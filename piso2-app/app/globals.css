@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@theme {
+  /* Definimos tus colores acá directamente */
+  --color-piso2-lime: #CCFF00;
+  --color-piso2-orange: #FF4D00;
+  --color-piso2-blue: #0000FF;
+  --color-piso2-dark: #050505;
+  --color-piso2-gray: #1A1A1A;
+
+  /* Configuramos la fuente (opcional pero recomendado) */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Estilos base */
+:root {
+  background-color: var(--color-piso2-dark);
+  color: #ffffff;
+}
+
+body {
+  /* En v4 antialiased suele venir integrado, pero lo forzamos así si querés */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
