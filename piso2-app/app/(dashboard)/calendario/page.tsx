@@ -10,7 +10,7 @@ import {
 import { es } from 'date-fns/locale'
 import {
     ChevronLeft, ChevronRight, X, Plus, ArrowLeft, Image as ImageIcon,
-    UploadCloud, MapPin, User, Clock, Instagram, Repeat, Trash2, Loader2
+    UploadCloud, MapPin, User, Clock, Instagram, Trash2, Loader2
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Image from 'next/image'
@@ -162,7 +162,7 @@ export default function CalendarioPage() {
         fetchData()
     }
 
-    // Estilos Helpers
+    // --- ESTILOS VISUALES ---
     const getBorderColorByTitle = (title: string) => {
         const lower = title.toLowerCase().trim()
         if (lower.includes('clase')) return "border-l-piso2-lime"
@@ -171,15 +171,29 @@ export default function CalendarioPage() {
     }
     const getColorByTitle = (title: string) => {
         const lower = title.toLowerCase().trim()
-        if (lower.includes('clase')) return "bg-piso2-lime" // Verde
-        if (lower.includes('seminario')) return "bg-piso2-orange" // Naranja
-        return "bg-piso2-blue" // Azul (Default)
+        if (lower.includes('clase')) return "bg-piso2-lime"
+        if (lower.includes('seminario')) return "bg-piso2-orange"
+        return "bg-piso2-blue"
     }
     const getSedeBadgeStyle = (nombreSede: string | undefined) => {
         const nombre = nombreSede?.toLowerCase() || '';
         if (nombre.includes('centro') || nombre.includes('congreso')) return 'bg-piso2-lime text-black border-transparent font-bold';
         if (nombre.includes('norte') || nombre.includes('obelisco')) return 'bg-cyan-400 text-black border-transparent font-bold shadow-[0_0_10px_rgba(34,211,238,0.3)]';
         return 'bg-white/10 text-white border-white/5';
+    }
+
+    // 🔥 NUEVA LÓGICA DE FONDO SUTIL 🔥
+    const getDayStyle = (dayClases: Clase[]) => {
+        if (dayClases.length === 0) return "bg-white/5 border-white/5" // Default vacío
+
+        // Prioridad de colores para el fondo: Naranja (Seminario) > Verde (Clase) > Azul (Otro)
+        const hasSeminario = dayClases.some(c => c.nombre.toLowerCase().includes('seminario'))
+        if (hasSeminario) return "bg-gradient-to-br from-piso2-orange/20 to-transparent border-piso2-orange/30 shadow-[inset_0_0_20px_rgba(255,77,0,0.1)]"
+
+        const hasClase = dayClases.some(c => c.nombre.toLowerCase().includes('clase'))
+        if (hasClase) return "bg-gradient-to-br from-piso2-lime/20 to-transparent border-piso2-lime/30 shadow-[inset_0_0_20px_rgba(204,255,0,0.1)]"
+
+        return "bg-gradient-to-br from-piso2-blue/20 to-transparent border-piso2-blue/30 shadow-[inset_0_0_20px_rgba(0,0,255,0.1)]"
     }
 
     const clasesDelDia = selectedDate
@@ -211,7 +225,7 @@ export default function CalendarioPage() {
                 {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(d => <div key={d} className="text-center text-gray-500 text-[9px] font-black uppercase tracking-wider">{d}</div>)}
             </div>
 
-            {/* GRILLA CALENDARIO (Versión "Muchos Puntitos") */}
+            {/* GRILLA CALENDARIO */}
             <div className="grid grid-cols-7 gap-1 px-1 auto-rows-fr">
                 {eachDayOfInterval({ start: startOfWeek(startOfMonth(currentDate)), end: endOfWeek(endOfMonth(currentDate)) }).map((day) => {
                     const isToday = isSameDay(day, new Date())
@@ -225,25 +239,26 @@ export default function CalendarioPage() {
                             onClick={() => handleDayClick(day)}
                             className={clsx(
                                 "h-[60px] md:h-[100px] border rounded-lg transition-all cursor-pointer relative flex flex-col items-center justify-start pt-1 overflow-hidden",
-                                isCurrentMonth ? "bg-white/5 border-white/5" : "opacity-20 border-transparent",
-                                isToday && "ring-1 ring-piso2-lime bg-piso2-lime/10"
+                                // APLICAMOS EL ESTILO DINÁMICO AQUÍ
+                                isCurrentMonth ? getDayStyle(dayClases) : "opacity-20 border-transparent",
+                                isToday && "ring-1 ring-white shadow-xl"
                             )}
                         >
                             {/* Número del día */}
                             <span className={clsx(
                                 "text-xs md:text-sm font-bold z-20 leading-none mb-1",
-                                isToday ? "text-piso2-lime" : "text-white/60"
+                                isToday ? "text-white drop-shadow-[0_0_5px_rgba(0,0,0,0.8)]" : "text-white/60"
                             )}>
                                 {format(day, 'd')}
                             </span>
 
-                            {/* PUNTITOS: Mostramos hasta 8 para que se vea "lleno" */}
+                            {/* PUNTITOS */}
                             {hasClases && (
-                                <div className="flex flex-wrap justify-center gap-1 px-1 w-full">
+                                <div className="flex flex-wrap justify-center gap-1 px-1 w-full z-10">
                                     {dayClases.slice(0, 8).map((clase, i) => (
                                         <div
                                             key={i}
-                                            className={`w-1.5 h-1.5 rounded-full ${getColorByTitle(clase.nombre)} shadow-[0_0_2px_rgba(0,0,0,0.5)]`}
+                                            className={`w-1.5 h-1.5 rounded-full ${getColorByTitle(clase.nombre)} shadow-[0_0_2px_rgba(0,0,0,0.8)]`}
                                         />
                                     ))}
                                     {dayClases.length > 8 && <div className="w-1.5 h-1.5 rounded-full bg-gray-500" />}
@@ -254,13 +269,12 @@ export default function CalendarioPage() {
                 })}
             </div>
 
-            {/* --- MODAL FULLSCREEN MOBILE (100dvh) --- */}
+            {/* --- MODAL (SIN CAMBIOS EN LA LÓGICA, SOLO VISUAL) --- */}
             {isModalOpen && selectedDate && (
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setIsModalOpen(false)}>
 
                     <div className="w-full h-[100dvh] md:h-auto md:max-h-[85vh] md:max-w-2xl bg-[#09090b] md:border border-white/10 md:rounded-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
 
-                        {/* Header Fijo */}
                         <div className="h-16 flex-shrink-0 border-b border-white/5 bg-[#09090b] flex justify-between items-center px-6 z-20">
                             <div>
                                 <p className={`font-bold text-[9px] uppercase tracking-[0.2em] ${modalMode === 'view' ? 'text-piso2-lime' : 'text-gray-500'}`}>
@@ -273,7 +287,6 @@ export default function CalendarioPage() {
                             <button onClick={() => setIsModalOpen(false)} className="p-2 bg-white/5 rounded-full text-white"><X size={20} /></button>
                         </div>
 
-                        {/* Contenido con Scroll */}
                         <div className="flex-1 overflow-y-auto bg-black/50 p-6 pb-safe">
 
                             {modalMode === 'view' && (
@@ -322,47 +335,29 @@ export default function CalendarioPage() {
                                         <input value={formNombre} onChange={e => setFormNombre(e.target.value)} className="w-full bg-transparent border-b border-white/20 text-white text-lg font-bold py-2 focus:border-piso2-lime outline-none" placeholder="Título..." autoFocus required />
                                     </div>
 
-                                    {/* INPUT DE IMAGEN (VOLVIÓ) */}
                                     <div className="space-y-1">
                                         <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Flyer / Imagen</label>
                                         <label className="flex flex-col items-center justify-center w-full h-20 border border-dashed border-white/10 rounded-xl bg-[#1a1a1a] hover:border-piso2-lime cursor-pointer relative overflow-hidden transition-colors group">
                                             {formFile && (<div className="absolute inset-0 bg-piso2-lime/10 flex items-center justify-center z-0"></div>)}
                                             <div className="flex flex-row items-center gap-2 text-gray-500 z-10 group-hover:text-piso2-lime">
-                                                {formFile ? (
-                                                    <><ImageIcon size={16} /><span className="text-[10px] font-bold uppercase line-clamp-1">{formFile.name}</span></>
-                                                ) : (
-                                                    <><UploadCloud size={16} /><span className="text-[10px] font-bold uppercase">Tocar para subir</span></>
-                                                )}
+                                                {formFile ? (<><ImageIcon size={16} /><span className="text-[10px] font-bold uppercase line-clamp-1">{formFile.name}</span></>) : (<><UploadCloud size={16} /><span className="text-[10px] font-bold uppercase">Tocar para subir</span></>)}
                                             </div>
                                             <input type="file" className="hidden" accept="image/*" onChange={e => e.target.files && setFormFile(e.target.files[0])} />
                                         </label>
                                     </div>
 
-                                    {/* INPUTS DE HORA Y DURACIÓN */}
                                     <div className="flex flex-col gap-3">
                                         <div className="space-y-1">
                                             <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Inicio</label>
                                             <div className="bg-[#1a1a1a] rounded-lg border border-white/5 h-12 flex items-center px-3">
-                                                <input
-                                                    type="time"
-                                                    value={formHora}
-                                                    onChange={e => setFormHora(e.target.value)}
-                                                    className="bg-transparent w-full text-white font-bold outline-none appearance-none h-full"
-                                                    required
-                                                />
+                                                <input type="time" value={formHora} onChange={e => setFormHora(e.target.value)} className="bg-transparent w-full text-white font-bold outline-none appearance-none h-full" required />
                                             </div>
                                         </div>
 
                                         <div className="space-y-1">
                                             <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Duración (min)</label>
                                             <div className="bg-[#1a1a1a] rounded-lg border border-white/5 h-12 flex items-center px-3">
-                                                <input
-                                                    type="number"
-                                                    value={formDuracion}
-                                                    onChange={e => setFormDuracion(Number(e.target.value))}
-                                                    className="bg-transparent w-full text-white font-bold outline-none appearance-none h-full"
-                                                    required
-                                                />
+                                                <input type="number" value={formDuracion} onChange={e => setFormDuracion(Number(e.target.value))} className="bg-transparent w-full text-white font-bold outline-none appearance-none h-full" required />
                                             </div>
                                         </div>
                                     </div>
@@ -402,8 +397,7 @@ export default function CalendarioPage() {
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in" onClick={() => setDeleteTarget(null)}>
                     <div className="bg-[#111] border border-red-500/30 rounded-2xl w-full max-w-xs p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
                         <h3 className="text-lg font-black text-white text-center uppercase mb-1">¿Eliminar?</h3>
-                        <p className="text-gray-500 text-xs text-center mb-4">{deleteTarget.serieId ? 'Es una serie recurrente' : 'Esta acción es permanente'}</p>
-                        <div className="space-y-2">
+                        <div className="space-y-2 mt-4">
                             <button onClick={() => handleConfirmDelete('single')} className="w-full bg-white/10 text-white font-bold py-3 rounded-lg text-xs uppercase">Solo esta fecha</button>
                             {deleteTarget.serieId && <button onClick={() => handleConfirmDelete('serie')} className="w-full bg-red-600 text-white font-bold py-3 rounded-lg text-xs uppercase">Toda la serie</button>}
                             <button onClick={() => setDeleteTarget(null)} className="w-full py-2 text-xs uppercase font-bold text-gray-500">Cancelar</button>
