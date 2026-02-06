@@ -1,14 +1,18 @@
-import Image from "next/image";
+'use client'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 
 export default function Home() {
+  const router = useRouter()
+
+  useEffect(() => {
+    // Redirigir directamente al Calendario (Agenda) que es lo más útil
+    router.push('/calendario')
+  }, [])
+
   return (
-    <div className="h-screen flex items-center justify-center gap-12">
-      <button className="bg-piso2-lime text-black px-6 py-3 font-bold uppercase rounded-none hover:bg-white transition-colors">
-        Botón Lima
-      </button>
-      <button className="border border-piso2-orange text-piso2-orange px-6 py-3 font-bold uppercase hover:bg-piso2-orange hover:text-white transition-colors">
-        Botón Naranja
-      </button>
+    <div className="flex items-center justify-center h-screen bg-black text-white">
+      <p className="animate-pulse text-xs font-bold uppercase tracking-widest">Cargando Piso 2...</p>
     </div>
-  );
+  )
 }
