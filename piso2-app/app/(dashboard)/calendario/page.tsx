@@ -265,7 +265,7 @@ export default function CalendarioPage() {
                                 isToday && "ring-1 ring-piso2-lime bg-piso2-lime/5"
                             )}
                         >
-                            <div className="flex justify-between items-start z-10">
+                            <div className="flex justify-between items-start z-10 gap-1 mb-1">
                                 <span className={clsx("text-lg font-black", isToday ? "text-piso2-lime" : "text-white/50 group-hover:text-white")}>{format(day, 'd')}</span>
                                 {hasClases && <span className="text-[9px] font-bold text-black bg-white/80 px-1.5 py-0.5 rounded-full">{dayClases.length}</span>}
                             </div>
