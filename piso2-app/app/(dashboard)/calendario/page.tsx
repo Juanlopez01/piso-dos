@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Image from 'next/image'
-import { Toaster, toast } from 'sonner' // <--- IMPORTANTE
+import { Toaster, toast } from 'sonner'
 
 // --- TIPOS ---
 type Sede = { id: string; nombre: string; salas: { id: string; nombre: string }[] }
@@ -26,7 +26,7 @@ type Clase = {
     fin: string
     imagen_url: string | null
     sala_id: string
-    serie_id: string | null // <--- IMPORTANTE
+    serie_id: string | null
     sala: { nombre: string; sede: { nombre: string } } | null
     profesor: { nombre_completo: string } | null
 }
@@ -46,7 +46,7 @@ export default function CalendarioPage() {
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [modalMode, setModalMode] = useState<'view' | 'create'>('view')
 
-    // Estado para el Modal de Borrado (Reemplazo del prompt)
+    // Estado para el Modal de Borrado
     const [deleteTarget, setDeleteTarget] = useState<{ id: string, serieId: string | null } | null>(null)
 
     // Formulario
@@ -58,7 +58,7 @@ export default function CalendarioPage() {
     const [formProfeId, setFormProfeId] = useState('')
     const [formFile, setFormFile] = useState<File | null>(null)
 
-    const [uploading, setUploading] = useState(false) // <--- CRÍTICO PARA EVITAR DOBLE CLICK
+    const [uploading, setUploading] = useState(false)
     const [repetirHastaFinAnio, setRepetirHastaFinAnio] = useState(false)
 
     useEffect(() => {
@@ -96,20 +96,19 @@ export default function CalendarioPage() {
         setIsModalOpen(true)
     }
 
-    // --- LÓGICA DE CREACIÓN (SOLUCIÓN DEL BUG DE DUPLICADOS) ---
+    // --- LÓGICA DE CREACIÓN ---
     const handleCrearClase = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!selectedDate || !formSalaId || !formProfeId) return
 
-        // 1. BLOQUEO INMEDIATO DEL BOTÓN
-        setUploading(true)
+        setUploading(true) // Bloqueamos botón
 
         try {
             const [horas, minutos] = formHora.split(':')
             const baseDate = new Date(selectedDate)
             baseDate.setHours(parseInt(horas), parseInt(minutos), 0, 0)
 
-            // Validación de conflictos básica
+            // Validación básica de conflictos
             const endCheck = new Date(baseDate.getTime() + formDuracion * 60000)
             const { data: conflictos } = await supabase.from('clases')
                 .select('id, nombre')
@@ -118,7 +117,7 @@ export default function CalendarioPage() {
                 .gt('fin', baseDate.toISOString())
 
             if (conflictos && conflictos.length > 0) {
-                toast.error(`Ya existe "${conflictos[0].nombre}" en ese horario.`)
+                toast.error(`Conflicto con "${conflictos[0].nombre}"`)
                 setUploading(false)
                 return
             }
@@ -133,12 +132,13 @@ export default function CalendarioPage() {
                 publicUrl = supabase.storage.from('clases').getPublicUrl(fileName).data.publicUrl
             }
 
-            // Generación de Serie
+            // Generación de Serie (Recurrencia)
             const serieUUID = repetirHastaFinAnio ? crypto.randomUUID() : null;
             const clasesAInsertar = []
             let pointerDate = baseDate
             const limitDate = repetirHastaFinAnio ? endOfYear(new Date()) : baseDate
 
+            // Bucle para crear fechas
             while (isBefore(pointerDate, limitDate) || pointerDate.getTime() === limitDate.getTime()) {
                 const endDateTime = new Date(pointerDate.getTime() + formDuracion * 60000)
                 clasesAInsertar.push({
@@ -151,25 +151,22 @@ export default function CalendarioPage() {
                     cupo_maximo: 20,
                     serie_id: serieUUID
                 })
-                if (!repetirHastaFinAnio) break;
+                if (!repetirHastaFinAnio) break; // Si no repite, sale loop
                 pointerDate = addWeeks(pointerDate, 1)
             }
 
             const { error } = await supabase.from('clases').insert(clasesAInsertar)
             if (error) throw error
 
-            // ÉXITO
             toast.success(repetirHastaFinAnio ? `Serie creada (${clasesAInsertar.length} clases)` : 'Clase creada correctamente')
 
             await fetchData()
 
-            // LIMPIEZA
+            // Reset
             setFormNombre('')
             setFormFile(null)
             setRepetirHastaFinAnio(false)
-
-            // 2. CERRAMOS EL MODO CREAR PARA EVITAR DOBLE CLICK
-            setModalMode('view')
+            setModalMode('view') // Volver a la lista automáticamente
 
         } catch (error: any) {
             toast.error(error.message)
@@ -192,11 +189,11 @@ export default function CalendarioPage() {
             else toast.success('Toda la serie eliminada')
         }
 
-        setDeleteTarget(null) // Cerrar modal de borrado
+        setDeleteTarget(null)
         fetchData()
     }
 
-    // Estilos
+    // Helpers de Estilo
     const getBorderColorByTitle = (title: string) => {
         const lower = title.toLowerCase().trim()
         if (lower.includes('clase')) return "border-l-piso2-lime"
@@ -223,14 +220,12 @@ export default function CalendarioPage() {
 
     return (
         <div className="h-full flex flex-col pb-20">
-
-            {/* Notificaciones (Toast) */}
             <Toaster position="top-center" richColors theme="dark" />
 
             {/* HEADER CALENDARIO */}
-            <div className="flex justify-between items-center mb-8">
+            <div className="flex justify-between items-center mb-6 px-1">
                 <div>
-                    <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-500 uppercase tracking-tighter">
+                    <h2 className="text-4xl font-black text-white uppercase tracking-tighter">
                         {format(currentDate, 'MMMM', { locale: es })}
                     </h2>
                     <p className="text-piso2-lime font-bold text-xs tracking-widest uppercase">
@@ -238,17 +233,18 @@ export default function CalendarioPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-3 bg-black border border-white/10 hover:border-piso2-lime hover:text-piso2-lime transition-all rounded-full"><ChevronLeft size={20} /></button>
-                    <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-3 bg-black border border-white/10 hover:border-piso2-lime hover:text-piso2-lime transition-all rounded-full"><ChevronRight size={20} /></button>
+                    <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-piso2-lime hover:text-piso2-lime transition-all rounded-full"><ChevronLeft size={20} /></button>
+                    <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-piso2-lime hover:text-piso2-lime transition-all rounded-full"><ChevronRight size={20} /></button>
                 </div>
             </div>
 
-            {/* GRILLA MENSUAL */}
-            <div className="grid grid-cols-7 mb-4">
+            {/* DÍAS SEMANA */}
+            <div className="grid grid-cols-7 mb-2">
                 {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(d => <div key={d} className="text-center text-gray-600 text-[10px] font-black uppercase tracking-wider">{d}</div>)}
             </div>
 
-            <div className="grid grid-cols-7 gap-2 auto-rows-fr">
+            {/* GRILLA MENSUAL */}
+            <div className="grid grid-cols-7 gap-1 md:gap-2 auto-rows-fr">
                 {eachDayOfInterval({ start: startOfWeek(startOfMonth(currentDate)), end: endOfWeek(endOfMonth(currentDate)) }).map((day) => {
                     const isToday = isSameDay(day, new Date())
                     const isCurrentMonth = isSameMonth(day, currentDate)
@@ -259,30 +255,46 @@ export default function CalendarioPage() {
                         <div
                             key={day.toString()}
                             onClick={() => handleDayClick(day)}
+                            // ARREGLO UI 1: Relative + Position Absolute para evitar superposición
                             className={clsx(
-                                "min-h-[100px] p-2 border rounded-xl transition-all cursor-pointer relative group flex flex-col justify-between overflow-hidden",
-                                isCurrentMonth ? "bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/20 hover:scale-[1.02] hover:shadow-2xl" : "bg-transparent border-transparent opacity-30",
+                                "min-h-[80px] md:min-h-[100px] p-1 border rounded-xl transition-all cursor-pointer relative group overflow-hidden",
+                                isCurrentMonth ? "bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/20" : "bg-transparent border-transparent opacity-30",
                                 isToday && "ring-1 ring-piso2-lime bg-piso2-lime/5"
                             )}
                         >
-                            <div className="flex justify-between items-start z-10 gap-1 mb-1">
-                                <span className={clsx("text-lg font-black", isToday ? "text-piso2-lime" : "text-white/50 group-hover:text-white")}>{format(day, 'd')}</span>
-                                {hasClases && <span className="text-[9px] font-bold text-black bg-white/80 px-1.5 py-0.5 rounded-full">{dayClases.length}</span>}
-                            </div>
-                            {hasClases && <div className={`absolute -bottom-4 -right-4 w-20 h-20 rounded-full blur-2xl opacity-20 ${getColorByTitle(dayClases[0].nombre).split(' ')[0]}`}></div>}
-                            <div className="flex flex-wrap content-end gap-1.5 z-10">
-                                {dayClases.map((clase) => <div key={clase.id} className={`w-2 h-2 rounded-full ${getColorByTitle(clase.nombre)}`} />)}
+                            {/* FECHA: Arriba Izquierda */}
+                            <span className={clsx(
+                                "absolute top-1.5 left-2 text-sm md:text-lg font-black z-20",
+                                isToday ? "text-piso2-lime" : "text-white/50 group-hover:text-white"
+                            )}>
+                                {format(day, 'd')}
+                            </span>
+
+                            {/* CONTADOR: Arriba Derecha */}
+                            {hasClases && (
+                                <span className="absolute top-1.5 right-1.5 z-20 text-[9px] font-bold text-black bg-white/90 px-1.5 py-0.5 rounded-full shadow-sm">
+                                    {dayClases.length}
+                                </span>
+                            )}
+
+                            {/* PUNTITOS (Indicadores): Abajo */}
+                            <div className="absolute bottom-2 left-2 right-2 flex flex-wrap content-end gap-1 z-10">
+                                {dayClases.slice(0, 6).map((clase) => (
+                                    <div key={clase.id} className={`w-1.5 h-1.5 rounded-full ${getColorByTitle(clase.nombre)}`} />
+                                ))}
+                                {dayClases.length > 6 && <span className="text-[8px] text-gray-500">+</span>}
                             </div>
                         </div>
                     )
                 })}
             </div>
 
-            {/* --- MODAL PRINCIPAL (Lineup / Crear) --- */}
+            {/* --- MODAL PRINCIPAL --- */}
             {isModalOpen && selectedDate && (
-                <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200" onClick={() => setIsModalOpen(false)}>
-                    <div className="w-full max-w-2xl bg-[#09090b] border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] rounded-2xl overflow-hidden flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                <div className="fixed inset-0 z-40 flex items-center justify-center p-0 md:p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200" onClick={() => setIsModalOpen(false)}>
+                    <div className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-2xl bg-[#09090b] border border-white/10 shadow-2xl md:rounded-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
 
+                        {/* Modal Header */}
                         <div className={`p-6 relative flex-shrink-0 border-b border-white/5 bg-black`}>
                             <div className="flex justify-between items-center relative z-10">
                                 <div>
@@ -297,12 +309,13 @@ export default function CalendarioPage() {
                             </div>
                         </div>
 
-                        {/* VISTA LISTA */}
+                        {/* VISTA: LISTA DE CLASES */}
                         {modalMode === 'view' && (
                             <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 bg-black/50">
                                 {clasesDelDia.length > 0 ? (
                                     clasesDelDia.map((clase) => (
                                         <div key={clase.id} className={`flex flex-col sm:flex-row bg-[#111] border border-white/5 rounded-xl overflow-hidden hover:border-white/20 transition-all group border-l-[6px] ${getBorderColorByTitle(clase.nombre)}`}>
+                                            {/* Imagen */}
                                             <div className="relative w-full sm:w-32 h-32 sm:h-auto flex-shrink-0 bg-white/5">
                                                 {clase.imagen_url ? (
                                                     <Image src={clase.imagen_url} alt={clase.nombre} fill className="object-cover" />
@@ -311,22 +324,29 @@ export default function CalendarioPage() {
                                                 )}
                                             </div>
 
-                                            <div className="flex-1 p-5 flex flex-col justify-center relative">
-                                                <div className="flex justify-between items-start mb-1">
+                                            {/* Info Tarjeta */}
+                                            <div className="flex-1 p-4 md:p-5 flex flex-col justify-center relative">
+                                                {/* Header Tarjeta: Hora y Sede (Separados) */}
+                                                <div className="flex justify-between items-start mb-2">
                                                     <div className="flex flex-col">
                                                         <span className="text-3xl font-black text-white tracking-tighter leading-none group-hover:text-piso2-lime transition-colors">{format(new Date(clase.inicio), 'HH:mm')}</span>
                                                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Hasta {format(new Date(clase.fin), 'HH:mm')}</span>
                                                     </div>
+                                                    {/* ARREGLO UI 2: Badge alineado a la derecha sin molestar */}
                                                     <span className={`px-2 py-1 rounded text-[10px] uppercase tracking-wider ${getSedeBadgeStyle(clase.sala?.sede?.nombre)}`}>
                                                         {clase.sala?.sede?.nombre}
                                                     </span>
                                                 </div>
-                                                <h4 className="text-xl font-bold text-white uppercase leading-tight mb-3 mt-2 pr-4">{clase.nombre}</h4>
+
+                                                <h4 className="text-lg md:text-xl font-bold text-white uppercase leading-tight mb-3 pr-4">{clase.nombre}</h4>
+
+                                                {/* Footer Tarjeta: Datos + Botón Borrar */}
                                                 <div className="flex items-end justify-between border-t border-white/5 pt-3 mt-auto">
                                                     <div className="flex flex-col gap-1 text-xs text-gray-400 font-medium">
                                                         <span className="flex items-center gap-1.5"><MapPin size={12} className="text-piso2-orange" /> {clase.sala?.nombre}</span>
                                                         <span className="flex items-center gap-1.5"><User size={12} className="text-piso2-blue" /> {clase.profesor?.nombre_completo || 'Staff'}</span>
                                                     </div>
+                                                    {/* Botón Borrar: Abajo a la derecha */}
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: clase.id, serieId: clase.serie_id }) }}
                                                         className="text-gray-600 hover:text-red-500 transition-colors p-2 bg-white/5 hover:bg-red-500/10 rounded-lg"
@@ -345,21 +365,38 @@ export default function CalendarioPage() {
                                     </div>
                                 )}
 
-                                <button onClick={() => setModalMode('create')} className="w-full mt-4 px-6 py-4 font-black text-black transition-all bg-piso2-lime rounded-xl hover:bg-white uppercase tracking-widest text-sm flex items-center justify-center gap-2">
+                                <button onClick={() => setModalMode('create')} className="w-full mt-4 px-6 py-4 font-black text-black transition-all bg-piso2-lime rounded-xl hover:bg-white uppercase tracking-widest text-sm flex items-center justify-center gap-2 mb-safe">
                                     <Plus size={18} strokeWidth={3} /> Agregar al Lineup
                                 </button>
                             </div>
                         )}
 
-                        {/* FORMULARIO CREAR */}
+                        {/* VISTA: CREAR CLASE */}
                         {modalMode === 'create' && (
                             <form onSubmit={handleCrearClase} className="flex-1 overflow-y-auto p-6 space-y-5 bg-black/50">
                                 <button type="button" onClick={() => setModalMode('view')} className="mb-4 flex items-center gap-2 text-gray-400 hover:text-white text-xs font-bold uppercase tracking-widest transition-colors"><ArrowLeft size={16} /> Volver al Lineup</button>
 
                                 <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Título</label><input value={formNombre} onChange={e => setFormNombre(e.target.value)} placeholder="Ej: MASTERCLASS URBANO" className="w-full bg-transparent border-b-2 border-white/20 text-white text-xl font-bold py-2 focus:border-piso2-lime outline-none" autoFocus required /></div>
+
                                 <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Flyer</label><label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-white/10 rounded-xl hover:border-piso2-lime hover:bg-piso2-lime/5 cursor-pointer transition-all group relative overflow-hidden">{formFile && (<div className="absolute inset-0 bg-piso2-lime/10 flex items-center justify-center z-0"></div>)}<div className="flex flex-col items-center gap-2 text-gray-500 group-hover:text-piso2-lime z-10 transition-colors">{formFile ? (<><ImageIcon size={24} /><span className="text-[10px] font-bold uppercase">{formFile.name}</span></>) : (<><UploadCloud size={24} /><span className="text-[10px] font-bold uppercase">Subir Imagen</span></>)}</div><input type="file" className="hidden" accept="image/*" onChange={e => e.target.files && setFormFile(e.target.files[0])} /></label></div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Inicio</label><input type="time" value={formHora} onChange={e => setFormHora(e.target.value)} className="w-full bg-[#1a1a1a] rounded-lg text-white font-bold p-3 outline-none focus:ring-1 focus:ring-piso2-lime border border-white/5" required /></div><div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Duración (min)</label><input type="number" value={formDuracion} onChange={e => setFormDuracion(Number(e.target.value))} className="w-full bg-[#1a1a1a] rounded-lg text-white font-bold p-3 outline-none focus:ring-1 focus:ring-piso2-lime border border-white/5" required /></div></div>
-                                <div className="grid grid-cols-2 gap-4"><select value={formSedeId} onChange={e => { setFormSedeId(e.target.value); setFormSalaId('') }} className="w-full bg-[#1a1a1a] text-white font-bold p-3 rounded-lg outline-none border border-white/5" required><option value="">Sede...</option>{sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select><select value={formSalaId} onChange={e => setFormSalaId(e.target.value)} className="w-full bg-[#1a1a1a] text-white font-bold p-3 rounded-lg outline-none border border-white/5 disabled:opacity-50" disabled={!formSedeId} required><option value="">Sala...</option>{salasDisponibles.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select></div>
+
+                                {/* ARREGLO UI 3: Inputs de hora apilados en móvil, al lado en tablet */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Inicio</label>
+                                        <input type="time" value={formHora} onChange={e => setFormHora(e.target.value)} className="w-full bg-[#1a1a1a] rounded-lg text-white font-bold p-3 outline-none focus:ring-1 focus:ring-piso2-lime border border-white/5" required />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Duración (min)</label>
+                                        <input type="number" value={formDuracion} onChange={e => setFormDuracion(Number(e.target.value))} className="w-full bg-[#1a1a1a] rounded-lg text-white font-bold p-3 outline-none focus:ring-1 focus:ring-piso2-lime border border-white/5" required />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <select value={formSedeId} onChange={e => { setFormSedeId(e.target.value); setFormSalaId('') }} className="w-full bg-[#1a1a1a] text-white font-bold p-3 rounded-lg outline-none border border-white/5" required><option value="">Sede...</option>{sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
+                                    <select value={formSalaId} onChange={e => setFormSalaId(e.target.value)} className="w-full bg-[#1a1a1a] text-white font-bold p-3 rounded-lg outline-none border border-white/5 disabled:opacity-50" disabled={!formSedeId} required><option value="">Sala...</option>{salasDisponibles.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
+                                </div>
+
                                 <select value={formProfeId} onChange={e => setFormProfeId(e.target.value)} className="w-full bg-[#1a1a1a] text-white font-bold p-3 rounded-lg outline-none border border-white/5" required><option value="">Profe...</option>{profesores.map(p => <option key={p.id} value={p.id}>{p.nombre_completo || p.email}</option>)}</select>
 
                                 <div className="flex items-center gap-3 bg-[#1a1a1a] p-3 rounded-xl border border-white/5 cursor-pointer" onClick={() => setRepetirHastaFinAnio(!repetirHastaFinAnio)}>
@@ -367,7 +404,7 @@ export default function CalendarioPage() {
                                     <div className="flex-1"><p className="text-white font-bold text-sm flex items-center gap-2"><Repeat size={14} /> Repetir semanalmente</p><p className="text-[10px] text-gray-400">Hasta fin de año.</p></div>
                                 </div>
 
-                                <button type="submit" disabled={uploading} className="w-full bg-white text-black font-bold uppercase py-4 rounded-xl hover:bg-piso2-lime transition-all shadow-lg flex justify-center gap-2 mt-4 items-center">
+                                <button type="submit" disabled={uploading} className="w-full bg-white text-black font-bold uppercase py-4 rounded-xl hover:bg-piso2-lime transition-all shadow-lg flex justify-center gap-2 mt-4 items-center mb-safe">
                                     {uploading ? <><Loader2 className="animate-spin" /> Creando...</> : 'Confirmar Evento'}
                                 </button>
                             </form>
@@ -376,7 +413,7 @@ export default function CalendarioPage() {
                 </div>
             )}
 
-            {/* --- MODAL DE CONFIRMACIÓN DE BORRADO (Custom UI) --- */}
+            {/* --- MODAL CONFIRMACIÓN BORRADO --- */}
             {deleteTarget && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in" onClick={() => setDeleteTarget(null)}>
                     <div className="bg-[#111] border border-red-500/30 rounded-2xl w-full max-w-sm p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
