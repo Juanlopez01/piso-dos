@@ -10,7 +10,7 @@ import {
 import { es } from 'date-fns/locale'
 import {
     ChevronLeft, ChevronRight, X, Plus, ArrowLeft, Image as ImageIcon,
-    UploadCloud, MapPin, User, Clock, Instagram, Repeat, Trash2, AlertTriangle, Loader2
+    UploadCloud, MapPin, User, Clock, Instagram, Repeat, Trash2, Loader2
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Image from 'next/image'
@@ -45,8 +45,6 @@ export default function CalendarioPage() {
     // Estados de UI
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [modalMode, setModalMode] = useState<'view' | 'create'>('view')
-
-    // Estado para el Modal de Borrado
     const [deleteTarget, setDeleteTarget] = useState<{ id: string, serieId: string | null } | null>(null)
 
     // Formulario
@@ -96,19 +94,16 @@ export default function CalendarioPage() {
         setIsModalOpen(true)
     }
 
-    // --- LÓGICA DE CREACIÓN ---
     const handleCrearClase = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!selectedDate || !formSalaId || !formProfeId) return
-
-        setUploading(true) // Bloqueamos botón
+        setUploading(true)
 
         try {
             const [horas, minutos] = formHora.split(':')
             const baseDate = new Date(selectedDate)
             baseDate.setHours(parseInt(horas), parseInt(minutos), 0, 0)
 
-            // Validación básica de conflictos
             const endCheck = new Date(baseDate.getTime() + formDuracion * 60000)
             const { data: conflictos } = await supabase.from('clases')
                 .select('id, nombre')
@@ -122,7 +117,6 @@ export default function CalendarioPage() {
                 return
             }
 
-            // Subida de imagen
             let publicUrl = null
             if (formFile) {
                 const fileExt = formFile.name.split('.').pop();
@@ -132,13 +126,11 @@ export default function CalendarioPage() {
                 publicUrl = supabase.storage.from('clases').getPublicUrl(fileName).data.publicUrl
             }
 
-            // Generación de Serie (Recurrencia)
             const serieUUID = repetirHastaFinAnio ? crypto.randomUUID() : null;
             const clasesAInsertar = []
             let pointerDate = baseDate
             const limitDate = repetirHastaFinAnio ? endOfYear(new Date()) : baseDate
 
-            // Bucle para crear fechas
             while (isBefore(pointerDate, limitDate) || pointerDate.getTime() === limitDate.getTime()) {
                 const endDateTime = new Date(pointerDate.getTime() + formDuracion * 60000)
                 clasesAInsertar.push({
@@ -151,22 +143,20 @@ export default function CalendarioPage() {
                     cupo_maximo: 20,
                     serie_id: serieUUID
                 })
-                if (!repetirHastaFinAnio) break; // Si no repite, sale loop
+                if (!repetirHastaFinAnio) break;
                 pointerDate = addWeeks(pointerDate, 1)
             }
 
             const { error } = await supabase.from('clases').insert(clasesAInsertar)
             if (error) throw error
 
-            toast.success(repetirHastaFinAnio ? `Serie creada (${clasesAInsertar.length} clases)` : 'Clase creada correctamente')
-
+            toast.success('Evento creado correctamente')
             await fetchData()
 
-            // Reset
             setFormNombre('')
             setFormFile(null)
             setRepetirHastaFinAnio(false)
-            setModalMode('view') // Volver a la lista automáticamente
+            setModalMode('view')
 
         } catch (error: any) {
             toast.error(error.message)
@@ -175,25 +165,19 @@ export default function CalendarioPage() {
         }
     }
 
-    // --- LÓGICA DE BORRADO ---
     const handleConfirmDelete = async (option: 'single' | 'serie') => {
         if (!deleteTarget) return
-
         if (option === 'single') {
             const { error } = await supabase.from('clases').delete().eq('id', deleteTarget.id)
-            if (error) toast.error(error.message)
-            else toast.success('Clase eliminada')
+            if (error) toast.error(error.message); else toast.success('Clase eliminada')
         } else {
             const { error } = await supabase.from('clases').delete().eq('serie_id', deleteTarget.serieId)
-            if (error) toast.error(error.message)
-            else toast.success('Toda la serie eliminada')
+            if (error) toast.error(error.message); else toast.success('Serie eliminada')
         }
-
         setDeleteTarget(null)
         fetchData()
     }
 
-    // Helpers de Estilo
     const getBorderColorByTitle = (title: string) => {
         const lower = title.toLowerCase().trim()
         if (lower.includes('clase')) return "border-l-piso2-lime"
@@ -219,13 +203,13 @@ export default function CalendarioPage() {
     const salasDisponibles = sedes.find(s => s.id === formSedeId)?.salas || []
 
     return (
-        <div className="h-full flex flex-col pb-20">
+        <div className="h-full flex flex-col pb-24 md:pb-10">
             <Toaster position="top-center" richColors theme="dark" />
 
-            {/* HEADER CALENDARIO */}
-            <div className="flex justify-between items-center mb-6 px-1">
+            {/* HEADER */}
+            <div className="flex justify-between items-center mb-4 px-1">
                 <div>
-                    <h2 className="text-4xl font-black text-white uppercase tracking-tighter">
+                    <h2 className="text-3xl font-black text-white uppercase tracking-tighter">
                         {format(currentDate, 'MMMM', { locale: es })}
                     </h2>
                     <p className="text-piso2-lime font-bold text-xs tracking-widest uppercase">
@@ -233,18 +217,17 @@ export default function CalendarioPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-piso2-lime hover:text-piso2-lime transition-all rounded-full"><ChevronLeft size={20} /></button>
-                    <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-piso2-lime hover:text-piso2-lime transition-all rounded-full"><ChevronRight size={20} /></button>
+                    <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-piso2-lime hover:text-piso2-lime transition-all rounded-full"><ChevronLeft size={18} /></button>
+                    <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-piso2-lime hover:text-piso2-lime transition-all rounded-full"><ChevronRight size={18} /></button>
                 </div>
             </div>
 
-            {/* DÍAS SEMANA */}
             <div className="grid grid-cols-7 mb-2">
-                {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(d => <div key={d} className="text-center text-gray-600 text-[10px] font-black uppercase tracking-wider">{d}</div>)}
+                {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(d => <div key={d} className="text-center text-gray-600 text-[9px] font-black uppercase tracking-wider">{d}</div>)}
             </div>
 
-            {/* GRILLA MENSUAL */}
-            <div className="grid grid-cols-7 gap-1 md:gap-2 auto-rows-fr">
+            {/* GRILLA CALENDARIO CORREGIDA */}
+            <div className="grid grid-cols-7 gap-1 auto-rows-fr">
                 {eachDayOfInterval({ start: startOfWeek(startOfMonth(currentDate)), end: endOfWeek(endOfMonth(currentDate)) }).map((day) => {
                     const isToday = isSameDay(day, new Date())
                     const isCurrentMonth = isSameMonth(day, currentDate)
@@ -255,191 +238,156 @@ export default function CalendarioPage() {
                         <div
                             key={day.toString()}
                             onClick={() => handleDayClick(day)}
-                            // ARREGLO UI 1: Relative + Position Absolute para evitar superposición
                             className={clsx(
-                                "min-h-[80px] md:min-h-[100px] p-1 border rounded-xl transition-all cursor-pointer relative group overflow-hidden",
-                                isCurrentMonth ? "bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/20" : "bg-transparent border-transparent opacity-30",
+                                "min-h-[85px] p-1 border rounded-xl transition-all cursor-pointer relative group overflow-hidden flex flex-col",
+                                isCurrentMonth ? "bg-white/5 border-white/5" : "bg-transparent border-transparent opacity-20",
                                 isToday && "ring-1 ring-piso2-lime bg-piso2-lime/5"
                             )}
                         >
-                            {/* FECHA: Arriba Izquierda */}
+                            {/* CORRECCIÓN 3: Texto más chico y pegado a los bordes */}
                             <span className={clsx(
-                                "absolute top-1.5 left-2 text-sm md:text-lg font-black z-20",
-                                isToday ? "text-piso2-lime" : "text-white/50 group-hover:text-white"
+                                "absolute top-1 left-1.5 text-xs md:text-sm font-black z-20 leading-none",
+                                isToday ? "text-piso2-lime" : "text-white/40"
                             )}>
                                 {format(day, 'd')}
                             </span>
 
-                            {/* CONTADOR: Arriba Derecha */}
                             {hasClases && (
-                                <span className="absolute top-1.5 right-1.5 z-20 text-[9px] font-bold text-black bg-white/90 px-1.5 py-0.5 rounded-full shadow-sm">
+                                <span className="absolute top-1 right-1 z-20 text-[8px] font-bold text-black bg-white/90 w-4 h-4 flex items-center justify-center rounded-full shadow-sm">
                                     {dayClases.length}
                                 </span>
                             )}
 
-                            {/* PUNTITOS (Indicadores): Abajo */}
-                            <div className="absolute bottom-2 left-2 right-2 flex flex-wrap content-end gap-1 z-10">
-                                {dayClases.slice(0, 6).map((clase) => (
+                            <div className="mt-auto flex flex-wrap content-end gap-1 p-0.5">
+                                {dayClases.slice(0, 5).map((clase) => (
                                     <div key={clase.id} className={`w-1.5 h-1.5 rounded-full ${getColorByTitle(clase.nombre)}`} />
                                 ))}
-                                {dayClases.length > 6 && <span className="text-[8px] text-gray-500">+</span>}
+                                {dayClases.length > 5 && <span className="text-[7px] text-gray-500 leading-none">+</span>}
                             </div>
                         </div>
                     )
                 })}
             </div>
 
-            {/* --- MODAL PRINCIPAL --- */}
+            {/* --- MODAL --- */}
             {isModalOpen && selectedDate && (
-                <div className="fixed inset-0 z-40 flex items-center justify-center p-0 md:p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200" onClick={() => setIsModalOpen(false)}>
-                    <div className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-2xl bg-[#09090b] border border-white/10 shadow-2xl md:rounded-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in duration-200" onClick={() => setIsModalOpen(false)}>
 
-                        {/* Modal Header */}
-                        <div className={`p-6 relative flex-shrink-0 border-b border-white/5 bg-black`}>
-                            <div className="flex justify-between items-center relative z-10">
-                                <div>
-                                    <p className={`font-bold text-[10px] uppercase tracking-[0.2em] mb-1 ${modalMode === 'view' ? 'text-piso2-lime' : 'text-gray-500'}`}>
-                                        {modalMode === 'view' ? 'Lineup del día' : 'Nueva Clase'}
-                                    </p>
-                                    <h3 className="text-3xl md:text-4xl font-black uppercase tracking-tighter leading-none text-white">
-                                        {format(selectedDate, 'EEEE d', { locale: es })}
-                                    </h3>
-                                </div>
-                                <button onClick={() => setIsModalOpen(false)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"><X size={20} /></button>
+                    {/* CORRECCIÓN 1: max-h dinámico (dvh) y padding inferior para mobile */}
+                    <div className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-2xl bg-[#09090b] md:border border-white/10 shadow-2xl md:rounded-2xl overflow-hidden flex flex-col absolute bottom-0 md:relative" onClick={e => e.stopPropagation()}>
+
+                        {/* Header Fijo */}
+                        <div className={`p-5 flex-shrink-0 border-b border-white/5 bg-[#09090b] flex justify-between items-center z-20`}>
+                            <div>
+                                <p className={`font-bold text-[9px] uppercase tracking-[0.2em] mb-1 ${modalMode === 'view' ? 'text-piso2-lime' : 'text-gray-500'}`}>
+                                    {modalMode === 'view' ? 'Lineup del día' : 'Nueva Clase'}
+                                </p>
+                                <h3 className="text-2xl font-black uppercase tracking-tighter leading-none text-white">
+                                    {format(selectedDate, 'EEEE d', { locale: es })}
+                                </h3>
                             </div>
+                            <button onClick={() => setIsModalOpen(false)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white"><X size={20} /></button>
                         </div>
 
-                        {/* VISTA: LISTA DE CLASES */}
-                        {modalMode === 'view' && (
-                            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 bg-black/50">
-                                {clasesDelDia.length > 0 ? (
-                                    clasesDelDia.map((clase) => (
-                                        <div key={clase.id} className={`flex flex-col sm:flex-row bg-[#111] border border-white/5 rounded-xl overflow-hidden hover:border-white/20 transition-all group border-l-[6px] ${getBorderColorByTitle(clase.nombre)}`}>
-                                            {/* Imagen */}
-                                            <div className="relative w-full sm:w-32 h-32 sm:h-auto flex-shrink-0 bg-white/5">
-                                                {clase.imagen_url ? (
-                                                    <Image src={clase.imagen_url} alt={clase.nombre} fill className="object-cover" />
-                                                ) : (
-                                                    <div className="flex items-center justify-center h-full text-white/10"><Instagram size={32} /></div>
-                                                )}
-                                            </div>
+                        {/* Contenido Scrollable */}
+                        <div className="flex-1 overflow-y-auto bg-black/50">
 
-                                            {/* Info Tarjeta */}
-                                            <div className="flex-1 p-4 md:p-5 flex flex-col justify-center relative">
-                                                {/* Header Tarjeta: Hora y Sede (Separados) */}
-                                                <div className="flex justify-between items-start mb-2">
-                                                    <div className="flex flex-col">
-                                                        <span className="text-3xl font-black text-white tracking-tighter leading-none group-hover:text-piso2-lime transition-colors">{format(new Date(clase.inicio), 'HH:mm')}</span>
-                                                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Hasta {format(new Date(clase.fin), 'HH:mm')}</span>
-                                                    </div>
-                                                    {/* ARREGLO UI 2: Badge alineado a la derecha sin molestar */}
-                                                    <span className={`px-2 py-1 rounded text-[10px] uppercase tracking-wider ${getSedeBadgeStyle(clase.sala?.sede?.nombre)}`}>
-                                                        {clase.sala?.sede?.nombre}
-                                                    </span>
+                            {modalMode === 'view' && (
+                                <div className="p-4 space-y-4 pb-32"> {/* pb-32 asegura espacio abajo */}
+                                    {clasesDelDia.length > 0 ? (
+                                        clasesDelDia.map((clase) => (
+                                            <div key={clase.id} className={`flex flex-row bg-[#111] border border-white/5 rounded-xl overflow-hidden border-l-[4px] ${getBorderColorByTitle(clase.nombre)}`}>
+                                                <div className="relative w-24 h-24 flex-shrink-0 bg-white/5">
+                                                    {clase.imagen_url ? (
+                                                        <Image src={clase.imagen_url} alt={clase.nombre} fill className="object-cover" />
+                                                    ) : (
+                                                        <div className="flex items-center justify-center h-full text-white/10"><Instagram size={24} /></div>
+                                                    )}
                                                 </div>
-
-                                                <h4 className="text-lg md:text-xl font-bold text-white uppercase leading-tight mb-3 pr-4">{clase.nombre}</h4>
-
-                                                {/* Footer Tarjeta: Datos + Botón Borrar */}
-                                                <div className="flex items-end justify-between border-t border-white/5 pt-3 mt-auto">
-                                                    <div className="flex flex-col gap-1 text-xs text-gray-400 font-medium">
-                                                        <span className="flex items-center gap-1.5"><MapPin size={12} className="text-piso2-orange" /> {clase.sala?.nombre}</span>
-                                                        <span className="flex items-center gap-1.5"><User size={12} className="text-piso2-blue" /> {clase.profesor?.nombre_completo || 'Staff'}</span>
+                                                <div className="flex-1 p-3 flex flex-col justify-center relative">
+                                                    <div className="flex justify-between items-start mb-1">
+                                                        <span className="text-2xl font-black text-white tracking-tighter leading-none">{format(new Date(clase.inicio), 'HH:mm')}</span>
+                                                        <span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${getSedeBadgeStyle(clase.sala?.sede?.nombre)}`}>
+                                                            {clase.sala?.sede?.nombre}
+                                                        </span>
                                                     </div>
-                                                    {/* Botón Borrar: Abajo a la derecha */}
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: clase.id, serieId: clase.serie_id }) }}
-                                                        className="text-gray-600 hover:text-red-500 transition-colors p-2 bg-white/5 hover:bg-red-500/10 rounded-lg"
-                                                        title="Eliminar clase"
-                                                    >
-                                                        <Trash2 size={18} />
-                                                    </button>
+                                                    <h4 className="text-sm font-bold text-white uppercase leading-tight mb-2 pr-6 line-clamp-1">{clase.nombre}</h4>
+                                                    <div className="flex items-end justify-between border-t border-white/5 pt-2 mt-auto">
+                                                        <div className="flex flex-col text-[10px] text-gray-400 font-medium">
+                                                            <span className="flex items-center gap-1"><MapPin size={10} /> {clase.sala?.nombre}</span>
+                                                        </div>
+                                                        <button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: clase.id, serieId: clase.serie_id }) }} className="text-gray-600 hover:text-red-500 p-1.5 bg-white/5 rounded">
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-center py-12 flex flex-col items-center justify-center text-gray-500 opacity-50">
+                                            <Clock size={40} className="mb-4" strokeWidth={1} />
+                                            <p className="text-xs font-bold uppercase tracking-widest">Sin actividad</p>
                                         </div>
-                                    ))
-                                ) : (
-                                    <div className="text-center py-12 flex flex-col items-center justify-center text-gray-500 opacity-50">
-                                        <Clock size={48} className="mb-4" strokeWidth={1} />
-                                        <p className="text-sm font-bold uppercase tracking-widest">Sin actividad</p>
-                                    </div>
-                                )}
+                                    )}
 
-                                <button onClick={() => setModalMode('create')} className="w-full mt-4 px-6 py-4 font-black text-black transition-all bg-piso2-lime rounded-xl hover:bg-white uppercase tracking-widest text-sm flex items-center justify-center gap-2 mb-safe">
-                                    <Plus size={18} strokeWidth={3} /> Agregar al Lineup
-                                </button>
-                            </div>
-                        )}
-
-                        {/* VISTA: CREAR CLASE */}
-                        {modalMode === 'create' && (
-                            <form onSubmit={handleCrearClase} className="flex-1 overflow-y-auto p-6 space-y-5 bg-black/50">
-                                <button type="button" onClick={() => setModalMode('view')} className="mb-4 flex items-center gap-2 text-gray-400 hover:text-white text-xs font-bold uppercase tracking-widest transition-colors"><ArrowLeft size={16} /> Volver al Lineup</button>
-
-                                <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Título</label><input value={formNombre} onChange={e => setFormNombre(e.target.value)} placeholder="Ej: MASTERCLASS URBANO" className="w-full bg-transparent border-b-2 border-white/20 text-white text-xl font-bold py-2 focus:border-piso2-lime outline-none" autoFocus required /></div>
-
-                                <div className="space-y-1"><label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Flyer</label><label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-white/10 rounded-xl hover:border-piso2-lime hover:bg-piso2-lime/5 cursor-pointer transition-all group relative overflow-hidden">{formFile && (<div className="absolute inset-0 bg-piso2-lime/10 flex items-center justify-center z-0"></div>)}<div className="flex flex-col items-center gap-2 text-gray-500 group-hover:text-piso2-lime z-10 transition-colors">{formFile ? (<><ImageIcon size={24} /><span className="text-[10px] font-bold uppercase">{formFile.name}</span></>) : (<><UploadCloud size={24} /><span className="text-[10px] font-bold uppercase">Subir Imagen</span></>)}</div><input type="file" className="hidden" accept="image/*" onChange={e => e.target.files && setFormFile(e.target.files[0])} /></label></div>
-
-                                {/* ARREGLO UI 3: Inputs de hora apilados en móvil, al lado en tablet */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Inicio</label>
-                                        <input type="time" value={formHora} onChange={e => setFormHora(e.target.value)} className="w-full bg-[#1a1a1a] rounded-lg text-white font-bold p-3 outline-none focus:ring-1 focus:ring-piso2-lime border border-white/5" required />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Duración (min)</label>
-                                        <input type="number" value={formDuracion} onChange={e => setFormDuracion(Number(e.target.value))} className="w-full bg-[#1a1a1a] rounded-lg text-white font-bold p-3 outline-none focus:ring-1 focus:ring-piso2-lime border border-white/5" required />
-                                    </div>
+                                    <button onClick={() => setModalMode('create')} className="w-full mt-4 px-6 py-4 font-black text-black transition-all bg-piso2-lime rounded-xl hover:bg-white uppercase tracking-widest text-xs flex items-center justify-center gap-2">
+                                        <Plus size={16} strokeWidth={3} /> Agregar al Lineup
+                                    </button>
                                 </div>
+                            )}
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <select value={formSedeId} onChange={e => { setFormSedeId(e.target.value); setFormSalaId('') }} className="w-full bg-[#1a1a1a] text-white font-bold p-3 rounded-lg outline-none border border-white/5" required><option value="">Sede...</option>{sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
-                                    <select value={formSalaId} onChange={e => setFormSalaId(e.target.value)} className="w-full bg-[#1a1a1a] text-white font-bold p-3 rounded-lg outline-none border border-white/5 disabled:opacity-50" disabled={!formSedeId} required><option value="">Sala...</option>{salasDisponibles.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
-                                </div>
+                            {modalMode === 'create' && (
+                                <form onSubmit={handleCrearClase} className="p-5 space-y-5 pb-32"> {/* CORRECCIÓN 1: pb-32 para el scroll */}
+                                    <button type="button" onClick={() => setModalMode('view')} className="flex items-center gap-2 text-gray-400 text-xs font-bold uppercase tracking-widest"><ArrowLeft size={14} /> Volver</button>
 
-                                <select value={formProfeId} onChange={e => setFormProfeId(e.target.value)} className="w-full bg-[#1a1a1a] text-white font-bold p-3 rounded-lg outline-none border border-white/5" required><option value="">Profe...</option>{profesores.map(p => <option key={p.id} value={p.id}>{p.nombre_completo || p.email}</option>)}</select>
+                                    <div className="space-y-1"><label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Título</label><input value={formNombre} onChange={e => setFormNombre(e.target.value)} placeholder="Ej: CLASE DE..." className="w-full bg-transparent border-b border-white/20 text-white text-lg font-bold py-2 focus:border-piso2-lime outline-none" autoFocus required /></div>
 
-                                <div className="flex items-center gap-3 bg-[#1a1a1a] p-3 rounded-xl border border-white/5 cursor-pointer" onClick={() => setRepetirHastaFinAnio(!repetirHastaFinAnio)}>
-                                    <div className={`w-10 h-6 rounded-full flex items-center p-1 transition-colors ${repetirHastaFinAnio ? 'bg-piso2-lime' : 'bg-gray-600'}`}><div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${repetirHastaFinAnio ? 'translate-x-4' : 'translate-x-0'}`}></div></div>
-                                    <div className="flex-1"><p className="text-white font-bold text-sm flex items-center gap-2"><Repeat size={14} /> Repetir semanalmente</p><p className="text-[10px] text-gray-400">Hasta fin de año.</p></div>
-                                </div>
+                                    <div className="space-y-1"><label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Flyer</label><label className="flex flex-col items-center justify-center w-full h-24 border border-dashed border-white/10 rounded-xl bg-white/5 hover:border-piso2-lime cursor-pointer relative overflow-hidden">{formFile && (<div className="absolute inset-0 bg-piso2-lime/10 flex items-center justify-center z-0"></div>)}<div className="flex flex-col items-center gap-1 text-gray-500 z-10">{formFile ? (<><ImageIcon size={20} /><span className="text-[9px] font-bold uppercase">{formFile.name}</span></>) : (<><UploadCloud size={20} /><span className="text-[9px] font-bold uppercase">Subir Imagen</span></>)}</div><input type="file" className="hidden" accept="image/*" onChange={e => e.target.files && setFormFile(e.target.files[0])} /></label></div>
 
-                                <button type="submit" disabled={uploading} className="w-full bg-white text-black font-bold uppercase py-4 rounded-xl hover:bg-piso2-lime transition-all shadow-lg flex justify-center gap-2 mt-4 items-center mb-safe">
-                                    {uploading ? <><Loader2 className="animate-spin" /> Creando...</> : 'Confirmar Evento'}
-                                </button>
-                            </form>
-                        )}
+                                    {/* CORRECCIÓN 2: Inputs con altura fija (h-12) para que se alineen perfecto */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Inicio</label>
+                                            <input type="time" value={formHora} onChange={e => setFormHora(e.target.value)} className="w-full h-12 bg-[#1a1a1a] rounded-lg text-white font-bold px-3 outline-none border border-white/5 appearance-none" required />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Minutos</label>
+                                            <input type="number" value={formDuracion} onChange={e => setFormDuracion(Number(e.target.value))} className="w-full h-12 bg-[#1a1a1a] rounded-lg text-white font-bold px-3 outline-none border border-white/5" required />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <select value={formSedeId} onChange={e => { setFormSedeId(e.target.value); setFormSalaId('') }} className="w-full h-12 bg-[#1a1a1a] text-white font-bold px-3 rounded-lg outline-none border border-white/5 text-sm" required><option value="">Sede...</option>{sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
+                                        <select value={formSalaId} onChange={e => setFormSalaId(e.target.value)} className="w-full h-12 bg-[#1a1a1a] text-white font-bold px-3 rounded-lg outline-none border border-white/5 disabled:opacity-50 text-sm" disabled={!formSedeId} required><option value="">Sala...</option>{salasDisponibles.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
+                                    </div>
+
+                                    <select value={formProfeId} onChange={e => setFormProfeId(e.target.value)} className="w-full h-12 bg-[#1a1a1a] text-white font-bold px-3 rounded-lg outline-none border border-white/5 text-sm" required><option value="">Profe...</option>{profesores.map(p => <option key={p.id} value={p.id}>{p.nombre_completo || p.email}</option>)}</select>
+
+                                    <div className="flex items-center gap-3 bg-[#1a1a1a] p-3 rounded-xl border border-white/5 cursor-pointer" onClick={() => setRepetirHastaFinAnio(!repetirHastaFinAnio)}>
+                                        <div className={`w-8 h-5 rounded-full flex items-center p-0.5 transition-colors ${repetirHastaFinAnio ? 'bg-piso2-lime' : 'bg-gray-600'}`}><div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${repetirHastaFinAnio ? 'translate-x-3' : 'translate-x-0'}`}></div></div>
+                                        <div className="flex-1"><p className="text-white font-bold text-xs flex items-center gap-2">Repetir semanalmente</p><p className="text-[9px] text-gray-400">Hasta fin de año.</p></div>
+                                    </div>
+
+                                    <button type="submit" disabled={uploading} className="w-full bg-white text-black font-bold uppercase h-14 rounded-xl hover:bg-piso2-lime transition-all shadow-lg flex justify-center gap-2 items-center text-sm">
+                                        {uploading ? <><Loader2 className="animate-spin" /> Guardando...</> : 'Confirmar Evento'}
+                                    </button>
+                                </form>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
 
-            {/* --- MODAL CONFIRMACIÓN BORRADO --- */}
             {deleteTarget && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in" onClick={() => setDeleteTarget(null)}>
-                    <div className="bg-[#111] border border-red-500/30 rounded-2xl w-full max-w-sm p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
-                        <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-4 text-red-500 mx-auto">
-                            <Trash2 size={24} />
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in" onClick={() => setDeleteTarget(null)}>
+                    <div className="bg-[#111] border border-red-500/30 rounded-2xl w-full max-w-xs p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-lg font-black text-white text-center uppercase mb-1">¿Eliminar?</h3>
+                        <p className="text-gray-500 text-xs text-center mb-4">{deleteTarget.serieId ? 'Es una serie recurrente' : 'Esta acción es permanente'}</p>
+                        <div className="space-y-2">
+                            <button onClick={() => handleConfirmDelete('single')} className="w-full bg-white/10 text-white font-bold py-3 rounded-lg text-xs uppercase">Solo esta</button>
+                            {deleteTarget.serieId && <button onClick={() => handleConfirmDelete('serie')} className="w-full bg-red-600 text-white font-bold py-3 rounded-lg text-xs uppercase">Toda la serie</button>}
+                            <button onClick={() => setDeleteTarget(null)} className="w-full py-2 text-xs uppercase font-bold text-gray-500">Cancelar</button>
                         </div>
-                        <h3 className="text-xl font-black text-white text-center uppercase tracking-tight mb-2">¿Eliminar Clase?</h3>
-
-                        {deleteTarget.serieId ? (
-                            <>
-                                <p className="text-gray-400 text-sm text-center mb-6">Esta clase es recurrente. ¿Qué querés borrar?</p>
-                                <div className="space-y-3">
-                                    <button onClick={() => handleConfirmDelete('single')} className="w-full bg-white/5 hover:bg-white/10 text-white font-bold py-3 rounded-lg transition-colors text-sm uppercase">Solo esta fecha</button>
-                                    <button onClick={() => handleConfirmDelete('serie')} className="w-full bg-red-500 hover:bg-red-600 text-black font-bold py-3 rounded-lg transition-colors text-sm uppercase">Toda la serie futura</button>
-                                    <button onClick={() => setDeleteTarget(null)} className="w-full text-gray-500 hover:text-white py-2 text-xs uppercase font-bold">Cancelar</button>
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <p className="text-gray-400 text-sm text-center mb-6">Esta acción no se puede deshacer.</p>
-                                <div className="space-y-3">
-                                    <button onClick={() => handleConfirmDelete('single')} className="w-full bg-red-500 hover:bg-red-600 text-black font-bold py-3 rounded-lg transition-colors text-sm uppercase">Eliminar</button>
-                                    <button onClick={() => setDeleteTarget(null)} className="w-full bg-white/5 hover:bg-white/10 text-white font-bold py-3 rounded-lg transition-colors text-sm uppercase">Cancelar</button>
-                                </div>
-                            </>
-                        )}
                     </div>
                 </div>
             )}
