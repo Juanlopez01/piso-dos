@@ -34,7 +34,7 @@ type Clase = {
 export default function CalendarioPage() {
     const supabase = createClient()
 
-    // Estados Principales
+    // Estados
     const [currentDate, setCurrentDate] = useState(new Date())
     const [selectedDate, setSelectedDate] = useState<Date | null>(null)
     const [clases, setClases] = useState<Clase[]>([])
@@ -42,12 +42,12 @@ export default function CalendarioPage() {
     const [profesores, setProfesores] = useState<Profile[]>([])
     const [loading, setLoading] = useState(true)
 
-    // Estados de UI
+    // UI
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [modalMode, setModalMode] = useState<'view' | 'create'>('view')
     const [deleteTarget, setDeleteTarget] = useState<{ id: string, serieId: string | null } | null>(null)
 
-    // Formulario
+    // Form
     const [formNombre, setFormNombre] = useState('')
     const [formHora, setFormHora] = useState('18:00')
     const [formDuracion, setFormDuracion] = useState(60)
@@ -55,13 +55,10 @@ export default function CalendarioPage() {
     const [formSalaId, setFormSalaId] = useState('')
     const [formProfeId, setFormProfeId] = useState('')
     const [formFile, setFormFile] = useState<File | null>(null)
-
     const [uploading, setUploading] = useState(false)
     const [repetirHastaFinAnio, setRepetirHastaFinAnio] = useState(false)
 
-    useEffect(() => {
-        fetchData()
-    }, [currentDate])
+    useEffect(() => { fetchData() }, [currentDate])
 
     const fetchData = async () => {
         setLoading(true)
@@ -104,19 +101,7 @@ export default function CalendarioPage() {
             const baseDate = new Date(selectedDate)
             baseDate.setHours(parseInt(horas), parseInt(minutos), 0, 0)
 
-            const endCheck = new Date(baseDate.getTime() + formDuracion * 60000)
-            const { data: conflictos } = await supabase.from('clases')
-                .select('id, nombre')
-                .eq('sala_id', formSalaId)
-                .lt('inicio', endCheck.toISOString())
-                .gt('fin', baseDate.toISOString())
-
-            if (conflictos && conflictos.length > 0) {
-                toast.error(`Conflicto con "${conflictos[0].nombre}"`)
-                setUploading(false)
-                return
-            }
-
+            // Subir imagen
             let publicUrl = null
             if (formFile) {
                 const fileExt = formFile.name.split('.').pop();
@@ -152,7 +137,6 @@ export default function CalendarioPage() {
 
             toast.success('Evento creado correctamente')
             await fetchData()
-
             setFormNombre('')
             setFormFile(null)
             setRepetirHastaFinAnio(false)
@@ -178,17 +162,12 @@ export default function CalendarioPage() {
         fetchData()
     }
 
+    // Estilos Helpers
     const getBorderColorByTitle = (title: string) => {
         const lower = title.toLowerCase().trim()
         if (lower.includes('clase')) return "border-l-piso2-lime"
         if (lower.includes('seminario')) return "border-l-piso2-orange"
         return "border-l-piso2-blue"
-    }
-    const getColorByTitle = (title: string) => {
-        const lower = title.toLowerCase().trim()
-        if (lower.includes('clase')) return "bg-piso2-lime shadow-[0_0_12px_#CCFF00]"
-        if (lower.includes('seminario')) return "bg-piso2-orange shadow-[0_0_12px_#FF4D00]"
-        return "bg-piso2-blue shadow-[0_0_12px_#0000FF]"
     }
     const getSedeBadgeStyle = (nombreSede: string | undefined) => {
         const nombre = nombreSede?.toLowerCase() || '';
@@ -206,8 +185,8 @@ export default function CalendarioPage() {
         <div className="h-full flex flex-col pb-24 md:pb-10">
             <Toaster position="top-center" richColors theme="dark" />
 
-            {/* HEADER */}
-            <div className="flex justify-between items-center mb-4 px-1">
+            {/* HEADER MES */}
+            <div className="flex justify-between items-center mb-4 px-2 pt-2">
                 <div>
                     <h2 className="text-3xl font-black text-white uppercase tracking-tighter">
                         {format(currentDate, 'MMMM', { locale: es })}
@@ -223,11 +202,11 @@ export default function CalendarioPage() {
             </div>
 
             <div className="grid grid-cols-7 mb-2">
-                {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(d => <div key={d} className="text-center text-gray-600 text-[9px] font-black uppercase tracking-wider">{d}</div>)}
+                {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(d => <div key={d} className="text-center text-gray-500 text-[9px] font-black uppercase tracking-wider">{d}</div>)}
             </div>
 
-            {/* GRILLA CALENDARIO CORREGIDA */}
-            <div className="grid grid-cols-7 gap-1 auto-rows-fr">
+            {/* GRILLA CALENDARIO (Versión Mobile Clean) */}
+            <div className="grid grid-cols-7 gap-1 px-1 auto-rows-fr">
                 {eachDayOfInterval({ start: startOfWeek(startOfMonth(currentDate)), end: endOfWeek(endOfMonth(currentDate)) }).map((day) => {
                     const isToday = isSameDay(day, new Date())
                     const isCurrentMonth = isSameMonth(day, currentDate)
@@ -238,139 +217,168 @@ export default function CalendarioPage() {
                         <div
                             key={day.toString()}
                             onClick={() => handleDayClick(day)}
+                            // En mobile (default) altura fija 50px (cuadrado chico). En md (tablet) altura 100px.
                             className={clsx(
-                                "min-h-[85px] p-1 border rounded-xl transition-all cursor-pointer relative group overflow-hidden flex flex-col",
-                                isCurrentMonth ? "bg-white/5 border-white/5" : "bg-transparent border-transparent opacity-20",
-                                isToday && "ring-1 ring-piso2-lime bg-piso2-lime/5"
+                                "h-[50px] md:h-[100px] border rounded-lg transition-all cursor-pointer relative flex flex-col items-center justify-center",
+                                isCurrentMonth ? "bg-white/5 border-white/5" : "opacity-20 border-transparent",
+                                isToday && "ring-1 ring-piso2-lime bg-piso2-lime/10"
                             )}
                         >
-                            {/* CORRECCIÓN 3: Texto más chico y pegado a los bordes */}
+                            {/* Número del día (Centrado en mobile, esq en desktop) */}
                             <span className={clsx(
-                                "absolute top-1 left-1.5 text-xs md:text-sm font-black z-20 leading-none",
-                                isToday ? "text-piso2-lime" : "text-white/40"
+                                "text-xs md:text-sm font-bold md:absolute md:top-2 md:left-2",
+                                isToday ? "text-piso2-lime" : "text-white/60"
                             )}>
                                 {format(day, 'd')}
                             </span>
 
+                            {/* Indicador de Clases (Solo un punto en mobile) */}
                             {hasClases && (
-                                <span className="absolute top-1 right-1 z-20 text-[8px] font-bold text-black bg-white/90 w-4 h-4 flex items-center justify-center rounded-full shadow-sm">
-                                    {dayClases.length}
-                                </span>
+                                <div className="mt-1 md:absolute md:top-2 md:right-2">
+                                    {/* Mobile: Punto simple */}
+                                    <div className="md:hidden w-1.5 h-1.5 rounded-full bg-piso2-lime shadow-[0_0_5px_#ccff00]"></div>
+
+                                    {/* Desktop: Badge con número */}
+                                    <span className="hidden md:block text-[9px] font-bold text-black bg-white/90 px-1.5 py-0.5 rounded-full">
+                                        {dayClases.length}
+                                    </span>
+                                </div>
                             )}
 
-                            <div className="mt-auto flex flex-wrap content-end gap-1 p-0.5">
+                            {/* Desktop: Puntitos de colores extra */}
+                            <div className="hidden md:flex absolute bottom-2 left-2 right-2 flex-wrap content-end gap-1">
                                 {dayClases.slice(0, 5).map((clase) => (
-                                    <div key={clase.id} className={`w-1.5 h-1.5 rounded-full ${getColorByTitle(clase.nombre)}`} />
+                                    <div key={clase.id} className="w-1.5 h-1.5 rounded-full bg-white/50" />
                                 ))}
-                                {dayClases.length > 5 && <span className="text-[7px] text-gray-500 leading-none">+</span>}
                             </div>
                         </div>
                     )
                 })}
             </div>
 
-            {/* --- MODAL --- */}
+            {/* --- MODAL FULLSCREEN MOBILE (100dvh) --- */}
             {isModalOpen && selectedDate && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in duration-200" onClick={() => setIsModalOpen(false)}>
+                <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setIsModalOpen(false)}>
 
-                    {/* CORRECCIÓN 1: max-h dinámico (dvh) y padding inferior para mobile */}
-                    <div className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-2xl bg-[#09090b] md:border border-white/10 shadow-2xl md:rounded-2xl overflow-hidden flex flex-col absolute bottom-0 md:relative" onClick={e => e.stopPropagation()}>
+                    {/* Contenedor Modal: h-[100dvh] en mobile = Pantalla COMPLETA real */}
+                    <div className="w-full h-[100dvh] md:h-auto md:max-h-[85vh] md:max-w-2xl bg-[#09090b] md:border border-white/10 md:rounded-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
 
                         {/* Header Fijo */}
-                        <div className={`p-5 flex-shrink-0 border-b border-white/5 bg-[#09090b] flex justify-between items-center z-20`}>
+                        <div className="h-16 flex-shrink-0 border-b border-white/5 bg-[#09090b] flex justify-between items-center px-6 z-20">
                             <div>
-                                <p className={`font-bold text-[9px] uppercase tracking-[0.2em] mb-1 ${modalMode === 'view' ? 'text-piso2-lime' : 'text-gray-500'}`}>
-                                    {modalMode === 'view' ? 'Lineup del día' : 'Nueva Clase'}
+                                <p className={`font-bold text-[9px] uppercase tracking-[0.2em] ${modalMode === 'view' ? 'text-piso2-lime' : 'text-gray-500'}`}>
+                                    {modalMode === 'view' ? 'Lineup' : 'Nueva Clase'}
                                 </p>
-                                <h3 className="text-2xl font-black uppercase tracking-tighter leading-none text-white">
+                                <h3 className="text-xl font-black uppercase tracking-tighter text-white leading-none">
                                     {format(selectedDate, 'EEEE d', { locale: es })}
                                 </h3>
                             </div>
-                            <button onClick={() => setIsModalOpen(false)} className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white"><X size={20} /></button>
+                            <button onClick={() => setIsModalOpen(false)} className="p-2 bg-white/5 rounded-full text-white"><X size={20} /></button>
                         </div>
 
-                        {/* Contenido Scrollable */}
-                        <div className="flex-1 overflow-y-auto bg-black/50">
+                        {/* Contenido con Scroll Independiente */}
+                        <div className="flex-1 overflow-y-auto bg-black/50 p-6 pb-safe"> {/* pb-safe para iPhone */}
 
                             {modalMode === 'view' && (
-                                <div className="p-4 space-y-4 pb-32"> {/* pb-32 asegura espacio abajo */}
+                                <div className="space-y-4 pb-20">
                                     {clasesDelDia.length > 0 ? (
                                         clasesDelDia.map((clase) => (
                                             <div key={clase.id} className={`flex flex-row bg-[#111] border border-white/5 rounded-xl overflow-hidden border-l-[4px] ${getBorderColorByTitle(clase.nombre)}`}>
-                                                <div className="relative w-24 h-24 flex-shrink-0 bg-white/5">
+                                                <div className="relative w-20 h-24 flex-shrink-0 bg-white/5">
                                                     {clase.imagen_url ? (
                                                         <Image src={clase.imagen_url} alt={clase.nombre} fill className="object-cover" />
                                                     ) : (
-                                                        <div className="flex items-center justify-center h-full text-white/10"><Instagram size={24} /></div>
+                                                        <div className="flex items-center justify-center h-full text-white/10"><Instagram size={20} /></div>
                                                     )}
                                                 </div>
                                                 <div className="flex-1 p-3 flex flex-col justify-center relative">
                                                     <div className="flex justify-between items-start mb-1">
-                                                        <span className="text-2xl font-black text-white tracking-tighter leading-none">{format(new Date(clase.inicio), 'HH:mm')}</span>
+                                                        <span className="text-xl font-black text-white tracking-tighter leading-none">{format(new Date(clase.inicio), 'HH:mm')}</span>
                                                         <span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${getSedeBadgeStyle(clase.sala?.sede?.nombre)}`}>
                                                             {clase.sala?.sede?.nombre}
                                                         </span>
                                                     </div>
-                                                    <h4 className="text-sm font-bold text-white uppercase leading-tight mb-2 pr-6 line-clamp-1">{clase.nombre}</h4>
+                                                    <h4 className="text-xs font-bold text-white uppercase leading-tight mb-2 pr-6 line-clamp-2">{clase.nombre}</h4>
                                                     <div className="flex items-end justify-between border-t border-white/5 pt-2 mt-auto">
-                                                        <div className="flex flex-col text-[10px] text-gray-400 font-medium">
-                                                            <span className="flex items-center gap-1"><MapPin size={10} /> {clase.sala?.nombre}</span>
-                                                        </div>
-                                                        <button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: clase.id, serieId: clase.serie_id }) }} className="text-gray-600 hover:text-red-500 p-1.5 bg-white/5 rounded">
-                                                            <Trash2 size={16} />
+                                                        <span className="flex items-center gap-1 text-[9px] text-gray-400 font-bold uppercase"><MapPin size={9} /> {clase.sala?.nombre}</span>
+                                                        <button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: clase.id, serieId: clase.serie_id }) }} className="text-gray-500 hover:text-red-500 p-1 bg-white/5 rounded">
+                                                            <Trash2 size={14} />
                                                         </button>
                                                     </div>
                                                 </div>
                                             </div>
                                         ))
                                     ) : (
-                                        <div className="text-center py-12 flex flex-col items-center justify-center text-gray-500 opacity-50">
-                                            <Clock size={40} className="mb-4" strokeWidth={1} />
-                                            <p className="text-xs font-bold uppercase tracking-widest">Sin actividad</p>
-                                        </div>
+                                        <div className="py-10 text-center text-gray-600 opacity-50"><Clock size={32} className="mx-auto mb-2" /><p className="text-xs font-bold uppercase">Sin clases</p></div>
                                     )}
 
                                     <button onClick={() => setModalMode('create')} className="w-full mt-4 px-6 py-4 font-black text-black transition-all bg-piso2-lime rounded-xl hover:bg-white uppercase tracking-widest text-xs flex items-center justify-center gap-2">
-                                        <Plus size={16} strokeWidth={3} /> Agregar al Lineup
+                                        <Plus size={16} strokeWidth={3} /> Agregar
                                     </button>
                                 </div>
                             )}
 
                             {modalMode === 'create' && (
-                                <form onSubmit={handleCrearClase} className="p-5 space-y-5 pb-32"> {/* CORRECCIÓN 1: pb-32 para el scroll */}
-                                    <button type="button" onClick={() => setModalMode('view')} className="flex items-center gap-2 text-gray-400 text-xs font-bold uppercase tracking-widest"><ArrowLeft size={14} /> Volver</button>
+                                <form onSubmit={handleCrearClase} className="space-y-5 pb-20">
+                                    <div className="space-y-1">
+                                        <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Título</label>
+                                        <input value={formNombre} onChange={e => setFormNombre(e.target.value)} className="w-full bg-transparent border-b border-white/20 text-white text-lg font-bold py-2 focus:border-piso2-lime outline-none" placeholder="Título..." autoFocus required />
+                                    </div>
 
-                                    <div className="space-y-1"><label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Título</label><input value={formNombre} onChange={e => setFormNombre(e.target.value)} placeholder="Ej: CLASE DE..." className="w-full bg-transparent border-b border-white/20 text-white text-lg font-bold py-2 focus:border-piso2-lime outline-none" autoFocus required /></div>
-
-                                    <div className="space-y-1"><label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Flyer</label><label className="flex flex-col items-center justify-center w-full h-24 border border-dashed border-white/10 rounded-xl bg-white/5 hover:border-piso2-lime cursor-pointer relative overflow-hidden">{formFile && (<div className="absolute inset-0 bg-piso2-lime/10 flex items-center justify-center z-0"></div>)}<div className="flex flex-col items-center gap-1 text-gray-500 z-10">{formFile ? (<><ImageIcon size={20} /><span className="text-[9px] font-bold uppercase">{formFile.name}</span></>) : (<><UploadCloud size={20} /><span className="text-[9px] font-bold uppercase">Subir Imagen</span></>)}</div><input type="file" className="hidden" accept="image/*" onChange={e => e.target.files && setFormFile(e.target.files[0])} /></label></div>
-
-                                    {/* CORRECCIÓN 2: Inputs con altura fija (h-12) para que se alineen perfecto */}
-                                    <div className="grid grid-cols-2 gap-3">
+                                    {/* INPUTS DE HORA Y DURACIÓN (APILADOS CON ESTILO MANUAL) */}
+                                    <div className="flex flex-col gap-3">
+                                        {/* Contenedor decorativo para forzar estilo */}
                                         <div className="space-y-1">
                                             <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Inicio</label>
-                                            <input type="time" value={formHora} onChange={e => setFormHora(e.target.value)} className="w-full h-12 bg-[#1a1a1a] rounded-lg text-white font-bold px-3 outline-none border border-white/5 appearance-none" required />
+                                            <div className="bg-[#1a1a1a] rounded-lg border border-white/5 h-12 flex items-center px-3">
+                                                <input
+                                                    type="time"
+                                                    value={formHora}
+                                                    onChange={e => setFormHora(e.target.value)}
+                                                    className="bg-transparent w-full text-white font-bold outline-none appearance-none h-full"
+                                                    required
+                                                />
+                                            </div>
                                         </div>
+
                                         <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Minutos</label>
-                                            <input type="number" value={formDuracion} onChange={e => setFormDuracion(Number(e.target.value))} className="w-full h-12 bg-[#1a1a1a] rounded-lg text-white font-bold px-3 outline-none border border-white/5" required />
+                                            <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Duración (min)</label>
+                                            <div className="bg-[#1a1a1a] rounded-lg border border-white/5 h-12 flex items-center px-3">
+                                                <input
+                                                    type="number"
+                                                    value={formDuracion}
+                                                    onChange={e => setFormDuracion(Number(e.target.value))}
+                                                    className="bg-transparent w-full text-white font-bold outline-none appearance-none h-full"
+                                                    required
+                                                />
+                                            </div>
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <select value={formSedeId} onChange={e => { setFormSedeId(e.target.value); setFormSalaId('') }} className="w-full h-12 bg-[#1a1a1a] text-white font-bold px-3 rounded-lg outline-none border border-white/5 text-sm" required><option value="">Sede...</option>{sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
-                                        <select value={formSalaId} onChange={e => setFormSalaId(e.target.value)} className="w-full h-12 bg-[#1a1a1a] text-white font-bold px-3 rounded-lg outline-none border border-white/5 disabled:opacity-50 text-sm" disabled={!formSedeId} required><option value="">Sala...</option>{salasDisponibles.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
+                                    <div className="space-y-1">
+                                        <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Ubicación</label>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <select value={formSedeId} onChange={e => { setFormSedeId(e.target.value); setFormSalaId('') }} className="w-full h-12 bg-[#1a1a1a] text-white font-bold px-3 rounded-lg outline-none border border-white/5 text-xs" required><option value="">Sede...</option>{sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
+                                            <select value={formSalaId} onChange={e => setFormSalaId(e.target.value)} className="w-full h-12 bg-[#1a1a1a] text-white font-bold px-3 rounded-lg outline-none border border-white/5 disabled:opacity-50 text-xs" disabled={!formSedeId} required><option value="">Sala...</option>{salasDisponibles.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
+                                        </div>
                                     </div>
 
-                                    <select value={formProfeId} onChange={e => setFormProfeId(e.target.value)} className="w-full h-12 bg-[#1a1a1a] text-white font-bold px-3 rounded-lg outline-none border border-white/5 text-sm" required><option value="">Profe...</option>{profesores.map(p => <option key={p.id} value={p.id}>{p.nombre_completo || p.email}</option>)}</select>
+                                    <div className="space-y-1">
+                                        <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Profesor</label>
+                                        <select value={formProfeId} onChange={e => setFormProfeId(e.target.value)} className="w-full h-12 bg-[#1a1a1a] text-white font-bold px-3 rounded-lg outline-none border border-white/5 text-xs" required><option value="">Seleccionar...</option>{profesores.map(p => <option key={p.id} value={p.id}>{p.nombre_completo || p.email}</option>)}</select>
+                                    </div>
 
                                     <div className="flex items-center gap-3 bg-[#1a1a1a] p-3 rounded-xl border border-white/5 cursor-pointer" onClick={() => setRepetirHastaFinAnio(!repetirHastaFinAnio)}>
                                         <div className={`w-8 h-5 rounded-full flex items-center p-0.5 transition-colors ${repetirHastaFinAnio ? 'bg-piso2-lime' : 'bg-gray-600'}`}><div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${repetirHastaFinAnio ? 'translate-x-3' : 'translate-x-0'}`}></div></div>
-                                        <div className="flex-1"><p className="text-white font-bold text-xs flex items-center gap-2">Repetir semanalmente</p><p className="text-[9px] text-gray-400">Hasta fin de año.</p></div>
+                                        <div className="flex-1"><p className="text-white font-bold text-xs flex items-center gap-2">Repetir semanalmente</p></div>
                                     </div>
 
-                                    <button type="submit" disabled={uploading} className="w-full bg-white text-black font-bold uppercase h-14 rounded-xl hover:bg-piso2-lime transition-all shadow-lg flex justify-center gap-2 items-center text-sm">
-                                        {uploading ? <><Loader2 className="animate-spin" /> Guardando...</> : 'Confirmar Evento'}
-                                    </button>
+                                    <div className="pt-4 flex gap-3">
+                                        <button type="button" onClick={() => setModalMode('view')} className="flex-1 py-4 bg-white/5 rounded-xl font-bold text-gray-400 text-xs uppercase">Cancelar</button>
+                                        <button type="submit" disabled={uploading} className="flex-[2] bg-white text-black font-bold uppercase rounded-xl hover:bg-piso2-lime transition-all shadow-lg text-xs flex justify-center items-center">
+                                            {uploading ? <Loader2 className="animate-spin mr-2" /> : 'Confirmar'}
+                                        </button>
+                                    </div>
                                 </form>
                             )}
                         </div>
@@ -378,13 +386,13 @@ export default function CalendarioPage() {
                 </div>
             )}
 
+            {/* MODAL BORRADO */}
             {deleteTarget && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in" onClick={() => setDeleteTarget(null)}>
                     <div className="bg-[#111] border border-red-500/30 rounded-2xl w-full max-w-xs p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
                         <h3 className="text-lg font-black text-white text-center uppercase mb-1">¿Eliminar?</h3>
-                        <p className="text-gray-500 text-xs text-center mb-4">{deleteTarget.serieId ? 'Es una serie recurrente' : 'Esta acción es permanente'}</p>
-                        <div className="space-y-2">
-                            <button onClick={() => handleConfirmDelete('single')} className="w-full bg-white/10 text-white font-bold py-3 rounded-lg text-xs uppercase">Solo esta</button>
+                        <div className="space-y-2 mt-4">
+                            <button onClick={() => handleConfirmDelete('single')} className="w-full bg-white/10 text-white font-bold py-3 rounded-lg text-xs uppercase">Solo esta fecha</button>
                             {deleteTarget.serieId && <button onClick={() => handleConfirmDelete('serie')} className="w-full bg-red-600 text-white font-bold py-3 rounded-lg text-xs uppercase">Toda la serie</button>}
                             <button onClick={() => setDeleteTarget(null)} className="w-full py-2 text-xs uppercase font-bold text-gray-500">Cancelar</button>
                         </div>
