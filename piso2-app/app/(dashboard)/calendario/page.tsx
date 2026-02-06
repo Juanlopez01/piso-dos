@@ -169,6 +169,12 @@ export default function CalendarioPage() {
         if (lower.includes('seminario')) return "border-l-piso2-orange"
         return "border-l-piso2-blue"
     }
+    const getColorByTitle = (title: string) => {
+        const lower = title.toLowerCase().trim()
+        if (lower.includes('clase')) return "bg-piso2-lime" // Verde
+        if (lower.includes('seminario')) return "bg-piso2-orange" // Naranja
+        return "bg-piso2-blue" // Azul (Default)
+    }
     const getSedeBadgeStyle = (nombreSede: string | undefined) => {
         const nombre = nombreSede?.toLowerCase() || '';
         if (nombre.includes('centro') || nombre.includes('congreso')) return 'bg-piso2-lime text-black border-transparent font-bold';
@@ -205,7 +211,7 @@ export default function CalendarioPage() {
                 {['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(d => <div key={d} className="text-center text-gray-500 text-[9px] font-black uppercase tracking-wider">{d}</div>)}
             </div>
 
-            {/* GRILLA CALENDARIO (Versión Mobile Clean) */}
+            {/* GRILLA CALENDARIO (Versión "Muchos Puntitos") */}
             <div className="grid grid-cols-7 gap-1 px-1 auto-rows-fr">
                 {eachDayOfInterval({ start: startOfWeek(startOfMonth(currentDate)), end: endOfWeek(endOfMonth(currentDate)) }).map((day) => {
                     const isToday = isSameDay(day, new Date())
@@ -217,40 +223,32 @@ export default function CalendarioPage() {
                         <div
                             key={day.toString()}
                             onClick={() => handleDayClick(day)}
-                            // En mobile (default) altura fija 50px (cuadrado chico). En md (tablet) altura 100px.
                             className={clsx(
-                                "h-[50px] md:h-[100px] border rounded-lg transition-all cursor-pointer relative flex flex-col items-center justify-center",
+                                "h-[60px] md:h-[100px] border rounded-lg transition-all cursor-pointer relative flex flex-col items-center justify-start pt-1 overflow-hidden",
                                 isCurrentMonth ? "bg-white/5 border-white/5" : "opacity-20 border-transparent",
                                 isToday && "ring-1 ring-piso2-lime bg-piso2-lime/10"
                             )}
                         >
-                            {/* Número del día (Centrado en mobile, esq en desktop) */}
+                            {/* Número del día */}
                             <span className={clsx(
-                                "text-xs md:text-sm font-bold md:absolute md:top-2 md:left-2",
+                                "text-xs md:text-sm font-bold z-20 leading-none mb-1",
                                 isToday ? "text-piso2-lime" : "text-white/60"
                             )}>
                                 {format(day, 'd')}
                             </span>
 
-                            {/* Indicador de Clases (Solo un punto en mobile) */}
+                            {/* PUNTITOS: Mostramos hasta 8 para que se vea "lleno" */}
                             {hasClases && (
-                                <div className="mt-1 md:absolute md:top-2 md:right-2">
-                                    {/* Mobile: Punto simple */}
-                                    <div className="md:hidden w-1.5 h-1.5 rounded-full bg-piso2-lime shadow-[0_0_5px_#ccff00]"></div>
-
-                                    {/* Desktop: Badge con número */}
-                                    <span className="hidden md:block text-[9px] font-bold text-black bg-white/90 px-1.5 py-0.5 rounded-full">
-                                        {dayClases.length}
-                                    </span>
+                                <div className="flex flex-wrap justify-center gap-1 px-1 w-full">
+                                    {dayClases.slice(0, 8).map((clase, i) => (
+                                        <div
+                                            key={i}
+                                            className={`w-1.5 h-1.5 rounded-full ${getColorByTitle(clase.nombre)} shadow-[0_0_2px_rgba(0,0,0,0.5)]`}
+                                        />
+                                    ))}
+                                    {dayClases.length > 8 && <div className="w-1.5 h-1.5 rounded-full bg-gray-500" />}
                                 </div>
                             )}
-
-                            {/* Desktop: Puntitos de colores extra */}
-                            <div className="hidden md:flex absolute bottom-2 left-2 right-2 flex-wrap content-end gap-1">
-                                {dayClases.slice(0, 5).map((clase) => (
-                                    <div key={clase.id} className="w-1.5 h-1.5 rounded-full bg-white/50" />
-                                ))}
-                            </div>
                         </div>
                     )
                 })}
@@ -260,7 +258,6 @@ export default function CalendarioPage() {
             {isModalOpen && selectedDate && (
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setIsModalOpen(false)}>
 
-                    {/* Contenedor Modal: h-[100dvh] en mobile = Pantalla COMPLETA real */}
                     <div className="w-full h-[100dvh] md:h-auto md:max-h-[85vh] md:max-w-2xl bg-[#09090b] md:border border-white/10 md:rounded-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
 
                         {/* Header Fijo */}
@@ -276,8 +273,8 @@ export default function CalendarioPage() {
                             <button onClick={() => setIsModalOpen(false)} className="p-2 bg-white/5 rounded-full text-white"><X size={20} /></button>
                         </div>
 
-                        {/* Contenido con Scroll Independiente */}
-                        <div className="flex-1 overflow-y-auto bg-black/50 p-6 pb-safe"> {/* pb-safe para iPhone */}
+                        {/* Contenido con Scroll */}
+                        <div className="flex-1 overflow-y-auto bg-black/50 p-6 pb-safe">
 
                             {modalMode === 'view' && (
                                 <div className="space-y-4 pb-20">
@@ -319,15 +316,30 @@ export default function CalendarioPage() {
                             )}
 
                             {modalMode === 'create' && (
-                                <form onSubmit={handleCrearClase} className="space-y-5 pb-20">
+                                <form onSubmit={handleCrearClase} className="space-y-5 pb-32">
                                     <div className="space-y-1">
                                         <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Título</label>
                                         <input value={formNombre} onChange={e => setFormNombre(e.target.value)} className="w-full bg-transparent border-b border-white/20 text-white text-lg font-bold py-2 focus:border-piso2-lime outline-none" placeholder="Título..." autoFocus required />
                                     </div>
 
-                                    {/* INPUTS DE HORA Y DURACIÓN (APILADOS CON ESTILO MANUAL) */}
+                                    {/* INPUT DE IMAGEN (VOLVIÓ) */}
+                                    <div className="space-y-1">
+                                        <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Flyer / Imagen</label>
+                                        <label className="flex flex-col items-center justify-center w-full h-20 border border-dashed border-white/10 rounded-xl bg-[#1a1a1a] hover:border-piso2-lime cursor-pointer relative overflow-hidden transition-colors group">
+                                            {formFile && (<div className="absolute inset-0 bg-piso2-lime/10 flex items-center justify-center z-0"></div>)}
+                                            <div className="flex flex-row items-center gap-2 text-gray-500 z-10 group-hover:text-piso2-lime">
+                                                {formFile ? (
+                                                    <><ImageIcon size={16} /><span className="text-[10px] font-bold uppercase line-clamp-1">{formFile.name}</span></>
+                                                ) : (
+                                                    <><UploadCloud size={16} /><span className="text-[10px] font-bold uppercase">Tocar para subir</span></>
+                                                )}
+                                            </div>
+                                            <input type="file" className="hidden" accept="image/*" onChange={e => e.target.files && setFormFile(e.target.files[0])} />
+                                        </label>
+                                    </div>
+
+                                    {/* INPUTS DE HORA Y DURACIÓN */}
                                     <div className="flex flex-col gap-3">
-                                        {/* Contenedor decorativo para forzar estilo */}
                                         <div className="space-y-1">
                                             <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Inicio</label>
                                             <div className="bg-[#1a1a1a] rounded-lg border border-white/5 h-12 flex items-center px-3">
@@ -386,12 +398,12 @@ export default function CalendarioPage() {
                 </div>
             )}
 
-            {/* MODAL BORRADO */}
             {deleteTarget && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-in fade-in" onClick={() => setDeleteTarget(null)}>
                     <div className="bg-[#111] border border-red-500/30 rounded-2xl w-full max-w-xs p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
                         <h3 className="text-lg font-black text-white text-center uppercase mb-1">¿Eliminar?</h3>
-                        <div className="space-y-2 mt-4">
+                        <p className="text-gray-500 text-xs text-center mb-4">{deleteTarget.serieId ? 'Es una serie recurrente' : 'Esta acción es permanente'}</p>
+                        <div className="space-y-2">
                             <button onClick={() => handleConfirmDelete('single')} className="w-full bg-white/10 text-white font-bold py-3 rounded-lg text-xs uppercase">Solo esta fecha</button>
                             {deleteTarget.serieId && <button onClick={() => handleConfirmDelete('serie')} className="w-full bg-red-600 text-white font-bold py-3 rounded-lg text-xs uppercase">Toda la serie</button>}
                             <button onClick={() => setDeleteTarget(null)} className="w-full py-2 text-xs uppercase font-bold text-gray-500">Cancelar</button>
