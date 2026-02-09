@@ -3,112 +3,114 @@
 import { createClient } from '@/utils/supabase/client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Toaster, toast } from 'sonner'
+import Link from 'next/link'
+import { ArrowLeft, Loader2, ArrowUpRight } from 'lucide-react'
 
 export default function LoginPage() {
-    const router = useRouter()
-    const supabase = createClient()
-
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [loading, setLoading] = useState(false)
-    const [message, setMessage] = useState<string | null>(null)
+    const router = useRouter()
+    const supabase = createClient()
 
-    // Función para Iniciar Sesión
-    const handleLogin = async () => {
+    const handleLogin = async (e: React.FormEvent) => {
+        e.preventDefault()
         setLoading(true)
-        const { error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-        })
 
-        if (error) {
-            setMessage("Error: " + error.message)
-        } else {
-            setMessage("¡Bienvenido! Redirigiendo...")
-            router.push('/') // Te manda al inicio
-            router.refresh()
+        try {
+            const { error } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            })
+
+            if (error) {
+                throw new Error('Credenciales incorrectas')
+            }
+
+            toast.success('¡Bienvenido a PISO 2!')
+
+            // --- LA REDIRECCIÓN CLAVE ---
+            // Forzamos la navegación al calendario
+            router.push('/calendario')
+            router.refresh() // Actualiza los componentes de servidor (layout) para mostrar el menú
+
+        } catch (error: any) {
+            toast.error(error.message)
+        } finally {
+            setLoading(false)
         }
-        setLoading(false)
-    }
-
-    // Función para Registrarse (Solo para probar ahora)
-    const handleSignUp = async () => {
-        setLoading(true)
-        const { error } = await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-                data: {
-                    full_name: "Usuario Nuevo", // Esto después lo pediremos en un input
-                },
-            },
-        })
-
-        if (error) {
-            setMessage("Error al crear cuenta: " + error.message)
-        } else {
-            setMessage("¡Cuenta creada! Revisá tu email para confirmar (o desactivá la confirmación en Supabase).")
-        }
-        setLoading(false)
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-black p-4">
-            <div className="max-w-md w-full bg-piso2-gray p-8 rounded-none border border-white/10 shadow-2xl">
-                <div className="text-center mb-8">
-                    <h1 className="text-4xl font-black text-white tracking-tighter">
-                        PISO<span className="text-piso2-lime">2</span>
-                    </h1>
-                    <p className="text-gray-400 text-sm mt-2 uppercase tracking-widest">Sistema de Gestión</p>
+        <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-4 relative overflow-hidden">
+            <Toaster position="top-center" richColors theme="dark" />
+
+            {/* Botón Volver (Flotante) */}
+            <Link href="/" className="absolute top-8 left-8 text-gray-500 hover:text-white flex items-center gap-2 text-xs font-bold uppercase tracking-widest transition-colors z-20">
+                <ArrowLeft size={16} /> Volver al Inicio
+            </Link>
+
+            {/* Decoración de Fondo (Glow Verde Sutil) */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-[#D4E655]/5 blur-[100px] rounded-full pointer-events-none" />
+
+            {/* Tarjeta de Login */}
+            <div className="w-full max-w-md bg-[#09090b] border border-white/10 rounded-2xl p-8 md:p-12 relative z-10 shadow-2xl">
+
+                {/* Encabezado */}
+                <div className="text-center mb-10">
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[#D4E655]/10 text-[#D4E655] mb-6 border border-[#D4E655]/20">
+                        <ArrowUpRight size={32} strokeWidth={2} />
+                    </div>
+                    <h1 className="text-3xl font-black uppercase tracking-tighter mb-2">Ingresar</h1>
+                    <p className="text-gray-500 text-sm">Accedé a tu cuenta de Piso 2</p>
                 </div>
 
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-xs uppercase font-bold text-gray-500 mb-1">Email</label>
+                {/* Formulario */}
+                <form onSubmit={handleLogin} className="space-y-5">
+
+                    <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest ml-1">Email</label>
                         <input
                             type="email"
+                            required
+                            autoFocus
+                            placeholder="alumno@piso2.com"
                             value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="w-full bg-black border border-white/20 text-white p-3 focus:outline-none focus:border-piso2-lime transition-colors"
-                            placeholder="admin@pisodos.com"
+                            onChange={e => setEmail(e.target.value)}
+                            className="w-full bg-[#111] border border-white/10 rounded-xl px-4 py-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors placeholder:text-gray-700"
                         />
                     </div>
 
-                    <div>
-                        <label className="block text-xs uppercase font-bold text-gray-500 mb-1">Contraseña</label>
+                    <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest ml-1">Contraseña</label>
                         <input
                             type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full bg-black border border-white/20 text-white p-3 focus:outline-none focus:border-piso2-lime transition-colors"
+                            required
                             placeholder="••••••••"
+                            value={password}
+                            onChange={e => setPassword(e.target.value)}
+                            className="w-full bg-[#111] border border-white/10 rounded-xl px-4 py-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors placeholder:text-gray-700"
                         />
                     </div>
 
-                    {message && (
-                        <div className="p-3 bg-white/5 border border-piso2-blue text-blue-200 text-xs text-center">
-                            {message}
-                        </div>
-                    )}
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all shadow-[0_0_20px_rgba(212,230,85,0.2)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-4"
+                    >
+                        {loading ? <Loader2 className="animate-spin" /> : 'Entrar al Sistema'}
+                    </button>
 
-                    <div className="pt-4 flex flex-col gap-3">
-                        <button
-                            onClick={handleLogin}
-                            disabled={loading}
-                            className="w-full bg-piso2-lime text-black font-bold uppercase py-3 hover:bg-white transition-colors disabled:opacity-50"
-                        >
-                            {loading ? 'Cargando...' : 'Ingresar'}
-                        </button>
+                </form>
 
-                        <button
-                            onClick={handleSignUp}
-                            disabled={loading}
-                            className="w-full border border-white/20 text-gray-400 text-xs font-bold uppercase py-3 hover:text-white hover:border-white transition-colors"
-                        >
-                            Crear cuenta de prueba
-                        </button>
-                    </div>
+                {/* Footer */}
+                <div className="mt-8 text-center">
+                    <p className="text-gray-600 text-xs">
+                        ¿Olvidaste tu contraseña? <a href="#" className="text-[#D4E655] hover:underline font-bold">Recuperar</a>
+                    </p>
                 </div>
+
             </div>
         </div>
     )

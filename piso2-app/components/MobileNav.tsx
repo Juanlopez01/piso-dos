@@ -54,7 +54,8 @@ export default function BottomNavigation() {
     const visibleHrefs = getVisibleItems()
     const items = ALL_ITEMS.filter(i => visibleHrefs.includes(i.href))
 
-    if (pathname === '/login') return null
+    // 1. SI ESTAMOS EN LA LANDING O LOGIN, NO MOSTRAR NADA
+    if (pathname === '/' || pathname === '/login') return null;
 
     return (
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#09090b]/95 backdrop-blur-md border-t border-white/10 z-50 pb-safe">

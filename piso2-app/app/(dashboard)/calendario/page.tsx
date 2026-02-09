@@ -182,7 +182,7 @@ export default function CalendarioPage() {
         return 'bg-white/10 text-white border-white/5';
     }
 
-    // 🔥 NUEVA LÓGICA DE FONDO SUTIL 🔥
+    // LÓGICA DE FONDO SUTIL
     const getDayStyle = (dayClases: Clase[]) => {
         if (dayClases.length === 0) return "bg-white/5 border-white/5" // Default vacío
 

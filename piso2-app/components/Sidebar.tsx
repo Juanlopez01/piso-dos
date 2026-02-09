@@ -16,7 +16,8 @@ export default function Sidebar() {
         await supabase.auth.signOut()
         router.push('/login')
     }
-
+    // SI ESTAMOS EN LA LANDING O LOGIN, DESAPARECER
+    if (pathname === '/' || pathname === '/login') return null;
     // TRUCO: 'hidden md:flex' hace que desaparezca en móviles
     return (
         <aside className="hidden md:flex w-64 bg-black border-r border-white/10 h-screen flex-col fixed left-0 top-0 z-50">
