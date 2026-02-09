@@ -111,6 +111,15 @@ export default function LoginPage() {
                     </p>
                 </div>
 
+                {/* Footer Link al Registro */}
+                <div className="mt-8 pt-6 border-t border-white/5 text-center">
+                    <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-3">
+                        ¿Sos nuevo en Piso 2?
+                    </p>
+                    <Link href="/signup" className="block w-full border border-white/20 text-white font-bold uppercase py-3 rounded-xl hover:border-[#D4E655] hover:text-[#D4E655] transition-all">
+                        Crear una cuenta
+                    </Link>
+                </div>
             </div>
         </div>
     )

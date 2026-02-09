@@ -19,7 +19,9 @@ export async function updateSession(request: NextRequest) {
                 setAll(cookiesToSet) {
                     cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
                     response = NextResponse.next({
-                        request,
+                        request: {
+                            headers: request.headers,
+                        },
                     })
                     cookiesToSet.forEach(({ name, value, options }) =>
                         response.cookies.set(name, value, options)
@@ -29,14 +31,32 @@ export async function updateSession(request: NextRequest) {
         }
     )
 
-    const {
-        data: { user },
-    } = await supabase.auth.getUser()
+    // IMPORTANTE: No protejas la ruta si es una API de auth o estática
+    if (request.nextUrl.pathname.startsWith('/auth') ||
+        request.nextUrl.pathname.startsWith('/_next') ||
+        request.nextUrl.pathname.includes('.')) {
+        return response
+    }
 
-    // SI NO HAY USUARIO Y NO ESTÁS EN LOGIN -> TE MANDO AL LOGIN
-    if (!user && !request.nextUrl.pathname.startsWith('/login')) {
+    const { data: { user } } = await supabase.auth.getUser()
+
+    // LÓGICA DE PROTECCIÓN (Aquí estaba el problema)
+
+    // 1. Rutas públicas (Login y Signup)
+    const isPublicRoute = request.nextUrl.pathname.startsWith('/login') ||
+        request.nextUrl.pathname.startsWith('/signup')
+
+    // 2. Si NO hay usuario y NO es ruta pública -> Mandar a Login
+    if (!user && !isPublicRoute) {
         const url = request.nextUrl.clone()
         url.pathname = '/login'
+        return NextResponse.redirect(url)
+    }
+
+    // 3. Si YA hay usuario y quiere entrar a Login o Signup -> Mandar al Home
+    if (user && isPublicRoute) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/' // O '/caja' si preferís
         return NextResponse.redirect(url)
     }
 

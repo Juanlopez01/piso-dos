@@ -1,62 +1,90 @@
 'use client'
 
+import { createClient } from '@/utils/supabase/client'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { menuItems } from '@/config/menu'
-import { LogOut } from 'lucide-react'
-import { createClient } from '@/utils/supabase/client'
-import { useRouter } from 'next/navigation'
+import { LogOut, UserCircle, Loader2 } from 'lucide-react'
+import { menuItems } from '@/config/menu' // Ajustá la ruta según donde lo tengas
 
 export default function Sidebar() {
     const pathname = usePathname()
-    const router = useRouter()
     const supabase = createClient()
+    const [role, setRole] = useState<string | null>(null)
+    const [loading, setLoading] = useState(true)
 
-    const handleLogout = async () => {
-        await supabase.auth.signOut()
-        router.push('/login')
+    useEffect(() => {
+        async function getRole() {
+            const { data: { user } } = await supabase.auth.getUser()
+            if (user) {
+                const { data } = await supabase.from('profiles').select('rol').eq('id', user.id).single()
+                setRole(data?.rol || 'recepcion')
+            }
+            setLoading(false)
+        }
+        getRole()
+    }, [])
+
+    // Filtramos el menú por el rol obtenido
+    const filteredMenu = menuItems.filter(item => item.roles.includes(role || ''))
+
+    if (loading) {
+        return (
+            <div className="flex flex-col h-full p-8 items-center bg-[#09090b]">
+                <Loader2 className="animate-spin text-[#D4E655]" />
+            </div>
+        )
     }
-    // SI ESTAMOS EN LA LANDING O LOGIN, DESAPARECER
-    if (pathname === '/' || pathname === '/login') return null;
-    // TRUCO: 'hidden md:flex' hace que desaparezca en móviles
-    return (
-        <aside className="hidden md:flex w-64 bg-black border-r border-white/10 h-screen flex-col fixed left-0 top-0 z-50">
 
-            {/* LOGO */}
-            <div className="h-20 flex items-center justify-center border-b border-white/10">
-                <h1 className="text-2xl font-black text-white tracking-tighter">
-                    PISO<span className="text-piso2-lime">2</span>
-                </h1>
+    return (
+        <div className="flex flex-col h-full p-4 bg-[#09090b]">
+            {/* BRAND / LOGO */}
+            <div className="mb-10 px-4 pt-4">
+                <h1 className="text-2xl font-black text-white uppercase tracking-tighter italic leading-none">Piso 2</h1>
+                <p className="text-[9px] text-[#D4E655] font-black uppercase tracking-[0.3em] mt-1">Management</p>
             </div>
 
-            {/* MENÚ VERTICAL */}
-            <nav className="flex-1 p-4 space-y-2">
-                {menuItems.map((item) => {
+            {/* NAV LINKS */}
+            <nav className="flex-1 space-y-1">
+                {filteredMenu.map((item) => {
                     const isActive = pathname === item.href
                     return (
                         <Link
                             key={item.href}
                             href={item.href}
-                            className={`flex items-center gap-3 px-4 py-3 rounded-md transition-all text-sm font-bold uppercase tracking-wider
-                ${isActive
-                                    ? 'bg-piso2-lime text-black shadow-[0_0_15px_rgba(204,255,0,0.3)]'
-                                    : 'text-gray-400 hover:text-white hover:bg-white/5'
-                                }
-              `}
+                            className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all uppercase tracking-tight ${isActive
+                                ? 'bg-[#D4E655] text-black shadow-[0_0_20px_rgba(212,230,85,0.15)]'
+                                : 'text-gray-500 hover:text-white hover:bg-white/5'
+                                }`}
                         >
-                            <item.icon size={20} />
+                            <item.icon size={20} strokeWidth={isActive ? 3 : 2} />
                             {item.name}
                         </Link>
                     )
                 })}
             </nav>
 
-            {/* BOTÓN SALIR */}
-            <div className="p-4 border-t border-white/10">
-                <button onClick={handleLogout} className="flex items-center gap-3 w-full px-4 py-3 text-red-500 hover:bg-red-500/10 rounded-md transition-colors text-xs font-bold uppercase">
-                    <LogOut size={18} /> Salir
+            {/* PROFILE & LOGOUT SECTION */}
+            <div className="pt-4 border-t border-white/10">
+                <div className="px-4 py-3 flex items-center gap-3 mb-2">
+                    <div className="w-8 h-8 rounded-full bg-[#D4E655]/10 flex items-center justify-center text-[#D4E655]">
+                        <UserCircle size={20} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-black text-gray-500 uppercase leading-none mb-1">Sesión</p>
+                        <p className="text-xs font-bold text-white uppercase truncate">{role === 'admin' ? 'Administrador' : 'Recepción'}</p>
+                    </div>
+                </div>
+                <button
+                    onClick={async () => {
+                        await supabase.auth.signOut()
+                        window.location.href = '/login'
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-red-500 transition-colors font-bold text-xs uppercase"
+                >
+                    <LogOut size={18} /> Cerrar Sesión
                 </button>
             </div>
-        </aside>
+        </div>
     )
 }

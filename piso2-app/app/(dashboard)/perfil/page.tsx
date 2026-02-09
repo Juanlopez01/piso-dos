@@ -2,233 +2,230 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
-import { Camera, User, Mail, Shield, Loader2, Calendar, Users, MapPin, Clock } from 'lucide-react'
-import Image from 'next/image'
-import { useRouter } from 'next/navigation'
+import {
+    User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
+    AlertTriangle, Mail, Calendar, LogOut
+} from 'lucide-react'
+import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
-import { es } from 'date-fns/locale'
-
-// Tipos
-type Profile = {
-    id: string
-    nombre_completo: string | null
-    email: string
-    rol: string
-    avatar_url: string | null
-}
-
-type ClaseHoy = {
-    id: string
-    nombre: string
-    inicio: string
-    sala: { nombre: string; sede: { nombre: string } }
-    _count: { asistencias: number } // Para contar alumnos
-}
+import { useRouter } from 'next/navigation'
 
 export default function PerfilPage() {
     const supabase = createClient()
     const router = useRouter()
 
     const [loading, setLoading] = useState(true)
-    const [uploading, setUploading] = useState(false)
+    const [saving, setSaving] = useState(false)
 
-    const [profile, setProfile] = useState<Profile | null>(null)
-    const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+    const [profile, setProfile] = useState<any>(null)
+    const [avisos, setAvisos] = useState<any[]>([]) // Solo para profes
 
-    // Estados para el Dashboard del Profesor
-    const [clasesHoy, setClasesHoy] = useState<ClaseHoy[]>([])
-    const [totalAlumnos, setTotalAlumnos] = useState(0)
+    // Estado del Formulario
+    const [formData, setFormData] = useState({
+        nombre: '', apellido: '', email: '', telefono: '',
+        alias_cbu: '', nombre_remplazo: '', contacto_remplazo: ''
+    })
 
     useEffect(() => {
-        getProfile()
+        fetchData()
     }, [])
 
-    const getProfile = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) { router.push('/login'); return }
+    const fetchData = async () => {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+            router.push('/login')
+            return
+        }
 
-            // 1. Datos del Perfil
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', user.id)
-                .single()
+        // 1. Perfil
+        const { data: dataProfile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
 
-            if (error) throw error
+        if (dataProfile) {
+            setProfile(dataProfile)
+            setFormData({
+                nombre: dataProfile.nombre || '',
+                apellido: dataProfile.apellido || '',
+                email: user.email || '',
+                telefono: dataProfile.telefono || '',
+                alias_cbu: dataProfile.alias_cbu || '',
+                nombre_remplazo: dataProfile.nombre_remplazo || '',
+                contacto_remplazo: dataProfile.contacto_remplazo || ''
+            })
 
-            if (data) {
-                setProfile(data)
-                setAvatarUrl(data.avatar_url)
-
-                // 2. Si es PROFE, cargamos su agenda del día
-                if (data.rol === 'profesor') {
-                    fetchProfessorStats(user.id)
-                }
+            // 2. Avisos (Solo si es PROFE)
+            if (dataProfile.rol === 'profesor') {
+                const { data: dataAvisos } = await supabase
+                    .from('comunicados')
+                    .select('*')
+                    .order('created_at', { ascending: false })
+                if (dataAvisos) setAvisos(dataAvisos)
             }
-        } catch (error) {
-            console.error(error)
-        } finally {
-            setLoading(false)
         }
+        setLoading(false)
     }
 
-    const fetchProfessorStats = async (userId: string) => {
-        const today = new Date()
-        const start = new Date(today.setHours(0, 0, 0, 0)).toISOString()
-        const end = new Date(today.setHours(23, 59, 59, 999)).toISOString()
+    const handleSave = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setSaving(true)
 
-        // Traemos las clases de hoy donde el profe es este usuario
-        // Y hacemos un "join" con asistencias para contar
-        const { data: clases } = await supabase
-            .from('clases')
-            .select(`
-            id, nombre, inicio,
-            sala:salas ( nombre, sede:sedes ( nombre ) ),
-            asistencias ( count )
-        `)
-            .eq('profesor_id', userId)
-            .gte('inicio', start)
-            .lte('inicio', end)
-            .order('inicio', { ascending: true })
-
-        if (clases) {
-            // Procesamos los datos para que sean fáciles de usar
-            const clasesFormateadas = clases.map((c: any) => ({
-                ...c,
-                _count: { asistencias: c.asistencias[0]?.count || 0 }
-            }))
-
-            setClasesHoy(clasesFormateadas)
-
-            // Sumamos el total de alumnos
-            const total = clasesFormateadas.reduce((acc: number, curr: any) => acc + curr._count.asistencias, 0)
-            setTotalAlumnos(total)
+        // Validaciones Específicas Profe
+        if (profile.rol === 'profesor') {
+            if (!formData.nombre_remplazo || !formData.contacto_remplazo) {
+                toast.error('Los datos de reemplazo son obligatorios para docentes')
+                setSaving(false)
+                return
+            }
         }
+
+        const { error } = await supabase.from('profiles').update({
+            telefono: formData.telefono,
+            alias_cbu: formData.alias_cbu,
+            nombre_remplazo: formData.nombre_remplazo,
+            contacto_remplazo: formData.contacto_remplazo,
+            nombre_completo: `${formData.nombre} ${formData.apellido}`
+        }).eq('id', profile.id)
+
+        if (error) toast.error('Error al guardar')
+        else toast.success('Perfil actualizado correctamente')
+
+        setSaving(false)
     }
 
-    const uploadAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        try {
-            setUploading(true)
-            if (!event.target.files || event.target.files.length === 0) throw new Error('Seleccioná una imagen.')
-            if (!profile) return
-
-            const file = event.target.files[0]
-            const fileExt = file.name.split('.').pop()
-            const fileName = `${profile.id}-${Math.random()}.${fileExt}`
-
-            const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file)
-            if (uploadError) throw uploadError
-
-            const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName)
-
-            const { error: updateError } = await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', profile.id)
-            if (updateError) throw updateError
-
-            setAvatarUrl(publicUrl)
-
-        } catch (error: any) {
-            alert('Error: ' + error.message)
-        } finally {
-            setUploading(false)
-        }
+    const handleLogout = async () => {
+        await supabase.auth.signOut()
+        router.push('/login')
     }
 
-    if (loading) return <div className="p-10 text-piso2-lime animate-pulse">Cargando perfil...</div>
+    if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
+
+    const isProfe = profile?.rol === 'profesor'
+    const isAlumno = profile?.rol === 'alumno' || profile?.rol === 'user' // Asumiendo rol default
+    const datosIncompletos = isProfe && (!formData.nombre_remplazo || !formData.contacto_remplazo || !formData.alias_cbu)
 
     return (
-        <div className="max-w-4xl mx-auto pb-20 space-y-8">
+        <div className="pb-24 px-4 pt-4 md:p-8 min-h-screen bg-[#050505] text-white">
+            <Toaster position="top-center" richColors theme="dark" />
 
-            {/* HEADER */}
-            <div>
-                <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Mi Perfil</h2>
-                <p className="text-gray-400 text-sm">Gestioná tu identidad en Piso 2.</p>
+            {/* HEADER PERFIL */}
+            <div className="flex justify-between items-end mb-8 border-b border-white/10 pb-6">
+                <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 rounded-full bg-[#D4E655] text-black flex items-center justify-center font-black text-2xl shadow-[0_0_20px_rgba(212,230,85,0.4)]">
+                        {profile.nombre?.[0]}{profile.apellido?.[0]}
+                    </div>
+                    <div>
+                        <h2 className="text-3xl font-black uppercase tracking-tighter text-white leading-none">{profile.nombre} {profile.apellido}</h2>
+                        <span className="text-[#D4E655] font-bold text-xs tracking-widest uppercase bg-[#D4E655]/10 px-2 py-0.5 rounded mt-1 inline-block">
+                            {profile.rol === 'admin' ? 'Administrador' : isProfe ? 'Staff Docente' : 'Alumno'}
+                        </span>
+                    </div>
+                </div>
+                <button onClick={handleLogout} className="text-gray-500 hover:text-red-500 text-xs font-bold uppercase flex items-center gap-2 transition-colors">
+                    <LogOut size={16} /> Cerrar Sesión
+                </button>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-                {/* COLUMNA IZQUIERDA: TARJETA DE PERFIL */}
-                <div className="lg:col-span-2 bg-[#09090b] border border-white/10 rounded-2xl overflow-hidden shadow-2xl relative h-fit">
-                    <div className="h-32 bg-gradient-to-r from-piso2-lime/20 to-piso2-blue/20 border-b border-white/5"></div>
-                    <div className="px-8 pb-8">
-                        <div className="relative -mt-16 mb-6 inline-block group">
-                            <div className="w-32 h-32 rounded-full border-4 border-[#09090b] overflow-hidden bg-black relative shadow-xl">
-                                {avatarUrl ? (
-                                    <Image src={avatarUrl} alt="Avatar" fill className="object-cover" />
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-white/10 text-white text-4xl font-black uppercase">{profile?.nombre_completo?.charAt(0) || <User />}</div>
-                                )}
-                                {uploading && <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-20"><Loader2 className="animate-spin text-piso2-lime" /></div>}
+                {/* --- COLUMNA IZQ: FORMULARIO (PARA TODOS) --- */}
+                <div className="lg:col-span-2 space-y-6">
+
+                    {/* Alerta Docentes */}
+                    {isProfe && datosIncompletos && (
+                        <div className="bg-orange-500/10 border border-orange-500/30 p-4 rounded-xl flex items-start gap-3 animate-pulse">
+                            <AlertTriangle className="text-orange-500 shrink-0" size={20} />
+                            <div>
+                                <h4 className="font-bold text-orange-500 uppercase text-xs">Acción Requerida</h4>
+                                <p className="text-gray-400 text-xs">Para poder liquidar tus sueldos, necesitamos tu CBU y contacto de reemplazo.</p>
                             </div>
-                            <label className="absolute bottom-0 right-0 bg-white text-black p-2 rounded-full cursor-pointer hover:bg-piso2-lime transition-colors shadow-lg z-10 border-4 border-[#09090b]">
-                                <Camera size={20} />
-                                <input type="file" className="hidden" accept="image/*" onChange={uploadAvatar} disabled={uploading} />
-                            </label>
+                        </div>
+                    )}
+
+                    <form onSubmit={handleSave} className="bg-[#09090b] border border-white/10 rounded-2xl p-6 md:p-8 shadow-2xl space-y-8">
+
+                        {/* 1. Datos Personales (Todos) */}
+                        <div className="space-y-4">
+                            <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2">
+                                <User size={16} className="text-[#D4E655]" /> Datos Personales
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Nombre</label><input disabled value={formData.nombre} className="w-full bg-[#111] border border-white/5 rounded-lg p-3 text-gray-400 font-bold text-sm cursor-not-allowed" /></div>
+                                <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Apellido</label><input disabled value={formData.apellido} className="w-full bg-[#111] border border-white/5 rounded-lg p-3 text-gray-400 font-bold text-sm cursor-not-allowed" /></div>
+                                <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Email</label><input disabled value={formData.email} className="w-full bg-[#111] border border-white/5 rounded-lg p-3 text-gray-400 font-bold text-sm cursor-not-allowed" /></div>
+                                <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Teléfono</label><input required value={formData.telefono} onChange={e => setFormData({ ...formData, telefono: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white font-bold outline-none focus:border-[#D4E655]" /></div>
+                            </div>
                         </div>
 
-                        <div className="space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-2">
-                                    <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest flex items-center gap-2"><User size={12} /> Nombre</label>
-                                    <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-white font-bold text-lg">{profile?.nombre_completo || 'Sin nombre'}</div>
+                        {/* 2. Sección Exclusiva ALUMNOS */}
+                        {isAlumno && (
+                            <div className="space-y-4">
+                                <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2">
+                                    <CreditCard size={16} className="text-[#D4E655]" /> Mis Créditos
+                                </h3>
+                                <div className="bg-[#D4E655]/10 border border-[#D4E655]/20 p-4 rounded-xl flex items-center justify-between">
+                                    <div>
+                                        <p className="text-[10px] font-bold uppercase text-[#D4E655]">Saldo Disponible</p>
+                                        <p className="text-3xl font-black text-white">{profile.creditos || 0}</p>
+                                    </div>
+                                    <button type="button" className="bg-[#D4E655] text-black px-4 py-2 rounded-lg text-xs font-black uppercase hover:bg-white transition-colors">
+                                        Comprar Packs
+                                    </button>
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest flex items-center gap-2"><Shield size={12} /> Rol</label>
-                                    <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-piso2-lime font-bold text-lg uppercase flex items-center gap-2">
-                                        {profile?.rol}
-                                        {profile?.rol === 'admin' && <span className="text-[10px] bg-red-500 text-black px-2 rounded-full">SUPERUSER</span>}
+                            </div>
+                        )}
+
+                        {/* 3. Sección Exclusiva DOCENTES */}
+                        {isProfe && (
+                            <>
+                                {/* Datos Bancarios */}
+                                <div className="space-y-4">
+                                    <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2">
+                                        <CreditCard size={16} className="text-[#D4E655]" /> Cobros
+                                    </h3>
+                                    <div className="space-y-1">
+                                        <label className="text-[9px] font-bold text-gray-500 uppercase">Alias / CBU</label>
+                                        <input required placeholder="Ej: mi.alias.banco" value={formData.alias_cbu} onChange={e => setFormData({ ...formData, alias_cbu: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white font-bold outline-none focus:border-[#D4E655] font-mono text-sm" />
                                     </div>
                                 </div>
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest flex items-center gap-2"><Mail size={12} /> Email</label>
-                                <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-gray-300 font-mono text-sm md:text-base">{profile?.email}</div>
-                            </div>
-                        </div>
-                    </div>
+
+                                {/* Reemplazo */}
+                                <div className="space-y-4">
+                                    <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2">
+                                        <Users size={16} className="text-[#D4E655]" /> Reemplazo (Obligatorio)
+                                    </h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Nombre Completo</label><input required placeholder="Ej: Maria Lopez" value={formData.nombre_remplazo} onChange={e => setFormData({ ...formData, nombre_remplazo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white font-bold outline-none focus:border-[#D4E655]" /></div>
+                                        <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Teléfono / Contacto</label><input required placeholder="Ej: 3624..." value={formData.contacto_remplazo} onChange={e => setFormData({ ...formData, contacto_remplazo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white font-bold outline-none focus:border-[#D4E655]" /></div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        <button type="submit" disabled={saving} className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all shadow-lg flex items-center justify-center gap-2">
+                            {saving ? <Loader2 className="animate-spin" /> : <><Save size={18} /> Guardar Cambios</>}
+                        </button>
+                    </form>
                 </div>
 
-                {/* COLUMNA DERECHA: DASHBOARD DOCENTE (Solo visible para Profesores) */}
-                {profile?.rol === 'profesor' && (
-                    <div className="space-y-4">
-
-                        {/* METRICA: ALUMNOS DEL DIA */}
-                        <div className="bg-piso2-lime text-black p-6 rounded-2xl shadow-[0_0_30px_rgba(204,255,0,0.1)] relative overflow-hidden group">
-                            <div className="absolute -right-4 -bottom-4 text-black/10 transform rotate-12 group-hover:scale-110 transition-transform">
-                                <Users size={100} />
-                            </div>
-                            <p className="text-xs font-black uppercase tracking-widest opacity-70 mb-1">Alumnos hoy</p>
-                            <p className="text-5xl font-black tracking-tighter">{totalAlumnos}</p>
-                            <p className="text-[10px] font-bold mt-2 uppercase">En {clasesHoy.length} Clases</p>
-                        </div>
-
-                        {/* LISTA: AGENDA */}
-                        <div className="bg-[#09090b] border border-white/10 p-6 rounded-2xl h-fit">
-                            <h3 className="text-white font-black uppercase text-sm mb-4 flex items-center gap-2">
-                                <Calendar size={16} className="text-piso2-blue" /> Agenda de Hoy
+                {/* --- COLUMNA DER: CARTELERA (SOLO PROFES) --- */}
+                {isProfe && (
+                    <div>
+                        <div className="bg-[#111] border border-white/10 rounded-2xl p-6 relative overflow-hidden sticky top-8">
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
+                            <h3 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-4 relative z-10">
+                                <Megaphone size={18} className="text-blue-400" /> Cartelera Staff
                             </h3>
 
-                            <div className="space-y-3">
-                                {clasesHoy.length > 0 ? clasesHoy.map(clase => (
-                                    <div key={clase.id} className="bg-white/5 p-3 rounded-lg border border-white/5 hover:border-piso2-blue/50 transition-colors">
-                                        <div className="flex justify-between items-start">
-                                            <span className="text-white font-bold text-sm">{clase.nombre}</span>
-                                            <span className="text-xs font-mono text-piso2-blue">{format(new Date(clase.inicio), 'HH:mm')}</span>
-                                        </div>
-                                        <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400 uppercase">
-                                            <span className="flex items-center gap-1"><MapPin size={10} /> {clase.sala.sede.nombre}</span>
-                                            <span className="flex items-center gap-1"><Users size={10} /> {clase._count.asistencias} Inscriptos</span>
-                                        </div>
+                            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                                {avisos.map(aviso => (
+                                    <div key={aviso.id} className="bg-black/40 border-l-2 border-blue-500 p-4 rounded-r-lg group hover:bg-white/5 transition-colors">
+                                        <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">{format(new Date(aviso.created_at), 'dd MMM yyyy')}</span>
+                                        <h4 className="font-bold text-white text-sm uppercase mb-2">{aviso.titulo}</h4>
+                                        <p className="text-xs text-gray-400 leading-relaxed">{aviso.mensaje}</p>
                                     </div>
-                                )) : (
-                                    <div className="text-center py-6 text-gray-500 text-xs">
-                                        <p>¡Día libre! 🎉</p>
-                                        <p>No tenés clases hoy.</p>
-                                    </div>
-                                )}
+                                ))}
+                                {avisos.length === 0 && <p className="text-gray-500 text-xs italic">No hay comunicados activos.</p>}
                             </div>
                         </div>
-
                     </div>
                 )}
 
