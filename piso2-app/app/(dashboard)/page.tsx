@@ -2,10 +2,9 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { ArrowUpRight, Triangle, Play, ArrowRight } from 'lucide-react'
+import { ArrowUpRight, Triangle, Play, ArrowRight, Menu, X } from 'lucide-react'
 import { Montserrat } from 'next/font/google'
 
-// Fuente oficial (Ancha y Geométrica)
 const montserrat = Montserrat({
   subsets: ['latin'],
   weight: ['400', '700', '900']
@@ -13,13 +12,15 @@ const montserrat = Montserrat({
 
 export default function LandingPage() {
   const [activeSection, setActiveSection] = useState<'2m' | '2e' | '2s'>('2m')
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false) // Nuevo estado para el menú
+
   const COLOR_HEX = '#D4E655'; // Verde Mate
 
-  // Helper de Estilos (Mismo de antes, funciona perfecto)
+  // Helper de Estilos
   const getStyles = (section: '2m' | '2e' | '2s') => {
     const isActive = activeSection === section
     return {
-      container: `group cursor-pointer flex flex-col items-center gap-4 transition-all duration-500 relative py-4 px-6`,
+      container: `group cursor-pointer flex flex-col items-center gap-4 transition-all duration-500 relative py-4 px-6 select-none`,
       glow: `absolute top-0 left-1/2 -translate-x-1/2 w-20 h-20 bg-[${COLOR_HEX}]/30 blur-[40px] rounded-full transition-opacity duration-500 ${isActive ? 'opacity-100' : 'opacity-0'}`,
       head: `relative z-10 flex items-center gap-2 text-5xl md:text-6xl tracking-tighter transition-all duration-300 ${isActive ? `text-[${COLOR_HEX}] drop-shadow-[0_0_15px_rgba(212,230,85,0.3)]` : `text-[${COLOR_HEX}]/40`}`,
       strokeWidth: isActive ? 3 : 2,
@@ -30,37 +31,56 @@ export default function LandingPage() {
   }
 
   return (
-    <div className={`min-h-screen bg-[#050505] text-white selection:bg-[#D4E655] selection:text-black overflow-x-hidden ${montserrat.className}`}>
+    // Quitamos overflow-x-hidden y min-h-screen de aquí para evitar conflictos con layout.tsx
+    <div className={`bg-[#050505] text-white selection:bg-[#D4E655] selection:text-black w-full ${montserrat.className}`}>
 
       {/* --- NAVBAR --- */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-black/80 backdrop-blur-md border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex justify-between items-center">
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-md border-b border-white/5 h-20">
+        <div className="max-w-7xl mx-auto px-6 h-full flex justify-between items-center">
+
           {/* Logo */}
-          <div className="font-black text-2xl tracking-tighter flex items-center gap-1">
+          <div className="font-black text-2xl tracking-tighter flex items-center gap-1 z-50 relative">
             PISO<span className="text-[#D4E655]">2</span>
           </div>
 
-          {/* Menu Desktop */}
+          {/* MENU DESKTOP (Oculto en celular) */}
           <div className="hidden md:flex items-center gap-8 text-[10px] font-bold tracking-[0.2em] text-gray-400 uppercase">
-            {/* CORRECCIÓN 1: INICIO ESTÁ ACTIVO (BLANCO), EL RESTO GRIS */}
             <Link href="/" className="text-white cursor-default">Inicio</Link>
             <Link href="#" className="hover:text-white transition-colors">Nosotros</Link>
             <Link href="#" className="hover:text-white transition-colors">Sedes</Link>
-
-            {/* CORRECCIÓN 2: BOTÓN "INGRESAR" (Según PDF) */}
             <Link href="/login" className="ml-4 px-8 py-2 rounded-full border border-[#D4E655]/50 text-[#D4E655] hover:bg-[#D4E655] hover:text-black transition-all duration-300 shadow-[0_0_10px_rgba(212,230,85,0.1)] hover:shadow-[0_0_20px_rgba(212,230,85,0.4)]">
               INGRESAR
             </Link>
           </div>
+
+          {/* BOTÓN HAMBURGUESA (Visible solo en celular) */}
+          <button
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="md:hidden text-white p-2 z-50 relative focus:outline-none"
+          >
+            {isMobileMenuOpen ? <X size={28} /> : <Menu size={28} />}
+          </button>
         </div>
       </nav>
 
+      {/* --- MENU MOBILE OVERLAY --- */}
+      {/* Se despliega sobre todo cuando isMobileMenuOpen es true */}
+      <div className={`fixed inset-0 bg-black z-40 flex flex-col justify-center items-center gap-8 transition-all duration-300 ${isMobileMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+        <Link href="/" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-white uppercase tracking-widest hover:text-[#D4E655]">Inicio</Link>
+        <Link href="#" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Nosotros</Link>
+        <Link href="#" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Sedes</Link>
+        <Link href="/login" onClick={() => setIsMobileMenuOpen(false)} className="mt-4 px-10 py-4 rounded-full bg-[#D4E655] text-black text-xl font-black uppercase tracking-widest">
+          INGRESAR
+        </Link>
+      </div>
+
+
       {/* --- HERO SECTION --- */}
-      <section className="pt-40 pb-20 px-4 flex justify-center min-h-[50vh] items-center">
-        <div className="max-w-5xl w-full flex flex-col md:flex-row justify-between items-center gap-12 md:gap-0 px-8">
+      <section className="pt-32 pb-10 md:pt-40 md:pb-20 px-4 flex justify-center min-h-[50vh] items-center">
+        <div className="max-w-5xl w-full flex flex-col md:flex-row justify-between items-center gap-12 md:gap-0 px-4 md:px-8">
 
           {/* 2M */}
-          <div className={getStyles('2m').container} onMouseEnter={() => setActiveSection('2m')}>
+          <div className={getStyles('2m').container} onMouseEnter={() => setActiveSection('2m')} onClick={() => setActiveSection('2m')}>
             <div className={getStyles('2m').glow} />
             <div className={getStyles('2m').head}>
               <ArrowUpRight size={44} strokeWidth={getStyles('2m').strokeWidth} />
@@ -73,7 +93,7 @@ export default function LandingPage() {
           </div>
 
           {/* 2E */}
-          <div className={getStyles('2e').container} onMouseEnter={() => setActiveSection('2e')}>
+          <div className={getStyles('2e').container} onMouseEnter={() => setActiveSection('2e')} onClick={() => setActiveSection('2e')}>
             <div className={getStyles('2e').glow} />
             <div className={getStyles('2e').head}>
               <Triangle size={34} strokeWidth={getStyles('2e').strokeWidth} className="-mt-1" />
@@ -86,7 +106,7 @@ export default function LandingPage() {
           </div>
 
           {/* 2S */}
-          <div className={getStyles('2s').container} onMouseEnter={() => setActiveSection('2s')}>
+          <div className={getStyles('2s').container} onMouseEnter={() => setActiveSection('2s')} onClick={() => setActiveSection('2s')}>
             <div className={getStyles('2s').glow} />
             <div className={getStyles('2s').head}>
               <Play size={34} strokeWidth={getStyles('2s').strokeWidth} className="fill-transparent ml-1" />
@@ -114,14 +134,13 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="p-10 md:p-16 flex flex-col justify-center">
-              <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter mb-6 leading-[0.9]">
+              <h2 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6 leading-[0.9]">
                 Espacio de <br /><span className="text-[#D4E655]">Movimiento.</span>
               </h2>
               <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed mb-8 font-medium">
                 Formación profesional, clases regulares y entrenamiento para bailarines. Sé parte de nuestro ecosistema.
               </p>
               <div>
-                {/* CORRECCIÓN 3: El botón de acción también dice INGRESAR */}
                 <Link href="/login" className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 hover:bg-white transition-all text-xs tracking-[0.2em]">
                   INGRESAR <ArrowRight size={16} />
                 </Link>
@@ -138,7 +157,7 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="p-10 md:p-16 flex flex-col justify-center">
-              <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter mb-6 leading-[0.9]">
+              <h2 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6 leading-[0.9]">
                 Sala de <br /><span className="text-[#D4E655]">Teatro.</span>
               </h2>
               <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed mb-8 font-medium">
@@ -161,7 +180,7 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="p-10 md:p-16 flex flex-col justify-center">
-              <h2 className="text-5xl md:text-7xl font-black uppercase tracking-tighter mb-6 leading-[0.9]">
+              <h2 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6 leading-[0.9]">
                 Estudio <br /><span className="text-[#D4E655]">Digital.</span>
               </h2>
               <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed mb-8 font-medium">
@@ -178,7 +197,8 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <footer className="w-full py-8 text-center text-[10px] text-gray-700 font-bold uppercase tracking-[0.2em] bg-black">
+      {/* Footer Fijo al fondo del contenido, no fixed a la pantalla para evitar scroll tapado */}
+      <footer className="w-full py-8 text-center text-[10px] text-gray-700 font-bold uppercase tracking-[0.2em] bg-black mt-[500px]">
         Piso 2 Multiespacio © 2026
       </footer>
 
