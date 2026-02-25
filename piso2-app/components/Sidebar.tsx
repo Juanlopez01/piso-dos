@@ -1,90 +1,200 @@
 'use client'
 
-import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { LogOut, UserCircle, Loader2 } from 'lucide-react'
-import { menuItems } from '@/config/menu' // Ajustá la ruta según donde lo tengas
+import { usePathname, useRouter } from 'next/navigation'
+import { LogOut, UserCircle, Shield, Radio, LogIn } from 'lucide-react'
+import { createClient } from '@/utils/supabase/client'
+import { menuItems } from '@/config/menu'
+import { useCash } from '@/context/CashContext'
+import { toast } from 'sonner'
+import { useState, useEffect } from 'react'
 
 export default function Sidebar() {
     const pathname = usePathname()
+    const router = useRouter()
     const supabase = createClient()
-    const [role, setRole] = useState<string | null>(null)
-    const [loading, setLoading] = useState(true)
 
+    const [isLoggingOut, setIsLoggingOut] = useState(false)
+    const [unreadNotifs, setUnreadNotifs] = useState(0)
+
+    // Traemos la data del contexto
+    const { isBoxOpen, userRole, userName, isLoading } = useCash()
+
+    // --- LÓGICA DE NOTIFICACIONES EN TIEMPO REAL ---
     useEffect(() => {
-        async function getRole() {
+        if (isLoading || !userRole || userRole === 'visitante') return
+
+        const fetchNotifsCount = async () => {
             const { data: { user } } = await supabase.auth.getUser()
-            if (user) {
-                const { data } = await supabase.from('profiles').select('rol').eq('id', user.id).single()
-                setRole(data?.rol || 'recepcion')
-            }
-            setLoading(false)
+            if (!user) return
+
+            const { count } = await supabase
+                .from('notificaciones')
+                .select('*', { count: 'exact', head: true })
+                .eq('usuario_id', user.id)
+                .eq('leido', false)
+
+            setUnreadNotifs(count || 0)
         }
-        getRole()
-    }, [])
 
-    // Filtramos el menú por el rol obtenido
-    const filteredMenu = menuItems.filter(item => item.roles.includes(role || ''))
+        fetchNotifsCount()
 
-    if (loading) {
-        return (
-            <div className="flex flex-col h-full p-8 items-center bg-[#09090b]">
-                <Loader2 className="animate-spin text-[#D4E655]" />
-            </div>
-        )
+        // Escuchar cambios en la DB (si entra una notificación nueva)
+        const channel = supabase
+            .channel('sidebar_notifs')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notificaciones' }, () => {
+                fetchNotifsCount()
+            })
+            .subscribe()
+
+        // Escuchar el evento local que disparamos desde la página de notificaciones al leer una
+        const handleLocalUpdate = () => fetchNotifsCount()
+        window.addEventListener('notificaciones_actualizadas', handleLocalUpdate)
+
+        return () => {
+            supabase.removeChannel(channel)
+            window.removeEventListener('notificaciones_actualizadas', handleLocalUpdate)
+        }
+    }, [isLoading, userRole, supabase])
+
+
+    // --- LÓGICA LOGOUT ---
+    const handleSignOut = async () => {
+        if (isLoggingOut) return;
+
+        if (userRole === 'recepcion' && isBoxOpen) {
+            return toast.error('¡Caja Abierta! Cerrala antes de salir.')
+        }
+
+        setIsLoggingOut(true)
+
+        try {
+            const { error } = await supabase.auth.signOut()
+            if (error) throw error
+
+            window.location.href = '/login'
+
+        } catch (error) {
+            console.error("Error al cerrar sesión:", error)
+            toast.error("Hubo un problema al cerrar sesión")
+            setIsLoggingOut(false)
+        }
     }
 
+    // --- LÓGICA DE MENÚ ---
+    const role = isLoading ? 'visitante' : (userRole || 'visitante')
+
+    const visibleItems = menuItems.filter(item => {
+        if (role === 'admin') return true
+        if (role === 'visitante') return ['Inicio', 'Agenda'].includes(item.name)
+        if (role === 'recepcion') {
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones'].includes(item.name)
+            return true
+        }
+        return item.roles.includes(role)
+    })
+
+    // --- RENDERIZADO ---
     return (
-        <div className="flex flex-col h-full p-4 bg-[#09090b]">
-            {/* BRAND / LOGO */}
-            <div className="mb-10 px-4 pt-4">
-                <h1 className="text-2xl font-black text-white uppercase tracking-tighter italic leading-none">Piso 2</h1>
-                <p className="text-[9px] text-[#D4E655] font-black uppercase tracking-[0.3em] mt-1">Management</p>
+        <aside className="
+        hidden md:flex flex-col 
+        w-64 min-w-[16rem] h-full 
+        border-r border-white/10 bg-[#09090b]
+        shrink-0
+    ">
+            {/* HEADER */}
+            <div className="p-6 shrink-0">
+                <h1 className="text-2xl font-black uppercase tracking-tighter text-white">
+                    Piso <span className="text-[#D4E655]">2</span>
+                </h1>
+
+                {/* Indicador de Estado (Solo Staff) */}
+                {!isLoading && (role === 'admin' || role === 'recepcion') && (
+                    <div className="mt-2 flex items-center gap-2 animate-in fade-in duration-500">
+                        <span className={`w-2 h-2 rounded-full ${isBoxOpen ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-red-500'}`} />
+                        <span className="text-[10px] uppercase font-bold text-gray-500">
+                            {isBoxOpen ? 'Caja Abierta' : 'Caja Cerrada'}
+                        </span>
+                    </div>
+                )}
             </div>
 
-            {/* NAV LINKS */}
-            <nav className="flex-1 space-y-1">
-                {filteredMenu.map((item) => {
-                    const isActive = pathname === item.href
-                    return (
-                        <Link
-                            key={item.href}
-                            href={item.href}
-                            className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all uppercase tracking-tight ${isActive
-                                ? 'bg-[#D4E655] text-black shadow-[0_0_20px_rgba(212,230,85,0.15)]'
-                                : 'text-gray-500 hover:text-white hover:bg-white/5'
-                                }`}
-                        >
-                            <item.icon size={20} strokeWidth={isActive ? 3 : 2} />
-                            {item.name}
-                        </Link>
-                    )
-                })}
+            {/* NAV */}
+            <nav className="flex-1 px-4 space-y-2 overflow-y-auto custom-scrollbar">
+                {isLoading ? (
+                    [1, 2, 3].map(i => <div key={i} className="h-10 bg-white/5 rounded-xl animate-pulse" />)
+                ) : (
+                    visibleItems.map((item) => {
+                        const isActive = pathname === item.href
+                        const isNotifs = item.name === 'Notificaciones'
+
+                        return (
+                            <Link
+                                key={item.href}
+                                href={item.href}
+                                className={`
+                                    flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold transition-all group
+                                    ${isActive
+                                        ? "bg-[#D4E655] text-black shadow-[0_0_15px_rgba(212,230,85,0.3)]"
+                                        : "text-gray-400 hover:text-white hover:bg-white/5"}
+                                `}
+                            >
+                                <div className="flex items-center gap-3">
+                                    <item.icon size={18} className={isActive ? 'text-black' : 'text-gray-500 group-hover:text-white'} />
+                                    {item.name}
+                                </div>
+
+                                {/* Badge de Notificaciones */}
+                                {isNotifs && unreadNotifs > 0 && (
+                                    <span className={`
+                                        text-[9px] font-black px-2 py-0.5 rounded-full
+                                        ${isActive ? 'bg-black text-[#D4E655]' : 'bg-red-500 text-white'}
+                                    `}>
+                                        {unreadNotifs > 99 ? '+99' : unreadNotifs}
+                                    </span>
+                                )}
+                            </Link>
+                        )
+                    })
+                )}
             </nav>
 
-            {/* PROFILE & LOGOUT SECTION */}
-            <div className="pt-4 border-t border-white/10">
-                <div className="px-4 py-3 flex items-center gap-3 mb-2">
-                    <div className="w-8 h-8 rounded-full bg-[#D4E655]/10 flex items-center justify-center text-[#D4E655]">
-                        <UserCircle size={20} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                        <p className="text-[10px] font-black text-gray-500 uppercase leading-none mb-1">Sesión</p>
-                        <p className="text-xs font-bold text-white uppercase truncate">{role === 'admin' ? 'Administrador' : 'Recepción'}</p>
-                    </div>
-                </div>
-                <button
-                    onClick={async () => {
-                        await supabase.auth.signOut()
-                        window.location.href = '/login'
-                    }}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-red-500 transition-colors font-bold text-xs uppercase"
-                >
-                    <LogOut size={18} /> Cerrar Sesión
-                </button>
+            {/* FOOTER */}
+            <div className="p-4 border-t border-white/10 bg-[#050505] shrink-0">
+                {!isLoading && role !== 'visitante' ? (
+                    <>
+                        <div className="flex items-center gap-3 mb-4 px-2 overflow-hidden">
+                            <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0">
+                                <UserCircle size={20} />
+                            </div>
+                            <div className="min-w-0">
+                                <p className="text-xs font-bold text-white truncate">{userName || 'Usuario'}</p>
+                                <p className="text-[10px] text-[#D4E655] uppercase font-black flex items-center gap-1">
+                                    {role === 'admin' ? <Shield size={10} /> : <Radio size={10} />} {role}
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleSignOut}
+                            disabled={isLoggingOut}
+                            className={`flex items-center justify-center gap-2 w-full px-4 py-3 text-xs font-black uppercase rounded-xl transition-all 
+                                ${isLoggingOut
+                                    ? 'bg-red-500/5 text-red-500/50 cursor-not-allowed'
+                                    : 'text-red-500 bg-red-500/10 hover:bg-red-500 hover:text-white'}`}
+                        >
+                            <LogOut size={14} className={isLoggingOut ? 'animate-pulse' : ''} />
+                            {isLoggingOut ? 'Saliendo...' : 'Cerrar Sesión'}
+                        </button>
+                    </>
+                ) : (
+                    <Link
+                        href="/login"
+                        className="flex items-center justify-center gap-2 w-full px-4 py-3 text-xs font-black uppercase text-[#D4E655] bg-[#D4E655]/10 hover:bg-[#D4E655] hover:text-black rounded-xl transition-all"
+                    >
+                        <LogIn size={14} /> Iniciar Sesión
+                    </Link>
+                )}
             </div>
-        </div>
+        </aside>
     )
 }

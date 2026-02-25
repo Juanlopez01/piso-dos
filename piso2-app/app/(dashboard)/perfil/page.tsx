@@ -4,11 +4,26 @@ import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
 import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
-    AlertTriangle, Mail, Calendar, LogOut
+    AlertTriangle, Mail, Calendar, LogOut, CheckCircle2, History,
+    BookOpen, Star,
+    X
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
+import { es } from 'date-fns/locale'
 import { useRouter } from 'next/navigation'
+
+// --- NUEVO TIPO ---
+type HistorialClase = {
+    id: string
+    presente: boolean
+    clase: {
+        nombre: string
+        inicio: string
+        tipo_clase: string
+        profesor: { nombre_completo: string }
+    }
+}
 
 export default function PerfilPage() {
     const supabase = createClient()
@@ -18,7 +33,10 @@ export default function PerfilPage() {
     const [saving, setSaving] = useState(false)
 
     const [profile, setProfile] = useState<any>(null)
-    const [avisos, setAvisos] = useState<any[]>([]) // Solo para profes
+    const [avisos, setAvisos] = useState<any[]>([])
+
+    // --- NUEVO ESTADO PARA EL HISTORIAL ---
+    const [historialClases, setHistorialClases] = useState<HistorialClase[]>([])
 
     // Estado del Formulario
     const [formData, setFormData] = useState({
@@ -37,8 +55,12 @@ export default function PerfilPage() {
             return
         }
 
-        // 1. Perfil
-        const { data: dataProfile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+        // 1. Perfil (Asegurándonos de traer los créditos nuevos)
+        const { data: dataProfile } = await supabase
+            .from('profiles')
+            .select('*, creditos_regulares, creditos_seminarios')
+            .eq('id', user.id)
+            .single()
 
         if (dataProfile) {
             setProfile(dataProfile)
@@ -60,6 +82,27 @@ export default function PerfilPage() {
                     .order('created_at', { ascending: false })
                 if (dataAvisos) setAvisos(dataAvisos)
             }
+
+            // --- NUEVO: 3. Historial de Clases (Solo si es ALUMNO/USER) ---
+            if (dataProfile.rol === 'alumno' || dataProfile.rol === 'user') {
+                const { data: dataHistorial } = await supabase
+                    .from('inscripciones')
+                    .select(`
+                        id, 
+                        presente, 
+                        clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))
+                    `)
+                    .eq('user_id', user.id)
+                    // Ordenamos para ver las más recientes o futuras primero
+                    .order('created_at', { ascending: false })
+                    .limit(20) // Traemos las últimas 20 para no saturar
+
+                if (dataHistorial) {
+                    // Limpiamos los datos por si alguna clase fue borrada y quedó en null
+                    const historialLimpio = dataHistorial.filter(h => h.clase !== null) as HistorialClase[]
+                    setHistorialClases(historialLimpio)
+                }
+            }
         }
         setLoading(false)
     }
@@ -68,7 +111,6 @@ export default function PerfilPage() {
         e.preventDefault()
         setSaving(true)
 
-        // Validaciones Específicas Profe
         if (profile.rol === 'profesor') {
             if (!formData.nombre_remplazo || !formData.contacto_remplazo) {
                 toast.error('Los datos de reemplazo son obligatorios para docentes')
@@ -96,11 +138,16 @@ export default function PerfilPage() {
         router.push('/login')
     }
 
-    if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
+    if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
 
     const isProfe = profile?.rol === 'profesor'
-    const isAlumno = profile?.rol === 'alumno' || profile?.rol === 'user' // Asumiendo rol default
+    const isAlumno = profile?.rol === 'alumno' || profile?.rol === 'user'
     const datosIncompletos = isProfe && (!formData.nombre_remplazo || !formData.contacto_remplazo || !formData.alias_cbu)
+
+    // Layout para alumnos: El form toma 1 columna, el historial toma 2. 
+    // Layout para profes: El form toma 2, los avisos 1.
+    const gridLayout = isAlumno ? "lg:grid-cols-3" : "lg:grid-cols-3"
+    const formColSpan = isAlumno ? "lg:col-span-1" : "lg:col-span-2"
 
     return (
         <div className="pb-24 px-4 pt-4 md:p-8 min-h-screen bg-[#050505] text-white">
@@ -120,16 +167,15 @@ export default function PerfilPage() {
                     </div>
                 </div>
                 <button onClick={handleLogout} className="text-gray-500 hover:text-red-500 text-xs font-bold uppercase flex items-center gap-2 transition-colors">
-                    <LogOut size={16} /> Cerrar Sesión
+                    <LogOut size={16} /> <span className="hidden md:inline">Cerrar Sesión</span>
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className={`grid grid-cols-1 ${gridLayout} gap-8`}>
 
-                {/* --- COLUMNA IZQ: FORMULARIO (PARA TODOS) --- */}
-                <div className="lg:col-span-2 space-y-6">
+                {/* --- COLUMNA 1: FORMULARIO (PARA TODOS) --- */}
+                <div className={`${formColSpan} space-y-6`}>
 
-                    {/* Alerta Docentes */}
                     {isProfe && datosIncompletos && (
                         <div className="bg-orange-500/10 border border-orange-500/30 p-4 rounded-xl flex items-start gap-3 animate-pulse">
                             <AlertTriangle className="text-orange-500 shrink-0" size={20} />
@@ -140,14 +186,13 @@ export default function PerfilPage() {
                         </div>
                     )}
 
-                    <form onSubmit={handleSave} className="bg-[#09090b] border border-white/10 rounded-2xl p-6 md:p-8 shadow-2xl space-y-8">
-
-                        {/* 1. Datos Personales (Todos) */}
+                    <form onSubmit={handleSave} className="bg-[#09090b] border border-white/10 rounded-2xl p-6 md:p-8 shadow-2xl space-y-8 h-full">
+                        {/* 1. Datos Personales */}
                         <div className="space-y-4">
                             <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2">
-                                <User size={16} className="text-[#D4E655]" /> Datos Personales
+                                <User size={16} className="text-[#D4E655]" /> Mis Datos
                             </h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className={`grid grid-cols-1 ${isAlumno ? '' : 'md:grid-cols-2'} gap-4`}>
                                 <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Nombre</label><input disabled value={formData.nombre} className="w-full bg-[#111] border border-white/5 rounded-lg p-3 text-gray-400 font-bold text-sm cursor-not-allowed" /></div>
                                 <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Apellido</label><input disabled value={formData.apellido} className="w-full bg-[#111] border border-white/5 rounded-lg p-3 text-gray-400 font-bold text-sm cursor-not-allowed" /></div>
                                 <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Email</label><input disabled value={formData.email} className="w-full bg-[#111] border border-white/5 rounded-lg p-3 text-gray-400 font-bold text-sm cursor-not-allowed" /></div>
@@ -155,28 +200,9 @@ export default function PerfilPage() {
                             </div>
                         </div>
 
-                        {/* 2. Sección Exclusiva ALUMNOS */}
-                        {isAlumno && (
-                            <div className="space-y-4">
-                                <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2">
-                                    <CreditCard size={16} className="text-[#D4E655]" /> Mis Créditos
-                                </h3>
-                                <div className="bg-[#D4E655]/10 border border-[#D4E655]/20 p-4 rounded-xl flex items-center justify-between">
-                                    <div>
-                                        <p className="text-[10px] font-bold uppercase text-[#D4E655]">Saldo Disponible</p>
-                                        <p className="text-3xl font-black text-white">{profile.creditos || 0}</p>
-                                    </div>
-                                    <button type="button" className="bg-[#D4E655] text-black px-4 py-2 rounded-lg text-xs font-black uppercase hover:bg-white transition-colors">
-                                        Comprar Packs
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* 3. Sección Exclusiva DOCENTES */}
+                        {/* SECCIÓN EXCLUSIVA DOCENTES */}
                         {isProfe && (
                             <>
-                                {/* Datos Bancarios */}
                                 <div className="space-y-4">
                                     <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2">
                                         <CreditCard size={16} className="text-[#D4E655]" /> Cobros
@@ -186,8 +212,6 @@ export default function PerfilPage() {
                                         <input required placeholder="Ej: mi.alias.banco" value={formData.alias_cbu} onChange={e => setFormData({ ...formData, alias_cbu: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white font-bold outline-none focus:border-[#D4E655] font-mono text-sm" />
                                     </div>
                                 </div>
-
-                                {/* Reemplazo */}
                                 <div className="space-y-4">
                                     <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2">
                                         <Users size={16} className="text-[#D4E655]" /> Reemplazo (Obligatorio)
@@ -200,15 +224,109 @@ export default function PerfilPage() {
                             </>
                         )}
 
-                        <button type="submit" disabled={saving} className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all shadow-lg flex items-center justify-center gap-2">
-                            {saving ? <Loader2 className="animate-spin" /> : <><Save size={18} /> Guardar Cambios</>}
+                        <button type="submit" disabled={saving} className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all shadow-lg flex items-center justify-center gap-2 mt-auto">
+                            {saving ? <Loader2 className="animate-spin" /> : <><Save size={18} /> Guardar</>}
                         </button>
                     </form>
                 </div>
 
+                {/* --- COLUMNA 2 Y 3: PANEL DEL ALUMNO --- */}
+                {isAlumno && (
+                    <div className="lg:col-span-2 space-y-6">
+
+                        {/* PANEL DE CRÉDITOS */}
+                        <div className="bg-[#09090b] border border-white/10 rounded-2xl p-6 shadow-xl">
+                            <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6">
+                                <CreditCard size={20} className="text-[#D4E655]" /> Mis Créditos Disponibles
+                            </h3>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* Créditos Regulares */}
+                                <div className="bg-[#111] border border-white/5 p-4 rounded-xl flex flex-col items-center justify-center text-center relative overflow-hidden group hover:border-white/20 transition-all">
+                                    <BookOpen size={24} className="text-gray-500 mb-2 opacity-50 group-hover:opacity-100 transition-opacity" />
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">Clases Regulares</p>
+                                    <p className="text-4xl font-black text-white">{profile.creditos_regulares || 0}</p>
+                                </div>
+
+                                {/* Créditos Seminarios */}
+                                <div className="bg-[#111] border border-white/5 p-4 rounded-xl flex flex-col items-center justify-center text-center relative overflow-hidden group hover:border-purple-500/30 transition-all">
+                                    <Star size={24} className="text-purple-500 mb-2 opacity-50 group-hover:opacity-100 transition-opacity" />
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-purple-400 mb-1">Seminarios</p>
+                                    <p className="text-4xl font-black text-white">{profile.creditos_seminarios || 0}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* HISTORIAL DE CLASES */}
+                        <div className="bg-[#09090b] border border-white/10 rounded-2xl p-6 shadow-xl flex flex-col h-[500px]">
+                            <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6 shrink-0">
+                                <History size={20} className="text-[#D4E655]" /> Historial de Asistencia
+                            </h3>
+
+                            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3">
+                                {historialClases.length === 0 ? (
+                                    <div className="h-full flex flex-col items-center justify-center text-gray-500 opacity-50">
+                                        <Calendar size={48} className="mb-4" />
+                                        <p className="text-xs font-bold uppercase text-center">Todavía no te anotaste<br />a ninguna clase.</p>
+                                    </div>
+                                ) : (
+                                    historialClases.map((historial) => {
+                                        const fechaClase = new Date(historial.clase.inicio)
+                                        const esPasada = fechaClase < new Date()
+
+                                        return (
+                                            <div key={historial.id} className="bg-[#111] border border-white/5 p-4 rounded-xl flex items-center justify-between gap-4 hover:bg-white/5 transition-colors group">
+
+                                                {/* Info de la clase */}
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <span className="text-[10px] text-[#D4E655] font-bold uppercase">
+                                                            {format(fechaClase, "EEE d MMM", { locale: es })}
+                                                        </span>
+                                                        <span className="text-[10px] text-gray-500 font-bold">
+                                                            {format(fechaClase, "HH:mm")}
+                                                        </span>
+                                                    </div>
+                                                    <h4 className="font-black text-white text-sm uppercase truncate">
+                                                        {historial.clase.nombre}
+                                                    </h4>
+                                                    <p className="text-xs text-gray-500 truncate">
+                                                        con {historial.clase.profesor?.nombre_completo || 'Staff'}
+                                                    </p>
+                                                </div>
+
+                                                {/* Estado (Presente/Ausente/Pendiente) */}
+                                                <div className="shrink-0 flex flex-col items-end gap-1">
+                                                    <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded border ${historial.clase.tipo_clase === 'Especial'
+                                                        ? 'border-purple-500/30 text-purple-400 bg-purple-500/10'
+                                                        : 'border-white/10 text-gray-400 bg-white/5'
+                                                        }`}>
+                                                        {historial.clase.tipo_clase}
+                                                    </span>
+
+                                                    {esPasada ? (
+                                                        historial.presente ? (
+                                                            <span className="text-xs font-bold text-green-500 flex items-center gap-1"><CheckCircle2 size={12} /> Presente</span>
+                                                        ) : (
+                                                            <span className="text-xs font-bold text-red-500 flex items-center gap-1"><X size={12} /> Ausente</span>
+                                                        )
+                                                    ) : (
+                                                        <span className="text-xs font-bold text-blue-400">Próxima</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )
+                                    })
+                                )}
+                            </div>
+                        </div>
+
+                    </div>
+                )}
+
                 {/* --- COLUMNA DER: CARTELERA (SOLO PROFES) --- */}
                 {isProfe && (
-                    <div>
+                    <div className="lg:col-span-1">
                         <div className="bg-[#111] border border-white/10 rounded-2xl p-6 relative overflow-hidden sticky top-8">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
                             <h3 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-4 relative z-10">

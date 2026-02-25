@@ -1,246 +1,413 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
-import { Shield, User, GraduationCap, Briefcase, Search, Lock, AlertTriangle, UserPlus, X, Save } from 'lucide-react'
-import { useRouter } from 'next/navigation'
-import { createNewUser } from '@/actions/register-user' // <--- Importamos la acción
+import { useEffect, useState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
+import {
+    Search, Filter, User, Shield, Briefcase, GraduationCap,
+    MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert
+} from 'lucide-react'
+import { toast, Toaster } from 'sonner'
+import { useCash } from '@/context/CashContext'
 
-type UserRole = 'admin' | 'profesor' | 'recepcion' | 'alumno'
+// Eliminamos la constante estática INTERESES_LIST
+// const INTERESES_LIST = ['Tango', 'Folklore', 'Salsa', 'Bachata', 'Contemporáneo', 'Urbano', 'Canto', 'Teatro', 'Yoga', 'Pilates', 'Infantil']
 
-type Profile = {
-    id: string
-    email: string
-    nombre_completo: string | null
-    rol: UserRole
-}
+type Ritmo = { id: string; nombre: string }
 
-export default function UsuariosPage() {
+function UsuariosContent() {
     const supabase = createClient()
-    const router = useRouter()
+    const searchParams = useSearchParams()
 
-    // Estados de Datos
-    const [users, setUsers] = useState<Profile[]>([])
+    const { userRole, isLoading: loadingContext } = useCash()
+
+    // Estado Datos
+    const [users, setUsers] = useState<any[]>([])
+    const [ritmosDisponibles, setRitmosDisponibles] = useState<Ritmo[]>([]) // NUEVO ESTADO PARA RITMOS
     const [loading, setLoading] = useState(true)
-    const [errorMsg, setErrorMsg] = useState<string | null>(null)
-    const [myRole, setMyRole] = useState<UserRole | null>(null)
 
-    // Estados de UI
+    // Filtros
+    const [roleFilter, setRoleFilter] = useState('todos')
+    const [interestFilter, setInterestFilter] = useState('') // Guardaremos el ID del ritmo
     const [searchTerm, setSearchTerm] = useState('')
-    const [updating, setUpdating] = useState<string | null>(null)
 
-    // Estados del Modal "Nuevo Usuario"
-    const [showModal, setShowModal] = useState(false)
-    const [formState, setFormState] = useState({ nombre: '', email: '', dni: '' })
-    const [isCreating, setIsCreating] = useState(false)
+    // Modales y Procesos
+    const [isEditOpen, setIsEditOpen] = useState(false)
+    const [isCreateOpen, setIsCreateOpen] = useState(false)
+    const [selectedUser, setSelectedUser] = useState<any>(null)
+    const [cambiandoRolId, setCambiandoRolId] = useState<string | null>(null)
 
+    // Forms (Actualizamos para manejar intereses_ritmos)
+    const [editForm, setEditForm] = useState({ obs: '', intereses_ritmos: [] as string[] })
+    const [createForm, setCreateForm] = useState({
+        nombre: '', email: '', dni: '', telefono: '', rol: 'alumno'
+    })
+    const [creating, setCreating] = useState(false)
+
+    // Cargar Datos Iniciales
     useEffect(() => {
-        checkMyRoleAndFetch()
-    }, [])
-
-    const checkMyRoleAndFetch = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) { router.push('/login'); return }
-
-            // Leer mi rol usando la función segura o lectura directa si la arreglamos
-            const { data: myProfile, error: profileError } = await supabase
-                .from('profiles')
-                .select('rol')
-                .eq('id', user.id)
-                .single()
-
-            const role = myProfile?.rol as UserRole
-            setMyRole(role)
-
-            if (role === 'profesor' || role === 'alumno') {
-                alert("⛔ Acceso restringido.")
-                router.push('/')
-                return
-            }
-
-            fetchUsers()
-
-        } catch (e) {
-            console.error(e)
-            setErrorMsg("Error de autenticación.")
-            setLoading(false)
+        if (!loadingContext) {
+            fetchData()
         }
-    }
 
-    const fetchUsers = async () => {
-        const { data } = await supabase
-            .from('profiles')
-            .select('*')
-            .order('created_at', { ascending: false })
+        const paramRole = searchParams.get('ver')
+        if (paramRole) setRoleFilter(paramRole)
+    }, [searchParams, loadingContext])
 
-        if (data) setUsers(data as any)
+    // Función unificada para traer todo
+    const fetchData = async () => {
+        setLoading(true)
+
+        // 1. Traer Ritmos
+        const { data: ritmosData } = await supabase.from('ritmos').select('id, nombre').order('nombre')
+        if (ritmosData) setRitmosDisponibles(ritmosData)
+
+        // 2. Traer Usuarios (Nos aseguramos de pedir intereses_ritmos)
+        const { data: usersData } = await supabase.from('profiles').select('*').order('nombre_completo', { ascending: true })
+        if (usersData) setUsers(usersData)
+
         setLoading(false)
     }
 
-    const handleRoleChange = async (userId: string, newRole: string) => {
-        setUpdating(userId)
-        const { error } = await supabase.from('profiles').update({ rol: newRole }).eq('id', userId)
-        if (error) alert('Error al actualizar rol')
-        else setUsers(prev => prev.map(u => u.id === userId ? { ...u, rol: newRole as any } : u))
-        setUpdating(null)
-    }
+    // --- LÓGICA DE FILTRADO ---
+    const filteredUsers = users.filter(u => {
+        let matchesRole = true
 
-    // MANEJO DEL FORMULARIO DE CREACIÓN
-    const handleSubmitNewUser = async (e: React.FormEvent) => {
-        e.preventDefault()
-        setIsCreating(true)
+        if (roleFilter === 'staff' && userRole !== 'admin') {
+            return false
+        }
 
-        const formData = new FormData()
-        formData.append('nombre', formState.nombre)
-        formData.append('email', formState.email)
-        formData.append('dni', formState.dni)
-
-        // Llamamos a la Server Action
-        const result = await createNewUser(null, formData)
-
-        if (result.success) {
-            alert('✅ Usuario creado correctamente. Contraseña inicial: ' + formState.dni)
-            setShowModal(false)
-            setFormState({ nombre: '', email: '', dni: '' })
-            fetchUsers() // Recargamos la lista
+        if (roleFilter === 'staff') {
+            matchesRole = u.rol === 'admin' || u.rol === 'recepcion'
+        } else if (roleFilter !== 'todos') {
+            matchesRole = u.rol === roleFilter
         } else {
-            alert('❌ Error: ' + result.message)
+            if (userRole !== 'admin' && (u.rol === 'admin' || u.rol === 'recepcion')) {
+                matchesRole = false
+            }
         }
-        setIsCreating(false)
+
+        const term = searchTerm.toLowerCase()
+        const matchesSearch = u.nombre_completo?.toLowerCase().includes(term) || u.email?.toLowerCase().includes(term)
+
+        let matchesInterest = true
+        if ((roleFilter === 'alumno' || roleFilter === 'todos') && interestFilter) {
+            // Comparamos el filtro (que ahora es el ID del ritmo) contra el array del usuario
+            matchesInterest = u.intereses_ritmos && u.intereses_ritmos.includes(interestFilter)
+        }
+
+        return matchesRole && matchesSearch && matchesInterest
+    })
+
+    // Función auxiliar para traducir ID de ritmo a Nombre
+    const getRitmoNombre = (id: string) => {
+        const ritmo = ritmosDisponibles.find(r => r.id === id)
+        return ritmo ? ritmo.nombre : 'Desconocido'
     }
 
-    const filteredUsers = users.filter(u =>
-        (u.nombre_completo?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-        (u.email?.toLowerCase() || '').includes(searchTerm.toLowerCase())
-    )
+    // --- CAMBIAR ROL ---
+    const cambiarRol = async (usuarioId: string, nuevoRol: string) => {
+        if (userRole !== 'admin') return toast.error('No tienes permisos')
 
-    const getRoleBadge = (rol: string) => {
-        switch (rol) {
-            case 'admin': return { icon: Shield, color: 'text-red-500 bg-red-500/10 border-red-500/20' }
-            case 'profesor': return { icon: Briefcase, color: 'text-piso2-blue bg-piso2-blue/10 border-piso2-blue/20' }
-            case 'recepcion': return { icon: User, color: 'text-piso2-orange bg-piso2-orange/10 border-piso2-orange/20' }
-            default: return { icon: GraduationCap, color: 'text-piso2-lime bg-piso2-lime/10 border-piso2-lime/20' }
+        setCambiandoRolId(usuarioId)
+        const { error } = await supabase
+            .from('profiles')
+            .update({ rol: nuevoRol as any })
+            .eq('id', usuarioId)
+
+        if (!error) {
+            toast.success('Rol actualizado correctamente')
+            setUsers(users.map(u => u.id === usuarioId ? { ...u, rol: nuevoRol } : u))
+        } else {
+            toast.error('Error al cambiar el rol')
+        }
+        setCambiandoRolId(null)
+    }
+
+    // --- CREAR USUARIO ---
+    const handleCreateUser = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setCreating(true)
+
+        try {
+            const res = await fetch('/api/admin/create-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: createForm.email,
+                    password: createForm.dni,
+                    nombre: createForm.nombre,
+                    rol: createForm.rol,
+                    telefono: createForm.telefono
+                })
+            })
+
+            const data = await res.json()
+            if (!res.ok) throw new Error(data.error || 'Error al crear')
+
+            toast.success(`${createForm.rol === 'profesor' ? 'Profesor' : 'Alumno'} creado correctamente`)
+            setIsCreateOpen(false)
+            setCreateForm({ nombre: '', email: '', dni: '', telefono: '', rol: 'alumno' })
+            fetchData()
+
+        } catch (error: any) {
+            toast.error(error.message)
+        } finally {
+            setCreating(false)
         }
     }
 
-    if (loading) return <div className="p-10 text-piso2-lime animate-pulse">Cargando...</div>
-    if (errorMsg) return <div className="p-10 text-red-500">{errorMsg}</div>
+    // --- FUNCIONES DE EDICIÓN ---
+    const openEditModal = (user: any) => {
+        setSelectedUser(user)
+        setEditForm({
+            obs: user.staff_observations || '',
+            intereses_ritmos: user.intereses_ritmos || []
+        })
+        setIsEditOpen(true)
+    }
 
-    const isReadOnly = myRole !== 'admin'
+    const toggleInterest = (ritmoId: string) => {
+        setEditForm(prev => {
+            const exists = prev.intereses_ritmos.includes(ritmoId)
+            return {
+                ...prev,
+                intereses_ritmos: exists ? prev.intereses_ritmos.filter(id => id !== ritmoId) : [...prev.intereses_ritmos, ritmoId]
+            }
+        })
+    }
+
+    const handleSaveChanges = async () => {
+        if (!selectedUser) return
+        const { error } = await supabase
+            .from('profiles')
+            .update({
+                staff_observations: editForm.obs,
+                intereses_ritmos: editForm.intereses_ritmos
+            })
+            .eq('id', selectedUser.id)
+
+        if (!error) {
+            toast.success('Cambios guardados')
+            setUsers(users.map(u => u.id === selectedUser.id ? { ...u, staff_observations: editForm.obs, intereses_ritmos: editForm.intereses_ritmos } : u))
+            setIsEditOpen(false)
+        } else {
+            toast.error('Error al guardar')
+        }
+    }
+
+    if (loading || loadingContext) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
+
+    const canCreate = userRole === 'admin' || userRole === 'recepcion'
+    const isAdmin = userRole === 'admin'
 
     return (
-        <div className="space-y-6 pb-20 relative">
+        <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32">
+            <Toaster position="top-center" richColors theme="dark" />
 
             {/* HEADER */}
-            <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-white/10 pb-6">
-                <div>
-                    <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Usuarios</h2>
-                    <p className="text-gray-400 text-sm flex items-center gap-2">
-                        Comunidad: {users.length} miembros.
-                        {isReadOnly && <span className="bg-white/10 px-2 py-0.5 rounded text-xs text-yellow-400 font-bold flex items-center gap-1"><Lock size={10} /> SOLO LECTURA</span>}
-                    </p>
+            <div className="flex flex-col gap-6 mb-8">
+                <div className="flex justify-between items-end border-b border-white/10 pb-6">
+                    <div>
+                        <h1 className="text-3xl font-black uppercase tracking-tighter text-white leading-none">Directorio</h1>
+                        <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">Gestión de Usuarios</p>
+                    </div>
+                    {canCreate && (
+                        <button onClick={() => setIsCreateOpen(true)} className="bg-[#D4E655] text-black px-4 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-all flex items-center gap-2 shadow-lg">
+                            <UserPlus size={16} /> Nuevo Usuario
+                        </button>
+                    )}
                 </div>
 
-                <div className="flex gap-2 w-full md:w-auto">
-                    {/* BOTÓN NUEVO ALUMNO */}
-                    <button
-                        onClick={() => setShowModal(true)}
-                        className="bg-piso2-lime text-black font-bold uppercase px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-white transition-colors"
-                    >
-                        <UserPlus size={18} strokeWidth={2.5} /> Nuevo Alumno
-                    </button>
+                {/* BARRA HERRAMIENTAS */}
+                <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
+                    <div className="bg-[#111] p-1 rounded-xl border border-white/10 flex gap-1 w-full md:w-auto overflow-x-auto">
+                        <button onClick={() => { setRoleFilter('todos'); setInterestFilter('') }} className={`flex items-center gap-2 px-4 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${roleFilter === 'todos' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}><User size={14} /> Todos</button>
+                        <button onClick={() => { setRoleFilter('alumno'); setInterestFilter('') }} className={`flex items-center gap-2 px-4 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${roleFilter === 'alumno' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}><GraduationCap size={14} /> Alumnos</button>
+                        <button onClick={() => { setRoleFilter('profesor'); setInterestFilter('') }} className={`flex items-center gap-2 px-4 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${roleFilter === 'profesor' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}><Briefcase size={14} /> Profesores</button>
 
-                    <div className="relative flex-1 md:w-64">
-                        <Search className="absolute left-3 top-3 text-gray-500" size={18} />
-                        <input
-                            type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full bg-black border border-white/20 pl-10 pr-4 py-2 text-white outline-none focus:border-piso2-lime rounded-lg"
-                        />
+                        {isAdmin && (
+                            <button onClick={() => { setRoleFilter('staff'); setInterestFilter('') }} className={`flex items-center gap-2 px-4 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${roleFilter === 'staff' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}><Shield size={14} /> Staff</button>
+                        )}
+                    </div>
+
+                    <div className="relative w-full md:w-72">
+                        <Search className="absolute left-3 top-3 text-gray-500" size={16} />
+                        <input placeholder="Buscar..." className="w-full bg-[#111] border border-white/10 rounded-xl pl-10 p-2.5 text-sm text-white outline-none focus:border-[#D4E655]" onChange={(e) => setSearchTerm(e.target.value)} />
                     </div>
                 </div>
+
+                {/* Filtros Intereses (Dinámicos desde la BD) */}
+                {(roleFilter === 'alumno' || roleFilter === 'todos') && ritmosDisponibles.length > 0 && (
+                    <div className="flex gap-2 flex-wrap pt-2">
+                        <div className="flex items-center gap-2 mr-2"><Filter size={12} className="text-[#D4E655]" /><span className="text-[10px] font-bold text-gray-500 uppercase">Intereses:</span></div>
+                        <button onClick={() => setInterestFilter('')} className={`text-[9px] font-bold px-3 py-1.5 rounded-lg border uppercase ${!interestFilter ? 'bg-white text-black border-white' : 'bg-transparent text-gray-600 border-white/10'}`}>Todos</button>
+                        {ritmosDisponibles.map(ritmo => (
+                            <button key={ritmo.id} onClick={() => setInterestFilter(ritmo.id === interestFilter ? '' : ritmo.id)} className={`text-[9px] font-bold px-3 py-1.5 rounded-lg border uppercase ${interestFilter === ritmo.id ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-500 border-white/10'}`}>{ritmo.nombre}</button>
+                        ))}
+                    </div>
+                )}
             </div>
 
-            {/* LISTA */}
-            <div className="grid grid-cols-1 gap-4">
-                {filteredUsers.map((user) => {
-                    const badge = getRoleBadge(user.rol)
-                    const Icon = badge.icon
-                    return (
-                        <div key={user.id} className="bg-[#09090b] border border-white/5 p-4 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4 group hover:border-white/10 transition-colors">
-                            <div className="flex items-center gap-4 w-full md:w-auto">
-                                <div className={`p-3 rounded-full ${badge.color}`}><Icon size={24} /></div>
-                                <div>
-                                    <h3 className="text-lg font-bold text-white leading-tight">{user.nombre_completo || 'Sin nombre'}</h3>
-                                    <p className="text-sm text-gray-500">{user.email}</p>
+            {/* GRILLA DE USUARIOS */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {filteredUsers.map((u) => (
+                    <div key={u.id} className="bg-[#09090b] border border-white/10 p-5 rounded-2xl flex flex-col justify-between gap-4 group hover:border-[#D4E655]/30 transition-all relative overflow-hidden shadow-sm">
+
+                        {/* Badge Rol */}
+                        <div className={`absolute top-0 right-0 px-3 py-1.5 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${u.rol === 'admin' ? 'bg-red-500/20 text-red-500' : u.rol === 'recepcion' ? 'bg-blue-500/20 text-blue-500' : u.rol === 'profesor' ? 'bg-purple-500/20 text-purple-500' : 'bg-white/5 text-gray-500'}`}>
+                            {u.rol}
+                        </div>
+
+                        <div>
+                            <div className="flex items-start gap-4 mb-3 mt-2">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-black uppercase shrink-0 ${u.rol === 'alumno' ? 'bg-white/10 text-white' : 'bg-[#D4E655] text-black'}`}>
+                                    {u.nombre_completo?.[0] || '?'}
+                                </div>
+                                <div className="min-w-0 pr-8">
+                                    <h4 className="font-bold text-white uppercase text-sm truncate">{u.nombre_completo}</h4>
+                                    <p className="text-[10px] text-gray-500 truncate mt-0.5">{u.email}</p>
                                 </div>
                             </div>
-                            <div className={`flex items-center gap-2 w-full md:w-auto p-1 rounded-lg border ${isReadOnly ? 'border-transparent opacity-70' : 'bg-black/50 border-white/5'}`}>
-                                <span className="text-[10px] font-bold text-gray-500 uppercase px-2">Rol:</span>
-                                <select
-                                    value={user.rol} onChange={(e) => handleRoleChange(user.id, e.target.value)} disabled={isReadOnly || updating === user.id}
-                                    className={`bg-transparent text-sm font-bold uppercase outline-none py-2 px-2 ${isReadOnly ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'} ${user.rol === 'admin' ? 'text-red-500' : user.rol === 'profesor' ? 'text-piso2-blue' : user.rol === 'recepcion' ? 'text-piso2-orange' : 'text-piso2-lime'}`}
-                                >
-                                    <option value="alumno" className="bg-black text-gray-300">🎓 Alumno</option>
-                                    <option value="profesor" className="bg-black text-piso2-blue">💼 Profesor</option>
-                                    <option value="recepcion" className="bg-black text-piso2-orange">👋 Recepción</option>
-                                    <option value="admin" className="bg-black text-red-500">🛡️ Admin</option>
-                                </select>
-                                {updating === user.id && <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin mr-2" />}
+
+                            <div className="space-y-1 mb-3">
+                                {u.telefono ? <div className="flex items-center gap-2 text-xs text-gray-400 bg-[#111] px-2 py-1.5 rounded-lg border border-white/5 w-fit"><Phone size={10} className="text-[#D4E655]" /> {u.telefono}</div> : <div className="text-[10px] text-gray-600 italic px-1">Sin teléfono</div>}
                             </div>
+
+                            {/* Mostrar intereses renderizados con su nombre real */}
+                            {u.intereses_ritmos && u.intereses_ritmos.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mb-2">
+                                    {u.intereses_ritmos.slice(0, 3).map((ritmoId: string) => (
+                                        <span key={ritmoId} className="text-[8px] bg-white/5 border border-white/5 text-gray-300 px-1.5 py-0.5 rounded uppercase font-bold">
+                                            {getRitmoNombre(ritmoId)}
+                                        </span>
+                                    ))}
+                                    {u.intereses_ritmos.length > 3 && <span className="text-[8px] text-gray-600 px-1 py-0.5 font-bold">+{u.intereses_ritmos.length - 3}</span>}
+                                </div>
+                            )}
+
+                            {u.staff_observations && canCreate && <div className="bg-yellow-500/5 border border-yellow-500/20 p-2.5 rounded-lg mb-2"><p className="text-[10px] text-yellow-200/70 italic line-clamp-2">"{u.staff_observations}"</p></div>}
                         </div>
-                    )
-                })}
+
+                        {/* ACCIONES (Botones abajo) */}
+                        {canCreate && (
+                            <div className="flex gap-2 mt-auto pt-2 border-t border-white/5">
+                                {/* Botón Editar */}
+                                <button onClick={() => openEditModal(u)} className={`flex-1 py-2.5 rounded-xl border text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-2 ${u.staff_observations ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20' : 'bg-[#111] text-gray-500 border-white/5 hover:border-white/20 hover:text-white'}`}>
+                                    <MessageSquare size={12} /> Notas
+                                </button>
+
+                                {/* SELECTOR DE ROL - Solo visible para el Admin */}
+                                {isAdmin && (
+                                    <div className="relative flex-1">
+                                        <select
+                                            disabled={cambiandoRolId === u.id}
+                                            value={u.rol || ''}
+                                            onChange={(e) => cambiarRol(u.id, e.target.value)}
+                                            className={`w-full py-2.5 px-2 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoRolId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : 'bg-[#111] text-gray-300 border-white/5 hover:border-white/20 hover:text-white'}`}
+                                        >
+                                            <option value="admin">Admin</option>
+                                            <option value="recepcion">Recepción</option>
+                                            <option value="profesor">Profesor</option>
+                                            <option value="alumno">Alumno</option>
+                                        </select>
+                                        {cambiandoRolId === u.id && (
+                                            <div className="absolute top-0 right-2 h-full flex items-center">
+                                                <Loader2 size={12} className="animate-spin text-[#D4E655]" />
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                ))}
+
+                {filteredUsers.length === 0 && (
+                    <div className="col-span-full py-20 text-center border-2 border-dashed border-white/10 rounded-2xl">
+                        <p className="text-gray-500 font-bold uppercase text-xs">No se encontraron usuarios.</p>
+                    </div>
+                )}
             </div>
 
-            {/* --- MODAL CREAR USUARIO --- */}
-            {showModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setShowModal(false)}>
-                    <div className="bg-[#09090b] border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-xl font-black text-white uppercase tracking-tight">Alta de Alumno</h3>
-                            <button onClick={() => setShowModal(false)}><X className="text-gray-500 hover:text-white" /></button>
+            {/* MODALES - Crear Usuario y Editar omitidos por brevedad visual, funcionan igual que antes */}
+
+            {/* MODAL EDITAR */}
+            {isEditOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-6 shadow-2xl relative">
+                        <div className="flex justify-between items-start mb-6 pb-4 border-b border-white/10">
+                            <div><h3 className="text-xl font-black text-white uppercase flex items-center gap-2 truncate pr-4">{selectedUser?.nombre_completo}</h3><p className="text-[10px] font-bold text-gray-500 uppercase mt-1">{selectedUser?.email}</p></div>
+                            <button onClick={() => setIsEditOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
+                        </div>
+                        {selectedUser?.rol === 'alumno' && (
+                            <div className="mb-6">
+                                <label className="text-[10px] font-bold text-[#D4E655] uppercase block mb-3 flex items-center gap-1"><Tag size={12} /> Intereses (Ritmos)</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {ritmosDisponibles.map(ritmo => {
+                                        const isActive = editForm.intereses_ritmos.includes(ritmo.id);
+                                        return (
+                                            <button key={ritmo.id} onClick={() => toggleInterest(ritmo.id)} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase border transition-all ${isActive ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-500 border-white/10 hover:border-white/30'}`}>
+                                                {ritmo.nombre}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                        <div className="mb-6"><label className="text-[10px] font-bold text-[#D4E655] uppercase block mb-3 flex items-center gap-1"><Shield size={12} /> Observaciones Internas</label><textarea className="w-full h-32 bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-[#D4E655] resize-none" placeholder="Escribir nota secreta..." value={editForm.obs} onChange={(e) => setEditForm({ ...editForm, obs: e.target.value })} /></div>
+                        <button onClick={handleSaveChanges} className="w-full bg-white text-black font-black uppercase py-4 rounded-xl hover:bg-gray-200 transition-all text-xs tracking-widest flex items-center justify-center gap-2"><Save size={16} /> Guardar Cambios</button>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL CREAR USUARIO */}
+            {isCreateOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-6 shadow-2xl relative">
+                        <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
+                            <h3 className="text-xl font-black text-white uppercase flex items-center gap-2"><UserPlus className="text-[#D4E655]" /> Alta Manual</h3>
+                            <button onClick={() => setIsCreateOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
                         </div>
 
-                        <form onSubmit={handleSubmitNewUser} className="space-y-4">
-                            <div className="space-y-1">
-                                <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">Nombre Completo</label>
-                                <input
-                                    required autoFocus
-                                    className="w-full bg-[#111] text-white border border-white/10 rounded-lg p-3 outline-none focus:border-piso2-lime"
-                                    placeholder="Ej: Lionel Messi"
-                                    value={formState.nombre}
-                                    onChange={e => setFormState({ ...formState, nombre: e.target.value })}
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">Email</label>
-                                <input
-                                    required type="email"
-                                    className="w-full bg-[#111] text-white border border-white/10 rounded-lg p-3 outline-none focus:border-piso2-lime"
-                                    placeholder="usuario@email.com"
-                                    value={formState.email}
-                                    onChange={e => setFormState({ ...formState, email: e.target.value })}
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">DNI (Será su contraseña)</label>
-                                <input
-                                    required type="number"
-                                    className="w-full bg-[#111] text-white border border-white/10 rounded-lg p-3 outline-none focus:border-piso2-lime"
-                                    placeholder="Sin puntos"
-                                    value={formState.dni}
-                                    onChange={e => setFormState({ ...formState, dni: e.target.value })}
-                                />
-                                <p className="text-[10px] text-gray-500">El alumno podrá cambiarla después.</p>
+                        <form onSubmit={handleCreateUser} className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase">Rol</label>
+                                    <select value={createForm.rol} onChange={e => setCreateForm({ ...createForm, rol: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]">
+                                        <option value="alumno">Alumno</option>
+                                        <option value="profesor">Profesor</option>
+                                        {isAdmin && <option value="recepcion">Recepción</option>}
+                                    </select>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase">DNI (Clave)</label>
+                                    <input required type="text" value={createForm.dni} onChange={e => setCreateForm({ ...createForm, dni: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" placeholder="12345678" />
+                                </div>
                             </div>
 
-                            <button
-                                type="submit"
-                                disabled={isCreating}
-                                className="w-full bg-piso2-lime text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all mt-4 flex justify-center"
-                            >
-                                {isCreating ? 'Registrando...' : 'Confirmar Alta'}
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase">Nombre Completo</label>
+                                <input required value={createForm.nombre} onChange={e => setCreateForm({ ...createForm, nombre: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" placeholder="Ej: Juan Perez" />
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase">Email (Usuario)</label>
+                                <input required type="email" value={createForm.email} onChange={e => setCreateForm({ ...createForm, email: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" placeholder="profe@piso2.com" />
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase">Teléfono</label>
+                                <input value={createForm.telefono} onChange={e => setCreateForm({ ...createForm, telefono: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" placeholder="+54 9 11..." />
+                            </div>
+
+                            <div className="bg-yellow-500/5 border border-yellow-500/20 p-3 rounded-xl flex items-start gap-2">
+                                <ShieldAlert size={14} className="text-yellow-500 mt-0.5 shrink-0" />
+                                <p className="text-[10px] text-yellow-200/80 leading-relaxed">El DNI será la contraseña inicial. Solo un Administrador puede crear perfiles de Recepción o Admin por seguridad.</p>
+                            </div>
+
+                            <button disabled={creating} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-4">
+                                {creating ? <Loader2 className="animate-spin" /> : 'Crear Usuario'}
                             </button>
                         </form>
                     </div>
@@ -248,5 +415,13 @@ export default function UsuariosPage() {
             )}
 
         </div>
+    )
+}
+
+export default function UsuariosPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-[#050505] flex items-center justify-center"><div className="text-[#D4E655] font-black text-xs uppercase animate-pulse">Cargando Directorio...</div></div>}>
+            <UsuariosContent />
+        </Suspense>
     )
 }

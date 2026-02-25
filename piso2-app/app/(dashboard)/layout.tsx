@@ -1,46 +1,39 @@
-import Sidebar from '@/components/Sidebar'
-import MobileNav from '@/components/MobileNav'
-import CajaApertura from '@/components/CajaApertura'
+'use client' // <--- IMPORTANTE: Agregá esto al principio si no estaba
+
+import Sidebar from "@/components/Sidebar";
+import MobileNav from "@/components/MobileNav";
+import { usePathname } from "next/navigation"; // <--- 1. Importar esto
 
 export default function DashboardLayout({
     children,
 }: {
-    children: React.ReactNode
+    children: React.ReactNode;
 }) {
+    // 2. Obtener la ruta actual
+    const pathname = usePathname();
+
     return (
-        <div className="flex h-screen w-full bg-[#050505] text-white overflow-hidden">
+        <div className="flex h-screen w-full bg-[#050505] overflow-hidden">
 
-            {/* 1. SIDEBAR ESCRITORIO */}
-            {/* - hidden md:flex: Se oculta en móvil, aparece flexible en escritorio.
-          - w-64: Ancho fijo.
-          - shrink-0: CLAVE. Prohibido achicarse.
-      */}
-            <aside className="hidden md:flex w-64 flex-col border-r border-white/10 bg-[#09090b] h-full shrink-0">
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
-                    <Sidebar />
-                </div>
-            </aside>
+            {/* Sidebar Fijo */}
+            <Sidebar />
 
-            {/* 2. CONTENEDOR PRINCIPAL */}
-            {/* min-w-0: CLAVE. Evita que tablas anchas rompan el layout */}
-            <div className="flex-1 flex flex-col min-w-0 relative h-full">
+            <div className="flex-1 flex flex-col min-w-0">
 
-                {/* Modal de Caja (Siempre disponible, invisible hasta que se activa) */}
-                <CajaApertura />
+                <MobileNav />
 
-                {/* 3. MAIN CONTENT (Scrollable) */}
-                {/* pb-24 en móvil para que el menú de abajo no tape el contenido */}
-                <main className="flex-1 overflow-y-auto custom-scrollbar bg-[#050505] pb-24 md:pb-0">
-                    <div className="h-full w-full">
-                        {children}
+                <main className="flex-1 overflow-y-auto p-4 md:p-0 scroll-smooth">
+                    <div className="max-w-7xl mx-auto w-full">
+
+                        {/* 3. EL TRUCO MÁGICO: key={pathname} */}
+                        {/* Esto obliga a que el contenido se reinicie al cambiar de link */}
+                        <div key={pathname} className="animate-in fade-in duration-300">
+                            {children}
+                        </div>
+
                     </div>
                 </main>
-
-                {/* 4. MOBILE NAV (Solo Móvil - Fijo Abajo) */}
-                <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#09090b] border-t border-white/10">
-                    <MobileNav />
-                </div>
             </div>
         </div>
-    )
+    );
 }

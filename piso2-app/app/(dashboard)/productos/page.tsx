@@ -2,15 +2,15 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
-import { Plus, Tag, Edit2, Trash2, Power, Loader2, DollarSign, Layers } from 'lucide-react'
+import { Plus, Tag, Edit2, Trash2, Power, Loader2, Layers, BookOpen, Star } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
-
 type Producto = {
     id: string
     nombre: string
     precio: number
     creditos: number
     activo: boolean
+    tipo_clase: 'regular' | 'seminario' // <-- NUEVO CAMPO
 }
 
 export default function ProductosPage() {
@@ -27,6 +27,7 @@ export default function ProductosPage() {
     const [formNombre, setFormNombre] = useState('')
     const [formPrecio, setFormPrecio] = useState('')
     const [formCreditos, setFormCreditos] = useState('1')
+    const [formTipo, setFormTipo] = useState<'regular' | 'seminario'>('regular') // <-- NUEVO ESTADO PARA EL FORM
     const [saving, setSaving] = useState(false)
 
     useEffect(() => {
@@ -38,7 +39,9 @@ export default function ProductosPage() {
         const { data } = await supabase
             .from('productos')
             .select('*')
-            .order('creditos', { ascending: true }) // Ordenar por tamaño del pack
+            // Ordenamos primero por tipo (para agruparlos) y luego por cantidad de créditos
+            .order('tipo_clase', { ascending: true })
+            .order('creditos', { ascending: true })
 
         if (data) setProductos(data)
         setLoading(false)
@@ -50,11 +53,13 @@ export default function ProductosPage() {
             setFormNombre(prod.nombre)
             setFormPrecio(prod.precio.toString())
             setFormCreditos(prod.creditos.toString())
+            setFormTipo(prod.tipo_clase || 'regular') // Carga el tipo existente
         } else {
             setEditingId(null)
             setFormNombre('')
             setFormPrecio('')
             setFormCreditos('1')
+            setFormTipo('regular') // Por defecto
         }
         setIsModalOpen(true)
     }
@@ -66,7 +71,8 @@ export default function ProductosPage() {
         const payload = {
             nombre: formNombre,
             precio: Number(formPrecio),
-            creditos: Number(formCreditos)
+            creditos: Number(formCreditos),
+            tipo_clase: formTipo // <-- ENVIAMOS EL NUEVO CAMPO A LA BD
         }
 
         try {
@@ -130,16 +136,26 @@ export default function ProductosPage() {
                         <div
                             key={prod.id}
                             className={`border rounded-xl p-5 relative group transition-all ${prod.activo
-                                    ? 'bg-[#111] border-white/10 hover:border-piso2-lime/50'
-                                    : 'bg-black border-white/5 opacity-50 grayscale'
+                                ? 'bg-[#111] border-white/10 hover:border-piso2-lime/50'
+                                : 'bg-black border-white/5 opacity-50 grayscale'
                                 }`}
                         >
+                            {/* ETIQUETA DE TIPO DE CLASE (Regular o Seminario) */}
+                            <div className={`absolute top-0 left-0 px-3 py-1 rounded-br-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1
+                                ${prod.tipo_clase === 'seminario'
+                                    ? 'bg-purple-500/20 text-purple-400 border-b border-r border-purple-500/30'
+                                    : 'bg-white/5 text-gray-400 border-b border-r border-white/10'}`
+                            }>
+                                {prod.tipo_clase === 'seminario' ? <Star size={10} /> : <BookOpen size={10} />}
+                                {prod.tipo_clase}
+                            </div>
+
                             {/* Badge Créditos */}
-                            <div className="absolute top-4 right-4 bg-white/10 px-2 py-1 rounded text-[10px] font-bold uppercase text-white flex items-center gap-1">
+                            <div className="absolute top-4 right-4 bg-white/10 px-2 py-1 rounded text-[10px] font-bold uppercase text-white flex items-center gap-1 mt-6">
                                 <Layers size={10} className="text-piso2-lime" /> {prod.creditos} Créditos
                             </div>
 
-                            <div className="mb-4">
+                            <div className="mb-4 mt-8">
                                 <h3 className="text-xl font-black text-white uppercase leading-none mb-2 pr-16">{prod.nombre}</h3>
                                 <p className="text-2xl font-bold text-piso2-lime flex items-baseline gap-0.5">
                                     <span className="text-sm opacity-50">$</span>
@@ -172,7 +188,7 @@ export default function ProductosPage() {
                 </div>
             )}
 
-            {/* MODAL CREAR/EDITAR (Mobile First) */}
+            {/* MODAL CREAR/EDITAR */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setIsModalOpen(false)}>
                     <div className="bg-[#111] border border-white/10 w-full md:max-w-md md:rounded-2xl rounded-t-2xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -182,12 +198,36 @@ export default function ProductosPage() {
                         </h3>
 
                         <form onSubmit={handleSave} className="space-y-4">
+
+                            {/* SELECTOR DE TIPO DE CLASE */}
+                            <div className="space-y-1">
+                                <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">Tipo de Clase</label>
+                                <div className="grid grid-cols-2 gap-2 bg-black border border-white/20 p-1 rounded-xl">
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormTipo('regular')}
+                                        className={`py-3 text-xs font-black uppercase rounded-lg transition-all flex items-center justify-center gap-2 
+                                            ${formTipo === 'regular' ? 'bg-white text-black shadow-lg' : 'text-gray-500 hover:text-white'}`}
+                                    >
+                                        <BookOpen size={14} /> Regular
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormTipo('seminario')}
+                                        className={`py-3 text-xs font-black uppercase rounded-lg transition-all flex items-center justify-center gap-2 
+                                            ${formTipo === 'seminario' ? 'bg-purple-500 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}
+                                    >
+                                        <Star size={14} /> Seminario
+                                    </button>
+                                </div>
+                            </div>
+
                             <div className="space-y-1">
                                 <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">Nombre del Pack</label>
                                 <input
                                     autoFocus
                                     required
-                                    placeholder="Ej: Pack 8 Clases"
+                                    placeholder={formTipo === 'seminario' ? "Ej: Seminario Intensivo" : "Ej: Pack 8 Clases"}
                                     value={formNombre}
                                     onChange={e => setFormNombre(e.target.value)}
                                     className="w-full bg-black border border-white/20 rounded-xl p-4 text-white font-bold outline-none focus:border-piso2-lime transition-colors"
@@ -220,7 +260,7 @@ export default function ProductosPage() {
                             </div>
 
                             <p className="text-[10px] text-gray-500 mt-2 bg-white/5 p-3 rounded-lg border border-white/5">
-                                ℹ️ <strong>Créditos:</strong> Cantidad de clases que el alumno podrá tomar con este pack.
+                                ℹ️ <strong>Créditos:</strong> Cantidad de clases {formTipo === 'seminario' ? 'especiales' : 'regulares'} que el alumno podrá tomar con este pack.
                             </p>
 
                             <div className="pt-4 flex gap-3">

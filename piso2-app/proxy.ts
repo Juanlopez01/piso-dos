@@ -2,7 +2,7 @@ import { type NextRequest } from 'next/server'
 // ACÁ EL CAMBIO: Importamos desde 'proxy' en lugar de 'middleware'
 import { updateSession } from '@/utils/supabase/server-helper'
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
     return await updateSession(request)
 }
 
