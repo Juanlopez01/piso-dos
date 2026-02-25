@@ -99,7 +99,7 @@ export default function PerfilPage() {
 
                 if (dataHistorial) {
                     // Limpiamos los datos por si alguna clase fue borrada y quedó en null
-                    const historialLimpio = dataHistorial.filter(h => h.clase !== null) as HistorialClase[]
+                    const historialLimpio = dataHistorial.filter((h: any) => h.clase !== null) as unknown as HistorialClase[]
                     setHistorialClases(historialLimpio)
                 }
             }
