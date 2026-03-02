@@ -2,9 +2,9 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
-import { format, isSameMonth } from 'date-fns'
+import { format, isSameMonth, subMonths, addMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { Wallet, Calendar, Loader2, ChevronDown, ChevronUp, CheckCircle, Clock, DollarSign, Users } from 'lucide-react'
+import { Wallet, Calendar, Loader2, ChevronDown, ChevronUp, CheckCircle, Clock, Users } from 'lucide-react'
 
 type Inscripcion = {
     valor_credito: number
@@ -70,9 +70,21 @@ export default function MisPagosPage() {
             const agrupados: Record<string, MesAgrupado> = {}
             const hoy = new Date()
 
+            // Filtro de meses permitidos: 2 pasados, el actual, y 1 futuro
+            const allowedMonths = [
+                format(subMonths(hoy, 2), 'yyyy-MM'),
+                format(subMonths(hoy, 1), 'yyyy-MM'),
+                format(hoy, 'yyyy-MM'),
+                format(addMonths(hoy, 1), 'yyyy-MM')
+            ]
+
             clasesData.forEach((clase: any) => {
                 const fechaClase = new Date(clase.inicio)
                 const mesKey = format(fechaClase, 'yyyy-MM')
+
+                // Si el mes de la clase no está en nuestra ventana permitida, lo ignoramos
+                if (!allowedMonths.includes(mesKey)) return
+
                 const esActual = isSameMonth(fechaClase, hoy)
 
                 if (!agrupados[mesKey]) {
@@ -117,7 +129,7 @@ export default function MisPagosPage() {
             const listaMeses = Object.values(agrupados).sort((a, b) => b.mesKey.localeCompare(a.mesKey))
             setMeses(listaMeses)
 
-            // Expandir por defecto el primer mes (el más reciente)
+            // Expandir por defecto el primer mes de la lista
             if (listaMeses.length > 0) {
                 setExpandedGroup(listaMeses[0].mesKey)
             }
@@ -146,8 +158,8 @@ export default function MisPagosPage() {
                 {meses.length === 0 ? (
                     <div className="bg-[#111] border border-white/5 rounded-2xl p-12 text-center text-gray-500">
                         <Wallet className="mx-auto mb-4 opacity-20" size={48} />
-                        <p className="font-bold uppercase text-sm">No hay clases registradas aún.</p>
-                        <p className="text-xs mt-1">Cuando des tu primera clase, aparecerá tu liquidación acá.</p>
+                        <p className="font-bold uppercase text-sm">No hay clases registradas en este período.</p>
+                        <p className="text-xs mt-1">Solo se muestran los dos meses anteriores, el mes actual y el mes próximo.</p>
                     </div>
                 ) : (
                     meses.map((mes) => {
@@ -203,7 +215,6 @@ export default function MisPagosPage() {
                                                         <th className="pb-3">Clase</th>
                                                         <th className="pb-3 text-center">Acuerdo</th>
                                                         <th className="pb-3 text-center">Alumnos</th>
-                                                        <th className="pb-3 text-right">Recaudado</th>
                                                         <th className="pb-3 text-right text-[#D4E655]">Mi Pago</th>
                                                     </tr>
                                                 </thead>
@@ -222,7 +233,6 @@ export default function MisPagosPage() {
                                                                     <Users size={12} /> {clase.cant_alumnos}
                                                                 </span>
                                                             </td>
-                                                            <td className="py-4 text-right text-gray-400">${clase.total_clase.toLocaleString()}</td>
                                                             <td className="py-4 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
                                                         </tr>
                                                     ))}

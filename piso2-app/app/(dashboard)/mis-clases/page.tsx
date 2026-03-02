@@ -1,11 +1,12 @@
 'use client'
-
+import { Lock } from 'lucide-react';
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
-import { format, isFuture, isPast } from 'date-fns'
+import { format, differenceInHours } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { CalendarCheck, MapPin, User, Clock, Loader2, ArrowRight, PlayCircle, StopCircle, Calendar, CheckCircle2, XCircle } from 'lucide-react'
+import { CalendarCheck, MapPin, User, Clock, Loader2, ArrowRight, PlayCircle, StopCircle, Calendar, CheckCircle2, XCircle, Trash2 } from 'lucide-react'
 import Link from 'next/link'
+import { toast, Toaster } from 'sonner'
 
 // Tipos
 type HistorialAlumno = {
@@ -13,8 +14,10 @@ type HistorialAlumno = {
     created_at: string
     presente: boolean
     clase: {
+        id: string // Agregado para poder devolver el credito correctamente
         nombre: string
         inicio: string
+        tipo_clase: string // Agregado para saber qué crédito devolver
         imagen_url: string | null
         sala: { nombre: string; sede: { nombre: string } }
         profesor: { nombre_completo: string }
@@ -36,10 +39,12 @@ export default function MisClasesPage() {
     const [loading, setLoading] = useState(true)
     const [userRole, setUserRole] = useState<string>('alumno')
     const [userName, setUserName] = useState('')
+    const [userId, setUserId] = useState('')
 
     // Estados según el rol
     const [historialAlumno, setHistorialAlumno] = useState<HistorialAlumno[]>([])
     const [clasesProfe, setClasesProfe] = useState<ClaseProfe[]>([])
+    const [procesandoId, setProcesandoId] = useState<string | null>(null)
 
     useEffect(() => {
         fetchData()
@@ -53,6 +58,7 @@ export default function MisClasesPage() {
             setLoading(false)
             return
         }
+        setUserId(user.id)
 
         // 1. Averiguar quién es (Rol y Nombre)
         const { data: profile } = await supabase
@@ -85,7 +91,7 @@ export default function MisClasesPage() {
                     .select(`
                         id, created_at, presente,
                         clase:clases (
-                            nombre, inicio, imagen_url,
+                            id, nombre, inicio, tipo_clase, imagen_url,
                             sala:salas ( nombre, sede:sedes ( nombre ) ),
                             profesor:profiles ( nombre_completo )
                         )
@@ -105,6 +111,52 @@ export default function MisClasesPage() {
 
         setLoading(false)
     }
+
+    // --- FUNCIÓN DE CANCELACIÓN (ALUMNO) ---
+    const handleCancelarInscripcion = async (inscripcionId: string, claseTipo: string) => {
+        if (!confirm('¿Seguro que querés cancelar tu inscripción? Se te devolverá el crédito.')) return
+
+        setProcesandoId(inscripcionId)
+
+        try {
+            // 1. Borramos la inscripción
+            const { error: errDelete } = await supabase
+                .from('inscripciones')
+                .delete()
+                .eq('id', inscripcionId)
+
+            if (errDelete) throw errDelete
+
+            // 2. Le devolvemos el crédito al alumno
+            const columnaCreditos = claseTipo === 'Especial' ? 'creditos_seminarios' : 'creditos_regulares'
+
+            // Buscamos cuántos tiene actualmente para sumarle 1
+            const { data: currentProfile } = await supabase
+                .from('profiles')
+                .select(columnaCreditos)
+                .eq('id', userId)
+                .single()
+
+            if (currentProfile) {
+                const saldoActual = Number(currentProfile[columnaCreditos as keyof typeof currentProfile] || 0)
+                await supabase
+                    .from('profiles')
+                    .update({ [columnaCreditos]: saldoActual + 1 })
+                    .eq('id', userId)
+            }
+
+            // 3. Actualizamos la UI
+            setHistorialAlumno(prev => prev.filter(item => item.id !== inscripcionId))
+            toast.success('Reserva cancelada. Crédito devuelto.')
+
+        } catch (error) {
+            console.error("Error al cancelar:", error)
+            toast.error('Hubo un error al intentar cancelar la reserva.')
+        } finally {
+            setProcesandoId(null)
+        }
+    }
+
 
     if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-8 h-8" /></div>
 
@@ -189,6 +241,7 @@ export default function MisClasesPage() {
 
     return (
         <div className="pb-24 px-4 pt-4 md:p-8 min-h-screen bg-[#050505] animate-in fade-in">
+            <Toaster position="top-center" richColors theme="dark" />
             <div className="mb-6 border-b border-white/10 pb-6">
                 <h2 className="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter mb-1">Mis Clases</h2>
                 <p className="text-[#D4E655] font-bold text-xs tracking-widest uppercase">
@@ -206,30 +259,53 @@ export default function MisClasesPage() {
 
                     {clasesProximas.length > 0 ? (
                         <div className="space-y-4">
-                            {clasesProximas.map((item) => (
-                                <div key={item.id} className="bg-[#09090b] border border-white/10 rounded-xl overflow-hidden flex flex-row hover:border-[#D4E655]/50 transition-colors shadow-lg">
-                                    {/* Fecha (Columna Izq) */}
-                                    <div className="bg-[#111] w-20 flex flex-col items-center justify-center p-3 text-center border-r border-white/10 shrink-0">
-                                        <span className="text-xs font-bold text-[#D4E655] uppercase">{format(new Date(item.clase.inicio), 'MMM', { locale: es })}</span>
-                                        <span className="text-2xl font-black text-white leading-none mt-1">{format(new Date(item.clase.inicio), 'd')}</span>
-                                    </div>
+                            {clasesProximas.map((item) => {
+                                const horasFaltantes = differenceInHours(new Date(item.clase.inicio), ahora)
+                                const esCancelable = horasFaltantes >= 24
 
-                                    {/* Info (Centro) */}
-                                    <div className="flex-1 p-4 flex flex-col justify-center min-w-0">
-                                        <h4 className="text-sm md:text-base font-bold text-white uppercase leading-tight mb-2 truncate">{item.clase.nombre}</h4>
-                                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] md:text-xs text-gray-400 font-medium">
-                                            <p className="flex items-center gap-1.5"><Clock size={12} className="text-[#D4E655]" /> {format(new Date(item.clase.inicio), 'HH:mm')} hs</p>
-                                            <p className="flex items-center gap-1.5"><User size={12} className="text-[#D4E655]" /> {item.clase.profesor?.nombre_completo || 'Staff'}</p>
-                                            <p className="flex items-center gap-1.5"><MapPin size={12} className="text-[#D4E655]" /> {item.clase.sala?.sede?.nombre}</p>
+                                return (
+                                    <div key={item.id} className="bg-[#09090b] border border-white/10 rounded-xl overflow-hidden flex flex-row hover:border-[#D4E655]/50 transition-colors shadow-lg group">
+                                        {/* Fecha (Columna Izq) */}
+                                        <div className="bg-[#111] w-20 flex flex-col items-center justify-center p-3 text-center border-r border-white/10 shrink-0">
+                                            <span className="text-xs font-bold text-[#D4E655] uppercase">{format(new Date(item.clase.inicio), 'MMM', { locale: es })}</span>
+                                            <span className="text-2xl font-black text-white leading-none mt-1">{format(new Date(item.clase.inicio), 'd')}</span>
+                                        </div>
+
+                                        {/* Info (Centro) */}
+                                        <div className="flex-1 p-4 flex flex-col justify-center min-w-0">
+                                            <h4 className="text-sm md:text-base font-bold text-white uppercase leading-tight mb-2 truncate">{item.clase.nombre}</h4>
+                                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] md:text-xs text-gray-400 font-medium">
+                                                <p className="flex items-center gap-1.5"><Clock size={12} className="text-[#D4E655]" /> {format(new Date(item.clase.inicio), 'HH:mm')} hs</p>
+                                                <p className="flex items-center gap-1.5"><User size={12} className="text-[#D4E655]" /> {item.clase.profesor?.nombre_completo || 'Staff'}</p>
+                                                <p className="flex items-center gap-1.5"><MapPin size={12} className="text-[#D4E655]" /> {item.clase.sala?.sede?.nombre}</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Botón Acción (Derecha) */}
+                                        <div className="w-24 md:w-32 flex flex-col shrink-0 border-l border-white/5">
+                                            {esCancelable ? (
+                                                <button
+                                                    onClick={() => handleCancelarInscripcion(item.id, item.clase.tipo_clase)}
+                                                    disabled={procesandoId === item.id}
+                                                    className="w-full h-full flex flex-col items-center justify-center bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white transition-colors p-2"
+                                                    title="Cancelar Reserva"
+                                                >
+                                                    {procesandoId === item.id ? <Loader2 size={20} className="animate-spin" /> : <Trash2 size={20} className="mb-1" />}
+                                                    <span className="text-[8px] font-black uppercase text-center tracking-widest hidden md:block">Cancelar</span>
+                                                </button>
+                                            ) : (
+                                                <div
+                                                    className="w-full h-full flex flex-col items-center justify-center bg-[#111] text-gray-500 p-2 cursor-not-allowed"
+                                                    title="No se puede cancelar (Faltan menos de 24hs)"
+                                                >
+                                                    <Lock size={16} className="mb-1 opacity-50" />
+                                                    <span className="text-[8px] font-black uppercase text-center leading-tight opacity-50 hidden md:block">No<br />Cancelable</span>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
-
-                                    {/* Etiqueta (Derecha) */}
-                                    <div className="w-16 flex items-center justify-center bg-black/50 border-l border-white/5 shrink-0">
-                                        <span className="text-[9px] font-black uppercase text-gray-500 -rotate-90 tracking-widest">Reserva</span>
-                                    </div>
-                                </div>
-                            ))}
+                                )
+                            })}
                         </div>
                     ) : (
                         <div className="text-center py-10 border border-dashed border-white/10 rounded-2xl bg-[#111]/50 text-gray-500">
@@ -283,3 +359,4 @@ export default function MisClasesPage() {
         </div>
     )
 }
+

@@ -2,7 +2,7 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
-import { format } from 'date-fns'
+import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
     Search, Music, Calendar, Clock, MapPin,
@@ -269,9 +269,10 @@ export default function ExplorarClasesPage() {
                     {clasesFiltradas.map((clase) => {
                         const estaLleno = clase.cupo_maximo > 0 && clase.inscritos_count >= clase.cupo_maximo
                         const esEspecial = clase.tipo_clase === 'Especial'
+                        const esHoy = isToday(new Date(clase.inicio))
 
                         return (
-                            <div key={clase.id} className="bg-[#09090b] border border-white/10 rounded-3xl overflow-hidden flex flex-col hover:border-[#D4E655]/50 transition-all group shadow-xl">
+                            <div key={clase.id} className={`bg-[#09090b] rounded-3xl overflow-hidden flex flex-col transition-all group shadow-xl border-2 ${esHoy ? (esEspecial ? 'border-purple-500/50 shadow-[0_0_20px_rgba(168,85,247,0.2)]' : 'border-[#D4E655]/50 shadow-[0_0_20px_rgba(212,230,85,0.2)]') : 'border-white/10 hover:border-white/30'}`}>
 
                                 {/* IMAGEN / FLYER */}
                                 <div className="h-48 w-full relative bg-gradient-to-br from-[#1a1a1c] to-[#0a0a0a] border-b border-white/5 flex items-center justify-center overflow-hidden">
@@ -288,6 +289,13 @@ export default function ExplorarClasesPage() {
                                             <ImageIcon size={40} strokeWidth={1} />
                                             <span className="text-[10px] font-black uppercase tracking-widest">Sin Flyer</span>
                                         </div>
+                                    )}
+
+                                    {/* Badge HOY (Nuevo) */}
+                                    {esHoy && (
+                                        <span className={`absolute top-4 left-4 text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full backdrop-blur-md flex items-center gap-1 shadow-lg ${esEspecial ? 'bg-purple-500 text-white' : 'bg-[#D4E655] text-black'}`}>
+                                            ⚡ Hoy
+                                        </span>
                                     )}
 
                                     {/* Badge Tipo de Clase */}
@@ -312,8 +320,8 @@ export default function ExplorarClasesPage() {
 
                                     {/* Detalles (Fecha, hora, lugar) */}
                                     <div className="space-y-3 mt-auto pt-4 border-t border-white/5">
-                                        <div className="flex items-center gap-3 text-sm text-gray-400">
-                                            <Calendar size={14} className="text-white/50" />
+                                        <div className={`flex items-center gap-3 text-sm ${esHoy ? 'text-white font-bold' : 'text-gray-400'}`}>
+                                            <Calendar size={14} className={esHoy ? (esEspecial ? 'text-purple-400' : 'text-[#D4E655]') : 'text-white/50'} />
                                             <span className="font-medium capitalize">{format(new Date(clase.inicio), "EEEE d 'de' MMMM", { locale: es })}</span>
                                         </div>
                                         <div className="flex items-center gap-3 text-sm text-gray-400">

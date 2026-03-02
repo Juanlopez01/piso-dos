@@ -74,7 +74,7 @@ export default function CalendarioPage() {
     // Form
     const [form, setForm] = useState({
         nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
-        hora: '18:00', duracion: 60, sedeId: '', salaId: '', profeId: '',
+        hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '', profeId: '',
         tipoAcuerdo: 'porcentaje', valorAcuerdo: '',
         fechas: [] as Date[]
     })
@@ -161,7 +161,7 @@ export default function CalendarioPage() {
 
     // --- MANEJO DE RITMOS ---
     const handleCrearRitmo = async (e?: any) => {
-        if (e) e.preventDefault() // Frenamos cualquier envío de formulario accidental
+        if (e) e.preventDefault()
 
         const nombreLimpio = nuevoRitmoNombre.trim()
         if (!nombreLimpio) return
@@ -271,7 +271,7 @@ export default function CalendarioPage() {
                     tipo_acuerdo: form.tipoAcuerdo,
                     valor_acuerdo: Number(form.valorAcuerdo),
                     imagen_url: publicUrl,
-                    cupo_maximo: 20,
+                    cupo_maximo: Number(form.cupoMaximo) || 0, // <-- Usamos el input
                     serie_id: serieUUID,
                     estado: 'activa'
                 })
@@ -324,7 +324,7 @@ export default function CalendarioPage() {
     const resetForm = () => {
         setForm({
             nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
-            hora: '18:00', duracion: 60, sedeId: '', salaId: '', profeId: '',
+            hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '', profeId: '',
             tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: selectedDate ? [selectedDate] : []
         })
         setFormFile(null)
@@ -466,7 +466,7 @@ export default function CalendarioPage() {
                                                             onChange={e => setNuevoRitmoNombre(e.target.value)}
                                                             onKeyDown={e => {
                                                                 if (e.key === 'Enter') {
-                                                                    e.preventDefault(); // Evita que el "Enter" mande la clase entera
+                                                                    e.preventDefault();
                                                                     handleCrearRitmo();
                                                                 }
                                                             }}
@@ -490,9 +490,33 @@ export default function CalendarioPage() {
                                                 )}
                                             </div>
 
-                                            <div className="grid grid-cols-2 gap-2 md:col-span-2">
-                                                <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Tipo</label><select value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]"><option value="Regular">Regular (Naranja)</option><option value="Intensivo">Intensivo (Negro)</option><option value="Formación">Formación (Amarillo)</option><option value="Compañía">Compañías (Azul)</option></select></div>
-                                                <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Nivel</label><select value={form.nivel} onChange={e => setForm({ ...form, nivel: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]"><option value="Open">Open</option><option value="Principiante">Principiante</option><option value="Intermedio">Intermedio</option><option value="Avanzado">Avanzado</option></select></div>
+                                            {/* ACA AGREGAMOS EL CAMPO DE CUPO */}
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:col-span-2">
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-bold text-gray-500 uppercase">Tipo</label>
+                                                    <select value={form.tipo} onChange={e => {
+                                                        const isCompania = e.target.value === 'Compañía';
+                                                        setForm({ ...form, tipo: e.target.value, cupoMaximo: isCompania ? 20 : form.cupoMaximo })
+                                                    }} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]">
+                                                        <option value="Regular">Regular (Naranja)</option>
+                                                        <option value="Intensivo">Intensivo (Negro)</option>
+                                                        <option value="Formación">Formación (Amarillo)</option>
+                                                        <option value="Compañía">Compañías (Azul)</option>
+                                                    </select>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-bold text-gray-500 uppercase">Nivel</label>
+                                                    <select value={form.nivel} onChange={e => setForm({ ...form, nivel: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]">
+                                                        <option value="Open">Open</option>
+                                                        <option value="Principiante">Principiante</option>
+                                                        <option value="Intermedio">Intermedio</option>
+                                                        <option value="Avanzado">Avanzado</option>
+                                                    </select>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-bold text-[#D4E655] uppercase">Cupo Máx.</label>
+                                                    <input type="number" min="0" value={form.cupoMaximo} onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]" placeholder="Ej: 20" />
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Descripción</label><textarea value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs outline-none focus:border-[#D4E655] resize-none h-16" /></div>
