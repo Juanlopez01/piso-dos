@@ -83,21 +83,29 @@ export default function CalendarioPage() {
     useEffect(() => { fetchData() }, [currentDate])
 
     const fetchData = async () => {
-        const start = startOfWeek(startOfMonth(currentDate)).toISOString()
-        const end = endOfWeek(endOfMonth(currentDate)).toISOString()
+        const start = startOfWeek(startOfMonth(currentDate))
+        const end = endOfWeek(endOfMonth(currentDate))
+
+        // Para clases (formato ISO)
+        const startIso = start.toISOString()
+        const endIso = end.toISOString()
+
+        // Para alquileres (formato YYYY-MM-DD)
+        const startDateStr = format(start, 'yyyy-MM-dd')
+        const endDateStr = format(end, 'yyyy-MM-dd')
 
         const { data: dataClases } = await supabase
             .from('clases')
             .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre)`)
-            .gte('inicio', start)
-            .lte('fin', end)
+            .gte('inicio', startIso)
+            .lte('fin', endIso)
 
         const { data: dataAlquileres } = await supabase
             .from('alquileres')
             .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) )`)
-            .gte('fecha_inicio', start)
-            .lte('fecha_fin', end)
-            .in('estado', ['confirmado', 'pagado'])
+            .gte('fecha', startDateStr)
+            .lte('fecha', endDateStr)
+            .in('estado', ['confirmado', 'pagado']) // Solo mostramos alquileres firmes en la agenda
 
         const agenda: EventoAgenda[] = []
 
@@ -129,17 +137,25 @@ export default function CalendarioPage() {
 
         if (dataAlquileres) {
             dataAlquileres.forEach((a: any) => {
+                // Desarmamos la fecha y hora manualmente para obligar al navegador a usar la zona horaria local
+                const [year, month, day] = a.fecha.split('-').map(Number);
+                const [hInicio, mInicio] = a.hora_inicio.split(':').map(Number);
+                const [hFin, mFin] = a.hora_fin.split(':').map(Number);
+
+                const startObj = new Date(year, month - 1, day, hInicio, mInicio);
+                const endObj = new Date(year, month - 1, day, hFin, mFin);
+
                 agenda.push({
                     id: a.id,
                     tipo: 'Alquiler',
-                    titulo: a.cliente_nombre || 'Cliente',
+                    titulo: a.cliente_nombre || 'Cliente Externo',
                     subtitulo: `Alquiler (${a.tipo_uso})`,
-                    inicio: a.fecha_inicio,
-                    fin: a.fecha_fin,
+                    inicio: startObj.toISOString(),
+                    fin: endObj.toISOString(),
                     sala_nombre: a.sala?.nombre,
                     sala_sede: a.sala?.sede?.nombre,
                     alquiler_data: {
-                        telefono: a.cliente_telefono,
+                        telefono: a.cliente_contacto,
                         monto: a.monto_total,
                         estado: a.estado
                     }
@@ -198,6 +214,9 @@ export default function CalendarioPage() {
     const checkConflictos = async (salaId: string, inicio: Date, fin: Date) => {
         const inicioIso = inicio.toISOString()
         const finIso = fin.toISOString()
+        const fechaStr = format(inicio, 'yyyy-MM-dd')
+        const hInicio = format(inicio, 'HH:mm')
+        const hFin = format(fin, 'HH:mm')
 
         const { data: conflictoClase } = await supabase
             .from('clases')
@@ -214,9 +233,10 @@ export default function CalendarioPage() {
             .from('alquileres')
             .select('id, cliente_nombre')
             .eq('sala_id', salaId)
-            .in('estado', ['confirmado', 'pagado'])
-            .lt('fecha_inicio', finIso)
-            .gt('fecha_fin', inicioIso)
+            .eq('fecha', fechaStr)
+            .in('estado', ['confirmado', 'pagado', 'pendiente']) // Pendiente también bloquea para seguridad
+            .lt('hora_inicio', hFin)
+            .gt('hora_fin', hInicio)
             .maybeSingle()
 
         if (conflictoAlquiler) return `Alquiler: ${conflictoAlquiler.cliente_nombre}`

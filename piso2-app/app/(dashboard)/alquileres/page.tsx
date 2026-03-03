@@ -5,9 +5,9 @@ import { useEffect, useState } from 'react'
 import {
     Plus, Calendar, Clock, DollarSign, User, MapPin,
     Trash2, CheckCircle, Loader2, X, MessageCircle,
-    Repeat, Settings, ChevronDown, ChevronUp, Layers, Sun, Moon, Zap, Copy
+    Repeat, Settings, ChevronDown, ChevronUp, Layers, Sun, Moon, Zap, Copy, Tag
 } from 'lucide-react'
-import { format, isSunday, isSaturday } from 'date-fns' // Agregado isSaturday por si acaso
+import { format, isSunday, isSaturday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { Toaster, toast } from 'sonner'
 import { v4 as uuidv4 } from 'uuid'
@@ -48,7 +48,8 @@ export default function AlquileresPage() {
         fechas: [] as Date[],
         hora_inicio: '18:00', // Default a horario popular
         hora_fin: '22:00',
-        tipo_uso: 'ensayo'
+        tipo_uso: 'ensayo',
+        descuento: 0 // <--- NUEVO CAMPO DE DESCUENTO
     })
 
     // Estado para el desglose de precios (Resumen)
@@ -56,6 +57,8 @@ export default function AlquileresPage() {
         manana: { horas: 0, precio: 0, subtotal: 0 },
         noche: { horas: 0, precio: 0, subtotal: 0 },
         finde: { horas: 0, precio: 0, subtotal: 0 },
+        subtotalBase: 0,
+        montoDescuento: 0,
         total: 0
     })
 
@@ -64,7 +67,7 @@ export default function AlquileresPage() {
     // --- CALCULADORA AVANZADA (Desglose) ---
     useEffect(() => {
         if (!form.sala_id || !form.hora_inicio || !form.hora_fin || form.fechas.length === 0) {
-            setPriceBreakdown({ manana: { horas: 0, precio: 0, subtotal: 0 }, noche: { horas: 0, precio: 0, subtotal: 0 }, finde: { horas: 0, precio: 0, subtotal: 0 }, total: 0 })
+            setPriceBreakdown({ manana: { horas: 0, precio: 0, subtotal: 0 }, noche: { horas: 0, precio: 0, subtotal: 0 }, finde: { horas: 0, precio: 0, subtotal: 0 }, subtotalBase: 0, montoDescuento: 0, total: 0 })
             return
         }
 
@@ -93,7 +96,7 @@ export default function AlquileresPage() {
 
         // Iterar por cada fecha seleccionada para clasificarla
         form.fechas.forEach(fecha => {
-            if (isSunday(fecha)) { // Asumimos Domingo como Finde/Feriado (agregar isSaturday si aplica)
+            if (isSunday(fecha)) { // Asumimos Domingo como Finde/Feriado
                 totalHFinde += duration
             } else {
                 // Lógica de Franja Horaria (Lunes a Sábado)
@@ -119,14 +122,19 @@ export default function AlquileresPage() {
             }
         })
 
+        const subtotalCalculado = (totalHManana * pManana) + (totalHNoche * pNoche) + (totalHFinde * pFinde)
+        const descuentoCalculado = subtotalCalculado * ((form.descuento || 0) / 100)
+
         setPriceBreakdown({
             manana: { horas: totalHManana, precio: pManana, subtotal: totalHManana * pManana },
             noche: { horas: totalHNoche, precio: pNoche, subtotal: totalHNoche * pNoche },
             finde: { horas: totalHFinde, precio: pFinde, subtotal: totalHFinde * pFinde },
-            total: (totalHManana * pManana) + (totalHNoche * pNoche) + (totalHFinde * pFinde)
+            subtotalBase: subtotalCalculado,
+            montoDescuento: descuentoCalculado,
+            total: subtotalCalculado - descuentoCalculado
         })
 
-    }, [form.sala_id, form.hora_inicio, form.hora_fin, form.tipo_uso, form.fechas, salas])
+    }, [form.sala_id, form.hora_inicio, form.hora_fin, form.tipo_uso, form.fechas, form.descuento, salas])
 
     const fetchData = async () => {
         setLoading(true)
@@ -185,7 +193,47 @@ export default function AlquileresPage() {
         else toast.success('Precio actualizado')
     }
 
-    // --- CREAR RESERVA ---
+    // --- NUEVA FUNCIÓN: VALIDADOR DE CONFLICTOS ---
+    const checkConflictos = async (salaId: string, dateObj: Date, hInicio: string, hFin: string) => {
+        const fechaStr = format(dateObj, 'yyyy-MM-dd')
+
+        // 1. Armamos las fechas completas para comparar con las CLASES (que usan timestamp)
+        const [hs, ms] = hInicio.split(':')
+        const [he, me] = hFin.split(':')
+
+        const reqStart = new Date(dateObj)
+        reqStart.setHours(Number(hs), Number(ms), 0, 0)
+
+        const reqEnd = new Date(dateObj)
+        reqEnd.setHours(Number(he), Number(me), 0, 0)
+
+        // Buscar cruce con Clases
+        const { data: clases } = await supabase.from('clases')
+            .select('nombre')
+            .eq('sala_id', salaId)
+            .neq('estado', 'cancelada')
+            .lt('inicio', reqEnd.toISOString())
+            .gt('fin', reqStart.toISOString())
+            .maybeSingle()
+
+        if (clases) return `Clase: ${clases.nombre}`
+
+        // 2. Buscar cruce con otros Alquileres (que usan fecha, hora_inicio, hora_fin)
+        const { data: alqs } = await supabase.from('alquileres')
+            .select('cliente_nombre')
+            .eq('sala_id', salaId)
+            .eq('fecha', fechaStr)
+            .in('estado', ['confirmado', 'pagado', 'pendiente'])
+            .lt('hora_inicio', hFin)
+            .gt('hora_fin', hInicio)
+            .maybeSingle()
+
+        if (alqs) return `Alquiler: ${alqs.cliente_nombre}`
+
+        return null
+    }
+
+    // --- HANDLE CREATE ACTUALIZADO ---
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault()
         if (form.fechas.length === 0) return toast.error('Seleccioná fechas')
@@ -194,56 +242,78 @@ export default function AlquileresPage() {
         const newGroupId = uuidv4()
         const sala = salas.find(s => s.id === form.sala_id)
 
-        // Función auxiliar para calcular costo de un día específico
-        const calculateDayCost = (date: Date) => {
-            if (!sala) return 0
-            const tipoPrefix = form.tipo_uso === 'produccion' ? 'p_prod' : `p_${form.tipo_uso}`
-
-            const parseTime = (t: string) => { const [h, m] = t.split(':').map(Number); return h + m / 60 }
-            const start = parseTime(form.hora_inicio)
-            const end = parseTime(form.hora_fin)
-            const duration = Math.max(0, end - start)
-
-            if (isSunday(date)) {
-                return duration * Number(sala[`${tipoPrefix}_finde`] || 0)
+        try {
+            // NUEVO: Validar conflictos ANTES de armar los inserts
+            for (const date of form.fechas) {
+                const conflicto = await checkConflictos(form.sala_id, date, form.hora_inicio, form.hora_fin)
+                if (conflicto) {
+                    throw new Error(`Conflicto el ${format(date, 'dd/MM')}: ya existe un/a ${conflicto}`)
+                }
             }
 
-            const CORTE = 18.0
-            let hManana = 0, hNoche = 0
+            // Función auxiliar para calcular costo de un día específico
+            const calculateDayCost = (date: Date) => {
+                if (!sala) return 0
+                const tipoPrefix = form.tipo_uso === 'produccion' ? 'p_prod' : `p_${form.tipo_uso}`
 
-            if (end <= CORTE) hManana = duration
-            else if (start >= CORTE) hNoche = duration
-            else { hManana = CORTE - start; hNoche = end - CORTE }
+                const parseTime = (t: string) => { const [h, m] = t.split(':').map(Number); return h + m / 60 }
+                const start = parseTime(form.hora_inicio)
+                const end = parseTime(form.hora_fin)
+                const duration = Math.max(0, end - start)
 
-            return (hManana * Number(sala[`${tipoPrefix}_manana`] || 0)) + (hNoche * Number(sala[`${tipoPrefix}_noche`] || 0))
-        }
+                let baseCost = 0
 
-        // Creamos los inserts calculando el precio INDIVIDUAL de cada fecha
-        const inserts = form.fechas.map(date => ({
-            group_id: newGroupId,
-            cliente_nombre: form.cliente_nombre,
-            cliente_contacto: form.cliente_contacto,
-            sala_id: form.sala_id,
-            fecha: date.toISOString().split('T')[0],
-            hora_inicio: form.hora_inicio,
-            hora_fin: form.hora_fin,
-            monto_total: calculateDayCost(date), // <--- Cálculo individual real
-            tipo_uso: form.tipo_uso,
-            estado: 'pendiente'
-        }))
+                if (isSunday(date)) {
+                    baseCost = duration * Number(sala[`${tipoPrefix}_finde`] || 0)
+                } else {
+                    const CORTE = 18.0
+                    let hManana = 0, hNoche = 0
 
-        const { error } = await supabase.from('alquileres').insert(inserts)
-        if (!error) {
+                    if (end <= CORTE) hManana = duration
+                    else if (start >= CORTE) hNoche = duration
+                    else { hManana = CORTE - start; hNoche = end - CORTE }
+
+                    baseCost = (hManana * Number(sala[`${tipoPrefix}_manana`] || 0)) + (hNoche * Number(sala[`${tipoPrefix}_noche`] || 0))
+                }
+
+                // Aplicamos el porcentaje de descuento a este día específico
+                const multiplier = 1 - ((form.descuento || 0) / 100)
+                return baseCost * multiplier
+            }
+
+            // Creamos los inserts calculando el precio INDIVIDUAL de cada fecha
+            const inserts = form.fechas.map(date => ({
+                group_id: newGroupId,
+                cliente_nombre: form.cliente_nombre,
+                cliente_contacto: form.cliente_contacto,
+                sala_id: form.sala_id,
+                fecha: format(date, 'yyyy-MM-dd'), // Guardamos la fecha limpia en formato DB
+                hora_inicio: form.hora_inicio,
+                hora_fin: form.hora_fin,
+                monto_total: calculateDayCost(date),
+                tipo_uso: form.tipo_uso,
+                estado: 'pendiente'
+            }))
+
+            const { error } = await supabase.from('alquileres').insert(inserts)
+
+            if (error) {
+                console.error("Error en DB:", error)
+                throw new Error('Error al guardar en la base de datos.')
+            }
+
             toast.success('Reserva creada con éxito')
             setIsModalOpen(false)
-            setForm({ ...form, cliente_nombre: '', fechas: [] })
+            setForm({ ...form, cliente_nombre: '', fechas: [], descuento: 0 })
             fetchData()
-        } else {
-            toast.error('Error al crear')
-        }
-        setCreating(false)
-    }
 
+        } catch (err: any) {
+            // Si hay un error (como un conflicto de horario), entra acá y aborta la creación
+            toast.error(err.message, { duration: 5000 })
+        } finally {
+            setCreating(false)
+        }
+    }
     // --- COPIAR PRESUPUESTO ---
     const handleCopyPresupuesto = () => {
         if (form.fechas.length === 0 || !form.sala_id) {
@@ -257,12 +327,18 @@ export default function AlquileresPage() {
 
         let fechasTexto = form.fechas.map(d => `- ${format(d, 'EEEE dd/MM', { locale: es })}`).join('\n')
 
-        const textoWsp = `*Presupuesto de Alquiler* 🏢\n\n` +
+        let textoWsp = `*Presupuesto de Alquiler* 🏢\n\n` +
             `*Actividad:* ${actividad}\n` +
             `*Sala:* ${nombreSala}\n` +
             `*Horario:* ${form.hora_inicio} a ${form.hora_fin} hs\n\n` +
-            `*Fechas solicitadas:*\n${fechasTexto}\n\n` +
-            `*Total a pagar: $${priceBreakdown.total.toLocaleString()}*\n\n` +
+            `*Fechas solicitadas:*\n${fechasTexto}\n\n`
+
+        if (form.descuento > 0) {
+            textoWsp += `*Subtotal:* $${priceBreakdown.subtotalBase.toLocaleString()}\n`
+            textoWsp += `*Descuento especial (${form.descuento}%):* -$${priceBreakdown.montoDescuento.toLocaleString()}\n`
+        }
+
+        textoWsp += `*Total a pagar: $${priceBreakdown.total.toLocaleString()}*\n\n` +
             `_Para confirmar la reserva, por favor envianos el comprobante de seña. ¡Gracias!_`
 
         navigator.clipboard.writeText(textoWsp).then(() => {
@@ -272,7 +348,7 @@ export default function AlquileresPage() {
         })
     }
 
-    // --- RESTO DE ACCIONES (Igual que antes) ---
+    // --- RESTO DE ACCIONES ---
     const handlePayGroup = async (group: ReservaGroup) => {
         if (!confirm(`¿Cobrar total de $${group.total_grupo.toLocaleString()}?`)) return
 
@@ -286,9 +362,6 @@ export default function AlquileresPage() {
         if (!salaData) return toast.error('Error: No se encontró la sede de esta sala')
 
         // 2. Buscar CAJA ABIERTA para ESA SEDE
-        // OJO: No buscamos por usuario, buscamos por SEDE. 
-        // Si hay multiple cajas en una sede, podrias filtrar también por usuario, 
-        // pero generalmente "Caja Sede Obelisco" es lo que importa.
         const { data: turno } = await supabase.from('caja_turnos')
             .select('id')
             .eq('sede_id', salaData.sede_id)
@@ -334,7 +407,7 @@ export default function AlquileresPage() {
             tipo_uso: group.tipo_uso || 'ensayo',
             hora_inicio: base.hora_inicio || '10:00',
             hora_fin: base.hora_fin || '12:00',
-            // No seteamos precio porque se recalcula
+            descuento: 0,
             fechas: []
         })
         setIsModalOpen(true)
@@ -359,7 +432,7 @@ export default function AlquileresPage() {
                     <button onClick={() => setIsTarifasOpen(true)} className="flex-1 md:flex-none bg-[#111] text-gray-300 border border-white/10 px-4 py-3 rounded-xl font-bold uppercase text-xs hover:bg-white hover:text-black transition-all flex justify-center items-center gap-2">
                         <Settings size={16} /> Tarifas
                     </button>
-                    <button onClick={() => { setForm({ ...form, fechas: [] }); setIsModalOpen(true) }} className="flex-1 md:flex-none bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-all flex justify-center items-center gap-2 shadow-lg">
+                    <button onClick={() => { setForm({ ...form, fechas: [], descuento: 0 }); setIsModalOpen(true) }} className="flex-1 md:flex-none bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-all flex justify-center items-center gap-2 shadow-lg">
                         <Plus size={16} /> Nueva
                     </button>
                 </div>
@@ -452,6 +525,22 @@ export default function AlquileresPage() {
                                     <div className="space-y-1"><label className="text-[10px] font-bold text-gray-500 uppercase">Fin</label><input type="time" required value={form.hora_fin} onChange={e => setForm({ ...form, hora_fin: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" /></div>
                                 </div>
 
+                                <div className="space-y-1 pt-2">
+                                    <label className="text-[10px] font-bold text-[#D4E655] uppercase flex items-center gap-1"><Tag size={12} /> Descuento Comercial (%)</label>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-3 text-gray-500 font-bold">%</span>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            max="100"
+                                            value={form.descuento || ''}
+                                            onChange={e => setForm({ ...form, descuento: Number(e.target.value) })}
+                                            className="w-full bg-[#111] border border-white/10 rounded-xl pl-8 p-3 text-white text-sm outline-none focus:border-[#D4E655]"
+                                            placeholder="0"
+                                        />
+                                    </div>
+                                </div>
+
                                 {/* --- RESUMEN DE COSTOS DETALLADO --- */}
                                 <div className="bg-[#111] p-4 rounded-xl border border-white/10 mt-2 space-y-2 relative">
                                     {/* Botón de copiar presupueseto */}
@@ -491,10 +580,24 @@ export default function AlquileresPage() {
                                         {priceBreakdown.total === 0 && <p className="text-[10px] text-gray-500 italic text-center">Seleccioná días y horarios para calcular</p>}
                                     </div>
 
-                                    {/* Total Final */}
-                                    <div className="flex justify-between items-center mt-3 pt-3 border-t border-white/10">
-                                        <span className="text-[10px] text-gray-500 font-bold uppercase">TOTAL A PAGAR</span>
-                                        <span className="text-2xl font-black text-[#D4E655]">${priceBreakdown.total.toLocaleString()}</span>
+                                    {/* Total Final y Descuentos */}
+                                    <div className="flex flex-col gap-1 mt-3 pt-3 border-t border-white/10">
+                                        {form.descuento > 0 && (
+                                            <>
+                                                <div className="flex justify-between items-center text-gray-400">
+                                                    <span className="text-[10px] uppercase font-bold">Subtotal Base</span>
+                                                    <span className="text-sm line-through">${priceBreakdown.subtotalBase.toLocaleString()}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center text-green-400">
+                                                    <span className="text-[10px] uppercase font-bold">Descuento ({form.descuento}%)</span>
+                                                    <span className="text-sm">-${priceBreakdown.montoDescuento.toLocaleString()}</span>
+                                                </div>
+                                            </>
+                                        )}
+                                        <div className="flex justify-between items-center mt-1">
+                                            <span className="text-[10px] text-white font-black uppercase">TOTAL A PAGAR</span>
+                                            <span className="text-2xl font-black text-[#D4E655]">${priceBreakdown.total.toLocaleString()}</span>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -507,7 +610,7 @@ export default function AlquileresPage() {
                 </div>
             )}
 
-            {/* MODAL TARIFAS (Igual que antes) */}
+            {/* MODAL TARIFAS */}
             {isTarifasOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-3xl rounded-3xl p-6 shadow-2xl relative flex flex-col max-h-[85vh]">
