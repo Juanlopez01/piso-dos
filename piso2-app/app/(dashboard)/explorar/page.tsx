@@ -46,6 +46,8 @@ export default function ExplorarClasesPage() {
     }, [])
 
     const fetchData = async () => {
+        // Ejecutamos la limpieza silenciosa de créditos vencidos en background
+        await supabase.rpc('limpiar_creditos_vencidos')
         setLoading(true)
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
@@ -88,70 +90,105 @@ export default function ExplorarClasesPage() {
         setLoading(false)
     }
 
-    // --- LÓGICA DE INSCRIPCIÓN (Descuenta crédito, anota y PERFILA) ---
+    // --- LÓGICA DE INSCRIPCIÓN (FIFO + Perfilado) ---
     const handleInscribirse = async (clase: ClaseDisponible) => {
         if (!perfil) return
 
         const esEspecial = clase.tipo_clase === 'Especial'
-        const creditosDisponibles = esEspecial ? perfil.creditos_seminarios : perfil.creditos_regulares
-
-        if (creditosDisponibles <= 0) {
-            toast.error(
-                <div className="flex flex-col gap-1">
-                    <span className="font-bold">Sin créditos suficientes</span>
-                    <span className="text-xs">Necesitás comprar un pack de clases {clase.tipo_clase} para anotarte.</span>
-                </div>
-            )
-            return
-        }
+        const tipoClaseBD = esEspecial ? 'seminario' : 'regular'
 
         setProcesandoId(clase.id)
 
         try {
-            // 1. Inscribir en la tabla
+            // 1. Buscar los packs activos del alumno ordenados por fecha de vencimiento (El que vence primero se gasta primero)
+            const hoyIso = new Date().toISOString()
+            const { data: packsActivos, error: errPacks } = await supabase
+                .from('alumno_packs')
+                .select('*')
+                .eq('user_id', perfil.id)
+                .eq('tipo_clase', tipoClaseBD)
+                .eq('estado', 'activo')
+                .gt('creditos_restantes', 0)
+                .gt('fecha_vencimiento', hoyIso)
+                .order('fecha_vencimiento', { ascending: true })
+
+            if (errPacks) throw new Error('Error al consultar tus créditos disponibles.')
+
+            if (!packsActivos || packsActivos.length === 0) {
+                toast.error(
+                    <div className="flex flex-col gap-1">
+                        <span className="font-bold">Sin créditos suficientes</span>
+                        <span className="text-xs">No tenés créditos vigentes. Necesitás comprar un pack nuevo.</span>
+                    </div>
+                )
+                setProcesandoId(null)
+                return
+            }
+
+            // 2. Tomar el pack más próximo a vencer (FIFO)
+            const packATomar = packsActivos[0]
+
+            // Calcular el valor unitario de la clase de ESE pack específico
+            // Ej: Si pagó $40.000 por 4 clases, la clase vale $10.000
+            const valorUnitarioClase = packATomar.cantidad_inicial > 0
+                ? (Number(packATomar.monto_abonado) / packATomar.cantidad_inicial)
+                : 0
+
+            // 3. Inscribir en la tabla de clases GUARDANDO el valor exacto para el profesor
             const { error: errInsc } = await supabase.from('inscripciones').insert({
                 clase_id: clase.id,
                 user_id: perfil.id,
                 presente: false,
-                metodo_pago: 'bonificado',
-                modalidad: 'Reserva por App (Crédito)',
-                valor_credito: 0
+                metodo_pago: 'credito_pack', // Ya no es 'bonificado'
+                modalidad: 'Reserva por App',
+                valor_credito: valorUnitarioClase, // EL SECRETO DEL CACHÉ PERFECTO ESTÁ ACÁ
+                pack_usado_id: packATomar.id // Opcional, pero bueno para auditoría
             })
 
-            if (errInsc) throw new Error('Error al reservar lugar')
+            if (errInsc) throw new Error('Error al reservar lugar, intentá de nuevo.')
 
-            // 2. Descontar 1 crédito al usuario
-            const nuevosCreditos = creditosDisponibles - 1
-            const columnaUpdate = esEspecial ? 'creditos_seminarios' : 'creditos_regulares'
+            // 4. Descontar 1 crédito de la bolsita (alumno_packs)
+            const nuevosCreditosBolsita = packATomar.creditos_restantes - 1
+            const nuevoEstadoBolsita = nuevosCreditosBolsita === 0 ? 'agotado' : 'activo'
 
-            // 3. MAGIA NUEVA: PERFILADO DE INTERESES
-            // Traemos los intereses actuales del usuario para no pisarlos
+            const { error: errUpdatePack } = await supabase
+                .from('alumno_packs')
+                .update({
+                    creditos_restantes: nuevosCreditosBolsita,
+                    estado: nuevoEstadoBolsita
+                })
+                .eq('id', packATomar.id)
+
+            if (errUpdatePack) console.error("Error al restar crédito del pack:", errUpdatePack)
+
+            // 5. MAGIA NUEVA: PERFILADO DE INTERESES (Igual que antes)
             const { data: currentProfile } = await supabase
                 .from('profiles')
-                .select('intereses_ritmos')
+                .select('intereses_ritmos, creditos_regulares, creditos_seminarios')
                 .eq('id', perfil.id)
                 .single()
 
             let nuevosIntereses = currentProfile?.intereses_ritmos || []
-
-            // Si la clase tiene un ritmo asociado y el alumno aún no lo tiene en su lista, lo agregamos
             if (clase.ritmo_id && !nuevosIntereses.includes(clase.ritmo_id)) {
                 nuevosIntereses = [...nuevosIntereses, clase.ritmo_id]
             }
 
-            // 4. Actualizamos créditos E intereses en la misma llamada
-            const { error: errUpdate } = await supabase
+            // 6. Actualizamos los créditos totales del perfil visual (Para la UI)
+            const columnaUpdate = esEspecial ? 'creditos_seminarios' : 'creditos_regulares'
+            const creditosTotalesPerfil = (currentProfile?.[columnaUpdate] || 1) - 1
+
+            const { error: errUpdateProf } = await supabase
                 .from('profiles')
                 .update({
-                    [columnaUpdate]: nuevosCreditos,
+                    [columnaUpdate]: Math.max(0, creditosTotalesPerfil), // Nunca menor a 0
                     intereses_ritmos: nuevosIntereses
                 })
                 .eq('id', perfil.id)
 
-            if (errUpdate) throw new Error('Error al actualizar el perfil')
+            if (errUpdateProf) console.error("Error al actualizar perfil visual:", errUpdateProf)
 
-            // 5. Actualizar UI Local
-            setPerfil(prev => prev ? { ...prev, [columnaUpdate]: nuevosCreditos } : null)
+            // 7. Actualizar UI Local
+            setPerfil(prev => prev ? { ...prev, [columnaUpdate]: Math.max(0, creditosTotalesPerfil) } : null)
             setClases(prev => prev.map(c =>
                 c.id === clase.id
                     ? { ...c, ya_inscrito: true, inscritos_count: c.inscritos_count + 1 }

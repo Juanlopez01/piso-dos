@@ -1,13 +1,15 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
     ShoppingBasket, Ticket, Star, Check,
-    CreditCard, Smartphone, Zap, Loader2, Info
+    Smartphone, Zap, Loader2, Info, Tag, X, Lock, CreditCard
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 
+// ... (Tipos iguales) ...
 type Producto = {
     id: string
     nombre: string
@@ -17,32 +19,175 @@ type Producto = {
     descripcion?: string
 }
 
-export default function TiendaPage() {
+type Cupon = {
+    id: string
+    codigo: string
+    porcentaje: number
+}
+
+function TiendaContent() {
     const supabase = createClient()
+    const searchParams = useSearchParams() // Para leer si vuelve de MercadoPago
     const [productos, setProductos] = useState<Producto[]>([])
     const [loading, setLoading] = useState(true)
+
+    // Checkout States
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
     const [selectedPack, setSelectedPack] = useState<Producto | null>(null)
+    const [userId, setUserId] = useState<string | null>(null)
+    const [userProfile, setUserProfile] = useState<{ creditos_regulares: number, creditos_seminarios: number } | null>(null)
+
+    // Cupones States
+    const [cuponInput, setCuponInput] = useState('')
+    const [cuponAplicado, setCuponAplicado] = useState<Cupon | null>(null)
+    const [validandoCupon, setValidandoCupon] = useState(false)
+
+    // MP States
+    const [generandoPago, setGenerandoPago] = useState(false)
 
     useEffect(() => {
-        fetchProductos()
-    }, [])
+        fetchData()
 
-    const fetchProductos = async () => {
-        setLoading(true)
-        const { data } = await supabase
-            .from('productos')
-            .select('*')
-            .eq('activo', true)
-            .order('precio', { ascending: true })
+        // Revisar si viene de Mercado Pago
+        const status = searchParams.get('status')
+        if (status === 'success') {
+            toast.success('¡Pago aprobado! Tus clases se acreditarán en breves instantes.', { duration: 8000 })
+            // Limpiamos la URL para que no quede el status pegado
+            window.history.replaceState(null, '', '/tienda')
+        } else if (status === 'failure') {
+            toast.error('El pago no se pudo procesar o fue rechazado.')
+            window.history.replaceState(null, '', '/tienda')
+        } else if (status === 'pending') {
+            toast.info('Tu pago está pendiente de confirmación.')
+            window.history.replaceState(null, '', '/tienda')
+        }
+    }, [searchParams])
 
-        if (data) setProductos(data as Producto[])
-        setLoading(false)
+    const fetchData = async () => {
+        try {
+            setLoading(true)
+            const { data: { user } } = await supabase.auth.getUser()
+            if (user) {
+                setUserId(user.id)
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('creditos_regulares, creditos_seminarios')
+                    .eq('id', user.id)
+                    .single()
+
+                if (profile) setUserProfile(profile)
+            }
+
+            const { data } = await supabase
+                .from('productos')
+                .select('*')
+                .eq('activo', true)
+                .order('precio', { ascending: true })
+
+            if (data) setProductos(data as Producto[])
+        } catch (error) {
+            console.error(error)
+        } finally {
+            setLoading(false)
+        }
     }
 
     const openCheckout = (producto: Producto) => {
+        if (!userId) {
+            toast.error("Debes iniciar sesión para comprar")
+            return
+        }
         setSelectedPack(producto)
+        setCuponInput('')
+        setCuponAplicado(null)
         setIsCheckoutOpen(true)
+    }
+
+    // --- LÓGICA DE CUPONES (Igual que antes) ---
+    const handleValidarCupon = async () => {
+        if (!cuponInput.trim()) return toast.error('Ingresá un código válido')
+        if (!userId) return toast.error('Debes iniciar sesión para usar cupones')
+
+        setValidandoCupon(true)
+        const codigoLimpio = cuponInput.trim().toUpperCase()
+
+        try {
+            const { data: cupon, error: errCupon } = await supabase
+                .from('cupones')
+                .select('*')
+                .eq('codigo', codigoLimpio)
+                .eq('activo', true)
+                .single()
+
+            if (errCupon || !cupon) {
+                setValidandoCupon(false)
+                return toast.error('El cupón no existe o expiró')
+            }
+
+            const { data: uso } = await supabase
+                .from('cupones_usados')
+                .select('id')
+                .eq('cupon_id', cupon.id)
+                .eq('user_id', userId)
+                .maybeSingle()
+
+            if (uso) {
+                setValidandoCupon(false)
+                return toast.error('Ya utilizaste este cupón anteriormente')
+            }
+
+            setCuponAplicado(cupon)
+            toast.success(`¡Cupón ${cupon.porcentaje}% aplicado!`)
+        } catch (error) {
+            toast.error('Error al validar cupón')
+        }
+        setValidandoCupon(false)
+    }
+
+    const removeCupon = () => {
+        setCuponAplicado(null)
+        setCuponInput('')
+    }
+
+    // --- LÓGICA MERCADO PAGO ---
+    const handlePagarConMP = async () => {
+        if (!userId) return toast.error('Debes iniciar sesión')
+        if (!selectedPack) return
+
+        setGenerandoPago(true)
+        try {
+            const res = await fetch('/api/mercadopago/preference', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    productoId: selectedPack.id,
+                    userId: userId,
+                    cuponId: cuponAplicado ? cuponAplicado.id : null
+                })
+            })
+
+            const data = await res.json()
+
+            if (!res.ok) throw new Error(data.error || 'Error al generar el link de pago')
+
+            // Magia: Redirigimos al alumno a la pasarela de Mercado Pago
+            window.location.href = data.init_point
+
+        } catch (error: any) {
+            toast.error(error.message)
+            setGenerandoPago(false)
+        }
+    }
+
+    const precioBase = selectedPack?.precio || 0
+    const descuentoDinero = cuponAplicado ? (precioBase * (cuponAplicado.porcentaje / 100)) : 0
+    const precioFinal = precioBase - descuentoDinero
+
+    // Mensaje para transferencia manual (lo dejamos como plan B)
+    const getMensajeWhatsApp = () => {
+        let msg = `Hola! Quiero pagar por transferencia el ${selectedPack?.nombre} de $${precioBase.toLocaleString()}`
+        if (cuponAplicado) msg += `.\n\n*Aviso:* Apliqué el cupón ${cuponAplicado.codigo}, así que el total es $${precioFinal.toLocaleString()}`
+        return encodeURIComponent(msg)
     }
 
     if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
@@ -54,7 +199,7 @@ export default function TiendaPage() {
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
             <Toaster position="top-center" richColors theme="dark" />
 
-            {/* HEADER */}
+            {/* HEADER TIENDA */}
             <div className="mb-10 border-b border-white/10 pb-6 text-center md:text-left">
                 <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tighter text-white mb-2">
                     Tienda de <span className="text-[#D4E655]">Créditos</span>
@@ -74,31 +219,16 @@ export default function TiendaPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                     {regulares.map((p) => (
                         <div key={p.id} className="bg-[#09090b] border border-white/10 rounded-3xl p-6 flex flex-col hover:border-[#D4E655]/50 transition-all group relative overflow-hidden shadow-2xl">
-                            {/* Badge de ahorro (si tiene más de 1 clase) */}
                             {p.creditos > 1 && (
-                                <div className="absolute -right-8 top-4 rotate-45 bg-[#D4E655] text-black text-[8px] font-black uppercase px-10 py-1 shadow-lg">
-                                    Ahorro
-                                </div>
+                                <div className="absolute -right-8 top-4 rotate-45 bg-[#D4E655] text-black text-[8px] font-black uppercase px-10 py-1 shadow-lg">Ahorro</div>
                             )}
-
                             <h3 className="text-xl font-black text-white uppercase mb-1">{p.nombre}</h3>
-                            <div className="text-4xl font-black text-[#D4E655] mb-4">
-                                ${p.precio.toLocaleString()}
-                            </div>
-
+                            <div className="text-4xl font-black text-[#D4E655] mb-4">${p.precio.toLocaleString()}</div>
                             <div className="space-y-3 mb-8 flex-1">
-                                <div className="flex items-center gap-2 text-sm text-gray-300 font-medium">
-                                    <Check size={16} className="text-[#D4E655]" /> {p.creditos} Clases Disponibles
-                                </div>
-                                <div className="flex items-center gap-2 text-xs text-gray-500 font-bold uppercase tracking-widest">
-                                    <Info size={14} /> ${Math.round(p.precio / p.creditos).toLocaleString()} por clase
-                                </div>
+                                <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-[#D4E655]" /> {p.creditos} Clases Disponibles</div>
+                                <div className="flex items-center gap-2 text-xs text-gray-500 font-bold uppercase tracking-widest"><Info size={14} /> ${Math.round(p.precio / p.creditos).toLocaleString()} por clase</div>
                             </div>
-
-                            <button
-                                onClick={() => openCheckout(p)}
-                                className="w-full bg-[#111] hover:bg-white text-white hover:text-black border border-white/10 rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all"
-                            >
+                            <button onClick={() => openCheckout(p)} className="w-full bg-[#111] hover:bg-white text-white hover:text-black border border-white/10 rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all">
                                 Comprar Ahora
                             </button>
                         </div>
@@ -118,23 +248,12 @@ export default function TiendaPage() {
                         {seminarios.map((p) => (
                             <div key={p.id} className="bg-[#09090b] border border-purple-500/20 rounded-3xl p-6 flex flex-col hover:border-purple-500/50 transition-all group relative overflow-hidden shadow-2xl">
                                 <h3 className="text-xl font-black text-white uppercase mb-1">{p.nombre}</h3>
-                                <div className="text-4xl font-black text-purple-500 mb-4">
-                                    ${p.precio.toLocaleString()}
-                                </div>
-
+                                <div className="text-4xl font-black text-purple-500 mb-4">${p.precio.toLocaleString()}</div>
                                 <div className="space-y-3 mb-8 flex-1">
-                                    <div className="flex items-center gap-2 text-sm text-gray-300 font-medium">
-                                        <Check size={16} className="text-purple-500" /> {p.creditos} Créditos Especiales
-                                    </div>
-                                    <p className="text-xs text-gray-500 leading-relaxed italic">
-                                        Válido para Workshops, Intensivos y clases masterclass.
-                                    </p>
+                                    <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-purple-500" /> {p.creditos} Créditos Especiales</div>
+                                    <p className="text-xs text-gray-500 leading-relaxed italic">Válido para Workshops, Intensivos y clases masterclass.</p>
                                 </div>
-
-                                <button
-                                    onClick={() => openCheckout(p)}
-                                    className="w-full bg-purple-600/10 hover:bg-purple-600 text-purple-500 hover:text-white border border-purple-600/30 rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all"
-                                >
+                                <button onClick={() => openCheckout(p)} className="w-full bg-purple-600/10 hover:bg-purple-600 text-purple-500 hover:text-white border border-purple-600/30 rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all">
                                     Comprar Ahora
                                 </button>
                             </div>
@@ -143,11 +262,11 @@ export default function TiendaPage() {
                 </div>
             )}
 
-            {/* MODAL DE CHECKOUT (Simulado por ahora) */}
+            {/* MODAL DE CHECKOUT */}
             {isCheckoutOpen && selectedPack && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setIsCheckoutOpen(false)}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in" onClick={() => !generandoPago && setIsCheckoutOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
-                        <div className="text-center mb-8">
+                        <div className="text-center mb-6">
                             <div className="w-16 h-16 bg-[#D4E655] text-black rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-[0_0_20px_rgba(212,230,85,0.4)]">
                                 <ShoppingBasket size={32} />
                             </div>
@@ -155,42 +274,81 @@ export default function TiendaPage() {
                             <p className="text-gray-400 text-sm font-bold uppercase tracking-widest mt-1">{selectedPack.nombre}</p>
                         </div>
 
-                        <div className="bg-white/5 border border-white/5 rounded-2xl p-4 mb-6">
-                            <div className="flex justify-between items-center mb-2">
-                                <span className="text-xs text-gray-500 font-bold uppercase">Total a Transferir</span>
-                                <span className="text-2xl font-black text-[#D4E655]">${selectedPack.precio.toLocaleString()}</span>
+                        {/* --- ZONA CUPONES --- */}
+                        <div className="mb-6 bg-[#111] p-1 rounded-xl border border-white/5 flex">
+                            {cuponAplicado ? (
+                                <div className="w-full flex items-center justify-between p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                                    <div className="flex items-center gap-2">
+                                        <Tag size={16} className="text-green-500" />
+                                        <span className="text-green-500 font-bold text-sm uppercase">{cuponAplicado.codigo}</span>
+                                        <span className="bg-green-500 text-black text-[9px] font-black px-2 py-0.5 rounded ml-1">-{cuponAplicado.porcentaje}%</span>
+                                    </div>
+                                    <button onClick={removeCupon} className="text-gray-500 hover:text-white transition-colors"><X size={16} /></button>
+                                </div>
+                            ) : (
+                                <>
+                                    <input type="text" placeholder="Código de Descuento" value={cuponInput} onChange={e => setCuponInput(e.target.value.toUpperCase())} className="flex-1 bg-transparent text-white text-sm px-4 outline-none font-mono uppercase" />
+                                    <button onClick={handleValidarCupon} disabled={validandoCupon} className="bg-white/10 hover:bg-[#D4E655] text-gray-300 hover:text-black font-bold text-[10px] uppercase px-4 py-3 rounded-lg transition-colors flex items-center">
+                                        {validandoCupon ? <Loader2 size={14} className="animate-spin" /> : 'Aplicar'}
+                                    </button>
+                                </>
+                            )}
+                        </div>
+
+                        {/* --- ZONA TOTALES --- */}
+                        <div className="bg-white/5 border border-white/5 rounded-2xl p-4 mb-8">
+                            {cuponAplicado && (
+                                <div className="flex justify-between items-center mb-1 text-gray-500">
+                                    <span className="text-[10px] font-bold uppercase">Precio Base</span>
+                                    <span className="text-sm line-through">${precioBase.toLocaleString()}</span>
+                                </div>
+                            )}
+                            <div className="flex justify-between items-center">
+                                <span className="text-xs text-gray-300 font-bold uppercase">Total a Pagar</span>
+                                <span className="text-3xl font-black text-[#D4E655]">${precioFinal.toLocaleString()}</span>
                             </div>
                         </div>
 
-                        <div className="space-y-4 mb-8">
-                            <p className="text-[10px] text-gray-500 font-black uppercase text-center tracking-widest">Información de Pago</p>
-                            <div className="bg-[#111] p-4 rounded-2xl border border-white/5 space-y-2">
-                                <p className="text-xs text-gray-400 flex justify-between"><span>Alias:</span> <span className="text-white font-mono font-bold">PISO2.DANZA.OK</span></p>
-                                <p className="text-xs text-gray-400 flex justify-between"><span>Banco:</span> <span className="text-white font-bold uppercase">Mercado Pago</span></p>
-                            </div>
-                            <p className="text-[10px] text-gray-400 text-center leading-relaxed">
-                                Una vez realizada la transferencia, envianos el comprobante por WhatsApp para que acreditemos tus clases.
-                            </p>
-                        </div>
-
+                        {/* --- BOTONES DE PAGO --- */}
                         <div className="flex flex-col gap-3">
-                            <a
-                                href={`https://wa.me/5491122334455?text=Hola! Quiero comprar el ${selectedPack.nombre} de $${selectedPack.precio}`}
-                                target="_blank"
-                                className="w-full bg-[#25D366] text-black font-black uppercase py-4 rounded-2xl text-xs tracking-widest text-center flex items-center justify-center gap-2 hover:bg-white transition-all shadow-xl"
-                            >
-                                <Smartphone size={18} /> Enviar Comprobante
-                            </a>
                             <button
-                                onClick={() => setIsCheckoutOpen(false)}
-                                className="w-full text-gray-500 font-bold uppercase text-[10px] hover:text-white transition-colors"
+                                onClick={handlePagarConMP}
+                                disabled={generandoPago}
+                                className="w-full bg-[#009EE3] text-white font-black uppercase py-4 rounded-2xl text-xs tracking-widest text-center flex items-center justify-center gap-2 hover:bg-[#008CC9] transition-all shadow-[0_0_20px_rgba(0,158,227,0.3)]"
                             >
-                                Volver atrás
+                                {generandoPago ? <Loader2 className="animate-spin" size={18} /> : <><CreditCard size={18} /> Pagar con Mercado Pago</>}
+                            </button>
+
+                            <div className="relative flex items-center py-2">
+                                <div className="flex-grow border-t border-white/10"></div>
+                                <span className="flex-shrink-0 mx-4 text-[9px] font-black uppercase text-gray-600 tracking-widest">O también</span>
+                                <div className="flex-grow border-t border-white/10"></div>
+                            </div>
+
+                            <a
+                                href={`https://wa.me/5491122334455?text=${getMensajeWhatsApp()}`}
+                                target="_blank"
+                                className="w-full bg-[#111] border border-white/10 text-gray-300 font-bold uppercase py-3.5 rounded-xl text-[10px] tracking-widest text-center flex items-center justify-center gap-2 hover:bg-white hover:text-black transition-all"
+                            >
+                                <Smartphone size={14} /> Pagar por Transferencia Manual
+                            </a>
+
+                            <button onClick={() => setIsCheckoutOpen(false)} disabled={generandoPago} className="w-full text-gray-500 font-bold uppercase text-[10px] hover:text-white transition-colors mt-2">
+                                Cancelar
                             </button>
                         </div>
                     </div>
                 </div>
             )}
         </div>
+    )
+}
+
+// Envolvemos todo en Suspense porque usamos useSearchParams de Next.js
+export default function TiendaPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>}>
+            <TiendaContent />
+        </Suspense>
     )
 }

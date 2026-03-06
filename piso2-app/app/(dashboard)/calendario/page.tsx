@@ -2,21 +2,22 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation' // <-- NUEVO IMPORT PARA EL CACHÉ
 import {
     format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
-    eachDayOfInterval, isSameDay, addMonths, subMonths, isBefore, isSameMonth
+    eachDayOfInterval, isSameDay, addMonths, subMonths, isSameMonth
 } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
     ChevronLeft, ChevronRight, X, Plus, MapPin, Trash2, Loader2,
     Info, DollarSign, Image as ImageIcon, Briefcase, GraduationCap,
-    Music, User, AlertCircle, CalendarDays, Tags
+    Music, User, AlertCircle, CalendarDays
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Image from 'next/image'
 import { Toaster, toast } from 'sonner'
 import MultiDatePicker from '@/components/MultiDatePicker'
-import { v4 as uuidv4 } from 'uuid' // Agregado para mejor compatibilidad de IDs
+import { v4 as uuidv4 } from 'uuid'
 
 // --- TIPOS ---
 type EventoAgenda = {
@@ -28,7 +29,6 @@ type EventoAgenda = {
     fin: string
     sala_nombre: string
     sala_sede: string
-
     clase_data?: {
         profesor_nombre: string
         nivel: string
@@ -39,7 +39,6 @@ type EventoAgenda = {
         valor_acuerdo: number
         ritmo_id: string | null
     }
-
     alquiler_data?: {
         telefono: string
         monto: number
@@ -53,6 +52,7 @@ type Ritmo = { id: string; nombre: string }
 
 export default function CalendarioPage() {
     const supabase = createClient()
+    const router = useRouter() // <-- INSTANCIAMOS EL ROUTER
 
     // Estados
     const [currentDate, setCurrentDate] = useState(new Date())
@@ -64,6 +64,7 @@ export default function CalendarioPage() {
     const [ritmos, setRitmos] = useState<Ritmo[]>([])
 
     // UI
+    const [loading, setLoading] = useState(true) // <-- NUEVO ESTADO DE CARGA
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [modalMode, setModalMode] = useState<'view' | 'create'>('view')
     const [deleteTarget, setDeleteTarget] = useState<{ id: string, serieId: string | null } | null>(null)
@@ -82,103 +83,114 @@ export default function CalendarioPage() {
 
     useEffect(() => { fetchData() }, [currentDate])
 
+    // --- FETCH BLINDADO CON TRY/CATCH/FINALLY ---
     const fetchData = async () => {
-        const start = startOfWeek(startOfMonth(currentDate))
-        const end = endOfWeek(endOfMonth(currentDate))
+        try {
+            setLoading(true)
+            const start = startOfWeek(startOfMonth(currentDate))
+            const end = endOfWeek(endOfMonth(currentDate))
 
-        // Para clases (formato ISO)
-        const startIso = start.toISOString()
-        const endIso = end.toISOString()
+            const startIso = start.toISOString()
+            const endIso = end.toISOString()
 
-        // Para alquileres (formato YYYY-MM-DD)
-        const startDateStr = format(start, 'yyyy-MM-dd')
-        const endDateStr = format(end, 'yyyy-MM-dd')
+            const startDateStr = format(start, 'yyyy-MM-dd')
+            const endDateStr = format(end, 'yyyy-MM-dd')
 
-        const { data: dataClases } = await supabase
-            .from('clases')
-            .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre)`)
-            .gte('inicio', startIso)
-            .lte('fin', endIso)
+            // Traemos los datos
+            const { data: dataClases, error: errClases } = await supabase
+                .from('clases')
+                .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre)`)
+                .gte('inicio', startIso)
+                .lte('fin', endIso)
 
-        const { data: dataAlquileres } = await supabase
-            .from('alquileres')
-            .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) )`)
-            .gte('fecha', startDateStr)
-            .lte('fecha', endDateStr)
-            .in('estado', ['confirmado', 'pagado']) // Solo mostramos alquileres firmes en la agenda
+            if (errClases) throw errClases
 
-        const agenda: EventoAgenda[] = []
+            const { data: dataAlquileres, error: errAlq } = await supabase
+                .from('alquileres')
+                .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) )`)
+                .gte('fecha', startDateStr)
+                .lte('fecha', endDateStr)
+                .in('estado', ['confirmado', 'pagado'])
 
-        if (dataClases) {
-            dataClases.forEach((c: any) => {
-                if (c.estado === 'cancelada') return;
-                agenda.push({
-                    id: c.id,
-                    tipo: 'Clase',
-                    titulo: c.nombre,
-                    subtitulo: c.tipo_clase,
-                    inicio: c.inicio,
-                    fin: c.fin,
-                    sala_nombre: c.sala?.nombre,
-                    sala_sede: c.sala?.sede?.nombre,
-                    clase_data: {
-                        profesor_nombre: c.profesor?.nombre_completo,
-                        nivel: c.nivel,
-                        imagen_url: c.imagen_url,
-                        serie_id: c.serie_id,
-                        tipo_clase: c.tipo_clase,
-                        tipo_acuerdo: c.tipo_acuerdo,
-                        valor_acuerdo: c.valor_acuerdo,
-                        ritmo_id: c.ritmo_id
-                    }
+            if (errAlq) throw errAlq
+
+            const agenda: EventoAgenda[] = []
+
+            if (dataClases) {
+                dataClases.forEach((c: any) => {
+                    if (c.estado === 'cancelada') return;
+                    agenda.push({
+                        id: c.id,
+                        tipo: 'Clase',
+                        titulo: c.nombre,
+                        subtitulo: c.tipo_clase,
+                        inicio: c.inicio,
+                        fin: c.fin,
+                        sala_nombre: c.sala?.nombre,
+                        sala_sede: c.sala?.sede?.nombre,
+                        clase_data: {
+                            profesor_nombre: c.profesor?.nombre_completo,
+                            nivel: c.nivel,
+                            imagen_url: c.imagen_url,
+                            serie_id: c.serie_id,
+                            tipo_clase: c.tipo_clase,
+                            tipo_acuerdo: c.tipo_acuerdo,
+                            valor_acuerdo: c.valor_acuerdo,
+                            ritmo_id: c.ritmo_id
+                        }
+                    })
                 })
-            })
-        }
+            }
 
-        if (dataAlquileres) {
-            dataAlquileres.forEach((a: any) => {
-                // Desarmamos la fecha y hora manualmente para obligar al navegador a usar la zona horaria local
-                const [year, month, day] = a.fecha.split('-').map(Number);
-                const [hInicio, mInicio] = a.hora_inicio.split(':').map(Number);
-                const [hFin, mFin] = a.hora_fin.split(':').map(Number);
+            if (dataAlquileres) {
+                dataAlquileres.forEach((a: any) => {
+                    const [year, month, day] = a.fecha.split('-').map(Number);
+                    const [hInicio, mInicio] = a.hora_inicio.split(':').map(Number);
+                    const [hFin, mFin] = a.hora_fin.split(':').map(Number);
 
-                const startObj = new Date(year, month - 1, day, hInicio, mInicio);
-                const endObj = new Date(year, month - 1, day, hFin, mFin);
+                    const startObj = new Date(year, month - 1, day, hInicio, mInicio);
+                    const endObj = new Date(year, month - 1, day, hFin, mFin);
 
-                agenda.push({
-                    id: a.id,
-                    tipo: 'Alquiler',
-                    titulo: a.cliente_nombre || 'Cliente Externo',
-                    subtitulo: `Alquiler (${a.tipo_uso})`,
-                    inicio: startObj.toISOString(),
-                    fin: endObj.toISOString(),
-                    sala_nombre: a.sala?.nombre,
-                    sala_sede: a.sala?.sede?.nombre,
-                    alquiler_data: {
-                        telefono: a.cliente_contacto,
-                        monto: a.monto_total,
-                        estado: a.estado
-                    }
+                    agenda.push({
+                        id: a.id,
+                        tipo: 'Alquiler',
+                        titulo: a.cliente_nombre || 'Cliente Externo',
+                        subtitulo: `Alquiler (${a.tipo_uso})`,
+                        inicio: startObj.toISOString(),
+                        fin: endObj.toISOString(),
+                        sala_nombre: a.sala?.nombre,
+                        sala_sede: a.sala?.sede?.nombre,
+                        alquiler_data: {
+                            telefono: a.cliente_contacto,
+                            monto: a.monto_total,
+                            estado: a.estado
+                        }
+                    })
                 })
-            })
+            }
+
+            agenda.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime())
+            setEventos(agenda)
+
+            const { data: dataSedes } = await supabase.from('sedes').select('id, nombre, salas(id, nombre)')
+            const { data: dataProfes } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'profesor')
+            const { data: dataRitmos } = await supabase.from('ritmos').select('id, nombre').order('nombre')
+
+            if (dataSedes) setSedes(dataSedes)
+            if (dataProfes) setProfesores(dataProfes)
+            if (dataRitmos) setRitmos(dataRitmos)
+
+        } catch (error) {
+            console.error("Error al cargar el calendario:", error)
+            toast.error("Error al cargar la agenda. Refrescá la página.")
+        } finally {
+            setLoading(false) // <-- ESTO NOS SALVA DE LOS LOADERS INFINITOS
         }
-
-        agenda.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime())
-        setEventos(agenda)
-
-        const { data: dataSedes } = await supabase.from('sedes').select('id, nombre, salas(id, nombre)')
-        const { data: dataProfes } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'profesor')
-        const { data: dataRitmos } = await supabase.from('ritmos').select('id, nombre').order('nombre')
-
-        if (dataSedes) setSedes(dataSedes)
-        if (dataProfes) setProfesores(dataProfes)
-        if (dataRitmos) setRitmos(dataRitmos)
     }
 
     // --- MANEJO DE RITMOS ---
     const handleCrearRitmo = async (e?: any) => {
         if (e) e.preventDefault()
-
         const nombreLimpio = nuevoRitmoNombre.trim()
         if (!nombreLimpio) return
 
@@ -190,7 +202,6 @@ export default function CalendarioPage() {
                 .single()
 
             if (error) {
-                console.error("Error de Supabase al crear ritmo:", error)
                 if (error.code === '23505') {
                     toast.error('Ese ritmo ya existe en la lista')
                 } else {
@@ -234,7 +245,7 @@ export default function CalendarioPage() {
             .select('id, cliente_nombre')
             .eq('sala_id', salaId)
             .eq('fecha', fechaStr)
-            .in('estado', ['confirmado', 'pagado', 'pendiente']) // Pendiente también bloquea para seguridad
+            .in('estado', ['confirmado', 'pagado', 'pendiente'])
             .lt('hora_inicio', hFin)
             .gt('hora_fin', hInicio)
             .maybeSingle()
@@ -254,16 +265,12 @@ export default function CalendarioPage() {
             const [horas, minutos] = form.hora.split(':')
             let publicUrl = null
 
-            // Lógica de subida de imagen mejorada con control de errores
             if (formFile) {
                 const fileExt = formFile.name.split('.').pop();
                 const fileName = `${Date.now()}.${fileExt}`
                 const { error: uploadError } = await supabase.storage.from('clases').upload(fileName, formFile)
 
-                if (uploadError) {
-                    console.error("Error Storage:", uploadError)
-                    throw new Error('No se pudo subir la imagen. Revisá si creaste el bucket "clases" en Supabase.')
-                }
+                if (uploadError) throw new Error('No se pudo subir la imagen.')
                 publicUrl = supabase.storage.from('clases').getPublicUrl(fileName).data.publicUrl
             }
 
@@ -291,50 +298,44 @@ export default function CalendarioPage() {
                     tipo_acuerdo: form.tipoAcuerdo,
                     valor_acuerdo: Number(form.valorAcuerdo),
                     imagen_url: publicUrl,
-                    cupo_maximo: Number(form.cupoMaximo) || 0, // <-- Usamos el input
+                    cupo_maximo: Number(form.cupoMaximo) || 0,
                     serie_id: serieUUID,
                     estado: 'activa'
                 })
             }
 
             const { error } = await supabase.from('clases').insert(clasesAInsertar)
-            if (error) {
-                console.error("Error Insertando:", error)
-                throw new Error('Error al guardar en la base de datos.')
-            }
+            if (error) throw new Error('Error al guardar en la base de datos.')
 
-            // --- NUEVO: SISTEMA DE NOTIFICACIONES AUTOMÁTICAS ---
             if (form.ritmoId) {
-                // 1. Buscamos el nombre del ritmo para el mensaje
                 const ritmoNombre = ritmos.find(r => r.id === form.ritmoId)?.nombre || 'Nuevo Ritmo'
-
-                // 2. Buscamos a todos los alumnos que tengan este ritmo_id en sus intereses
                 const { data: interesados } = await supabase
                     .from('profiles')
                     .select('id')
                     .contains('intereses_ritmos', [form.ritmoId])
 
-                // 3. Si hay interesados, armamos el lote de notificaciones y las disparamos
                 if (interesados && interesados.length > 0) {
                     const primerDia = format(new Date(form.fechas[0]), "EEEE d 'de' MMMM", { locale: es })
-
                     const notificaciones = interesados.map(user => ({
                         usuario_id: user.id,
                         titulo: '¡Nueva clase disponible! 🎉',
                         mensaje: `Se abrió una nueva clase de ${ritmoNombre} el ${primerDia}. ¡Reservá tu lugar antes de que se llene!`,
                         leido: false,
-                        link: '/explorar' // Los manda a la cartelera
+                        link: '/explorar'
                     }))
-
                     await supabase.from('notificaciones').insert(notificaciones)
                 }
             }
+
             toast.success(`${clasesAInsertar.length} clase(s) creada(s) correctamente`)
+
             await fetchData()
             setModalMode('view')
             resetForm()
+
+            router.refresh() // <-- OBLIGAMOS A NEXT.JS A BORRAR EL CACHÉ DESPUÉS DE CREAR
+
         } catch (error: any) {
-            console.error(error)
             toast.error(error.message, { duration: 6000, icon: <AlertCircle /> })
         } finally {
             setUploading(false)
@@ -354,9 +355,12 @@ export default function CalendarioPage() {
         if (!deleteTarget) return
         if (option === 'single') await supabase.from('clases').delete().eq('id', deleteTarget.id)
         else await supabase.from('clases').delete().eq('serie_id', deleteTarget.serieId)
+
         toast.success('Eliminado')
         setDeleteTarget(null)
-        fetchData()
+
+        await fetchData()
+        router.refresh() // <-- OBLIGAMOS A NEXT.JS A BORRAR EL CACHÉ DESPUÉS DE ELIMINAR
     }
 
     const getEventStyle = (evt: EventoAgenda) => {
@@ -379,9 +383,14 @@ export default function CalendarioPage() {
 
             {/* HEADER CALENDARIO */}
             <div className="flex justify-between items-center mb-4">
-                <div>
-                    <h2 className="text-3xl font-black text-white uppercase tracking-tighter">{format(currentDate, 'MMMM', { locale: es })}</h2>
-                    <p className="text-[#D4E655] font-bold text-xs tracking-widest uppercase">{format(currentDate, 'yyyy', { locale: es })} • Agenda Completa</p>
+                <div className="flex items-center gap-3">
+                    <div>
+                        <h2 className="text-3xl font-black text-white uppercase tracking-tighter flex items-center gap-2">
+                            {format(currentDate, 'MMMM', { locale: es })}
+                            {loading && <Loader2 size={20} className="animate-spin text-[#D4E655]" />}
+                        </h2>
+                        <p className="text-[#D4E655] font-bold text-xs tracking-widest uppercase">{format(currentDate, 'yyyy', { locale: es })} • Agenda Completa</p>
+                    </div>
                 </div>
                 <div className="flex gap-2">
                     <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-[#D4E655] hover:text-[#D4E655] transition-all rounded-full"><ChevronLeft size={18} /></button>
@@ -453,6 +462,20 @@ export default function CalendarioPage() {
                                                             {evt.tipo === 'Clase' ? (<><a href={`/clase/${evt.id}`} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase py-2 rounded hover:bg-white transition-colors text-center shadow-[0_0_10px_rgba(212,230,85,0.2)]">Gestionar / Tomar Lista</a><button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: evt.id, serieId: evt.clase_data?.serie_id || null }) }} className="text-gray-500 hover:text-red-500 p-2 bg-white/5 rounded hover:bg-red-500/10 transition-colors"><Trash2 size={14} /></button></>) : (<div className="flex gap-2 w-full"><div className="flex-1 text-[10px] text-gray-500 italic flex items-center"><Info size={12} className="mr-1" /> Alquiler externo</div><a href="/alquileres" className="px-3 py-2 bg-white/10 text-white rounded text-[10px] font-bold uppercase hover:bg-white/20">Ver Alquileres</a></div>)}
                                                         </div>
                                                     </div>
+
+                                                    {/* CONFIRMACIÓN DE BORRADO DE CLASE */}
+                                                    {deleteTarget?.id === evt.id && (
+                                                        <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-center p-4 text-center animate-in fade-in">
+                                                            <AlertCircle className="text-red-500 mb-2" size={32} />
+                                                            <h4 className="text-white font-black uppercase mb-1">¿Eliminar Clase?</h4>
+                                                            <p className="text-gray-400 text-[10px] mb-4">Esta acción no se puede deshacer.</p>
+                                                            <div className="flex gap-2 w-full">
+                                                                <button onClick={() => setDeleteTarget(null)} className="flex-1 py-2 bg-white/10 rounded font-bold text-[10px] uppercase hover:bg-white/20">Cancelar</button>
+                                                                <button onClick={() => handleConfirmDelete('single')} className="flex-1 py-2 bg-red-500 text-white rounded font-bold text-[10px] uppercase hover:bg-red-600 shadow-[0_0_15px_rgba(239,68,68,0.3)]">Solo esta</button>
+                                                                {deleteTarget.serieId && <button onClick={() => handleConfirmDelete('serie')} className="flex-1 py-2 bg-red-900 border border-red-500 text-white rounded font-bold text-[10px] uppercase hover:bg-red-800">Toda la serie</button>}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )
                                         })
@@ -465,6 +488,7 @@ export default function CalendarioPage() {
 
                             {/* MODO CREAR (FORMULARIO) */}
                             {modalMode === 'create' && (
+                                // El formulario queda idéntico, ya que la lógica fuerte la cambiamos en handleCrearClase
                                 <form onSubmit={handleCrearClase} className="space-y-6">
                                     <div className="space-y-3">
                                         <div className="flex items-center gap-2 text-[#D4E655] border-b border-white/10 pb-1"><Info size={14} /><h4 className="text-[10px] font-black uppercase tracking-widest">Ficha Técnica</h4></div>
@@ -510,7 +534,6 @@ export default function CalendarioPage() {
                                                 )}
                                             </div>
 
-                                            {/* ACA AGREGAMOS EL CAMPO DE CUPO */}
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:col-span-2">
                                                 <div className="space-y-1">
                                                     <label className="text-[9px] font-bold text-gray-500 uppercase">Tipo</label>
@@ -542,7 +565,6 @@ export default function CalendarioPage() {
                                         <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Descripción</label><textarea value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs outline-none focus:border-[#D4E655] resize-none h-16" /></div>
                                     </div>
 
-                                    {/* SECCIÓN CALENDARIO */}
                                     <div className="space-y-3">
                                         <div className="flex items-center gap-2 text-[#D4E655] border-b border-white/10 pb-1"><CalendarDays size={14} /><h4 className="text-[10px] font-black uppercase tracking-widest">Días de la Clase</h4></div>
                                         <div className="bg-[#111] p-1 rounded-xl border border-white/10">

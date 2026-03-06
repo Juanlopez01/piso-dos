@@ -5,15 +5,21 @@ import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
-    MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert
+    MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
-
-// Eliminamos la constante estática INTERESES_LIST
-// const INTERESES_LIST = ['Tango', 'Folklore', 'Salsa', 'Bachata', 'Contemporáneo', 'Urbano', 'Canto', 'Teatro', 'Yoga', 'Pilates', 'Infantil']
+import { addDays, format } from 'date-fns'
 
 type Ritmo = { id: string; nombre: string }
+
+type Producto = {
+    id: string
+    nombre: string
+    precio: number
+    creditos: number
+    tipo_clase: 'regular' | 'seminario'
+}
 
 function UsuariosContent() {
     const supabase = createClient()
@@ -23,26 +29,29 @@ function UsuariosContent() {
 
     // Estado Datos
     const [users, setUsers] = useState<any[]>([])
-    const [ritmosDisponibles, setRitmosDisponibles] = useState<Ritmo[]>([]) // NUEVO ESTADO PARA RITMOS
+    const [ritmosDisponibles, setRitmosDisponibles] = useState<Ritmo[]>([])
+    const [productos, setProductos] = useState<Producto[]>([]) // NUEVO ESTADO PARA PACKS
     const [loading, setLoading] = useState(true)
 
     // Filtros
     const [roleFilter, setRoleFilter] = useState('todos')
-    const [interestFilter, setInterestFilter] = useState('') // Guardaremos el ID del ritmo
+    const [interestFilter, setInterestFilter] = useState('')
     const [searchTerm, setSearchTerm] = useState('')
 
     // Modales y Procesos
     const [isEditOpen, setIsEditOpen] = useState(false)
     const [isCreateOpen, setIsCreateOpen] = useState(false)
+    const [isPackModalOpen, setIsPackModalOpen] = useState(false) // MODAL PARA PACKS
     const [selectedUser, setSelectedUser] = useState<any>(null)
     const [cambiandoRolId, setCambiandoRolId] = useState<string | null>(null)
+    const [assigningPack, setAssigningPack] = useState(false)
 
-    // Forms (Actualizamos para manejar intereses_ritmos)
+    // Forms
     const [editForm, setEditForm] = useState({ obs: '', intereses_ritmos: [] as string[] })
     const [createForm, setCreateForm] = useState({
         nombre: '', email: '', dni: '', telefono: '', rol: 'alumno'
     })
-    const [creating, setCreating] = useState(false)
+    const [packForm, setPackForm] = useState({ packId: '', monto: '', metodo: 'efectivo' })
 
     // Cargar Datos Iniciales
     useEffect(() => {
@@ -62,9 +71,13 @@ function UsuariosContent() {
         const { data: ritmosData } = await supabase.from('ritmos').select('id, nombre').order('nombre')
         if (ritmosData) setRitmosDisponibles(ritmosData)
 
-        // 2. Traer Usuarios (Nos aseguramos de pedir intereses_ritmos)
+        // 2. Traer Usuarios 
         const { data: usersData } = await supabase.from('profiles').select('*').order('nombre_completo', { ascending: true })
         if (usersData) setUsers(usersData)
+
+        // 3. Traer Packs/Productos activos
+        const { data: prodsData } = await supabase.from('productos').select('*').eq('activo', true).order('tipo_clase').order('creditos')
+        if (prodsData) setProductos(prodsData)
 
         setLoading(false)
     }
@@ -92,14 +105,12 @@ function UsuariosContent() {
 
         let matchesInterest = true
         if ((roleFilter === 'alumno' || roleFilter === 'todos') && interestFilter) {
-            // Comparamos el filtro (que ahora es el ID del ritmo) contra el array del usuario
             matchesInterest = u.intereses_ritmos && u.intereses_ritmos.includes(interestFilter)
         }
 
         return matchesRole && matchesSearch && matchesInterest
     })
 
-    // Función auxiliar para traducir ID de ritmo a Nombre
     const getRitmoNombre = (id: string) => {
         const ritmo = ritmosDisponibles.find(r => r.id === id)
         return ritmo ? ritmo.nombre : 'Desconocido'
@@ -157,7 +168,7 @@ function UsuariosContent() {
         }
     }
 
-    // --- FUNCIONES DE EDICIÓN ---
+    // --- FUNCIONES DE EDICIÓN DE NOTAS/INTERESES ---
     const openEditModal = (user: any) => {
         setSelectedUser(user)
         setEditForm({
@@ -195,6 +206,107 @@ function UsuariosContent() {
             toast.error('Error al guardar')
         }
     }
+
+    // --- FUNCIONES DE CARGA DE PACKS ---
+    const openPackModal = (user: any) => {
+        setSelectedUser(user)
+        setPackForm({ packId: '', monto: '', metodo: 'efectivo' }) // Agregamos el método inicial
+        setIsPackModalOpen(true)
+    }
+
+    const handlePackSelectionChange = (packId: string) => {
+        const prod = productos.find(p => p.id === packId)
+        // Usamos prev para mantener el método de pago que ya estaba seleccionado
+        setPackForm(prev => ({
+            ...prev,
+            packId,
+            monto: prod ? prod.precio.toString() : ''
+        }))
+    }
+
+    const handleAssignPack = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!packForm.packId || packForm.monto === '') return toast.error('Completá los campos del pack')
+
+        setAssigningPack(true)
+
+        const prod = productos.find(p => p.id === packForm.packId)
+        const montoNum = Number(packForm.monto)
+
+        if (!prod) {
+            setAssigningPack(false)
+            return toast.error('Producto no encontrado')
+        }
+
+        const { data: { user } } = await supabase.auth.getUser()
+        let turnoActivoId = null
+
+        // SI HAY PLATA DE POR MEDIO, EXIGIMOS CAJA ABIERTA
+        if (montoNum > 0 && user) {
+            const { data: turno } = await supabase.from('caja_turnos')
+                .select('id')
+                .eq('usuario_id', user.id)
+                .eq('estado', 'abierta')
+                .maybeSingle()
+
+            if (!turno) {
+                setAssigningPack(false)
+                return toast.error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
+            }
+            turnoActivoId = turno.id
+        }
+
+        // Calculamos fecha a 30 días
+        const fechaVencimiento = addDays(new Date(), 30).toISOString()
+
+        try {
+            // 1. Guardar la "bolsita" en el historial (Ledger)
+            const { error: errPack } = await supabase.from('alumno_packs').insert({
+                user_id: selectedUser.id,
+                producto_id: prod.id,
+                tipo_clase: prod.tipo_clase,
+                cantidad_inicial: prod.creditos,
+                creditos_restantes: prod.creditos,
+                monto_abonado: montoNum,
+                fecha_vencimiento: fechaVencimiento,
+                estado: 'activo'
+            })
+            if (errPack) throw errPack
+
+            // 2. Sumar visualmente los créditos al perfil
+            const fieldToUpdate = prod.tipo_clase === 'regular' ? 'creditos_regulares' : 'creditos_seminarios'
+            const currentCreds = selectedUser[fieldToUpdate] || 0
+
+            const { error: errProf } = await supabase.from('profiles').update({
+                [fieldToUpdate]: currentCreds + prod.creditos
+            }).eq('id', selectedUser.id)
+
+            if (errProf) throw errProf
+
+            // 3. REGISTRAR EL MOVIMIENTO EN CAJA (Si corresponde)
+            if (montoNum > 0 && turnoActivoId) {
+                const { error: errCaja } = await supabase.from('caja_movimientos').insert({
+                    turno_id: turnoActivoId,
+                    tipo: 'ingreso',
+                    concepto: `Venta Pack: ${prod.nombre} (${selectedUser.nombre_completo})`,
+                    monto: montoNum,
+                    metodo_pago: packForm.metodo,
+                    origen_referencia: 'sistema'
+                })
+                if (errCaja) console.error("Error al registrar en caja:", errCaja)
+            }
+
+            toast.success(`Pack asignado correctamente. Vence el ${format(new Date(fechaVencimiento), 'dd/MM/yyyy')}`)
+            setIsPackModalOpen(false)
+            fetchData()
+        } catch (error: any) {
+            toast.error(error.message || 'Error al asignar el pack')
+        } finally {
+            setAssigningPack(false)
+        }
+    }
+
+    const [creating, setCreating] = useState(false)
 
     if (loading || loadingContext) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
 
@@ -237,7 +349,7 @@ function UsuariosContent() {
                     </div>
                 </div>
 
-                {/* Filtros Intereses (Dinámicos desde la BD) */}
+                {/* Filtros Intereses */}
                 {(roleFilter === 'alumno' || roleFilter === 'todos') && ritmosDisponibles.length > 0 && (
                     <div className="flex gap-2 flex-wrap pt-2">
                         <div className="flex items-center gap-2 mr-2"><Filter size={12} className="text-[#D4E655]" /><span className="text-[10px] font-bold text-gray-500 uppercase">Intereses:</span></div>
@@ -274,7 +386,14 @@ function UsuariosContent() {
                                 {u.telefono ? <div className="flex items-center gap-2 text-xs text-gray-400 bg-[#111] px-2 py-1.5 rounded-lg border border-white/5 w-fit"><Phone size={10} className="text-[#D4E655]" /> {u.telefono}</div> : <div className="text-[10px] text-gray-600 italic px-1">Sin teléfono</div>}
                             </div>
 
-                            {/* Mostrar intereses renderizados con su nombre real */}
+                            {/* Mostrar Resumen de Créditos Si es Alumno */}
+                            {u.rol === 'alumno' && (
+                                <div className="flex gap-2 mb-3">
+                                    <div className="bg-white/5 px-2 py-1 rounded text-[10px] text-gray-400 uppercase font-bold">Reg: <span className="text-white text-xs">{u.creditos_regulares || 0}</span></div>
+                                    <div className="bg-white/5 px-2 py-1 rounded text-[10px] text-gray-400 uppercase font-bold">Sem: <span className="text-purple-400 text-xs">{u.creditos_seminarios || 0}</span></div>
+                                </div>
+                            )}
+
                             {u.intereses_ritmos && u.intereses_ritmos.length > 0 && (
                                 <div className="flex flex-wrap gap-1 mb-2">
                                     {u.intereses_ritmos.slice(0, 3).map((ritmoId: string) => (
@@ -289,22 +408,27 @@ function UsuariosContent() {
                             {u.staff_observations && canCreate && <div className="bg-yellow-500/5 border border-yellow-500/20 p-2.5 rounded-lg mb-2"><p className="text-[10px] text-yellow-200/70 italic line-clamp-2">"{u.staff_observations}"</p></div>}
                         </div>
 
-                        {/* ACCIONES (Botones abajo) */}
+                        {/* ACCIONES */}
                         {canCreate && (
-                            <div className="flex gap-2 mt-auto pt-2 border-t border-white/5">
-                                {/* Botón Editar */}
+                            <div className="flex gap-2 mt-auto pt-2 border-t border-white/5 flex-wrap">
+                                {/* Botón Cargar Pack (Solo para alumnos) */}
+                                {u.rol === 'alumno' && (
+                                    <button onClick={() => openPackModal(u)} className="w-full py-2.5 rounded-xl border bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500 hover:text-black text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-2 mb-2">
+                                        <CreditCard size={12} /> Cargar Pack
+                                    </button>
+                                )}
+
                                 <button onClick={() => openEditModal(u)} className={`flex-1 py-2.5 rounded-xl border text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-2 ${u.staff_observations ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20' : 'bg-[#111] text-gray-500 border-white/5 hover:border-white/20 hover:text-white'}`}>
                                     <MessageSquare size={12} /> Notas
                                 </button>
 
-                                {/* SELECTOR DE ROL - Solo visible para el Admin */}
                                 {isAdmin && (
                                     <div className="relative flex-1">
                                         <select
                                             disabled={cambiandoRolId === u.id}
                                             value={u.rol || ''}
                                             onChange={(e) => cambiarRol(u.id, e.target.value)}
-                                            className={`w-full py-2.5 px-2 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoRolId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : 'bg-[#111] text-gray-300 border-white/5 hover:border-white/20 hover:text-white'}`}
+                                            className={`w-full h-full py-2.5 px-2 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoRolId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : 'bg-[#111] text-gray-300 border-white/5 hover:border-white/20 hover:text-white'}`}
                                         >
                                             <option value="admin">Admin</option>
                                             <option value="recepcion">Recepción</option>
@@ -330,9 +454,7 @@ function UsuariosContent() {
                 )}
             </div>
 
-            {/* MODALES - Crear Usuario y Editar omitidos por brevedad visual, funcionan igual que antes */}
-
-            {/* MODAL EDITAR */}
+            {/* MODAL EDITAR NOTAS */}
             {isEditOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-6 shadow-2xl relative">
@@ -408,6 +530,67 @@ function UsuariosContent() {
 
                             <button disabled={creating} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-4">
                                 {creating ? <Loader2 className="animate-spin" /> : 'Crear Usuario'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL CARGAR PACK (NUEVO) */}
+            {isPackModalOpen && selectedUser && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-8 shadow-2xl relative">
+                        <div className="flex justify-between items-start mb-6 pb-4 border-b border-white/10">
+                            <div>
+                                <h3 className="text-xl font-black text-white uppercase flex items-center gap-2"><CreditCard className="text-[#D4E655]" size={20} /> Cargar Pack</h3>
+                                <p className="text-[10px] font-bold text-gray-500 uppercase mt-1">Para: <span className="text-white">{selectedUser.nombre_completo}</span></p>
+                            </div>
+                            <button onClick={() => setIsPackModalOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
+                        </div>
+
+                        <form onSubmit={handleAssignPack} className="space-y-5">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Seleccionar Pack</label>
+                                <select
+                                    required
+                                    value={packForm.packId}
+                                    onChange={e => handlePackSelectionChange(e.target.value)}
+                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-[#D4E655]"
+                                >
+                                    <option value="" disabled>Seleccioná un producto...</option>
+                                    {productos.map(p => (
+                                        <option key={p.id} value={p.id}>
+                                            {p.nombre} ({p.creditos} clases) - ${p.precio.toLocaleString()}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {packForm.packId && (
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Monto Abonado ($)</label>
+                                    <input
+                                        required
+                                        type="number"
+                                        value={packForm.monto}
+                                        onChange={e => setPackForm({ ...packForm, monto: e.target.value })}
+                                        className="w-full bg-[#111] border border-[#D4E655]/30 rounded-xl p-4 text-[#D4E655] font-black text-lg outline-none focus:border-[#D4E655] transition-colors"
+                                        placeholder="Monto final pagado"
+                                    />
+                                    <p className="text-[9px] text-gray-500 italic mt-1">Podés editar este monto si el alumno tuvo un descuento manual.</p>
+                                </div>
+                            )}
+
+                            <div className="bg-[#111] border border-white/5 p-4 rounded-xl flex items-start gap-3">
+                                <Calendar size={16} className="text-blue-400 mt-0.5 shrink-0" />
+                                <div>
+                                    <p className="text-[10px] text-white font-bold uppercase tracking-widest mb-1">Vencimiento Automático</p>
+                                    <p className="text-[10px] text-gray-400 leading-relaxed">El sistema le otorgará <strong>30 días exactos</strong> a partir de hoy para utilizar estos créditos.</p>
+                                </div>
+                            </div>
+
+                            <button disabled={assigningPack} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-4 shadow-lg">
+                                {assigningPack ? <Loader2 className="animate-spin" /> : 'Confirmar Carga'}
                             </button>
                         </form>
                     </div>

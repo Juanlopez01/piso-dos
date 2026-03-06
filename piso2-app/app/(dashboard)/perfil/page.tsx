@@ -5,15 +5,15 @@ import { useEffect, useState } from 'react'
 import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
     AlertTriangle, Mail, Calendar, LogOut, CheckCircle2, History,
-    BookOpen, Star,
+    BookOpen, Star, Clock, AlertCircle,
     X
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
-import { format } from 'date-fns'
+import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useRouter } from 'next/navigation'
 
-// --- NUEVO TIPO ---
+// --- TIPOS ---
 type HistorialClase = {
     id: string
     presente: boolean
@@ -23,6 +23,12 @@ type HistorialClase = {
         tipo_clase: string
         profesor: { nombre_completo: string }
     }
+}
+
+type PackVencimiento = {
+    fecha_vencimiento: string
+    creditos_restantes: number
+    tipo_clase: string
 }
 
 export default function PerfilPage() {
@@ -35,8 +41,8 @@ export default function PerfilPage() {
     const [profile, setProfile] = useState<any>(null)
     const [avisos, setAvisos] = useState<any[]>([])
 
-    // --- NUEVO ESTADO PARA EL HISTORIAL ---
     const [historialClases, setHistorialClases] = useState<HistorialClase[]>([])
+    const [proximoVencimiento, setProximoVencimiento] = useState<PackVencimiento | null>(null) // NUEVO ESTADO
 
     // Estado del Formulario
     const [formData, setFormData] = useState({
@@ -49,62 +55,86 @@ export default function PerfilPage() {
     }, [])
 
     const fetchData = async () => {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) {
-            router.push('/login')
-            return
-        }
-
-        // 1. Perfil (Asegurándonos de traer los créditos nuevos)
-        const { data: dataProfile } = await supabase
-            .from('profiles')
-            .select('*, creditos_regulares, creditos_seminarios')
-            .eq('id', user.id)
-            .single()
-
-        if (dataProfile) {
-            setProfile(dataProfile)
-            setFormData({
-                nombre: dataProfile.nombre || '',
-                apellido: dataProfile.apellido || '',
-                email: user.email || '',
-                telefono: dataProfile.telefono || '',
-                alias_cbu: dataProfile.alias_cbu || '',
-                nombre_remplazo: dataProfile.nombre_remplazo || '',
-                contacto_remplazo: dataProfile.contacto_remplazo || ''
-            })
-
-            // 2. Avisos (Solo si es PROFE)
-            if (dataProfile.rol === 'profesor') {
-                const { data: dataAvisos } = await supabase
-                    .from('comunicados')
-                    .select('*')
-                    .order('created_at', { ascending: false })
-                if (dataAvisos) setAvisos(dataAvisos)
+        try {
+            // Ejecutamos la limpieza silenciosa de créditos vencidos en background
+            await supabase.rpc('limpiar_creditos_vencidos')
+            setLoading(true)
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) {
+                router.push('/login')
+                return
             }
 
-            // --- NUEVO: 3. Historial de Clases (Solo si es ALUMNO/USER) ---
-            if (dataProfile.rol === 'alumno' || dataProfile.rol === 'user') {
-                const { data: dataHistorial } = await supabase
-                    .from('inscripciones')
-                    .select(`
-                        id, 
-                        presente, 
-                        clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))
-                    `)
-                    .eq('user_id', user.id)
-                    // Ordenamos para ver las más recientes o futuras primero
-                    .order('created_at', { ascending: false })
-                    .limit(20) // Traemos las últimas 20 para no saturar
+            // 1. Perfil
+            const { data: dataProfile } = await supabase
+                .from('profiles')
+                .select('*, creditos_regulares, creditos_seminarios')
+                .eq('id', user.id)
+                .single()
 
-                if (dataHistorial) {
-                    // Limpiamos los datos por si alguna clase fue borrada y quedó en null
-                    const historialLimpio = dataHistorial.filter((h: any) => h.clase !== null) as unknown as HistorialClase[]
-                    setHistorialClases(historialLimpio)
+            if (dataProfile) {
+                setProfile(dataProfile)
+                setFormData({
+                    nombre: dataProfile.nombre || '',
+                    apellido: dataProfile.apellido || '',
+                    email: user.email || '',
+                    telefono: dataProfile.telefono || '',
+                    alias_cbu: dataProfile.alias_cbu || '',
+                    nombre_remplazo: dataProfile.nombre_remplazo || '',
+                    contacto_remplazo: dataProfile.contacto_remplazo || ''
+                })
+
+                // 2. Avisos (Solo si es PROFE)
+                if (dataProfile.rol === 'profesor') {
+                    const { data: dataAvisos } = await supabase
+                        .from('comunicados')
+                        .select('*')
+                        .order('created_at', { ascending: false })
+                    if (dataAvisos) setAvisos(dataAvisos)
+                }
+
+                // 3. Historial de Clases y Vencimientos (ALUMNO)
+                if (dataProfile.rol === 'alumno' || dataProfile.rol === 'user') {
+                    // Historial
+                    const { data: dataHistorial } = await supabase
+                        .from('inscripciones')
+                        .select(`
+                            id, 
+                            presente, 
+                            clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))
+                        `)
+                        .eq('user_id', user.id)
+                        .order('created_at', { ascending: false })
+                        .limit(20)
+
+                    if (dataHistorial) {
+                        const historialLimpio = dataHistorial.filter((h: any) => h.clase !== null) as unknown as HistorialClase[]
+                        setHistorialClases(historialLimpio)
+                    }
+
+                    // --- NUEVO: Buscar Próximo Vencimiento ---
+                    const hoyIso = new Date().toISOString()
+                    const { data: dataPacks } = await supabase
+                        .from('alumno_packs')
+                        .select('fecha_vencimiento, creditos_restantes, tipo_clase')
+                        .eq('user_id', user.id)
+                        .eq('estado', 'activo')
+                        .gt('creditos_restantes', 0)
+                        .gt('fecha_vencimiento', hoyIso)
+                        .order('fecha_vencimiento', { ascending: true }) // El que vence más pronto primero
+                        .limit(1)
+
+                    if (dataPacks && dataPacks.length > 0) {
+                        setProximoVencimiento(dataPacks[0])
+                    }
                 }
             }
+        } catch (error) {
+            console.error("Error al cargar el perfil:", error)
+            toast.error("Ocurrió un error al cargar tu información.")
+        } finally {
+            setLoading(false)
         }
-        setLoading(false)
     }
 
     const handleSave = async (e: React.FormEvent) => {
@@ -128,14 +158,17 @@ export default function PerfilPage() {
         }).eq('id', profile.id)
 
         if (error) toast.error('Error al guardar')
-        else toast.success('Perfil actualizado correctamente')
+        else {
+            toast.success('Perfil actualizado correctamente')
+            router.refresh()
+        }
 
         setSaving(false)
     }
 
     const handleLogout = async () => {
         await supabase.auth.signOut()
-        router.push('/login')
+        window.location.href = '/login'
     }
 
     if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
@@ -144,10 +177,21 @@ export default function PerfilPage() {
     const isAlumno = profile?.rol === 'alumno' || profile?.rol === 'user'
     const datosIncompletos = isProfe && (!formData.nombre_remplazo || !formData.contacto_remplazo || !formData.alias_cbu)
 
-    // Layout para alumnos: El form toma 1 columna, el historial toma 2. 
-    // Layout para profes: El form toma 2, los avisos 1.
     const gridLayout = isAlumno ? "lg:grid-cols-3" : "lg:grid-cols-3"
     const formColSpan = isAlumno ? "lg:col-span-1" : "lg:col-span-2"
+
+    // Calcular si el vencimiento está cerca
+    let diasParaVencer = null
+    let colorVencimiento = 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+    let iconoVencimiento = <Clock size={16} />
+
+    if (proximoVencimiento) {
+        diasParaVencer = differenceInDays(new Date(proximoVencimiento.fecha_vencimiento), new Date())
+        if (diasParaVencer <= 7) {
+            colorVencimiento = 'bg-orange-500/10 border-orange-500/30 text-orange-400 animate-pulse'
+            iconoVencimiento = <AlertCircle size={16} />
+        }
+    }
 
     return (
         <div className="pb-24 px-4 pt-4 md:p-8 min-h-screen bg-[#050505] text-white">
@@ -240,7 +284,7 @@ export default function PerfilPage() {
                                 <CreditCard size={20} className="text-[#D4E655]" /> Mis Créditos Disponibles
                             </h3>
 
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-2 gap-4 mb-4">
                                 {/* Créditos Regulares */}
                                 <div className="bg-[#111] border border-white/5 p-4 rounded-xl flex flex-col items-center justify-center text-center relative overflow-hidden group hover:border-white/20 transition-all">
                                     <BookOpen size={24} className="text-gray-500 mb-2 opacity-50 group-hover:opacity-100 transition-opacity" />
@@ -255,6 +299,27 @@ export default function PerfilPage() {
                                     <p className="text-4xl font-black text-white">{profile.creditos_seminarios || 0}</p>
                                 </div>
                             </div>
+
+                            {/* NUEVO: ALERTA DE VENCIMIENTO */}
+                            {proximoVencimiento && (
+                                <div className={`border rounded-xl p-4 flex items-center gap-3 ${colorVencimiento}`}>
+                                    {iconoVencimiento}
+                                    <div className="flex-1">
+                                        <p className="text-xs font-black uppercase tracking-widest mb-0.5">
+                                            {diasParaVencer && diasParaVencer <= 7 ? '¡Tus créditos están por vencer!' : 'Próximo vencimiento'}
+                                        </p>
+                                        <p className="text-[10px] opacity-80">
+                                            Tenés {proximoVencimiento.creditos_restantes} clase(s) {proximoVencimiento.tipo_clase} que vencen el <strong>{format(new Date(proximoVencimiento.fecha_vencimiento), "d 'de' MMMM", { locale: es })}</strong>.
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => router.push('/explorar')}
+                                        className="shrink-0 bg-black/20 hover:bg-black/40 text-current px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-colors"
+                                    >
+                                        Usar Ahora
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         {/* HISTORIAL DE CLASES */}

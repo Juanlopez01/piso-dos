@@ -138,6 +138,7 @@ export default function Sidebar() {
                                         ? "bg-[#D4E655] text-black shadow-[0_0_15px_rgba(212,230,85,0.3)]"
                                         : "text-gray-400 hover:text-white hover:bg-white/5"}
                                 `}
+                                prefetch={false}
                             >
                                 <div className="flex items-center gap-3">
                                     <item.icon size={18} className={isActive ? 'text-black' : 'text-gray-500 group-hover:text-white'} />

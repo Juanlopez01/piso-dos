@@ -5,12 +5,13 @@ import { useEffect, useState } from 'react'
 import {
     DollarSign, Lock, Unlock, TrendingUp, TrendingDown,
     Loader2, History, MapPin, Wallet, CreditCard, LayoutDashboard,
-    User
+    User, X, Info
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
+
 
 export default function CajaPage() {
     const supabase = createClient()
@@ -26,7 +27,7 @@ export default function CajaPage() {
     const [sedes, setSedes] = useState<any[]>([])
     const [montoInicial, setMontoInicial] = useState('')
     const [sedeSeleccionada, setSedeSeleccionada] = useState('')
-    const [recienCerrada, setRecienCerrada] = useState(false) // NUEVO ESTADO: Despedida
+    const [recienCerrada, setRecienCerrada] = useState(false)
 
     // Formulario Movimientos
     const [nuevoMovimiento, setNuevoMovimiento] = useState({
@@ -36,6 +37,11 @@ export default function CajaPage() {
     // --- ESTADOS ADMIN ---
     const [cajasActivas, setCajasActivas] = useState<any[]>([])
     const [historialCajas, setHistorialCajas] = useState<any[]>([])
+
+    // Estados Modal de Detalle (Admin)
+    const [cajaDetalle, setCajaDetalle] = useState<any>(null)
+    const [movimientosDetalle, setMovimientosDetalle] = useState<any[]>([])
+    const [loadingDetalle, setLoadingDetalle] = useState(false)
 
     // Efecto Maestro
     useEffect(() => {
@@ -78,16 +84,13 @@ export default function CajaPage() {
                 const ingresosEfecMovs = caja.caja_movimientos?.filter((m: any) => m.tipo === 'ingreso' && m.metodo_pago === 'efectivo').reduce((a: any, b: any) => a + Number(b.monto), 0) || 0
                 const egresosEfec = caja.caja_movimientos?.filter((m: any) => m.tipo === 'egreso' && m.metodo_pago === 'efectivo').reduce((a: any, b: any) => a + Number(b.monto), 0) || 0
 
-                // --- LA CORRECCIÓN CLAVE ---
-                // Le sumamos el monto inicial a los ingresos para que la vista del admin tenga sentido
                 const ingresosTotales = montoInicial + ingresosMovs
 
                 return {
                     ...caja,
-                    // Reemplazamos los ingresos puros por los totales (inicial + movs)
+                    ingresos_movimientos: ingresosMovs,
                     total_ingresos_vista: ingresosTotales,
                     saldo_total: montoInicial + ingresosMovs - egresos,
-                    // El físico es el monto inicial + ingresos en efectivo - egresos en efectivo
                     saldo_fisico: montoInicial + ingresosEfecMovs - egresosEfec
                 }
             })
@@ -101,15 +104,25 @@ export default function CajaPage() {
             .order('fecha_cierre', { ascending: false })
             .limit(20)
 
-        // En el historial también queremos que se vea el monto inicial sumado a los ingresos
         if (historial) {
             const historialCalculado = historial.map(caja => ({
                 ...caja,
-                // Sumamos el monto inicial al total de ingresos que ya estaba guardado en la DB
                 ingresos_con_inicial: Number(caja.total_ingresos) + Number(caja.monto_inicial)
             }))
             setHistorialCajas(historialCalculado)
         }
+    }
+
+    const abrirDetalleCaja = async (caja: any) => {
+        setCajaDetalle(caja)
+        setLoadingDetalle(true)
+        const { data } = await supabase.from('caja_movimientos')
+            .select('*')
+            .eq('turno_id', caja.id)
+            .order('created_at', { ascending: false })
+
+        if (data) setMovimientosDetalle(data)
+        setLoadingDetalle(false)
     }
 
     // =================================================================
@@ -142,7 +155,6 @@ export default function CajaPage() {
     }
 
     // --- CÁLCULOS GLOBALES DEL TURNO ACTIVO ---
-    // Los calculamos aquí arriba para usarlos tanto en la UI como en el botón Cerrar
     let saldoFisico = 0;
     let saldoDigital = 0;
     let ingresosEfec = 0;
@@ -162,7 +174,7 @@ export default function CajaPage() {
         saldoDigital = ingresosDig - egresosDig
     }
 
-    // --- ACCIONES ---
+    // --- ACCIONES RECEPCIÓN ---
     const handleAbrirCaja = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!sedeSeleccionada) return toast.error('Seleccioná una sede')
@@ -174,7 +186,7 @@ export default function CajaPage() {
             })
             if (!error) {
                 toast.success('Caja Abierta')
-                setRecienCerrada(false) // Limpiamos el estado de despedida
+                setRecienCerrada(false)
                 await checkStatus()
                 fetchRecepcionData()
             } else {
@@ -198,8 +210,8 @@ export default function CajaPage() {
             estado: 'cerrada',
             fecha_cierre: new Date().toISOString(),
             monto_final: saldoFinalTotal,
-            saldo_final_efectivo: saldoFisico, // Guardamos desglose
-            saldo_final_digital: saldoDigital, // Guardamos desglose
+            saldo_final_efectivo: saldoFisico,
+            saldo_final_digital: saldoDigital,
             total_ingresos: totalIngresos,
             total_egresos: totalEgresos
         }).eq('id', turnoActivo.id)
@@ -207,7 +219,7 @@ export default function CajaPage() {
         if (!error) {
             toast.success('Caja Cerrada')
             setTurnoActivo(null)
-            setRecienCerrada(true) // Activamos pantalla de despedida
+            setRecienCerrada(true)
             await checkStatus()
             fetchRecepcionData()
         } else {
@@ -250,7 +262,106 @@ export default function CajaPage() {
     // =================================================================
     if (userRole === 'admin') {
         return (
-            <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
+            <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in relative">
+
+                {/* --- MODAL DETALLE DE CAJA --- */}
+                {cajaDetalle && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setCajaDetalle(null)}>
+                        <div className="bg-[#09090b] border border-white/10 w-full max-w-4xl rounded-3xl p-6 shadow-2xl relative flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+
+                            <div className="flex justify-between items-start mb-6 shrink-0 border-b border-white/10 pb-4">
+                                <div>
+                                    <h3 className="text-2xl font-black text-white uppercase flex items-center gap-3">
+                                        Auditoría de Caja
+                                        <span className={`text-[10px] px-2 py-1 rounded uppercase tracking-widest ${cajaDetalle.estado === 'abierta' ? 'bg-[#D4E655]/20 text-[#D4E655]' : 'bg-gray-500/20 text-gray-400'}`}>
+                                            {cajaDetalle.estado}
+                                        </span>
+                                    </h3>
+                                    <div className="text-[11px] text-gray-400 font-bold uppercase mt-2 flex items-center gap-3">
+                                        <span className="flex items-center gap-1"><MapPin size={12} /> {cajaDetalle.sede?.nombre}</span>
+                                        <span className="text-white/20">|</span>
+                                        <span className="flex items-center gap-1"><User size={12} /> {cajaDetalle.usuario?.nombre_completo}</span>
+                                        <span className="text-white/20">|</span>
+                                        <span className="flex items-center gap-1"><History size={12} /> Abierta: {format(new Date(cajaDetalle.fecha_apertura), "dd/MM HH:mm")} hs</span>
+                                    </div>
+                                </div>
+                                <button onClick={() => setCajaDetalle(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X className="text-gray-500 hover:text-white" /></button>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 shrink-0">
+                                <div className="bg-[#111] p-4 rounded-2xl border border-white/5">
+                                    <p className="text-[9px] text-gray-500 uppercase font-bold mb-1">Fondo Inicial</p>
+                                    <p className="text-xl font-black text-white">${Number(cajaDetalle.monto_inicial).toLocaleString()}</p>
+                                </div>
+                                <div className="bg-[#111] p-4 rounded-2xl border border-white/5">
+                                    <p className="text-[9px] text-gray-500 uppercase font-bold text-green-500 mb-1">Ingresos (Movs)</p>
+                                    <p className="text-xl font-black text-green-500">
+                                        +${cajaDetalle.estado === 'abierta'
+                                            ? Number(cajaDetalle.ingresos_movimientos).toLocaleString()
+                                            : Number(cajaDetalle.total_ingresos).toLocaleString()}
+                                    </p>
+                                </div>
+                                <div className="bg-[#111] p-4 rounded-2xl border border-white/5">
+                                    <p className="text-[9px] text-gray-500 uppercase font-bold text-red-500 mb-1">Egresos (Movs)</p>
+                                    <p className="text-xl font-black text-red-500">
+                                        -${Number(cajaDetalle.total_egresos || 0).toLocaleString()}
+                                    </p>
+                                </div>
+                                <div className="bg-[#D4E655]/10 p-4 rounded-2xl border border-[#D4E655]/20">
+                                    <p className="text-[9px] text-[#D4E655] uppercase font-bold mb-1">Total en Caja</p>
+                                    <p className="text-xl font-black text-[#D4E655]">
+                                        ${cajaDetalle.estado === 'abierta'
+                                            ? Number(cajaDetalle.saldo_total).toLocaleString()
+                                            : Number(cajaDetalle.monto_final).toLocaleString()}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <h4 className="text-xs font-black text-white uppercase tracking-widest mb-3 shrink-0 flex items-center gap-2">
+                                <LayoutDashboard size={14} className="text-[#D4E655]" /> Detalle de Movimientos
+                            </h4>
+
+                            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-2">
+                                {loadingDetalle ? (
+                                    <div className="flex justify-center py-10"><Loader2 className="animate-spin text-[#D4E655]" /></div>
+                                ) : movimientosDetalle.length === 0 ? (
+                                    <div className="text-center py-10 border border-dashed border-white/10 rounded-2xl">
+                                        <p className="text-gray-500 text-xs font-bold uppercase">Esta caja no tiene movimientos registrados</p>
+                                    </div>
+                                ) : (
+                                    movimientosDetalle.map(mov => (
+                                        <div key={mov.id} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors">
+                                            <div className="flex items-center gap-4">
+                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${mov.tipo === 'ingreso' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+                                                    {mov.tipo === 'ingreso' ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-bold text-white text-sm">{mov.concepto}</h4>
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        <span className="text-[10px] text-gray-500 uppercase font-bold">
+                                                            {format(new Date(mov.created_at), "HH:mm", { locale: es })} hs
+                                                        </span>
+                                                        <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo_pago === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                                                            {mov.metodo_pago}
+                                                        </span>
+                                                        {mov.origen_referencia !== 'manual' && (
+                                                            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400">Sistema</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <span className={`text-base font-black ${mov.tipo === 'ingreso' ? 'text-white' : 'text-red-500'}`}>
+                                                {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
+                                            </span>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {/* --- FIN MODAL DETALLE --- */}
+
                 <div className="flex justify-between items-end mb-8 border-b border-white/10 pb-6">
                     <div>
                         <h1 className="text-3xl font-black uppercase tracking-tighter text-white">Finanzas</h1>
@@ -273,7 +384,11 @@ export default function CajaPage() {
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
                         {cajasActivas.map(caja => (
-                            <div key={caja.id} className="bg-[#09090b] border border-white/10 rounded-2xl p-6 shadow-lg relative overflow-hidden group hover:border-white/20 transition-all">
+                            <div
+                                key={caja.id}
+                                onClick={() => abrirDetalleCaja(caja)}
+                                className="bg-[#09090b] border border-white/10 rounded-2xl p-6 shadow-lg relative overflow-hidden group hover:border-[#D4E655]/50 hover:shadow-[0_0_20px_rgba(212,230,85,0.1)] transition-all cursor-pointer"
+                            >
                                 <div className="absolute top-0 right-0 bg-[#D4E655] text-black text-[9px] font-black uppercase px-3 py-1 rounded-bl-xl z-10 shadow-[0_0_10px_rgba(212,230,85,0.4)]">
                                     Abierta
                                 </div>
@@ -298,8 +413,10 @@ export default function CajaPage() {
                                     </div>
                                 </div>
 
-                                <div className="bg-[#111] p-4 rounded-xl border border-white/5 mb-2 relative z-10">
-                                    <p className="text-[10px] text-gray-500 font-bold uppercase">Saldo Total (Físico + Digital)</p>
+                                <div className="bg-[#111] p-4 rounded-xl border border-white/5 mb-2 relative z-10 group-hover:bg-[#D4E655]/5 transition-colors">
+                                    <p className="text-[10px] text-gray-500 font-bold uppercase flex justify-between">
+                                        Saldo Total <Info size={12} className="opacity-50" />
+                                    </p>
                                     <p className="text-3xl font-black text-[#D4E655] tracking-tight">
                                         ${caja.saldo_total.toLocaleString()}
                                     </p>
@@ -334,7 +451,11 @@ export default function CajaPage() {
                             </thead>
                             <tbody className="text-xs divide-y divide-white/5">
                                 {historialCajas.map((caja) => (
-                                    <tr key={caja.id} className="hover:bg-white/5 transition-colors group">
+                                    <tr
+                                        key={caja.id}
+                                        onClick={() => abrirDetalleCaja(caja)}
+                                        className="hover:bg-white/10 transition-colors group cursor-pointer"
+                                    >
                                         <td className="p-4 font-bold text-gray-300">
                                             {format(new Date(caja.fecha_cierre), "d MMM, HH:mm", { locale: es })}
                                         </td>
