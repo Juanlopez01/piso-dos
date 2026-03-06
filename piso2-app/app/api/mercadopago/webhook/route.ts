@@ -116,3 +116,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
+
+export async function GET() {
+    return NextResponse.json({
+        mensaje: "¡El Webhook existe y está vivo, esperando a Mercado Pago!"
+    }, { status: 200 });
+}
