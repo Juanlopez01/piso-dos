@@ -318,7 +318,9 @@ export default function ExplorarClasesPage() {
                                             src={clase.imagen_url}
                                             alt={clase.nombre}
                                             fill
-                                            className="object-cover group-hover:scale-105 transition-transform duration-500"
+                                            priority
+                                            sizes="(max-width: 768px) 100vw, 33vw"
+                                            className="object-cover"
                                         />
                                     ) : (
                                         // Fallback si no hay imagen
