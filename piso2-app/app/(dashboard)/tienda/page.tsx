@@ -2,7 +2,7 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import {
     ShoppingBasket, Ticket, Star, Check,
     Smartphone, Zap, Loader2, Info, Tag, X, Lock, CreditCard
@@ -28,6 +28,7 @@ type Cupon = {
 function TiendaContent() {
     const supabase = createClient()
     const searchParams = useSearchParams() // Para leer si vuelve de MercadoPago
+    const router = useRouter()
     const [productos, setProductos] = useState<Producto[]>([])
     const [loading, setLoading] = useState(true)
 
@@ -48,20 +49,18 @@ function TiendaContent() {
     useEffect(() => {
         fetchData()
 
-        // Revisar si viene de Mercado Pago
         const status = searchParams.get('status')
         if (status === 'success') {
             toast.success('¡Pago aprobado! Tus clases se acreditarán en breves instantes.', { duration: 8000 })
-            // Limpiamos la URL para que no quede el status pegado
-            window.history.replaceState(null, '', '/tienda')
+            router.replace('/tienda') // <-- ESTA ES LA FORMA CORRECTA
         } else if (status === 'failure') {
             toast.error('El pago no se pudo procesar o fue rechazado.')
-            window.history.replaceState(null, '', '/tienda')
+            router.replace('/tienda') // <-- ESTA ES LA FORMA CORRECTA
         } else if (status === 'pending') {
             toast.info('Tu pago está pendiente de confirmación.')
-            window.history.replaceState(null, '', '/tienda')
+            router.replace('/tienda') // <-- ESTA ES LA FORMA CORRECTA
         }
-    }, [searchParams])
+    }, [searchParams, router])
 
     const fetchData = async () => {
         try {
