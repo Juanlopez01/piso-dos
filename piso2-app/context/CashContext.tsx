@@ -29,10 +29,9 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     const [userName, setUserName] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(true)
 
-    // Función auxiliar para cargar datos del perfil una vez que tenemos usuario
-    const fetchProfileAndBox = async (userId: string) => {
+    // Agregamos isMounted para evitar actualizar estados si cambiamos de página rápido
+    const fetchProfileAndBox = async (userId: string, isMounted: boolean = true) => {
         try {
-            // 1. Buscar Perfil
             const { data: profile, error: profileError } = await supabase
                 .from('profiles')
                 .select('rol, nombre_completo')
@@ -42,10 +41,12 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
             if (profileError) console.error("Error perfil:", profileError)
 
             const rolReal = profile?.rol || 'alumno'
-            setUserRole(rolReal)
-            setUserName(profile?.nombre_completo || 'Usuario')
 
-            // 2. Buscar Caja (Solo si es Staff)
+            if (isMounted) {
+                setUserRole(rolReal)
+                setUserName(profile?.nombre_completo || 'Usuario')
+            }
+
             if (['admin', 'recepcion'].includes(rolReal)) {
                 const { data: turno } = await supabase.from('caja_turnos')
                     .select('id, sede_id')
@@ -53,46 +54,85 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                     .eq('estado', 'abierta')
                     .maybeSingle()
 
-                if (turno) {
-                    setIsBoxOpen(true)
-                    setCurrentTurnoId(turno.id)
-                    setCurrentSedeId(turno.sede_id)
-                } else {
-                    setIsBoxOpen(false)
+                if (isMounted) {
+                    if (turno) {
+                        setIsBoxOpen(true)
+                        setCurrentTurnoId(turno.id)
+                        setCurrentSedeId(turno.sede_id)
+                    } else {
+                        setIsBoxOpen(false)
+                        setCurrentTurnoId(null)
+                        setCurrentSedeId(null)
+                    }
                 }
             }
         } catch (err) {
             console.error("Error fetching details:", err)
-        } finally {
-            setIsLoading(false)
         }
     }
 
     useEffect(() => {
-        console.log("🔄 Iniciando listener de autenticación...")
+        let isMounted = true;
+        console.log("🔄 Iniciando verificación de sesión...")
 
-        // SUSCRIPCIÓN A CAMBIOS DE AUTH (Login, Logout, Auto-restore)
+        const initSession = async () => {
+            try {
+                if (isMounted) setIsLoading(true);
+
+                // 1. Verificación imperativa: Vamos a buscar la sesión sí o sí al cargar
+                const { data: { session }, error } = await supabase.auth.getSession()
+
+                if (error || !session?.user) {
+                    console.log("👀 Sin usuario activo (Visitante)")
+                    if (isMounted) {
+                        setUserRole('visitante')
+                        setUserName(null)
+                        setIsBoxOpen(false)
+                    }
+                    return; // Cortamos acá
+                }
+
+                console.log("✅ Usuario detectado en inicio:", session.user.email)
+                await fetchProfileAndBox(session.user.id, isMounted)
+
+            } catch (error) {
+                console.error("❌ Error inicializando sesión:", error)
+            } finally {
+                // EL SALVAVIDAS: Pase lo que pase, apagamos el loading
+                if (isMounted) setIsLoading(false)
+            }
+        }
+
+        // Ejecutamos la carga inicial
+        initSession()
+
+        // 2. EL DESPERTADOR: Actúa solo si hay un cambio de estado en vivo
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
             console.log("🔔 Evento Auth:", event)
 
-            if (session?.user) {
-                console.log("✅ Usuario detectado:", session.user.email)
-                await fetchProfileAndBox(session.user.id)
-            } else {
-                console.log("👀 Sin usuario (Visitante)")
-                setUserRole('visitante')
-                setUserName(null)
-                setIsBoxOpen(false)
-                setIsLoading(false)
+            if (event === 'SIGNED_OUT') {
+                if (isMounted) {
+                    setUserRole('visitante')
+                    setUserName(null)
+                    setIsBoxOpen(false)
+                    setCurrentTurnoId(null)
+                    setCurrentSedeId(null)
+                    setIsLoading(false)
+                }
+            } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+                if (session?.user) {
+                    await fetchProfileAndBox(session.user.id, isMounted)
+                    if (isMounted) setIsLoading(false)
+                }
             }
         })
 
         return () => {
+            isMounted = false;
             subscription.unsubscribe()
         }
     }, [])
 
-    // Mantenemos checkStatus por compatibilidad, pero ya no es el motor principal
     const checkStatus = async () => {
         const { data: { user } } = await supabase.auth.getUser()
         if (user) await fetchProfileAndBox(user.id)
