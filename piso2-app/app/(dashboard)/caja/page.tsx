@@ -199,6 +199,7 @@ export default function CajaPage() {
     const handleCerrarCaja = async () => {
         if (!turnoActivo) return
 
+        // Mantenemos los cálculos locales SOLO para mostrarle al usuario la alerta antes de confirmar
         const totalIngresos = ingresosEfec + ingresosDig
         const totalEgresos = egresosEfec + egresosDig
         const saldoFinalTotal = saldoFisico + saldoDigital
@@ -206,26 +207,28 @@ export default function CajaPage() {
         if (!confirm(`¿Cerrar caja con saldo TOTAL $${saldoFinalTotal.toLocaleString()}? \n(Efectivo: $${saldoFisico.toLocaleString()} | Digital: $${saldoDigital.toLocaleString()})`)) return
 
         setProcesando(true)
-        const { error } = await supabase.from('caja_turnos').update({
-            estado: 'cerrada',
-            fecha_cierre: new Date().toISOString(),
-            monto_final: saldoFinalTotal,
-            saldo_final_efectivo: saldoFisico,
-            saldo_final_digital: saldoDigital,
-            total_ingresos: totalIngresos,
-            total_egresos: totalEgresos
-        }).eq('id', turnoActivo.id)
 
-        if (!error) {
-            toast.success('Caja Cerrada')
+        try {
+            // Disparamos la función SQL de cierre atómico
+            const { data, error } = await supabase.rpc('cerrar_turno_caja', {
+                p_turno_id: turnoActivo.id
+            })
+
+            if (error) throw new Error('Fallo de red al intentar cerrar caja.')
+            if (!data.success) throw new Error(data.message)
+
+            toast.success(data.message)
             setTurnoActivo(null)
             setRecienCerrada(true)
-            await checkStatus()
-            fetchRecepcionData()
-        } else {
-            toast.error('Error al cerrar caja')
+            await checkStatus() // Actualiza el contexto global
+            fetchRecepcionData() // Limpia la pantalla
+
+        } catch (error: any) {
+            console.error("Error al cerrar caja:", error)
+            toast.error(error.message || 'Error desconocido al cerrar')
+        } finally {
+            setProcesando(false)
         }
-        setProcesando(false)
     }
 
     const handleMovimiento = async (e: React.FormEvent) => {

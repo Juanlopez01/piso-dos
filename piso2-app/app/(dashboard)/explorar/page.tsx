@@ -100,102 +100,45 @@ export default function ExplorarClasesPage() {
         setProcesandoId(clase.id)
 
         try {
-            // 1. Buscar los packs activos del alumno ordenados por fecha de vencimiento (El que vence primero se gasta primero)
-            const hoyIso = new Date().toISOString()
-            const { data: packsActivos, error: errPacks } = await supabase
-                .from('alumno_packs')
-                .select('*')
-                .eq('user_id', perfil.id)
-                .eq('tipo_clase', tipoClaseBD)
-                .eq('estado', 'activo')
-                .gt('creditos_restantes', 0)
-                .gt('fecha_vencimiento', hoyIso)
-                .order('fecha_vencimiento', { ascending: true })
-
-            if (errPacks) throw new Error('Error al consultar tus créditos disponibles.')
-
-            if (!packsActivos || packsActivos.length === 0) {
-                toast.error(
-                    <div className="flex flex-col gap-1">
-                        <span className="font-bold">Sin créditos suficientes</span>
-                        <span className="text-xs">No tenés créditos vigentes. Necesitás comprar un pack nuevo.</span>
-                    </div>
-                )
-                setProcesandoId(null)
-                return
-            }
-
-            // 2. Tomar el pack más próximo a vencer (FIFO)
-            const packATomar = packsActivos[0]
-
-            // Calcular el valor unitario de la clase de ESE pack específico
-            // Ej: Si pagó $40.000 por 4 clases, la clase vale $10.000
-            const valorUnitarioClase = packATomar.cantidad_inicial > 0
-                ? (Number(packATomar.monto_abonado) / packATomar.cantidad_inicial)
-                : 0
-
-            // 3. Inscribir en la tabla de clases GUARDANDO el valor exacto para el profesor
-            const { error: errInsc } = await supabase.from('inscripciones').insert({
-                clase_id: clase.id,
-                user_id: perfil.id,
-                presente: false,
-                metodo_pago: 'credito_pack', // Ya no es 'bonificado'
-                modalidad: 'Reserva por App',
-                valor_credito: valorUnitarioClase, // EL SECRETO DEL CACHÉ PERFECTO ESTÁ ACÁ
-                pack_usado_id: packATomar.id // Opcional, pero bueno para auditoría
+            // 1. Disparamos la transacción SQL segura (Evita doble cobro)
+            const { data, error } = await supabase.rpc('inscribir_alumno_fifo', {
+                p_user_id: perfil.id,
+                p_clase_id: clase.id,
+                p_tipo_clase: tipoClaseBD
             })
 
-            if (errInsc) throw new Error('Error al reservar lugar, intentá de nuevo.')
+            if (error) throw new Error('Error de conexión al procesar la reserva.')
+            if (!data.success) throw new Error(data.message)
 
-            // 4. Descontar 1 crédito de la bolsita (alumno_packs)
-            const nuevosCreditosBolsita = packATomar.creditos_restantes - 1
-            const nuevoEstadoBolsita = nuevosCreditosBolsita === 0 ? 'agotado' : 'activo'
+            // 2. PERFILADO DE INTERESES (Se mantiene intacto)
+            if (clase.ritmo_id) {
+                const { data: currentProfile } = await supabase
+                    .from('profiles')
+                    .select('intereses_ritmos')
+                    .eq('id', perfil.id)
+                    .single()
 
-            const { error: errUpdatePack } = await supabase
-                .from('alumno_packs')
-                .update({
-                    creditos_restantes: nuevosCreditosBolsita,
-                    estado: nuevoEstadoBolsita
-                })
-                .eq('id', packATomar.id)
-
-            if (errUpdatePack) console.error("Error al restar crédito del pack:", errUpdatePack)
-
-            // 5. MAGIA NUEVA: PERFILADO DE INTERESES (Igual que antes)
-            const { data: currentProfile } = await supabase
-                .from('profiles')
-                .select('intereses_ritmos, creditos_regulares, creditos_seminarios')
-                .eq('id', perfil.id)
-                .single()
-
-            let nuevosIntereses = currentProfile?.intereses_ritmos || []
-            if (clase.ritmo_id && !nuevosIntereses.includes(clase.ritmo_id)) {
-                nuevosIntereses = [...nuevosIntereses, clase.ritmo_id]
+                let nuevosIntereses = currentProfile?.intereses_ritmos || []
+                if (!nuevosIntereses.includes(clase.ritmo_id)) {
+                    await supabase
+                        .from('profiles')
+                        .update({ intereses_ritmos: [...nuevosIntereses, clase.ritmo_id] })
+                        .eq('id', perfil.id)
+                }
             }
 
-            // 6. Actualizamos los créditos totales del perfil visual (Para la UI)
+            // 3. Actualizar UI Localmente para respuesta instantánea
             const columnaUpdate = esEspecial ? 'creditos_seminarios' : 'creditos_regulares'
-            const creditosTotalesPerfil = (currentProfile?.[columnaUpdate] || 1) - 1
+            const creditosActuales = perfil[columnaUpdate] || 0
 
-            const { error: errUpdateProf } = await supabase
-                .from('profiles')
-                .update({
-                    [columnaUpdate]: Math.max(0, creditosTotalesPerfil), // Nunca menor a 0
-                    intereses_ritmos: nuevosIntereses
-                })
-                .eq('id', perfil.id)
-
-            if (errUpdateProf) console.error("Error al actualizar perfil visual:", errUpdateProf)
-
-            // 7. Actualizar UI Local
-            setPerfil(prev => prev ? { ...prev, [columnaUpdate]: Math.max(0, creditosTotalesPerfil) } : null)
+            setPerfil(prev => prev ? { ...prev, [columnaUpdate]: Math.max(0, creditosActuales - 1) } : null)
             setClases(prev => prev.map(c =>
                 c.id === clase.id
                     ? { ...c, ya_inscrito: true, inscritos_count: c.inscritos_count + 1 }
                     : c
             ))
 
-            toast.success('¡Lugar reservado con éxito!')
+            toast.success(data.message)
 
         } catch (error: any) {
             toast.error(error.message)

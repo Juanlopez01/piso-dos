@@ -146,11 +146,57 @@ export default function ClaseDetallePage() {
         if (newVal) toast.success('Presente')
     }
 
-    const handleDeleteInscripcion = async (id: string) => {
-        if (!confirm('¿Eliminar de la lista?')) return
-        await supabase.from('inscripciones').delete().eq('id', id)
-        setInscripciones(prev => prev.filter(i => i.id !== id))
-        toast.success('Eliminado')
+    const handleDeleteInscripcion = async (insc: Inscripcion) => {
+        if (!confirm('¿Dar de baja a este alumno? Si usó un pack, el crédito volverá a su cuenta.')) return
+
+        const nombreAlumno = insc.user?.nombre_completo || [insc.user?.nombre, insc.user?.apellido].filter(Boolean).join(' ') || insc.nombre_invitado || 'el alumno'
+
+        // 1. Envolvemos la llamada en una Promesa real y la ejecutamos
+        const promesaBaja = new Promise(async (resolve, reject) => {
+            try {
+                const { data, error } = await supabase.rpc('reembolsar_inscripcion', {
+                    p_inscripcion_id: insc.id
+                })
+
+                if (error) throw new Error('Error de conexión con la base de datos.')
+                if (!data.success) throw new Error(data.message)
+
+                // Si todo salió bien, actualizamos la lista
+                setInscripciones(prev => prev.filter(i => i.id !== insc.id))
+                fetchData()
+
+                resolve(data)
+            } catch (err: any) {
+                reject(err)
+            }
+        })
+
+        // 2. Le pasamos la promesa ya viva al toast
+        toast.promise(
+            promesaBaja,
+            {
+                loading: (
+                    <div className="flex flex-col gap-1">
+                        <span className="font-bold text-white">Procesando baja de {nombreAlumno}...</span>
+                        <span className="text-xs text-gray-400">Calculando reembolsos y actualizando liquidación.</span>
+                    </div>
+                ),
+                success: (data: any) => (
+                    <div className="flex flex-col gap-1">
+                        <span className="font-bold text-white">¡Baja confirmada!</span>
+                        <span className="text-xs text-gray-400">
+                            {nombreAlumno} fue eliminado. {data.message.includes('devuelto') && 'Se reintegró 1 crédito a su cuenta.'}
+                        </span>
+                    </div>
+                ),
+                error: (err: any) => (
+                    <div className="flex flex-col gap-1">
+                        <span className="font-bold text-red-500">Error al procesar la baja</span>
+                        <span className="text-xs text-gray-400">{err.message}</span>
+                    </div>
+                )
+            }
+        )
     }
 
     // --- FUNCIÓN DEL BUSCADOR EN VIVO ---
@@ -219,170 +265,80 @@ export default function ClaseDetallePage() {
             const { data: { user } } = await supabase.auth.getUser()
             if (!user) throw new Error("No estás logueado")
 
-            const tipoKey = (clase.tipo_clase === 'Especial') ? 'Especial' : 'Regular'
-            const precios = PRECIOS_ALUMNO[tipoKey]
-
-            type ColumnaCreditos = 'creditos_seminarios' | 'creditos_regulares';
-            const columnaCreditos: ColumnaCreditos = tipoKey === 'Especial' ? 'creditos_seminarios' : 'creditos_regulares'
-
+            // 1. Calcular plata en juego
             let montoACobrarEnCaja = 0
-            let valorContableClase = 0
-            let modalidadInscripcion = ""
-            let packElegidoData: ProductoPack | null = null
-
-            let alumnoIdFinal = alumnoSeleccionado ? alumnoSeleccionado.id : null
-
-            if (guestForm.tipo === 'usar_credito') {
-                if (!alumnoSeleccionado) throw new Error("Debes buscar y seleccionar un alumno primero")
-
-                const saldoActual = Number(alumnoSeleccionado[columnaCreditos]) || 0
-                if (saldoActual <= 0) throw new Error(`¡El alumno no tiene saldo para clases ${clase.tipo_clase}! Saldo actual: ${saldoActual}`)
-
-                montoACobrarEnCaja = 0
-                modalidadInscripcion = "Uso de Crédito Activo"
-
-                if (packsDisponibles.length > 0) {
-                    const packReferencia = packsDisponibles[0]
-                    valorContableClase = packReferencia.precio / packReferencia.creditos
-                } else {
-                    valorContableClase = clase.tipo_clase === 'Especial' ? 12000 : 10000
-                }
-            }
-            else if (guestForm.tipo === 'invitado') {
-                montoACobrarEnCaja = 0
-                valorContableClase = 0
-                modalidadInscripcion = "Invitado (Beca/Cortesia)"
-            }
-            else if (guestForm.tipo === 'suelta') {
+            if (guestForm.tipo === 'suelta') {
+                const tipoKey = clase.tipo_clase === 'Especial' ? 'Especial' : 'Regular'
+                const precios = PRECIOS_ALUMNO[tipoKey]
                 montoACobrarEnCaja = guestForm.pago === 'efectivo' ? precios.efectivo : precios.transferencia
-                valorContableClase = montoACobrarEnCaja
-                modalidadInscripcion = `Clase Suelta (${guestForm.pago === 'efectivo' ? 'Efec' : 'Transf'})`
-            }
-            else if (guestForm.tipo === 'pack') {
-                packElegidoData = packsDisponibles.find(p => p.id === guestForm.packSeleccionadoId) || null
-                if (!packElegidoData) throw new Error("Pack inválido")
-
-                montoACobrarEnCaja = packElegidoData.precio
-                valorContableClase = packElegidoData.precio / packElegidoData.creditos
-                modalidadInscripcion = `Compra Pack: ${packElegidoData.nombre} (${guestForm.pago})`
+            } else if (guestForm.tipo === 'pack') {
+                const packElegidoData = packsDisponibles.find(p => p.id === guestForm.packSeleccionadoId)
+                if (packElegidoData) montoACobrarEnCaja = packElegidoData.precio
             }
 
+            // 2. Control de Caja Fuerte
             let turnoId = null
             if (montoACobrarEnCaja > 0) {
                 const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user.id).eq('estado', 'abierta').maybeSingle()
                 if (turno) {
                     turnoId = turno.id
                 } else if (guestForm.pago === 'efectivo') {
-                    toast.error('¡Caja Cerrada! Abrí tu caja para cobrar en efectivo.')
-                    setProcessing(false)
-                    return
+                    throw new Error('¡Caja Cerrada! Abrí tu caja para cobrar en efectivo.')
                 } else {
                     toast.warning('Registrando cobro digital sin caja física abierta.')
                 }
             }
 
+            // 3. Gestión del Alumno (Creación si no existe)
+            let alumnoIdFinal = alumnoSeleccionado ? alumnoSeleccionado.id : null
             if (!alumnoIdFinal && guestForm.email) {
                 const { data: usuarioExistente } = await supabase.from('profiles').select('id').eq('email', guestForm.email).maybeSingle()
-
                 if (usuarioExistente) {
                     alumnoIdFinal = usuarioExistente.id
-                }
-                else if (guestForm.tipo === 'pack') {
+                } else if (guestForm.tipo === 'pack') {
                     if (!guestForm.dni) throw new Error("Para crear un nuevo alumno necesitás ingresar el DNI")
-
                     const res = await fetch('/api/admin/create-user', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            email: guestForm.email,
-                            password: guestForm.dni,
-                            nombre: guestForm.nombre,
-                            apellido: guestForm.apellido,
-                            rol: 'alumno',
-                            telefono: guestForm.telefono,
-                            dni: guestForm.dni
+                            email: guestForm.email, password: guestForm.dni, nombre: guestForm.nombre,
+                            apellido: guestForm.apellido, rol: 'alumno', telefono: guestForm.telefono, dni: guestForm.dni
                         })
                     })
-                    if (!res.ok) {
-                        const dataAPI = await res.json()
-                        throw new Error(dataAPI.error || 'Error al crear usuario en la API')
-                    }
+                    if (!res.ok) throw new Error('Error al crear usuario en la API')
 
                     const { data: usuarioNuevo } = await supabase.from('profiles').select('id').eq('email', guestForm.email).maybeSingle()
-                    if (usuarioNuevo?.id) {
-                        alumnoIdFinal = usuarioNuevo.id
-                        toast.success('Alumno nuevo creado (Clave: DNI)')
-                    } else {
-                        throw new Error("El usuario fue creado pero no se pudo recuperar su perfil. Reintentá.")
-                    }
+                    if (usuarioNuevo?.id) alumnoIdFinal = usuarioNuevo.id
+                    else throw new Error("Error al recuperar el perfil del nuevo alumno.")
                 }
             }
 
-            if (alumnoIdFinal) {
-                const { data: currentProfile } = await supabase.from('profiles').select(columnaCreditos).eq('id', alumnoIdFinal).single()
-                const perfilTipado = currentProfile as Record<ColumnaCreditos, number> | null
-                const creditosActuales = perfilTipado ? (Number(perfilTipado[columnaCreditos]) || 0) : 0
+            // 4. DISPARAMOS LA TRANSACCIÓN BLINDADA SQL
+            const tipoClaseBD = clase.tipo_clase === 'Especial' ? 'seminario' : 'regular'
+            const { data, error } = await supabase.rpc('procesar_inscripcion_recepcion', {
+                p_clase_id: clase.id,
+                p_user_id: alumnoIdFinal,
+                p_nombre_invitado: !alumnoIdFinal ? `${guestForm.nombre} ${guestForm.apellido}`.trim() : null,
+                p_tipo_operacion: guestForm.tipo,
+                p_tipo_clase: tipoClaseBD,
+                p_monto_caja: montoACobrarEnCaja,
+                p_metodo_pago: guestForm.pago,
+                p_turno_caja_id: turnoId,
+                p_producto_id: guestForm.packSeleccionadoId || null,
+                p_email_comprador: guestForm.email || null
+            })
 
-                let nuevoSaldo = creditosActuales
+            if (error) throw new Error('Fallo de red al ejecutar transacción.')
+            if (!data.success) throw new Error(data.message)
 
-                if (guestForm.tipo === 'usar_credito') {
-                    nuevoSaldo = creditosActuales - 1
-                } else if (guestForm.tipo === 'pack' && packElegidoData) {
-                    nuevoSaldo = creditosActuales + (packElegidoData.creditos - 1)
-                }
-
-                if (guestForm.tipo === 'usar_credito' || guestForm.tipo === 'pack') {
-                    const { error: errUpdate } = await supabase.from('profiles').update({
-                        [columnaCreditos]: nuevoSaldo
-                    }).eq('id', alumnoIdFinal)
-
-                    if (errUpdate) console.error("Error al actualizar créditos", errUpdate)
-                    else {
-                        if (guestForm.tipo === 'usar_credito') toast.success(`Crédito descontado. Le quedan ${nuevoSaldo}`)
-                        if (guestForm.tipo === 'pack') toast.success(`Se guardaron ${(packElegidoData?.creditos || 1) - 1} créditos de saldo`)
-                    }
-                }
-            }
-
-            const newInsc = {
-                clase_id: clase.id,
-                user_id: alumnoIdFinal,
-                nombre_invitado: !alumnoIdFinal ? `${guestForm.nombre} ${guestForm.apellido}`.trim() : null,
-                es_invitado: guestForm.tipo === 'invitado',
-                presente: true,
-                metodo_pago: guestForm.tipo === 'invitado' || guestForm.tipo === 'usar_credito' ? 'bonificado' : guestForm.pago,
-                valor_credito: valorContableClase,
-                modalidad: guestForm.tipo === 'pack' ? `Uso de Pack (${packElegidoData?.nombre})` : modalidadInscripcion
-            }
-
-            const { data: inscData, error: inscError } = await supabase.from('inscripciones').insert(newInsc).select().single()
-            if (inscError) throw inscError
-
-            if (montoACobrarEnCaja > 0 && turnoId) {
-                await supabase.from('caja_movimientos').insert({
-                    turno_id: turnoId,
-                    tipo: 'ingreso',
-                    concepto: `${modalidadInscripcion} - ${guestForm.email || guestForm.nombre}`,
-                    monto: montoACobrarEnCaja,
-                    metodo_pago: guestForm.pago,
-                    origen_referencia: 'inscripcion'
-                })
-            }
-
-            setInscripciones([...inscripciones, {
-                ...inscData,
-                user: alumnoIdFinal ? {
-                    nombre: guestForm.nombre,
-                    apellido: guestForm.apellido,
-                    nombre_completo: alumnoSeleccionado?.nombre_completo || `${guestForm.nombre} ${guestForm.apellido}`.trim(),
-                    email: guestForm.email || ''
-                } : null
-            }])
+            // 5. Limpieza y Actualización Visual
+            toast.success(data.message)
+            fetchData() // Esto asegura que la lista, la caja y el pago del docente sean matemáticamente perfectos
             setIsGuestOpen(false)
             limpiarSeleccionAlumno()
 
         } catch (err: any) {
-            console.error("Error al procesar inscripción:", err)
+            console.error("Error al procesar:", err)
             toast.error(err.message || 'Error desconocido')
         } finally {
             setProcessing(false)
@@ -518,7 +474,7 @@ export default function ClaseDetallePage() {
                                         {insc.presente ? <Check size={20} strokeWidth={3} /> : <X size={20} />}
                                         <span className="hidden md:inline text-[10px] font-black uppercase tracking-widest">{insc.presente ? 'Presente' : 'Ausente'}</span>
                                     </button>
-                                    {showFinance && <button onClick={() => handleDeleteInscripcion(insc.id)} className="text-gray-600 hover:text-red-500 p-2"><Trash2 size={18} /></button>}
+                                    {showFinance && <button onClick={() => handleDeleteInscripcion(insc)} className="text-gray-600 hover:text-red-500 p-2"><Trash2 size={18} /></button>}
                                 </div>
                             </div>
                         ))}

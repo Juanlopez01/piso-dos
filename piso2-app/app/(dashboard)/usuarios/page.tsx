@@ -5,7 +5,8 @@ import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
-    MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar
+    MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
+    Wallet
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
@@ -224,6 +225,7 @@ function UsuariosContent() {
         }))
     }
 
+    // --- FUNCIONES DE CARGA DE PACKS (SQL) ---
     const handleAssignPack = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!packForm.packId || packForm.monto === '') return toast.error('Completá los campos del pack')
@@ -238,74 +240,47 @@ function UsuariosContent() {
             return toast.error('Producto no encontrado')
         }
 
-        const { data: { user } } = await supabase.auth.getUser()
-        let turnoActivoId = null
-
-        // SI HAY PLATA DE POR MEDIO, EXIGIMOS CAJA ABIERTA
-        if (montoNum > 0 && user) {
-            const { data: turno } = await supabase.from('caja_turnos')
-                .select('id')
-                .eq('usuario_id', user.id)
-                .eq('estado', 'abierta')
-                .maybeSingle()
-
-            if (!turno) {
-                setAssigningPack(false)
-                return toast.error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
-            }
-            turnoActivoId = turno.id
-        }
-
-        // Calculamos fecha a 30 días
-        const fechaVencimiento = addDays(new Date(), 30).toISOString()
-
         try {
-            // 1. Guardar la "bolsita" en el historial (Ledger)
-            const { error: errPack } = await supabase.from('alumno_packs').insert({
-                user_id: selectedUser.id,
-                producto_id: prod.id,
-                tipo_clase: prod.tipo_clase,
-                cantidad_inicial: prod.creditos,
-                creditos_restantes: prod.creditos,
-                monto_abonado: montoNum,
-                fecha_vencimiento: fechaVencimiento,
-                estado: 'activo'
-            })
-            if (errPack) throw errPack
+            const { data: { user } } = await supabase.auth.getUser()
+            let turnoActivoId = null
 
-            // 2. Sumar visualmente los créditos al perfil
-            const fieldToUpdate = prod.tipo_clase === 'regular' ? 'creditos_regulares' : 'creditos_seminarios'
-            const currentCreds = selectedUser[fieldToUpdate] || 0
+            // SI HAY PLATA DE POR MEDIO, EXIGIMOS CAJA ABIERTA
+            if (montoNum > 0 && user) {
+                const { data: turno } = await supabase.from('caja_turnos')
+                    .select('id')
+                    .eq('usuario_id', user.id)
+                    .eq('estado', 'abierta')
+                    .maybeSingle()
 
-            const { error: errProf } = await supabase.from('profiles').update({
-                [fieldToUpdate]: currentCreds + prod.creditos
-            }).eq('id', selectedUser.id)
-
-            if (errProf) throw errProf
-
-            // 3. REGISTRAR EL MOVIMIENTO EN CAJA (Si corresponde)
-            if (montoNum > 0 && turnoActivoId) {
-                const { error: errCaja } = await supabase.from('caja_movimientos').insert({
-                    turno_id: turnoActivoId,
-                    tipo: 'ingreso',
-                    concepto: `Venta Pack: ${prod.nombre} (${selectedUser.nombre_completo})`,
-                    monto: montoNum,
-                    metodo_pago: packForm.metodo,
-                    origen_referencia: 'sistema'
-                })
-                if (errCaja) console.error("Error al registrar en caja:", errCaja)
+                if (!turno) {
+                    throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
+                }
+                turnoActivoId = turno.id
             }
 
-            toast.success(`Pack asignado correctamente. Vence el ${format(new Date(fechaVencimiento), 'dd/MM/yyyy')}`)
+            // Disparamos el misil SQL (Todo en Uno: Pack, Perfil y Caja)
+            const { data, error } = await supabase.rpc('asignar_pack_manual', {
+                p_user_id: selectedUser.id,
+                p_turno_caja_id: turnoActivoId,
+                p_tipo_clase: prod.tipo_clase,
+                p_cantidad: prod.creditos,
+                p_monto: montoNum,
+                p_metodo_pago: packForm.metodo
+            })
+
+            if (error) throw new Error('Error de conexión al cargar el pack.')
+            if (!data.success) throw new Error(data.message)
+
+            toast.success(`Pack asignado correctamente. Créditos actualizados.`)
             setIsPackModalOpen(false)
-            fetchData()
+            fetchData() // Refrescamos la grilla visualmente
+
         } catch (error: any) {
             toast.error(error.message || 'Error al asignar el pack')
         } finally {
             setAssigningPack(false)
         }
     }
-
     const [creating, setCreating] = useState(false)
 
     if (loading || loadingContext) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
@@ -568,17 +543,25 @@ function UsuariosContent() {
 
                             {packForm.packId && (
                                 <div className="space-y-2">
-                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Monto Abonado ($)</label>
-                                    <input
-                                        required
-                                        type="number"
-                                        value={packForm.monto}
-                                        onChange={e => setPackForm({ ...packForm, monto: e.target.value })}
-                                        className="w-full bg-[#111] border border-[#D4E655]/30 rounded-xl p-4 text-[#D4E655] font-black text-lg outline-none focus:border-[#D4E655] transition-colors"
-                                        placeholder="Monto final pagado"
-                                    />
-                                    <p className="text-[9px] text-gray-500 italic mt-1">Podés editar este monto si el alumno tuvo un descuento manual.</p>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <button
+                                            type="button"
+                                            onClick={() => setPackForm({ ...packForm, metodo: 'efectivo' })}
+                                            className={`p-4 rounded-xl border flex items-center justify-center gap-2 transition-all ${packForm.metodo === 'efectivo' ? 'bg-[#D4E655] border-[#D4E655] text-black font-black' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}
+                                        >
+                                            <Wallet size={16} /> Efectivo
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPackForm({ ...packForm, metodo: 'transferencia' })}
+                                            className={`p-4 rounded-xl border flex items-center justify-center gap-2 transition-all ${packForm.metodo === 'transferencia' ? 'bg-[#D4E655] border-[#D4E655] text-black font-black' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}
+                                        >
+                                            <CreditCard size={16} /> Transferencia
+                                        </button>
+                                    </div>
                                 </div>
+
                             )}
 
                             <div className="bg-[#111] border border-white/5 p-4 rounded-xl flex items-start gap-3">
