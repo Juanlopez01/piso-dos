@@ -11,9 +11,9 @@ export async function POST(request: Request) {
         const body = await request.json()
 
         // Extraemos los datos que nos manda el botón del Frontend
-        const { titulo, precio, usuarioId, tipo_pago } = body
+        const { titulo, precio, userId, tipo_pago } = body
 
-        if (!titulo || !precio || !usuarioId) {
+        if (!titulo || !precio || !userId) {
             return NextResponse.json({ error: "Faltan datos para cobrar" }, { status: 400 })
         }
 
@@ -21,8 +21,8 @@ export async function POST(request: Request) {
         // ARMADO DEL "PAPELITO OCULTO" (METADATA)
         // ==========================================
         let metadataCustom: any = {
-            usuario_id: usuarioId, // Para La Liga
-            user_id: usuarioId     // Para los Packs (tu webhook original usa este)
+            usuario_id: userId, // Para La Liga
+            user_id: userId     // Para los Packs (tu webhook original usa este)
         }
 
         if (tipo_pago === 'cuota_liga') {
