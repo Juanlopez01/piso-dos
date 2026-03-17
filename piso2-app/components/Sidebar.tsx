@@ -109,7 +109,7 @@ export default function Sidebar() {
                 </h1>
 
                 {/* Indicador de Estado (Solo Staff) */}
-                {!isLoading && (role === 'admin' || role === 'recepcion') && (
+                {!isLoading && (role === 'recepcion') && (
                     <div className="mt-2 flex items-center gap-2 animate-in fade-in duration-500">
                         <span className={`w-2 h-2 rounded-full ${isBoxOpen ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-red-500'}`} />
                         <span className="text-[10px] uppercase font-bold text-gray-500">

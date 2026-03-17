@@ -1,101 +1,72 @@
-import { NextResponse } from 'next/server';
-import { MercadoPagoConfig, Preference } from 'mercadopago';
-import { createClient } from '@supabase/supabase-js';
+import { MercadoPagoConfig, Preference } from 'mercadopago'
+import { NextResponse } from 'next/server'
 
-// Usamos el cliente de Supabase de Admin para poder verificar datos de forma segura
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Inicializamos el cliente con tu token de MercadoPago
+const client = new MercadoPagoConfig({
+    accessToken: process.env.MP_ACCESS_TOKEN || ''
+})
 
 export async function POST(request: Request) {
     try {
-        const body = await request.json();
-        const { productoId, userId, cuponId } = body;
+        const body = await request.json()
 
-        if (!productoId || !userId) {
-            return NextResponse.json({ error: 'Faltan datos requeridos' }, { status: 400 });
+        // Extraemos los datos que nos manda el botón del Frontend
+        const { titulo, precio, usuarioId, tipo_pago } = body
+
+        if (!titulo || !precio || !usuarioId) {
+            return NextResponse.json({ error: "Faltan datos para cobrar" }, { status: 400 })
         }
 
-        // 1. Verificamos el producto en la BD para asegurar que el precio es real (evita hackeos)
-        const { data: producto, error: errProd } = await supabase
-            .from('productos')
-            .select('*')
-            .eq('id', productoId)
-            .single();
-
-        if (errProd || !producto) throw new Error('Producto no encontrado');
-
-        let precioFinal = producto.precio;
-        let codigoCupon = '';
-
-        // 2. Si mandó un cupón, lo validamos y aplicamos el descuento matemáticamente
-        if (cuponId) {
-            const { data: cupon } = await supabase
-                .from('cupones')
-                .select('*')
-                .eq('id', cuponId)
-                .eq('activo', true)
-                .single();
-
-            if (cupon) {
-                // Chequeamos que no lo haya usado ya
-                const { data: yaUsado } = await supabase
-                    .from('cupones_usados')
-                    .select('id')
-                    .eq('cupon_id', cupon.id)
-                    .eq('user_id', userId)
-                    .maybeSingle();
-
-                if (!yaUsado) {
-                    const descuento = precioFinal * (cupon.porcentaje / 100);
-                    precioFinal = precioFinal - descuento;
-                    codigoCupon = cupon.codigo;
-                }
-            }
+        // ==========================================
+        // ARMADO DEL "PAPELITO OCULTO" (METADATA)
+        // ==========================================
+        let metadataCustom: any = {
+            usuario_id: usuarioId, // Para La Liga
+            user_id: usuarioId     // Para los Packs (tu webhook original usa este)
         }
 
-        // 3. Inicializamos Mercado Pago con nuestro Token
-        const client = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN! });
-        const preference = new Preference(client);
+        if (tipo_pago === 'cuota_liga') {
+            // Si están pagando la liga, mandamos el mes y el año
+            metadataCustom.tipo_pago = 'cuota_liga'
+            metadataCustom.mes = body.mes
+            metadataCustom.anio = body.anio
+        } else {
+            // Si están pagando un pack normal, pasamos los datos que requiere tu código original
+            metadataCustom.producto_id = body.packId
+            metadataCustom.tipo_clase = body.tipo_clase
+            metadataCustom.creditos = body.creditos
+            if (body.cupon_id) metadataCustom.cupon_id = body.cupon_id
+        }
 
-        // 4. Creamos la preferencia (el link de pago)
-        // Usamos metadata para pasarle al Webhook la info de a quién hay que darle los créditos después
-        const response = await preference.create({
+        // Creamos la preferencia de cobro en MercadoPago
+        const preference = new Preference(client)
+        const result = await preference.create({
             body: {
                 items: [
                     {
-                        id: producto.id,
-                        title: `${producto.nombre} ${codigoCupon ? `(Cupón: ${codigoCupon})` : ''}`,
+                        id: tipo_pago === 'cuota_liga' ? 'LIGA_CUOTA' : (body.packId || 'PACK'),
+                        title: titulo,
                         quantity: 1,
-                        unit_price: Number(precioFinal),
+                        unit_price: Number(precio),
                         currency_id: 'ARS',
                     }
                 ],
-                metadata: {
-                    user_id: userId,
-                    producto_id: producto.id,
-                    cupon_id: cuponId || null,
-                    tipo_clase: producto.tipo_clase,
-                    creditos: producto.creditos
-                },
-                // URLs a donde vuelve el usuario después de pagar o cancelar
+                metadata: metadataCustom,
                 back_urls: {
-                    success: `${process.env.NEXT_PUBLIC_SITE_URL}/tienda?status=success`,
-                    failure: `${process.env.NEXT_PUBLIC_SITE_URL}/tienda?status=failure`,
-                    pending: `${process.env.NEXT_PUBLIC_SITE_URL}/tienda?status=pending`,
+                    // A dónde vuelve el alumno después de pasar la tarjeta
+                    success: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/la-liga?pago=exito`,
+                    failure: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/la-liga?pago=error`,
+                    pending: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/la-liga?pago=pendiente`
                 },
                 auto_return: 'approved',
-                // ACÁ ENVIARÁ MP EL AVISO SILENCIOSO CUANDO SE APRUEBE
-                notification_url: `${process.env.NEXT_PUBLIC_SITE_URL}/api/mercadopago/webhook`,
             }
-        });
+        })
 
-        // Devolvemos el ID de la preferencia para que el frontend abra la ventana de pago
-        return NextResponse.json({ id: response.id, init_point: response.init_point });
+        // Devolvemos el link mágico generado por MercadoPago
+        return NextResponse.json({ url: result.init_point })
 
-    } catch (error: any) {
-        console.error('Error generando preferencia:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+    } catch (error) {
+        console.error("❌ Error creando preferencia MP:", error)
+        return NextResponse.json({ error: "Error al crear el link de pago" }, { status: 500 })
     }
 }

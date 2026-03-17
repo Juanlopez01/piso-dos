@@ -2,7 +2,7 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation' // <-- NUEVO IMPORT PARA EL CACHÉ
+import { useRouter } from 'next/navigation'
 import {
     format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
     eachDayOfInterval, isSameDay, addMonths, subMonths, isSameMonth
@@ -11,7 +11,7 @@ import { es } from 'date-fns/locale'
 import {
     ChevronLeft, ChevronRight, X, Plus, MapPin, Trash2, Loader2,
     Info, DollarSign, Image as ImageIcon, Briefcase, GraduationCap,
-    Music, User, AlertCircle, CalendarDays
+    Music, User, AlertCircle, CalendarDays, Star
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Image from 'next/image'
@@ -38,6 +38,8 @@ type EventoAgenda = {
         tipo_acuerdo: string
         valor_acuerdo: number
         ritmo_id: string | null
+        es_la_liga: boolean     // <-- NUEVO
+        liga_nivel: number | null // <-- NUEVO
     }
     alquiler_data?: {
         telefono: string
@@ -52,7 +54,7 @@ type Ritmo = { id: string; nombre: string }
 
 export default function CalendarioPage() {
     const supabase = createClient()
-    const router = useRouter() // <-- INSTANCIAMOS EL ROUTER
+    const router = useRouter()
 
     // Estados
     const [currentDate, setCurrentDate] = useState(new Date())
@@ -64,7 +66,7 @@ export default function CalendarioPage() {
     const [ritmos, setRitmos] = useState<Ritmo[]>([])
 
     // UI
-    const [loading, setLoading] = useState(true) // <-- NUEVO ESTADO DE CARGA
+    const [loading, setLoading] = useState(true)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [modalMode, setModalMode] = useState<'view' | 'create'>('view')
     const [deleteTarget, setDeleteTarget] = useState<{ id: string, serieId: string | null } | null>(null)
@@ -77,13 +79,14 @@ export default function CalendarioPage() {
         nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
         hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '', profeId: '',
         tipoAcuerdo: 'porcentaje', valorAcuerdo: '',
-        fechas: [] as Date[]
+        fechas: [] as Date[],
+        // --- NUEVOS CAMPOS LA LIGA ---
+        esLaLiga: false, ligaNivel: 1
     })
     const [formFile, setFormFile] = useState<File | null>(null)
 
     useEffect(() => { fetchData() }, [currentDate])
 
-    // --- FETCH BLINDADO CON TRY/CATCH/FINALLY ---
     const fetchData = async () => {
         try {
             setLoading(true)
@@ -96,7 +99,7 @@ export default function CalendarioPage() {
             const startDateStr = format(start, 'yyyy-MM-dd')
             const endDateStr = format(end, 'yyyy-MM-dd')
 
-            // Traemos los datos
+            // Traemos los datos (Asegurarse de que la tabla clases tenga es_la_liga y liga_nivel)
             const { data: dataClases, error: errClases } = await supabase
                 .from('clases')
                 .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre)`)
@@ -136,7 +139,9 @@ export default function CalendarioPage() {
                             tipo_clase: c.tipo_clase,
                             tipo_acuerdo: c.tipo_acuerdo,
                             valor_acuerdo: c.valor_acuerdo,
-                            ritmo_id: c.ritmo_id
+                            ritmo_id: c.ritmo_id,
+                            es_la_liga: c.es_la_liga || false,
+                            liga_nivel: c.liga_nivel || null
                         }
                     })
                 })
@@ -184,11 +189,10 @@ export default function CalendarioPage() {
             console.error("Error al cargar el calendario:", error)
             toast.error("Error al cargar la agenda. Refrescá la página.")
         } finally {
-            setLoading(false) // <-- ESTO NOS SALVA DE LOS LOADERS INFINITOS
+            setLoading(false)
         }
     }
 
-    // --- MANEJO DE RITMOS ---
     const handleCrearRitmo = async (e?: any) => {
         if (e) e.preventDefault()
         const nombreLimpio = nuevoRitmoNombre.trim()
@@ -300,7 +304,10 @@ export default function CalendarioPage() {
                     imagen_url: publicUrl,
                     cupo_maximo: Number(form.cupoMaximo) || 0,
                     serie_id: serieUUID,
-                    estado: 'activa'
+                    estado: 'activa',
+                    // --- APLICACIÓN LA LIGA ---
+                    es_la_liga: form.esLaLiga,
+                    liga_nivel: form.esLaLiga ? form.ligaNivel : null
                 })
             }
 
@@ -332,8 +339,7 @@ export default function CalendarioPage() {
             await fetchData()
             setModalMode('view')
             resetForm()
-
-            router.refresh() // <-- OBLIGAMOS A NEXT.JS A BORRAR EL CACHÉ DESPUÉS DE CREAR
+            router.refresh()
 
         } catch (error: any) {
             toast.error(error.message, { duration: 6000, icon: <AlertCircle /> })
@@ -346,7 +352,8 @@ export default function CalendarioPage() {
         setForm({
             nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
             hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '', profeId: '',
-            tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: selectedDate ? [selectedDate] : []
+            tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: selectedDate ? [selectedDate] : [],
+            esLaLiga: false, ligaNivel: 1
         })
         setFormFile(null)
     }
@@ -360,11 +367,13 @@ export default function CalendarioPage() {
         setDeleteTarget(null)
 
         await fetchData()
-        router.refresh() // <-- OBLIGAMOS A NEXT.JS A BORRAR EL CACHÉ DESPUÉS DE ELIMINAR
+        router.refresh()
     }
 
     const getEventStyle = (evt: EventoAgenda) => {
         if (evt.tipo === 'Alquiler') return { border: 'border-white', text: 'text-white', bg: 'bg-white', glow: 'shadow-white/20' }
+        if (evt.clase_data?.es_la_liga) return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500', glow: 'shadow-purple-500/20' }
+
         switch (evt.subtitulo) {
             case 'Regular': return { border: 'border-orange-500', text: 'text-orange-500', bg: 'bg-orange-500', glow: 'shadow-orange-500/20' }
             case 'Intensivo': return { border: 'border-gray-500', text: 'text-gray-400', bg: 'bg-black', glow: 'shadow-gray-500/20' }
@@ -457,7 +466,20 @@ export default function CalendarioPage() {
                                                     </div>
                                                     <div className="flex-1 p-3 flex flex-col justify-center relative">
                                                         <div className="flex justify-between items-start mb-1"><h4 className="text-sm font-bold text-white uppercase leading-tight pr-2">{evt.titulo}</h4><span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${style.bg}/10 ${style.text} border ${style.border}/20`}>{evt.subtitulo}</span></div>
-                                                        <div className="text-[10px] text-gray-400 font-medium flex items-center gap-2 mb-2 flex-wrap">{evt.tipo === 'Clase' ? (<><span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><Briefcase size={10} /> {evt.clase_data?.profesor_nombre || 'Sin asignar'}</span><span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><GraduationCap size={10} /> {evt.clase_data?.nivel}</span></>) : (<span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><User size={10} /> Cliente Externo</span>)}</div>
+                                                        <div className="text-[10px] text-gray-400 font-medium flex items-center gap-2 mb-2 flex-wrap">
+                                                            {evt.tipo === 'Clase' ? (
+                                                                <>
+                                                                    <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><Briefcase size={10} /> {evt.clase_data?.profesor_nombre || 'Sin asignar'}</span>
+                                                                    <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><GraduationCap size={10} /> {evt.clase_data?.nivel}</span>
+                                                                    {/* BADGE DE LA LIGA EN EL MODAL DE VISTA */}
+                                                                    {evt.clase_data?.es_la_liga && (
+                                                                        <span className="flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]">
+                                                                            <Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})
+                                                                        </span>
+                                                                    )}
+                                                                </>
+                                                            ) : (<span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><User size={10} /> Cliente Externo</span>)}
+                                                        </div>
                                                         <div className="flex items-end justify-between border-t border-white/5 pt-2 mt-auto gap-2">
                                                             {evt.tipo === 'Clase' ? (<><a href={`/clase/${evt.id}`} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase py-2 rounded hover:bg-white transition-colors text-center shadow-[0_0_10px_rgba(212,230,85,0.2)]">Gestionar / Tomar Lista</a><button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: evt.id, serieId: evt.clase_data?.serie_id || null }) }} className="text-gray-500 hover:text-red-500 p-2 bg-white/5 rounded hover:bg-red-500/10 transition-colors"><Trash2 size={14} /></button></>) : (<div className="flex gap-2 w-full"><div className="flex-1 text-[10px] text-gray-500 italic flex items-center"><Info size={12} className="mr-1" /> Alquiler externo</div><a href="/alquileres" className="px-3 py-2 bg-white/10 text-white rounded text-[10px] font-bold uppercase hover:bg-white/20">Ver Alquileres</a></div>)}
                                                         </div>
@@ -488,7 +510,6 @@ export default function CalendarioPage() {
 
                             {/* MODO CREAR (FORMULARIO) */}
                             {modalMode === 'create' && (
-                                // El formulario queda idéntico, ya que la lógica fuerte la cambiamos en handleCrearClase
                                 <form onSubmit={handleCrearClase} className="space-y-6">
                                     <div className="space-y-3">
                                         <div className="flex items-center gap-2 text-[#D4E655] border-b border-white/10 pb-1"><Info size={14} /><h4 className="text-[10px] font-black uppercase tracking-widest">Ficha Técnica</h4></div>
@@ -559,6 +580,37 @@ export default function CalendarioPage() {
                                                 <div className="space-y-1">
                                                     <label className="text-[9px] font-bold text-[#D4E655] uppercase">Cupo Máx.</label>
                                                     <input type="number" min="0" value={form.cupoMaximo} onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]" placeholder="Ej: 20" />
+                                                </div>
+
+                                                {/* --- NUEVO: TOGGLE DE LA LIGA --- */}
+                                                <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-purple-500/5 p-3 rounded-xl border-dashed border-purple-500/20">
+                                                    <label className="flex items-center gap-3 cursor-pointer">
+                                                        <div className="relative flex items-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={form.esLaLiga}
+                                                                onChange={e => setForm({ ...form, esLaLiga: e.target.checked })}
+                                                                className="peer sr-only"
+                                                            />
+                                                            <div className="w-10 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
+                                                        </div>
+                                                        <span className="text-[10px] font-black uppercase text-purple-400 flex items-center gap-1">
+                                                            <Star size={12} className="fill-purple-500/50" /> Pertenece a La Liga
+                                                        </span>
+                                                    </label>
+
+                                                    {form.esLaLiga && (
+                                                        <div className="pl-[52px] flex gap-4 mt-2 animate-in fade-in slide-in-from-top-2">
+                                                            <label className="flex items-center gap-2 cursor-pointer group">
+                                                                <input type="radio" name="ligaNivel" value={1} checked={form.ligaNivel === 1} onChange={() => setForm({ ...form, ligaNivel: 1 })} className="w-4 h-4 accent-purple-500" />
+                                                                <span className={`text-xs font-bold uppercase ${form.ligaNivel === 1 ? 'text-white' : 'text-gray-500 group-hover:text-white/80'}`}>Nivel 1</span>
+                                                            </label>
+                                                            <label className="flex items-center gap-2 cursor-pointer group">
+                                                                <input type="radio" name="ligaNivel" value={2} checked={form.ligaNivel === 2} onChange={() => setForm({ ...form, ligaNivel: 2 })} className="w-4 h-4 accent-purple-500" />
+                                                                <span className={`text-xs font-bold uppercase ${form.ligaNivel === 2 ? 'text-white' : 'text-gray-500 group-hover:text-white/80'}`}>Nivel 2</span>
+                                                            </label>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>

@@ -56,6 +56,47 @@ export async function POST(request: Request) {
                 return NextResponse.json({ message: 'Sin metadata' }, { status: 200 });
             }
 
+            // ==========================================
+            // DESVÍO A: PAGO DE CUOTA DE LA LIGA
+            // ==========================================
+            if (metadata.tipo_pago === 'cuota_liga') {
+                const { usuario_id, mes, anio } = metadata;
+                const montoAbonado = payment.transaction_amount;
+                console.log(`[WEBHOOK LIGA] Cobrando La Liga para Usuario: ${usuario_id}, Mes: ${mes}/${anio}`);
+
+                // Verificar que no haya pagado ya este mes (por las dudas)
+                const { data: pagoExistenteLiga } = await supabase
+                    .from('liga_pagos')
+                    .select('id')
+                    .eq('alumno_id', usuario_id)
+                    .eq('mes', mes)
+                    .eq('anio', anio)
+                    .maybeSingle();
+
+                if (pagoExistenteLiga) {
+                    console.log("✅ [WEBHOOK LIGA] Esta cuota ya estaba paga.");
+                    return NextResponse.json({ message: 'Cuota ya pagada' }, { status: 200 });
+                }
+
+                // Registrar el pago en la base de datos
+                const { error: errLiga } = await supabase.from('liga_pagos').insert({
+                    alumno_id: usuario_id,
+                    mes: Number(mes),
+                    anio: Number(anio),
+                    monto: montoAbonado,
+                    metodo_pago: 'mercadopago', // Etiqueta automática
+                    turno_caja_id: null // Los pagos online no van a la caja física
+                });
+
+                if (errLiga) throw errLiga;
+
+                console.log("🌟 [WEBHOOK LIGA] ¡Cuota de La Liga registrada con éxito!");
+                return NextResponse.json({ success: true }, { status: 200 });
+            }
+
+            // ==========================================
+            // DESVÍO B: COMPRA DE PACK NORMAL (TU CÓDIGO ORIGINAL)
+            // ==========================================
             const { user_id, producto_id, cupon_id, tipo_clase, creditos } = metadata;
             const montoAbonado = payment.transaction_amount;
 
