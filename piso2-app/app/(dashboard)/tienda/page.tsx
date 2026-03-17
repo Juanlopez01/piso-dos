@@ -167,10 +167,17 @@ function TiendaContent() {
 
             const data = await res.json()
 
-            if (!res.ok) throw new Error(data.error || 'Error al generar el link de pago')
+            if (!res.ok || data.error) {
+                // Si el backend tiró error, lo mostramos y frenamos la redirección
+                console.error("Error del backend:", data.error);
+                alert("Hubo un error al generar el pago: " + data.error);
+                return; // Frenamos la ejecución acá
+            }
 
-            // Magia: Redirigimos al alumno a la pasarela de Mercado Pago
-            window.location.href = data.init_point
+            // Si todo salió bien, recién ahí redirigimos
+            if (data.url) {
+                window.location.href = data.url;
+            }
 
         } catch (error: any) {
             toast.error(error.message)
