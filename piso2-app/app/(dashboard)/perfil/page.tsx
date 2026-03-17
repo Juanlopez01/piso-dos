@@ -11,7 +11,7 @@ import {
 import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 // --- TIPOS ---
 type HistorialClase = {
@@ -52,10 +52,25 @@ export default function PerfilPage() {
         edad: '', direccion: '', contacto_emergencia: '',
         plan_medico: '', condiciones_medicas: '', apto_fisico_url: ''
     })
+    const searchParams = useSearchParams()
 
     useEffect(() => {
         fetchData()
-    }, [])
+        // Ahora buscamos el parámetro 'pago' que es el que manda tu backend
+        const pagoStatus = searchParams.get('pago')
+
+        if (pagoStatus === 'exito') {
+            toast.success('¡Pago aprobado! Tus clases se acreditarán en breves instantes.', { duration: 8000 })
+            router.replace('/perfil') // 👈 Limpia la URL para que no quede el ?pago=exito
+        } else if (pagoStatus === 'error') {
+            toast.error('El pago no se pudo procesar o fue rechazado.')
+            router.replace('/perfil')
+        } else if (pagoStatus === 'pendiente') {
+            toast.info('Tu pago está pendiente de confirmación.')
+            router.replace('/perfil')
+        }
+    }, [searchParams, router])
+
 
     const fetchData = async () => {
         try {

@@ -155,13 +155,15 @@ function TiendaContent() {
 
         setGenerandoPago(true)
         try {
+            // Dentro de tu handlePagarConMP en TiendaContent
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     productoId: selectedPack.id,
                     userId: userId,
-                    cuponId: cuponAplicado ? cuponAplicado.id : null
+                    cuponId: cuponAplicado ? cuponAplicado.id : null,
+                    tipo_pago: 'pack' // 👈 AGREGAR ESTA LÍNEA
                 })
             })
 
