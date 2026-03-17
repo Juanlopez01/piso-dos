@@ -33,6 +33,7 @@ export const menuItems = [
     { name: 'Alquilar Sala', href: '/alquilar-sala', icon: MapPin, roles: ['alumno'] },
     // --- COMPARTIDO (PROFESOR Y ALUMNO) ---
     { name: 'Mis Clases', href: '/mis-clases', icon: BookOpen, roles: ['profesor', 'alumno'] },
+    { name: 'La Liga', href: '/la-liga', icon: BookOpen, roles: ['profesor', 'alumno'] },
 
     // --- SOLO PROFESOR ---
     { name: 'Mis Pagos', href: '/mis-pagos', icon: Wallet, roles: ['profesor'] },
