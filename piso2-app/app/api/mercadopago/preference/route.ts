@@ -66,6 +66,16 @@ export async function POST(request: Request) {
         // 3. CREAMOS LA PREFERENCIA CON LOS DATOS DE LA BD
         // ==========================================
         const preference = new Preference(client)
+        // 1. DEFINIMOS A DÓNDE VUELVE SEGÚN LO QUE COMPRÓ
+        let rutaDestino = "/perfil" // Por defecto, si compra un pack, lo mandamos al perfil
+
+        if (tipo_pago === 'cuota_liga') {
+            rutaDestino = "/la-liga" // Si paga la liga, lo devolvemos a la liga
+        }
+
+        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+
+        // 2. ARMAMOS LA PREFERENCIA CON LA RUTA DINÁMICA
         const result = await preference.create({
             body: {
                 items: [
@@ -78,10 +88,11 @@ export async function POST(request: Request) {
                     }
                 ],
                 metadata: metadataCustom,
+                // 👇 ACÁ ESTÁ LA MAGIA 👇
                 back_urls: {
-                    success: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/la-liga?pago=exito`,
-                    failure: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/la-liga?pago=error`,
-                    pending: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/la-liga?pago=pendiente`
+                    success: `${baseUrl}${rutaDestino}?pago=exito`,
+                    failure: `${baseUrl}${rutaDestino}?pago=error`,
+                    pending: `${baseUrl}${rutaDestino}?pago=pendiente`
                 },
                 auto_return: 'approved',
             }
