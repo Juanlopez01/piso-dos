@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState, useRef } from 'react' // 👈 Chau Suspense
+import { useEffect, useState } from 'react'
 import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
     AlertTriangle, Mail, Calendar, LogOut, CheckCircle2, History,
@@ -10,32 +10,18 @@ import {
 import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { useRouter } from 'next/navigation' // 👈 Chau useSearchParams
+import { useRouter } from 'next/navigation'
 
 // --- TIPOS ---
-type HistorialClase = {
-    id: string
-    presente: boolean
-    clase: {
-        nombre: string
-        inicio: string
-        tipo_clase: string
-        profesor: { nombre_completo: string }
-    }
-}
+type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; inicio: string; tipo_clase: string; profesor: { nombre_completo: string } } }
+type PackVencimiento = { fecha_vencimiento: string; creditos_restantes: number; tipo_clase: string }
 
-type PackVencimiento = {
-    fecha_vencimiento: string
-    creditos_restantes: number
-    tipo_clase: string
-}
-
-// 👈 Convertimos este componente directamente en la página principal
 export default function PerfilPage() {
     const supabase = createClient()
     const router = useRouter()
 
     const [loading, setLoading] = useState(true)
+    const [loadingMsg, setLoadingMsg] = useState("Iniciando conexión...") // 👈 Nuevo estado para dar feedback visual
     const [saving, setSaving] = useState(false)
     const [uploadingFile, setUploadingFile] = useState(false)
 
@@ -45,132 +31,96 @@ export default function PerfilPage() {
     const [proximoVencimiento, setProximoVencimiento] = useState<PackVencimiento | null>(null)
 
     const [formData, setFormData] = useState({
-        nombre: '', apellido: '', email: '', telefono: '',
-        alias_cbu: '', nombre_remplazo: '', contacto_remplazo: '',
-        edad: '', direccion: '', contacto_emergencia: '',
-        plan_medico: '', condiciones_medicas: '', apto_fisico_url: ''
+        nombre: '', apellido: '', email: '', telefono: '', alias_cbu: '', nombre_remplazo: '', contacto_remplazo: '',
+        edad: '', direccion: '', contacto_emergencia: '', plan_medico: '', condiciones_medicas: '', apto_fisico_url: ''
     })
 
-    const inicializado = useRef(false)
-
-    // ==========================================
-    // 1. CARGA INICIAL (BLINDADA)
-    // ==========================================
     useEffect(() => {
-        if (inicializado.current) return
-        inicializado.current = true
-
-        // ESCUDO 1: Temporizador de emergencia.
-        const failsafeTimeout = setTimeout(() => {
-            console.warn("Failsafe activado: La carga tomó demasiado tiempo, destrabando la pantalla.")
-            setLoading(false)
-        }, 8000)
+        let isMounted = true // Control de montaje nativo y seguro
 
         const iniciarTodo = async () => {
             try {
-                // ESCUDO 2: Leemos Mercado Pago directo de la URL con JavaScript puro
+                if (!isMounted) return
+                setLoading(true)
+
+                // 1. LEER MERCADO PAGO (Silencioso)
                 const urlParams = new URLSearchParams(window.location.search)
                 const pagoStatus = urlParams.get('pago')
-
                 if (pagoStatus) {
                     if (pagoStatus === 'exito') toast.success('¡Pago aprobado! Tus clases se acreditarán.')
                     else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
                     else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
-
-                    // Limpieza silenciosa de la barra de direcciones
                     window.history.replaceState(null, '', window.location.pathname)
                 }
 
-                // ESCUDO 3: Buscamos la sesión de Supabase
-                const { data: { user }, error: authError } = await supabase.auth.getUser()
+                // 2. BUSCAMOS SESIÓN (Lectura local instantánea para resistir el F5)
+                if (isMounted) setLoadingMsg("Verificando credenciales...")
+                const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
-                if (authError || !user) {
+                let userId = session?.user?.id
+
+                // Si la sesión rápida falla, hacemos un re-intento con el servidor
+                if (!userId) {
+                    const { data: { user } } = await supabase.auth.getUser()
+                    userId = user?.id
+                }
+
+                if (!userId) {
                     window.location.href = '/login'
                     return
                 }
 
-                // Disparamos la limpieza en segundo plano
-                supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => {
-                    if (error) console.error("Error limpiando créditos:", error)
-                })
+                // 3. LIMPIEZA DE CRÉDITOS (En segundo plano)
+                supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => { if (error) console.error(error) })
 
-                // Buscamos los datos reales del perfil
+                // 4. CARGAMOS PERFIL
+                if (isMounted) setLoadingMsg("Sincronizando perfil...")
                 const { data: dataProfile, error: profileError } = await supabase
-                    .from('profiles')
-                    .select('*, creditos_regulares, creditos_seminarios')
-                    .eq('id', user.id)
-                    .single()
+                    .from('profiles').select('*, creditos_regulares, creditos_seminarios').eq('id', userId).single()
 
                 if (profileError || !dataProfile) throw new Error("Perfil no encontrado")
 
-                // Asignamos datos
-                setProfile(dataProfile)
-                setFormData({
-                    nombre: dataProfile.nombre || '',
-                    apellido: dataProfile.apellido || '',
-                    email: user.email || '',
-                    telefono: dataProfile.telefono || '',
-                    alias_cbu: dataProfile.alias_cbu || '',
-                    nombre_remplazo: dataProfile.nombre_remplazo || '',
-                    contacto_remplazo: dataProfile.contacto_remplazo || '',
-                    edad: dataProfile.edad?.toString() || '',
-                    direccion: dataProfile.direccion || '',
-                    contacto_emergencia: dataProfile.contacto_emergencia || '',
-                    plan_medico: dataProfile.plan_medico || '',
-                    condiciones_medicas: dataProfile.condiciones_medicas || '',
-                    apto_fisico_url: dataProfile.apto_fisico_url || ''
-                })
+                if (isMounted) {
+                    setProfile(dataProfile)
+                    setFormData({
+                        nombre: dataProfile.nombre || '', apellido: dataProfile.apellido || '', email: session?.user?.email || '',
+                        telefono: dataProfile.telefono || '', alias_cbu: dataProfile.alias_cbu || '',
+                        nombre_remplazo: dataProfile.nombre_remplazo || '', contacto_remplazo: dataProfile.contacto_remplazo || '',
+                        edad: dataProfile.edad?.toString() || '', direccion: dataProfile.direccion || '',
+                        contacto_emergencia: dataProfile.contacto_emergencia || '', plan_medico: dataProfile.plan_medico || '',
+                        condiciones_medicas: dataProfile.condiciones_medicas || '', apto_fisico_url: dataProfile.apto_fisico_url || ''
+                    })
+                }
 
-                if (dataProfile.rol === 'profesor') {
-                    const { data: dataAvisos } = await supabase
-                        .from('comunicados')
-                        .select('*')
-                        .order('created_at', { ascending: false })
+                // 5. DATOS ADICIONALES SEGÚN ROL
+                if (isMounted) setLoadingMsg("Cargando tu información...")
+                if (dataProfile.rol === 'profesor' && isMounted) {
+                    const { data: dataAvisos } = await supabase.from('comunicados').select('*').order('created_at', { ascending: false })
                     if (dataAvisos) setAvisos(dataAvisos)
                 }
 
-                if (dataProfile.rol === 'alumno' || dataProfile.rol === 'user') {
-                    const { data: dataHistorial } = await supabase
-                        .from('inscripciones')
-                        .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))')
-                        .eq('user_id', user.id)
-                        .order('created_at', { ascending: false })
-                        .limit(20)
-
-                    if (dataHistorial) {
-                        const historialLimpio = dataHistorial.filter((h: any) => h.clase !== null) as unknown as HistorialClase[]
-                        setHistorialClases(historialLimpio)
-                    }
+                if ((dataProfile.rol === 'alumno' || dataProfile.rol === 'user') && isMounted) {
+                    const { data: dataHistorial } = await supabase.from('inscripciones').select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))').eq('user_id', userId).order('created_at', { ascending: false }).limit(20)
+                    if (dataHistorial) setHistorialClases(dataHistorial.filter((h: any) => h.clase !== null) as unknown as HistorialClase[])
 
                     const hoyIso = new Date().toISOString()
-                    const { data: dataPacks } = await supabase
-                        .from('alumno_packs')
-                        .select('fecha_vencimiento, creditos_restantes, tipo_clase')
-                        .eq('user_id', user.id)
-                        .eq('estado', 'activo')
-                        .gt('creditos_restantes', 0)
-                        .gt('fecha_vencimiento', hoyIso)
-                        .order('fecha_vencimiento', { ascending: true })
-                        .limit(1)
-
+                    const { data: dataPacks } = await supabase.from('alumno_packs').select('fecha_vencimiento, creditos_restantes, tipo_clase').eq('user_id', userId).eq('estado', 'activo').gt('creditos_restantes', 0).gt('fecha_vencimiento', hoyIso).order('fecha_vencimiento', { ascending: true }).limit(1)
                     if (dataPacks && dataPacks.length > 0) setProximoVencimiento(dataPacks[0])
                 }
 
             } catch (error) {
-                console.error("Error al cargar datos:", error)
-                setProfile(null)
+                console.error("Error crítico en la carga:", error)
+                if (isMounted) setProfile(null)
             } finally {
-                clearTimeout(failsafeTimeout)
-                setLoading(false)
+                if (isMounted) setLoading(false)
             }
         }
 
         iniciarTodo()
+
+        return () => { isMounted = false } // Limpiamos si el componente se desmonta
     }, [])
 
-    // ==========================================
-    // 2. MÉTODOS DE FORMULARIO
-    // ==========================================
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const inputElement = e.target;
         try {
@@ -204,10 +154,8 @@ export default function PerfilPage() {
             }
 
             const updatePayload: any = {
-                telefono: formData.telefono,
-                alias_cbu: formData.alias_cbu,
-                nombre_remplazo: formData.nombre_remplazo,
-                contacto_remplazo: formData.contacto_remplazo,
+                telefono: formData.telefono, alias_cbu: formData.alias_cbu,
+                nombre_remplazo: formData.nombre_remplazo, contacto_remplazo: formData.contacto_remplazo,
                 nombre_completo: `${formData.nombre} ${formData.apellido}`
             };
 
@@ -238,12 +186,15 @@ export default function PerfilPage() {
     }
 
     // ==========================================
-    // 3. ESCUDOS DE RENDERIZADO VISUALES
+    // ESCUDOS DE RENDERIZADO VISUALES
     // ==========================================
     if (loading) {
         return (
-            <div className="min-h-screen bg-[#050505] flex items-center justify-center w-full">
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center w-full gap-4">
                 <Loader2 className="animate-spin text-[#D4E655] w-12 h-12" />
+                <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">
+                    {loadingMsg}
+                </p>
             </div>
         )
     }
@@ -262,15 +213,7 @@ export default function PerfilPage() {
                     </button>
                     <button
                         onClick={async () => {
-                            try {
-                                // Intentamos limpiar la sesión fantasma
-                                await supabase.auth.signOut()
-                            } catch (error) {
-                                console.error("Error limpiando sesión, forzando salida...", error)
-                            } finally {
-                                // SÍ O SÍ, pase lo que pase, te manda al login
-                                window.location.href = '/login'
-                            }
+                            try { await supabase.auth.signOut() } catch (e) { } finally { window.location.href = '/login' }
                         }}
                         className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors"
                     >
@@ -282,7 +225,7 @@ export default function PerfilPage() {
     }
 
     // ==========================================
-    // 4. INTERFAZ DE USUARIO NORMAL
+    // INTERFAZ DE USUARIO NORMAL
     // ==========================================
     const isProfe = profile?.rol === 'profesor'
     const isAlumno = profile?.rol === 'alumno' || profile?.rol === 'user'
