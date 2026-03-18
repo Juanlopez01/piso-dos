@@ -75,7 +75,9 @@ export default function PerfilPage() {
                 console.log("✅ 4. Usuario detectado:", userId);
 
                 // Limpieza background
-                supabase.rpc('limpiar_creditos_vencidos').catch(e => console.log("Aviso en limpieza:", e));
+                supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => {
+                    if (error) console.error("Error en RPC:", error)
+                })
 
                 // --- PERFIL ---
                 console.log("📥 5. Descargando datos de la base de datos...");
