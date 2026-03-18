@@ -95,6 +95,7 @@ export async function POST(request: Request) {
                     pending: `${baseUrl}${rutaDestino}?pago=pendiente`
                 },
                 auto_return: 'approved',
+                notification_url: `${process.env.NEXT_PUBLIC_SITE_URL}/api/mercadopago/webhook`
             }
         })
 

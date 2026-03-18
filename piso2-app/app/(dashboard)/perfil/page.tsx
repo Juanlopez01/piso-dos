@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState, Suspense, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react' // 👈 Chau Suspense
 import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
     AlertTriangle, Mail, Calendar, LogOut, CheckCircle2, History,
@@ -10,7 +10,7 @@ import {
 import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation' // 👈 Chau useSearchParams
 
 // --- TIPOS ---
 type HistorialClase = {
@@ -30,9 +30,10 @@ type PackVencimiento = {
     tipo_clase: string
 }
 
-function PerfilContent() {
+// 👈 Convertimos este componente directamente en la página principal
+export default function PerfilPage() {
     const supabase = createClient()
-    const searchParams = useSearchParams()
+    const router = useRouter()
 
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
@@ -50,7 +51,6 @@ function PerfilContent() {
         plan_medico: '', condiciones_medicas: '', apto_fisico_url: ''
     })
 
-    // Variable para asegurar que el código no se corra dos veces por el StrictMode
     const inicializado = useRef(false)
 
     // ==========================================
@@ -60,7 +60,7 @@ function PerfilContent() {
         if (inicializado.current) return
         inicializado.current = true
 
-        // ESCUDO 1: Temporizador de emergencia. Si pasan 8 segundos y sigue cargando, apagamos el loader a la fuerza.
+        // ESCUDO 1: Temporizador de emergencia.
         const failsafeTimeout = setTimeout(() => {
             console.warn("Failsafe activado: La carga tomó demasiado tiempo, destrabando la pantalla.")
             setLoading(false)
@@ -68,8 +68,9 @@ function PerfilContent() {
 
         const iniciarTodo = async () => {
             try {
-                // ESCUDO 2: Leemos Mercado Pago directo de la URL sin alertar a Next.js
-                const pagoStatus = new URLSearchParams(window.location.search).get('pago')
+                // ESCUDO 2: Leemos Mercado Pago directo de la URL con JavaScript puro
+                const urlParams = new URLSearchParams(window.location.search)
+                const pagoStatus = urlParams.get('pago')
 
                 if (pagoStatus) {
                     if (pagoStatus === 'exito') toast.success('¡Pago aprobado! Tus clases se acreditarán.')
@@ -88,7 +89,7 @@ function PerfilContent() {
                     return
                 }
 
-                // Disparamos la limpieza pero NO la esperamos, así no frena la página
+                // Disparamos la limpieza en segundo plano
                 supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => {
                     if (error) console.error("Error limpiando créditos:", error)
                 })
@@ -157,15 +158,14 @@ function PerfilContent() {
 
             } catch (error) {
                 console.error("Error al cargar datos:", error)
-                setProfile(null) // Esto dispara la pantalla amarilla de Conexión Perdida
+                setProfile(null)
             } finally {
-                clearTimeout(failsafeTimeout) // Cancelamos el timer de emergencia si cargó rápido
-                setLoading(false) // APAGAMOS EL LOADER SÍ O SÍ
+                clearTimeout(failsafeTimeout)
+                setLoading(false)
             }
         }
 
         iniciarTodo()
-        // IMPORTANTE: El array vacío es obligatorio
     }, [])
 
     // ==========================================
@@ -262,7 +262,6 @@ function PerfilContent() {
                     </button>
                     <button
                         onClick={async () => {
-                            // 👈 ACÁ ESTÁ TU IDEA: Matamos la sesión fantasma primero
                             await supabase.auth.signOut()
                             window.location.href = '/login'
                         }}
@@ -495,17 +494,5 @@ function PerfilContent() {
                 )}
             </div>
         </div>
-    )
-}
-
-export default function PerfilPage() {
-    return (
-        <Suspense fallback={
-            <div className="min-h-screen bg-[#050505] flex items-center justify-center">
-                <Loader2 className="animate-spin text-[#D4E655] w-12 h-12" />
-            </div>
-        }>
-            <PerfilContent />
-        </Suspense>
     )
 }
