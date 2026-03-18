@@ -54,28 +54,110 @@ function PerfilContent() {
     })
     const searchParams = useSearchParams()
 
-    // EFECTO 1: Carga los datos una ÚNICA vez al entrar
     useEffect(() => {
-        fetchData()
-    }, []) // 👈 Array vacío: no se repite nunca
+        const iniciarTodo = async () => {
+            try {
+                setLoading(true)
 
-    // EFECTO 2: Escucha los mensajes de Mercado Pago y limpia la URL sin trabar nada
-    useEffect(() => {
-        const pagoStatus = searchParams.get('pago')
+                // 1. REVISAMOS MERCADO PAGO PRIMERO (Sin tocar el router de Next.js)
+                const urlParams = new URLSearchParams(window.location.search)
+                const pagoStatus = urlParams.get('pago')
 
-        if (pagoStatus) {
-            if (pagoStatus === 'exito') {
-                toast.success('¡Pago aprobado! Tus clases se acreditarán en breves instantes.', { duration: 8000 })
-            } else if (pagoStatus === 'error') {
-                toast.error('El pago no se pudo procesar o fue cancelado.')
-            } else if (pagoStatus === 'pendiente') {
-                toast.info('Tu pago está pendiente de confirmación.')
+                if (pagoStatus) {
+                    if (pagoStatus === 'exito') toast.success('¡Pago aprobado! Tus clases se acreditarán en breves instantes.', { duration: 8000 })
+                    else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
+                    else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
+
+                    // Limpiamos la URL de forma silenciosa
+                    window.history.replaceState(null, '', window.location.pathname)
+                }
+
+                // 2. BUSCAMOS LA SESIÓN
+                const { data: { user } } = await supabase.auth.getUser()
+                if (!user) {
+                    window.location.href = '/login' // Salida de emergencia segura
+                    return
+                }
+
+                // 3. LIMPIAMOS CRÉDITOS EN SEGUNDO PLANO
+                supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => {
+                    if (error) console.error("Error limpiando créditos:", error)
+                })
+
+                // 4. TRAEMOS EL PERFIL
+                const { data: dataProfile, error: profileError } = await supabase
+                    .from('profiles')
+                    .select('*, creditos_regulares, creditos_seminarios')
+                    .eq('id', user.id)
+                    .single()
+
+                if (profileError || !dataProfile) {
+                    console.error("No se encontró el perfil")
+                    return // Esto hará que el loader se apague y muestre el botón de rescate del Paso 1
+                }
+
+                // 5. CARGAMOS TODO EN PANTALLA
+                setProfile(dataProfile)
+                setFormData({
+                    nombre: dataProfile.nombre || '',
+                    apellido: dataProfile.apellido || '',
+                    email: user.email || '',
+                    telefono: dataProfile.telefono || '',
+                    alias_cbu: dataProfile.alias_cbu || '',
+                    nombre_remplazo: dataProfile.nombre_remplazo || '',
+                    contacto_remplazo: dataProfile.contacto_remplazo || '',
+                    edad: dataProfile.edad?.toString() || '',
+                    direccion: dataProfile.direccion || '',
+                    contacto_emergencia: dataProfile.contacto_emergencia || '',
+                    plan_medico: dataProfile.plan_medico || '',
+                    condiciones_medicas: dataProfile.condiciones_medicas || '',
+                    apto_fisico_url: dataProfile.apto_fisico_url || ''
+                })
+
+                if (dataProfile.rol === 'profesor') {
+                    const { data: dataAvisos } = await supabase
+                        .from('comunicados')
+                        .select('*')
+                        .order('created_at', { ascending: false })
+                    if (dataAvisos) setAvisos(dataAvisos)
+                }
+
+                if (dataProfile.rol === 'alumno' || dataProfile.rol === 'user') {
+                    const { data: dataHistorial } = await supabase
+                        .from('inscripciones')
+                        .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))')
+                        .eq('user_id', user.id)
+                        .order('created_at', { ascending: false })
+                        .limit(20)
+
+                    if (dataHistorial) {
+                        const historialLimpio = dataHistorial.filter((h: any) => h.clase !== null) as unknown as HistorialClase[]
+                        setHistorialClases(historialLimpio)
+                    }
+
+                    const hoyIso = new Date().toISOString()
+                    const { data: dataPacks } = await supabase
+                        .from('alumno_packs')
+                        .select('fecha_vencimiento, creditos_restantes, tipo_clase')
+                        .eq('user_id', user.id)
+                        .eq('estado', 'activo')
+                        .gt('creditos_restantes', 0)
+                        .gt('fecha_vencimiento', hoyIso)
+                        .order('fecha_vencimiento', { ascending: true })
+                        .limit(1)
+
+                    if (dataPacks && dataPacks.length > 0) setProximoVencimiento(dataPacks[0])
+                }
+
+            } catch (error) {
+                console.error("Error masivo:", error)
+            } finally {
+                setLoading(false)
             }
-
-            // Limpia la URL de forma segura sin reiniciar la página
-            router.replace('/perfil', { scroll: false })
         }
-    }, [searchParams, router])
+
+        iniciarTodo()
+    }, []) // El array vacío garantiza que esto se ejecute una sola vez sin tildarse
 
 
     const fetchData = async () => {
@@ -280,8 +362,22 @@ function PerfilContent() {
         window.location.href = '/login'
     }
 
-    if (loading || !profile) {
+    // 1. Si está cargando, mostramos la ruedita
+    if (loading) {
         return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
+    }
+
+    // 2. ESCUDO ANTI-CONGELAMIENTO: Si dejó de cargar pero el perfil quedó vacío por un error, le damos un botón de rescate
+    if (!profile) {
+        return (
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-6">
+                <AlertTriangle className="text-orange-500 w-16 h-16" />
+                <p className="text-gray-400 font-bold uppercase tracking-widest text-xs">Ocurrió un error de conexión</p>
+                <button onClick={() => window.location.href = '/login'} className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs">
+                    Volver a iniciar sesión
+                </button>
+            </div>
+        )
     }
 
     const isProfe = profile?.rol === 'profesor'
