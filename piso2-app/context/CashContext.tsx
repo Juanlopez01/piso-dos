@@ -29,14 +29,13 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     const [userName, setUserName] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(true)
 
-    // Agregamos isMounted para evitar actualizar estados si cambiamos de página rápido
     const fetchProfileAndBox = async (userId: string, isMounted: boolean = true) => {
         try {
-            const { data: profile, error: profileError } = await supabase
-                .from('profiles')
-                .select('rol, nombre_completo')
-                .eq('id', userId)
-                .maybeSingle()
+            // 🛡️ ESCUDO DB: Máximo 4 segundos o pasa de largo
+            const { data: profile, error: profileError } = await Promise.race([
+                supabase.from('profiles').select('rol, nombre_completo').eq('id', userId).maybeSingle(),
+                new Promise((resolve) => setTimeout(() => resolve({ data: null, error: new Error("TIMEOUT_DB") }), 4000))
+            ]) as any;
 
             if (profileError) console.error("Error perfil:", profileError)
 
@@ -48,11 +47,11 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
             }
 
             if (['admin', 'recepcion'].includes(rolReal)) {
-                const { data: turno } = await supabase.from('caja_turnos')
-                    .select('id, sede_id')
-                    .eq('usuario_id', userId)
-                    .eq('estado', 'abierta')
-                    .maybeSingle()
+                // 🛡️ ESCUDO CAJA: Máximo 4 segundos
+                const { data: turno } = await Promise.race([
+                    supabase.from('caja_turnos').select('id, sede_id').eq('usuario_id', userId).eq('estado', 'abierta').maybeSingle(),
+                    new Promise((resolve) => setTimeout(() => resolve({ data: null }), 4000))
+                ]) as any;
 
                 if (isMounted) {
                     if (turno) {
@@ -73,16 +72,27 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         let isMounted = true;
-        console.log("🔄 Iniciando verificación de sesión...")
+        console.log("🔄 Iniciando verificación global de sesión...")
+
+        // 🚨 EL FAILSAFE GLOBAL IMPLACABLE: Destraba TODA la aplicación a los 4 segundos
+        const failsafeTimeout = setTimeout(() => {
+            if (isMounted) {
+                console.warn("⏳ [FAILSAFE GLOBAL] Supabase se tildó. Destrabando la app completa a la fuerza.");
+                setIsLoading(false);
+            }
+        }, 4000);
 
         const initSession = async () => {
             try {
                 if (isMounted) setIsLoading(true);
 
-                // 1. Verificación imperativa: Vamos a buscar la sesión sí o sí al cargar
-                const { data: { session }, error } = await supabase.auth.getSession()
+                // 1. Verificación imperativa BLINDADA
+                const { data: sessionData, error } = await Promise.race([
+                    supabase.auth.getSession(),
+                    new Promise((resolve) => setTimeout(() => resolve({ data: { session: null }, error: new Error("TIMEOUT_SESSION") }), 3000))
+                ]) as any;
 
-                if (error || !session?.user) {
+                if (error || !sessionData?.session?.user) {
                     console.log("👀 Sin usuario activo (Visitante)")
                     if (isMounted) {
                         setUserRole('visitante')
@@ -92,13 +102,14 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                     return; // Cortamos acá
                 }
 
-                console.log("✅ Usuario detectado en inicio:", session.user.email)
-                await fetchProfileAndBox(session.user.id, isMounted)
+                console.log("✅ Usuario global detectado:", sessionData.session.user.email)
+                await fetchProfileAndBox(sessionData.session.user.id, isMounted)
 
             } catch (error) {
-                console.error("❌ Error inicializando sesión:", error)
+                console.error("❌ Error inicializando sesión global:", error)
             } finally {
-                // EL SALVAVIDAS: Pase lo que pase, apagamos el loading
+                // EL SALVAVIDAS: Pase lo que pase, apagamos el timer y el loading
+                clearTimeout(failsafeTimeout)
                 if (isMounted) setIsLoading(false)
             }
         }
@@ -108,7 +119,7 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
         // 2. EL DESPERTADOR: Actúa solo si hay un cambio de estado en vivo
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            console.log("🔔 Evento Auth:", event)
+            console.log("🔔 Evento Auth Global:", event)
 
             if (event === 'SIGNED_OUT') {
                 if (isMounted) {
@@ -129,13 +140,15 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
         return () => {
             isMounted = false;
+            clearTimeout(failsafeTimeout);
             subscription.unsubscribe()
         }
     }, [])
 
     const checkStatus = async () => {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) await fetchProfileAndBox(user.id)
+        // 👈 CAMBIO CLAVE: Usamos getSession para no asfixiar al servidor si se llama desde otra parte
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.user) await fetchProfileAndBox(session.user.id)
     }
 
     return (

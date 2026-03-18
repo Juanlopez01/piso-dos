@@ -27,14 +27,13 @@ export async function proxy(request: NextRequest) {
         }
     )
 
-    // IMPORTANTE: Esto es lo que mantiene la sesión viva a la fuerza
-    // Refresca el token si está por expirar y sincroniza las cookies
+    // IMPORTANTE: Mantiene la sesión viva a la fuerza
     await supabase.auth.getUser()
 
     return supabaseResponse
 }
 
-// Esto le dice a Next.js en qué rutas debe ejecutar este escudo protector
+// Le decimos a Next.js dónde ejecutar este escudo protector
 export const config = {
     matcher: [
         /*
@@ -42,8 +41,9 @@ export const config = {
          * - _next/static (archivos estáticos)
          * - _next/image (optimización de imágenes)
          * - favicon.ico (ícono)
+         * - Rutas de la API (api/) -> FUNDAMENTAL PARA QUE EL WEBHOOK RESPIRE
          * - Imágenes y assets
          */
-        '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!_next/static|_next/image|favicon.ico|api/|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 }

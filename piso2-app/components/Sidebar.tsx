@@ -25,16 +25,23 @@ export default function Sidebar() {
         if (isLoading || !userRole || userRole === 'visitante') return
 
         const fetchNotifsCount = async () => {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
+            try {
+                // 👈 LA MAGIA: Usamos getSession en vez de getUser para no saturar al servidor en el F5
+                const { data: { session } } = await supabase.auth.getSession()
+                const userId = session?.user?.id
 
-            const { count } = await supabase
-                .from('notificaciones')
-                .select('*', { count: 'exact', head: true })
-                .eq('usuario_id', user.id)
-                .eq('leido', false)
+                if (!userId) return
 
-            setUnreadNotifs(count || 0)
+                const { count } = await supabase
+                    .from('notificaciones')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('usuario_id', userId)
+                    .eq('leido', false)
+
+                setUnreadNotifs(count || 0)
+            } catch (error) {
+                console.error("Error silencioso en notificaciones del sidebar:", error)
+            }
         }
 
         fetchNotifsCount()
@@ -69,15 +76,12 @@ export default function Sidebar() {
         setIsLoggingOut(true)
 
         try {
-            const { error } = await supabase.auth.signOut()
-            if (error) throw error
-
-            window.location.href = '/login'
-
+            await supabase.auth.signOut()
         } catch (error) {
             console.error("Error al cerrar sesión:", error)
-            toast.error("Hubo un problema al cerrar sesión")
-            setIsLoggingOut(false)
+        } finally {
+            // Siempre forzamos la salida, falle o no
+            window.location.href = '/login'
         }
     }
 
