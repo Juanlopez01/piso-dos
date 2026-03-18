@@ -67,6 +67,7 @@ export default function LaLigaPage() {
         fetchLaLigaData()
     }, [])
 
+
     const fetchLaLigaData = async () => {
         try {
             setLoading(true)

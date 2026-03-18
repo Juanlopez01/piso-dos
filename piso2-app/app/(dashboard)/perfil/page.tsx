@@ -54,22 +54,28 @@ function PerfilContent() {
     })
     const searchParams = useSearchParams()
 
+    // 1. EFECTO PARA CARGAR DATOS (Se ejecuta UNA SOLA VEZ al entrar)
     useEffect(() => {
         fetchData()
-        // Ahora buscamos el parámetro 'pago' que es el que manda tu backend
+    }, []) // 👈 El array vacío es clave, evita que se dispare infinitamente
+
+    // 2. EFECTO PARA LOS CARTELITOS DE MERCADO PAGO
+    useEffect(() => {
         const pagoStatus = searchParams.get('pago')
 
-        if (pagoStatus === 'exito') {
-            toast.success('¡Pago aprobado! Tus clases se acreditarán en breves instantes.', { duration: 8000 })
-            router.replace('/perfil') // 👈 Limpia la URL para que no quede el ?pago=exito
-        } else if (pagoStatus === 'error') {
-            toast.error('El pago no se pudo procesar o fue rechazado.')
-            router.replace('/perfil')
-        } else if (pagoStatus === 'pendiente') {
-            toast.info('Tu pago está pendiente de confirmación.')
-            router.replace('/perfil')
+        if (pagoStatus) {
+            if (pagoStatus === 'exito') {
+                toast.success('¡Pago aprobado! Tus clases se acreditarán en breves instantes.', { duration: 8000 })
+            } else if (pagoStatus === 'error') {
+                toast.error('El pago no se pudo procesar o fue cancelado.')
+            } else if (pagoStatus === 'pendiente') {
+                toast.info('Tu pago está pendiente de confirmación.')
+            }
+
+            // 🪄 MAGIA PURA: Limpiamos la URL de forma silenciosa sin trabar la página
+            window.history.replaceState(null, '', window.location.pathname)
         }
-    }, [searchParams, router])
+    }, [searchParams])
 
 
     const fetchData = async () => {
