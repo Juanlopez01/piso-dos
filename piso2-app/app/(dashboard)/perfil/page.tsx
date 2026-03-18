@@ -260,7 +260,14 @@ function PerfilContent() {
                     <button onClick={() => window.location.reload()} className="bg-white/10 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white hover:text-black transition-colors">
                         Refrescar
                     </button>
-                    <button onClick={() => window.location.href = '/login'} className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors">
+                    <button
+                        onClick={async () => {
+                            // 👈 ACÁ ESTÁ TU IDEA: Matamos la sesión fantasma primero
+                            await supabase.auth.signOut()
+                            window.location.href = '/login'
+                        }}
+                        className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors"
+                    >
                         Iniciar sesión
                     </button>
                 </div>
