@@ -66,15 +66,13 @@ export default function LaLigaPage() {
     const inicializado = useRef(false)
 
     // ==========================================
-    // 1. CARGA INICIAL (BLINDADA CONTRA COLD BOOT)
+    // CARGA INICIAL
     // ==========================================
     useEffect(() => {
         if (inicializado.current) return
         inicializado.current = true
 
-        // ESCUDO 1: Temporizador de emergencia de 5 segundos
         const failsafeTimeout = setTimeout(() => {
-            console.warn("Failsafe: La carga tardó demasiado, apagando loader.");
             setLoading(false);
         }, 5000);
 
@@ -82,10 +80,8 @@ export default function LaLigaPage() {
             try {
                 setLoading(true)
 
-                // ESCUDO 2: Leemos Mercado Pago directo de la URL
                 const urlParams = new URLSearchParams(window.location.search)
                 const pagoStatus = urlParams.get('pago')
-
                 if (pagoStatus) {
                     if (pagoStatus === 'exito') toast.success('¡Pago aprobado! La cuota de La Liga fue abonada.')
                     else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
@@ -93,7 +89,6 @@ export default function LaLigaPage() {
                     window.history.replaceState(null, '', window.location.pathname)
                 }
 
-                // ESCUDO 3: Sesión rápida sin asfixiar la base de datos
                 const { data: sessionData } = await Promise.race([
                     supabase.auth.getSession(),
                     new Promise((resolve) => setTimeout(() => resolve({ data: { session: null } }), 3000))
@@ -127,7 +122,7 @@ export default function LaLigaPage() {
                             dataProfile.condiciones_medicas
                         )
                         setLegajoCompleto(tieneDatos)
-                        if (!tieneDatos) return // Termina rápido si le falta el legajo
+                        if (!tieneDatos) return
                     } else {
                         setLegajoCompleto(true)
                     }
@@ -142,7 +137,6 @@ export default function LaLigaPage() {
                         .limit(30)
 
                     if (dataProfile.rol === 'admin') {
-                        // Admin ve todo
                     } else if (isProfe) {
                         queryAvisos = queryAvisos.or(`autor_id.eq.${userId},tipo_destino.eq.general`)
                     } else {
@@ -152,7 +146,7 @@ export default function LaLigaPage() {
                     const { data: dataAvisos } = await queryAvisos
                     if (dataAvisos) setAvisos(dataAvisos)
 
-                    // --- TRAER MATERIAS ---
+                    // --- TRAER MATERIAS (EL ALGORITMO NUEVO Y MEJORADO) ---
                     const hoyIso = new Date().toISOString()
                     const cuatrimestreActual = '2026-1'
 
@@ -161,14 +155,14 @@ export default function LaLigaPage() {
                     if (isProfe && dataProfile.rol !== 'admin') {
                         queryClases = queryClases.eq('profesor_id', userId)
                     } else if (!isProfe) {
-                        queryClases = queryClases.eq('liga_nivel', nivelAlumno).gte('inicio', hoyIso).order('inicio', { ascending: true })
+                        // Traemos TODAS las clases de este nivel (pasadas y futuras) para agruparlas bien
+                        queryClases = queryClases.eq('liga_nivel', nivelAlumno)
                     }
 
                     const { data: dataClases } = await queryClases
 
                     let misEvaluaciones: any[] = []
                     if (!isProfe) {
-                        // 1. Verificar deuda del mes actual
                         const mesActual = new Date().getMonth() + 1
                         const anioActual = new Date().getFullYear()
 
@@ -182,7 +176,6 @@ export default function LaLigaPage() {
 
                         setDeudaCuota(!pagoMes)
 
-                        // 2. Traer evaluaciones
                         const { data: evals } = await supabase
                             .from('liga_evaluaciones')
                             .select('*')
@@ -193,27 +186,46 @@ export default function LaLigaPage() {
                     }
 
                     if (dataClases) {
-                        const disciplinasUnicas: any[] = []
-                        const nombresVistos = new Set()
+                        const disciplinasMap: Record<string, any> = {}
 
+                        // Agrupamos inteligentemente todas las clases por nombre de materia
                         dataClases.forEach((clase: any) => {
-                            if (!nombresVistos.has(clase.nombre)) {
-                                nombresVistos.add(clase.nombre)
-                                const evaluacion = misEvaluaciones.find(e => e.clase_id === clase.id)
-                                disciplinasUnicas.push({
+                            if (!disciplinasMap[clase.nombre]) {
+                                disciplinasMap[clase.nombre] = {
                                     id: clase.id,
                                     nombre: clase.nombre,
                                     liga_nivel: clase.liga_nivel,
                                     profesor: clase.profesor?.nombre_completo || 'Staff',
-                                    proxima_clase: clase.inicio,
-                                    evaluacion: evaluacion || null
-                                })
+                                    proxima_clase: null,
+                                    clases_ids: [] // Guardamos todos los IDs de esta materia para buscar la nota en cualquiera
+                                }
+                            }
+
+                            disciplinasMap[clase.nombre].clases_ids.push(clase.id)
+
+                            // Si esta clase ocurre de hoy en adelante, la guardamos como próxima
+                            if (clase.inicio >= hoyIso) {
+                                if (!disciplinasMap[clase.nombre].proxima_clase || clase.inicio < disciplinasMap[clase.nombre].proxima_clase) {
+                                    disciplinasMap[clase.nombre].proxima_clase = clase.inicio
+                                    disciplinasMap[clase.nombre].profesor = clase.profesor?.nombre_completo || 'Staff'
+                                }
                             }
                         })
+
+                        // Cruzamos las materias consolidadas con las evaluaciones
+                        const disciplinasUnicas = Object.values(disciplinasMap).map((disciplina: any) => {
+                            let evaluacion = null
+                            if (!isProfe) {
+                                evaluacion = misEvaluaciones.find(e => disciplina.clases_ids.includes(e.clase_id))
+                            }
+                            return { ...disciplina, evaluacion: evaluacion || null }
+                        })
+
+                        // Ordenamos alfabéticamente para que quede prolijo
+                        disciplinasUnicas.sort((a, b) => a.nombre.localeCompare(b.nombre))
                         setMaterias(disciplinasUnicas)
                     }
 
-                    // SI ES PROFE/ADMIN, CARGAR ALUMNOS
                     if (isProfe) {
                         cargarTodosLosAlumnos(false)
                     }
@@ -295,7 +307,6 @@ export default function LaLigaPage() {
 
             toast.success("Comunicado enviado correctamente")
             setAvisoForm({ titulo: '', mensaje: '', tipo_destino: 'general', nivel_destino: 1, alumno_id: '' })
-            // Recarga parcial ligera simulada para no volver a hacer Cold Boot
             window.location.reload()
         } catch (error: any) {
             toast.error(error.message || "Error al enviar aviso")
@@ -803,7 +814,14 @@ export default function LaLigaPage() {
                                     onClick={() => cargarAlumnos(mat)}
                                     className={`bg-[#111] border rounded-xl p-4 cursor-pointer transition-all ${selectedMateria?.id === mat.id ? 'border-[#D4E655] shadow-[0_0_15px_rgba(212,230,85,0.1)]' : 'border-white/5 hover:border-white/20'}`}
                                 >
-                                    <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Nivel {mat.liga_nivel}</span>
+                                    <div className="flex items-start justify-between mb-1">
+                                        <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block">Nivel {mat.liga_nivel}</span>
+                                        {mat.proxima_clase && (
+                                            <span className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest bg-[#D4E655]/10 px-2 py-0.5 rounded flex items-center gap-1">
+                                                <Clock size={10} /> {format(new Date(mat.proxima_clase), "d MMM • HH:mm", { locale: es })}
+                                            </span>
+                                        )}
+                                    </div>
                                     <h4 className="font-black text-white uppercase text-sm truncate">{mat.nombre}</h4>
                                 </div>
                             )) : (
@@ -903,21 +921,25 @@ export default function LaLigaPage() {
                                                 <h4 className="font-black text-xl uppercase tracking-tighter text-white mb-1 group-hover:text-[#D4E655] transition-colors truncate relative z-10">
                                                     {materia.nombre}
                                                 </h4>
-                                                <p className="text-[10px] text-gray-400 mb-6 uppercase font-bold tracking-widest relative z-10">
+                                                <p className="text-[10px] text-gray-400 mb-5 uppercase font-bold tracking-widest relative z-10">
                                                     Prof: {materia.profesor}
                                                 </p>
 
-                                                {/* NUEVO: Próxima Clase Siempre Visible */}
-                                                {materia.proxima_clase && (
-                                                    <div className="mb-4 relative z-10">
-                                                        <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block mb-1 flex items-center gap-1">
-                                                            <CalendarX size={10} /> Próxima Clase
-                                                        </span>
+                                                {/* NUEVO: Próxima Clase SÍ O SÍ VISIBLE */}
+                                                <div className="mb-5 relative z-10">
+                                                    <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block mb-1 flex items-center gap-1">
+                                                        <Clock size={10} /> Próxima Clase
+                                                    </span>
+                                                    {materia.proxima_clase ? (
                                                         <span className="text-xs font-black text-white bg-white/5 px-2 py-1.5 rounded-md border border-white/10 block w-max">
                                                             {format(new Date(materia.proxima_clase), "EEE d MMM • HH:mm", { locale: es })}
                                                         </span>
-                                                    </div>
-                                                )}
+                                                    ) : (
+                                                        <span className="text-[10px] font-bold text-gray-600 bg-white/5 px-2 py-1.5 rounded-md border border-white/5 block w-max italic">
+                                                            A confirmar
+                                                        </span>
+                                                    )}
+                                                </div>
 
                                                 <div className="pt-4 border-t border-white/5 mt-auto relative z-10 flex items-center justify-between">
                                                     {materia.evaluacion ? (
