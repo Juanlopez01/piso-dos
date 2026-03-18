@@ -1,14 +1,14 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
     Lock, Loader2, AlertTriangle, FileWarning,
     Megaphone, BookOpen, GraduationCap, ChevronRight,
     CheckCircle2, AlertCircle, CalendarX, Users, ClipboardEdit, Save, FileText,
-    Search, UserCog, UserMinus, Star, Send, Trash2
+    Search, UserCog, UserMinus, Star, Send, Trash2, Clock
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -63,135 +63,172 @@ export default function LaLigaPage() {
     const [boletinModalOpen, setBoletinModalOpen] = useState(false)
     const [selectedBoletin, setSelectedBoletin] = useState<any>(null)
 
+    const inicializado = useRef(false)
+
+    // ==========================================
+    // 1. CARGA INICIAL (BLINDADA CONTRA COLD BOOT)
+    // ==========================================
     useEffect(() => {
+        if (inicializado.current) return
+        inicializado.current = true
+
+        // ESCUDO 1: Temporizador de emergencia de 5 segundos
+        const failsafeTimeout = setTimeout(() => {
+            console.warn("Failsafe: La carga tardó demasiado, apagando loader.");
+            setLoading(false);
+        }, 5000);
+
+        const fetchLaLigaData = async () => {
+            try {
+                setLoading(true)
+
+                // ESCUDO 2: Leemos Mercado Pago directo de la URL
+                const urlParams = new URLSearchParams(window.location.search)
+                const pagoStatus = urlParams.get('pago')
+
+                if (pagoStatus) {
+                    if (pagoStatus === 'exito') toast.success('¡Pago aprobado! La cuota de La Liga fue abonada.')
+                    else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
+                    else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
+                    window.history.replaceState(null, '', window.location.pathname)
+                }
+
+                // ESCUDO 3: Sesión rápida sin asfixiar la base de datos
+                const { data: sessionData } = await Promise.race([
+                    supabase.auth.getSession(),
+                    new Promise((resolve) => setTimeout(() => resolve({ data: { session: null } }), 3000))
+                ]) as any;
+
+                let userId = sessionData?.session?.user?.id
+
+                if (!userId) {
+                    const { data: userData } = await Promise.race([
+                        supabase.auth.getUser(),
+                        new Promise((resolve) => setTimeout(() => resolve({ data: { user: null } }), 3000))
+                    ]) as any;
+                    userId = userData?.user?.id
+                }
+
+                if (!userId) {
+                    window.location.href = '/login';
+                    return;
+                }
+
+                const { data: dataProfile } = await supabase.from('profiles').select('*').eq('id', userId).single()
+
+                if (dataProfile) {
+                    setProfile(dataProfile)
+                    const isProfe = dataProfile.rol === 'profesor' || dataProfile.rol === 'admin'
+
+                    if (!isProfe) {
+                        const tieneDatos = Boolean(
+                            dataProfile.edad && dataProfile.direccion &&
+                            dataProfile.contacto_emergencia && dataProfile.plan_medico &&
+                            dataProfile.condiciones_medicas
+                        )
+                        setLegajoCompleto(tieneDatos)
+                        if (!tieneDatos) return // Termina rápido si le falta el legajo
+                    } else {
+                        setLegajoCompleto(true)
+                    }
+
+                    const nivelAlumno = dataProfile.nivel_liga || dataProfile.nivel || 1
+
+                    // --- TRAER AVISOS ---
+                    let queryAvisos = supabase
+                        .from('liga_avisos')
+                        .select('*, autor:profiles!liga_avisos_autor_id_fkey(nombre_completo)')
+                        .order('created_at', { ascending: false })
+                        .limit(30)
+
+                    if (dataProfile.rol === 'admin') {
+                        // Admin ve todo
+                    } else if (isProfe) {
+                        queryAvisos = queryAvisos.or(`autor_id.eq.${userId},tipo_destino.eq.general`)
+                    } else {
+                        queryAvisos = queryAvisos.or(`tipo_destino.eq.general,and(tipo_destino.eq.nivel,nivel_destino.eq.${nivelAlumno}),and(tipo_destino.eq.individual,alumno_id.eq.${userId})`)
+                    }
+
+                    const { data: dataAvisos } = await queryAvisos
+                    if (dataAvisos) setAvisos(dataAvisos)
+
+                    // --- TRAER MATERIAS ---
+                    const hoyIso = new Date().toISOString()
+                    const cuatrimestreActual = '2026-1'
+
+                    let queryClases = supabase.from('clases').select('id, nombre, inicio, liga_nivel, profesor_id, profesor:profiles(nombre_completo)').eq('es_la_liga', true).neq('estado', 'cancelada')
+
+                    if (isProfe && dataProfile.rol !== 'admin') {
+                        queryClases = queryClases.eq('profesor_id', userId)
+                    } else if (!isProfe) {
+                        queryClases = queryClases.eq('liga_nivel', nivelAlumno).gte('inicio', hoyIso).order('inicio', { ascending: true })
+                    }
+
+                    const { data: dataClases } = await queryClases
+
+                    let misEvaluaciones: any[] = []
+                    if (!isProfe) {
+                        // 1. Verificar deuda del mes actual
+                        const mesActual = new Date().getMonth() + 1
+                        const anioActual = new Date().getFullYear()
+
+                        const { data: pagoMes } = await supabase
+                            .from('liga_pagos')
+                            .select('id')
+                            .eq('alumno_id', userId)
+                            .eq('mes', mesActual)
+                            .eq('anio', anioActual)
+                            .maybeSingle()
+
+                        setDeudaCuota(!pagoMes)
+
+                        // 2. Traer evaluaciones
+                        const { data: evals } = await supabase
+                            .from('liga_evaluaciones')
+                            .select('*')
+                            .eq('alumno_id', userId)
+                            .eq('cuatrimestre', cuatrimestreActual)
+
+                        if (evals) misEvaluaciones = evals
+                    }
+
+                    if (dataClases) {
+                        const disciplinasUnicas: any[] = []
+                        const nombresVistos = new Set()
+
+                        dataClases.forEach((clase: any) => {
+                            if (!nombresVistos.has(clase.nombre)) {
+                                nombresVistos.add(clase.nombre)
+                                const evaluacion = misEvaluaciones.find(e => e.clase_id === clase.id)
+                                disciplinasUnicas.push({
+                                    id: clase.id,
+                                    nombre: clase.nombre,
+                                    liga_nivel: clase.liga_nivel,
+                                    profesor: clase.profesor?.nombre_completo || 'Staff',
+                                    proxima_clase: clase.inicio,
+                                    evaluacion: evaluacion || null
+                                })
+                            }
+                        })
+                        setMaterias(disciplinasUnicas)
+                    }
+
+                    // SI ES PROFE/ADMIN, CARGAR ALUMNOS
+                    if (isProfe) {
+                        cargarTodosLosAlumnos(false)
+                    }
+                }
+            } catch (error) {
+                console.error("Error cargando La Liga:", error)
+                setProfile(null)
+            } finally {
+                clearTimeout(failsafeTimeout)
+                setLoading(false)
+            }
+        }
+
         fetchLaLigaData()
     }, [])
-
-
-    const fetchLaLigaData = async () => {
-        try {
-            setLoading(true)
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) { router.push('/login'); return }
-
-            const { data: dataProfile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
-
-            if (dataProfile) {
-                setProfile(dataProfile)
-                const isProfe = dataProfile.rol === 'profesor' || dataProfile.rol === 'admin'
-
-                if (!isProfe) {
-                    const tieneDatos = Boolean(
-                        dataProfile.edad && dataProfile.direccion &&
-                        dataProfile.contacto_emergencia && dataProfile.plan_medico &&
-                        dataProfile.condiciones_medicas
-                    )
-                    setLegajoCompleto(tieneDatos)
-                    if (!tieneDatos) return setLoading(false)
-                } else {
-                    setLegajoCompleto(true)
-                }
-
-                const nivelAlumno = dataProfile.nivel_liga || dataProfile.nivel || 1
-
-                // --- TRAER AVISOS (CORREGIDO) ---
-                let queryAvisos = supabase
-                    .from('liga_avisos')
-                    .select('*, autor:profiles!liga_avisos_autor_id_fkey(nombre_completo)')
-                    .order('created_at', { ascending: false })
-                    .limit(30)
-
-                if (dataProfile.rol === 'admin') {
-                    // El Admin ve absolutamente toda la cartelera
-                } else if (isProfe) {
-                    // El profe ve los generales y los que él mismo mandó
-                    queryAvisos = queryAvisos.or(`autor_id.eq.${user.id},tipo_destino.eq.general`)
-                } else {
-                    // El alumno ve lo que le corresponde a él
-                    queryAvisos = queryAvisos.or(`tipo_destino.eq.general,and(tipo_destino.eq.nivel,nivel_destino.eq.${nivelAlumno}),and(tipo_destino.eq.individual,alumno_id.eq.${user.id})`)
-                }
-
-                const { data: dataAvisos, error: errorAvisos } = await queryAvisos
-
-                if (errorAvisos) {
-                    console.error("❌ Error al traer cartelera:", errorAvisos)
-                } else if (dataAvisos) {
-                    setAvisos(dataAvisos)
-                }
-                // ---------------------------------
-
-                // TRAER MATERIAS
-                const hoyIso = new Date().toISOString()
-                const cuatrimestreActual = '2026-1'
-
-                let queryClases = supabase.from('clases').select('id, nombre, inicio, liga_nivel, profesor_id, profesor:profiles(nombre_completo)').eq('es_la_liga', true).neq('estado', 'cancelada')
-
-                if (isProfe && dataProfile.rol !== 'admin') {
-                    queryClases = queryClases.eq('profesor_id', user.id)
-                } else if (!isProfe) {
-                    queryClases = queryClases.eq('liga_nivel', nivelAlumno).gte('inicio', hoyIso).order('inicio', { ascending: true })
-                }
-
-                const { data: dataClases } = await queryClases
-
-                let misEvaluaciones: any[] = []
-                if (!isProfe) {
-                    // 1. Verificar deuda del mes actual
-                    const mesActual = new Date().getMonth() + 1
-                    const anioActual = new Date().getFullYear()
-
-                    const { data: pagoMes } = await supabase
-                        .from('liga_pagos')
-                        .select('id')
-                        .eq('alumno_id', user.id)
-                        .eq('mes', mesActual)
-                        .eq('anio', anioActual)
-                        .maybeSingle()
-
-                    setDeudaCuota(!pagoMes) // Si no hay registro de pago en la BD, hay deuda
-
-                    // 2. Traer evaluaciones
-                    const { data: evals } = await supabase
-                        .from('liga_evaluaciones')
-                        .select('*')
-                        .eq('alumno_id', user.id)
-                        .eq('cuatrimestre', cuatrimestreActual)
-
-                    if (evals) misEvaluaciones = evals
-                }
-
-                if (dataClases) {
-                    const disciplinasUnicas: any[] = []
-                    const nombresVistos = new Set()
-
-                    dataClases.forEach((clase: any) => {
-                        if (!nombresVistos.has(clase.nombre)) {
-                            nombresVistos.add(clase.nombre)
-                            const evaluacion = misEvaluaciones.find(e => e.clase_id === clase.id)
-                            disciplinasUnicas.push({
-                                id: clase.id,
-                                nombre: clase.nombre,
-                                liga_nivel: clase.liga_nivel,
-                                profesor: clase.profesor?.nombre_completo || 'Staff',
-                                proxima_clase: clase.inicio,
-                                evaluacion: evaluacion || null
-                            })
-                        }
-                    })
-                    setMaterias(disciplinasUnicas)
-                }
-
-                // SI ES PROFE/ADMIN, CARGAR ALUMNOS PARA EL SELECTOR DEL AVISO INDIVIDUAL
-                if (isProfe) {
-                    cargarTodosLosAlumnos(false) // Solo los cargamos silenciosamente
-                }
-            }
-        } catch (error) {
-            console.error("Error cargando La Liga:", error)
-        } finally {
-            setLoading(false)
-        }
-    }
 
     // --- FUNCIONES GESTIÓN ADMIN ---
     const cargarTodosLosAlumnos = async (mostrarLoading = true) => {
@@ -230,13 +267,11 @@ export default function LaLigaPage() {
         }
     }
 
-    // Efecto para cargar alumnos al abrir pestaña de gestión (si no los tenemos)
     useEffect(() => {
         if (adminTab === 'gestion' && allStudents.length === 0) {
             cargarTodosLosAlumnos()
         }
     }, [adminTab])
-
 
     // --- FUNCIONES COMUNICADOS ---
     const enviarAviso = async (e: React.FormEvent) => {
@@ -260,7 +295,8 @@ export default function LaLigaPage() {
 
             toast.success("Comunicado enviado correctamente")
             setAvisoForm({ titulo: '', mensaje: '', tipo_destino: 'general', nivel_destino: 1, alumno_id: '' })
-            fetchLaLigaData() // Recargar para que aparezca en la lista
+            // Recarga parcial ligera simulada para no volver a hacer Cold Boot
+            window.location.reload()
         } catch (error: any) {
             toast.error(error.message || "Error al enviar aviso")
         } finally {
@@ -384,7 +420,20 @@ export default function LaLigaPage() {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center">
                 <Loader2 className="animate-spin text-[#D4E655] w-12 h-12 mb-4" />
-                <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">Cargando...</p>
+                <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">Cargando La Liga...</p>
+            </div>
+        )
+    }
+
+    if (!profile) {
+        return (
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-6 w-full animate-in fade-in">
+                <AlertTriangle className="text-orange-500 w-16 h-16" />
+                <h2 className="text-white font-black text-2xl uppercase tracking-tighter">Conexión Perdida</h2>
+                <div className="flex gap-4">
+                    <button onClick={() => window.location.reload()} className="bg-white/10 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white hover:text-black transition-colors">Refrescar</button>
+                    <button onClick={async () => { try { await supabase.auth.signOut() } catch (e) { } finally { window.location.href = '/login' } }} className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors">Iniciar sesión</button>
+                </div>
             </div>
         )
     }
@@ -419,7 +468,6 @@ export default function LaLigaPage() {
             const anioActual = new Date().getFullYear()
             const precioCuota = 15000 // <-- CAMBIÁ ESTE VALOR POR EL PRECIO REAL DE TU CUOTA
 
-            // Llamamos a tu API de pagos (usamos la misma ruta o creamos una nueva, asumo /api/checkout)
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -427,7 +475,7 @@ export default function LaLigaPage() {
                     titulo: `Cuota La Liga - Mes ${mesActual}/${anioActual}`,
                     precio: precioCuota,
                     usuarioId: profile.id,
-                    tipo_pago: 'cuota_liga', // Clave secreta para que tu backend sepa qué cobrar
+                    tipo_pago: 'cuota_liga',
                     mes: mesActual,
                     anio: anioActual
                 })
@@ -435,7 +483,7 @@ export default function LaLigaPage() {
 
             const data = await res.json()
             if (data.url) {
-                window.location.href = data.url // Redirigimos a MercadoPago
+                window.location.href = data.url
             } else {
                 throw new Error('No se pudo generar el link')
             }
@@ -520,24 +568,24 @@ export default function LaLigaPage() {
                                 </Link>
                             </div>
                         )}
-                    </div>
-                )}
-                {deudaCuota && (
-                    <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div className="flex items-start gap-3">
-                            <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={20} />
-                            <div>
-                                <h4 className="font-black text-red-500 uppercase text-xs tracking-widest mb-1">Cuota Vencida</h4>
-                                <p className="text-gray-400 text-[10px] sm:text-xs leading-relaxed">Tenés pendiente la cuota de La Liga de este mes. Abonala para destrabar tu boletín.</p>
+                        {deudaCuota && (
+                            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                <div className="flex items-start gap-3">
+                                    <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={20} />
+                                    <div>
+                                        <h4 className="font-black text-red-500 uppercase text-xs tracking-widest mb-1">Cuota Vencida</h4>
+                                        <p className="text-gray-400 text-[10px] sm:text-xs leading-relaxed">Tenés pendiente la cuota de La Liga de este mes. Abonala para destrabar tu boletín.</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={generarLinkPagoLiga}
+                                    disabled={procesandoPago}
+                                    className="shrink-0 bg-red-500/20 hover:bg-red-500/30 text-red-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2"
+                                >
+                                    {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : 'Pagar Online con MP'}
+                                </button>
                             </div>
-                        </div>
-                        <button
-                            onClick={generarLinkPagoLiga}
-                            disabled={procesandoPago}
-                            className="shrink-0 bg-red-500/20 hover:bg-red-500/30 text-red-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2"
-                        >
-                            {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : 'Pagar Online con MP'}
-                        </button>
+                        )}
                     </div>
                 )}
 
@@ -855,22 +903,31 @@ export default function LaLigaPage() {
                                                 <h4 className="font-black text-xl uppercase tracking-tighter text-white mb-1 group-hover:text-[#D4E655] transition-colors truncate relative z-10">
                                                     {materia.nombre}
                                                 </h4>
-                                                <p className="text-[10px] text-gray-400 mb-4 uppercase font-bold tracking-widest relative z-10">
+                                                <p className="text-[10px] text-gray-400 mb-6 uppercase font-bold tracking-widest relative z-10">
                                                     Prof: {materia.profesor}
                                                 </p>
 
+                                                {/* NUEVO: Próxima Clase Siempre Visible */}
+                                                {materia.proxima_clase && (
+                                                    <div className="mb-4 relative z-10">
+                                                        <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block mb-1 flex items-center gap-1">
+                                                            <CalendarX size={10} /> Próxima Clase
+                                                        </span>
+                                                        <span className="text-xs font-black text-white bg-white/5 px-2 py-1.5 rounded-md border border-white/10 block w-max">
+                                                            {format(new Date(materia.proxima_clase), "EEE d MMM • HH:mm", { locale: es })}
+                                                        </span>
+                                                    </div>
+                                                )}
+
                                                 <div className="pt-4 border-t border-white/5 mt-auto relative z-10 flex items-center justify-between">
                                                     {materia.evaluacion ? (
-                                                        <span className="bg-[#D4E655] text-black text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg flex items-center gap-2 shadow-[0_0_10px_rgba(212,230,85,0.2)]">
-                                                            <FileText size={12} /> Ver Boletín
+                                                        <span className="bg-[#D4E655] text-black text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-lg flex items-center gap-2 shadow-[0_0_10px_rgba(212,230,85,0.2)] w-full justify-center">
+                                                            <FileText size={14} /> Ver Boletín
                                                         </span>
                                                     ) : (
-                                                        <>
-                                                            <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Próxima Clase</span>
-                                                            <span className="text-xs font-black text-white">
-                                                                {format(new Date(materia.proxima_clase), "EEE d MMM • HH:mm", { locale: es })}
-                                                            </span>
-                                                        </>
+                                                        <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest text-center w-full py-2 bg-white/5 rounded-lg border border-white/5">
+                                                            Evaluación Pendiente
+                                                        </span>
                                                     )}
                                                 </div>
                                             </div>
