@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useState, Suspense, useRef } from 'react'
 import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
     AlertTriangle, Mail, Calendar, LogOut, CheckCircle2, History,
@@ -32,7 +32,6 @@ type PackVencimiento = {
 
 function PerfilContent() {
     const supabase = createClient()
-    const router = useRouter()
     const searchParams = useSearchParams()
 
     const [loading, setLoading] = useState(true)
@@ -51,41 +50,50 @@ function PerfilContent() {
         plan_medico: '', condiciones_medicas: '', apto_fisico_url: ''
     })
 
+    // Variable para asegurar que el código no se corra dos veces por el StrictMode
+    const inicializado = useRef(false)
+
     // ==========================================
-    // 1. CARGA INICIAL Y AVISOS DE MERCADO PAGO
+    // 1. CARGA INICIAL (BLINDADA)
     // ==========================================
     useEffect(() => {
-        let isMounted = true; // Para evitar errores si el componente se desmonta rápido
+        if (inicializado.current) return
+        inicializado.current = true
+
+        // ESCUDO 1: Temporizador de emergencia. Si pasan 8 segundos y sigue cargando, apagamos el loader a la fuerza.
+        const failsafeTimeout = setTimeout(() => {
+            console.warn("Failsafe activado: La carga tomó demasiado tiempo, destrabando la pantalla.")
+            setLoading(false)
+        }, 8000)
 
         const iniciarTodo = async () => {
             try {
-                if (isMounted) setLoading(true);
+                // ESCUDO 2: Leemos Mercado Pago directo de la URL sin alertar a Next.js
+                const pagoStatus = new URLSearchParams(window.location.search).get('pago')
 
-                // --- GESTIÓN DE AVISOS DE PAGO ---
-                const pagoStatus = searchParams.get('pago')
                 if (pagoStatus) {
                     if (pagoStatus === 'exito') toast.success('¡Pago aprobado! Tus clases se acreditarán.')
                     else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
                     else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
 
-                    // Limpieza silenciosa de la URL
+                    // Limpieza silenciosa de la barra de direcciones
                     window.history.replaceState(null, '', window.location.pathname)
                 }
 
-                // --- CARGA DE BASE DE DATOS ---
-                const { data: { user } } = await supabase.auth.getUser()
+                // ESCUDO 3: Buscamos la sesión de Supabase
+                const { data: { user }, error: authError } = await supabase.auth.getUser()
 
-                if (!user) {
-                    console.warn("Sesión no detectada, redirigiendo...");
+                if (authError || !user) {
                     window.location.href = '/login'
                     return
                 }
 
-                // Limpieza de créditos en segundo plano
+                // Disparamos la limpieza pero NO la esperamos, así no frena la página
                 supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => {
                     if (error) console.error("Error limpiando créditos:", error)
                 })
 
+                // Buscamos los datos reales del perfil
                 const { data: dataProfile, error: profileError } = await supabase
                     .from('profiles')
                     .select('*, creditos_regulares, creditos_seminarios')
@@ -94,74 +102,71 @@ function PerfilContent() {
 
                 if (profileError || !dataProfile) throw new Error("Perfil no encontrado")
 
-                if (isMounted) {
-                    setProfile(dataProfile)
-                    setFormData({
-                        nombre: dataProfile.nombre || '',
-                        apellido: dataProfile.apellido || '',
-                        email: user.email || '',
-                        telefono: dataProfile.telefono || '',
-                        alias_cbu: dataProfile.alias_cbu || '',
-                        nombre_remplazo: dataProfile.nombre_remplazo || '',
-                        contacto_remplazo: dataProfile.contacto_remplazo || '',
-                        edad: dataProfile.edad?.toString() || '',
-                        direccion: dataProfile.direccion || '',
-                        contacto_emergencia: dataProfile.contacto_emergencia || '',
-                        plan_medico: dataProfile.plan_medico || '',
-                        condiciones_medicas: dataProfile.condiciones_medicas || '',
-                        apto_fisico_url: dataProfile.apto_fisico_url || ''
-                    })
+                // Asignamos datos
+                setProfile(dataProfile)
+                setFormData({
+                    nombre: dataProfile.nombre || '',
+                    apellido: dataProfile.apellido || '',
+                    email: user.email || '',
+                    telefono: dataProfile.telefono || '',
+                    alias_cbu: dataProfile.alias_cbu || '',
+                    nombre_remplazo: dataProfile.nombre_remplazo || '',
+                    contacto_remplazo: dataProfile.contacto_remplazo || '',
+                    edad: dataProfile.edad?.toString() || '',
+                    direccion: dataProfile.direccion || '',
+                    contacto_emergencia: dataProfile.contacto_emergencia || '',
+                    plan_medico: dataProfile.plan_medico || '',
+                    condiciones_medicas: dataProfile.condiciones_medicas || '',
+                    apto_fisico_url: dataProfile.apto_fisico_url || ''
+                })
 
-                    if (dataProfile.rol === 'profesor') {
-                        const { data: dataAvisos } = await supabase
-                            .from('comunicados')
-                            .select('*')
-                            .order('created_at', { ascending: false })
-                        if (dataAvisos) setAvisos(dataAvisos)
+                if (dataProfile.rol === 'profesor') {
+                    const { data: dataAvisos } = await supabase
+                        .from('comunicados')
+                        .select('*')
+                        .order('created_at', { ascending: false })
+                    if (dataAvisos) setAvisos(dataAvisos)
+                }
+
+                if (dataProfile.rol === 'alumno' || dataProfile.rol === 'user') {
+                    const { data: dataHistorial } = await supabase
+                        .from('inscripciones')
+                        .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))')
+                        .eq('user_id', user.id)
+                        .order('created_at', { ascending: false })
+                        .limit(20)
+
+                    if (dataHistorial) {
+                        const historialLimpio = dataHistorial.filter((h: any) => h.clase !== null) as unknown as HistorialClase[]
+                        setHistorialClases(historialLimpio)
                     }
 
-                    if (dataProfile.rol === 'alumno' || dataProfile.rol === 'user') {
-                        const { data: dataHistorial } = await supabase
-                            .from('inscripciones')
-                            .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))')
-                            .eq('user_id', user.id)
-                            .order('created_at', { ascending: false })
-                            .limit(20)
+                    const hoyIso = new Date().toISOString()
+                    const { data: dataPacks } = await supabase
+                        .from('alumno_packs')
+                        .select('fecha_vencimiento, creditos_restantes, tipo_clase')
+                        .eq('user_id', user.id)
+                        .eq('estado', 'activo')
+                        .gt('creditos_restantes', 0)
+                        .gt('fecha_vencimiento', hoyIso)
+                        .order('fecha_vencimiento', { ascending: true })
+                        .limit(1)
 
-                        if (dataHistorial) {
-                            const historialLimpio = dataHistorial.filter((h: any) => h.clase !== null) as unknown as HistorialClase[]
-                            setHistorialClases(historialLimpio)
-                        }
-
-                        const hoyIso = new Date().toISOString()
-                        const { data: dataPacks } = await supabase
-                            .from('alumno_packs')
-                            .select('fecha_vencimiento, creditos_restantes, tipo_clase')
-                            .eq('user_id', user.id)
-                            .eq('estado', 'activo')
-                            .gt('creditos_restantes', 0)
-                            .gt('fecha_vencimiento', hoyIso)
-                            .order('fecha_vencimiento', { ascending: true })
-                            .limit(1)
-
-                        if (dataPacks && dataPacks.length > 0) setProximoVencimiento(dataPacks[0])
-                    }
+                    if (dataPacks && dataPacks.length > 0) setProximoVencimiento(dataPacks[0])
                 }
 
             } catch (error) {
                 console.error("Error al cargar datos:", error)
-                if (isMounted) setProfile(null) // Activa el escudo anti-congelamiento
+                setProfile(null) // Esto dispara la pantalla amarilla de Conexión Perdida
             } finally {
-                if (isMounted) setLoading(false)
+                clearTimeout(failsafeTimeout) // Cancelamos el timer de emergencia si cargó rápido
+                setLoading(false) // APAGAMOS EL LOADER SÍ O SÍ
             }
         }
 
         iniciarTodo()
-
-        return () => {
-            isMounted = false; // Cleanup para evitar leaks
-        }
-    }, [searchParams]) // Dependencia agregada correctamente para que lea los cambios en la URL
+        // IMPORTANTE: El array vacío es obligatorio
+    }, [])
 
     // ==========================================
     // 2. MÉTODOS DE FORMULARIO
@@ -219,7 +224,6 @@ function PerfilContent() {
             if (error) throw error;
 
             toast.success('Perfil actualizado correctamente');
-            // Como combinamos el fetch en el useEffect, podemos simular una recarga rápida para refrescar los datos visualmente si es necesario
             window.location.reload()
         } catch (error: any) {
             toast.error('Error al guardar el perfil');
@@ -234,7 +238,7 @@ function PerfilContent() {
     }
 
     // ==========================================
-    // 3. ESCUDOS DE RENDERIZADO (Chau spinner infinito)
+    // 3. ESCUDOS DE RENDERIZADO VISUALES
     // ==========================================
     if (loading) {
         return (
@@ -250,7 +254,7 @@ function PerfilContent() {
                 <AlertTriangle className="text-orange-500 w-16 h-16" />
                 <h2 className="text-white font-black text-2xl uppercase tracking-tighter">Conexión Perdida</h2>
                 <p className="text-gray-400 font-bold uppercase tracking-widest text-xs text-center max-w-sm px-4">
-                    Tuvimos un problema al cargar tus datos. Refrescá la página o volvé a iniciar sesión.
+                    Tuvimos un problema al cargar tus datos desde el servidor. Por favor, refrescá la página.
                 </p>
                 <div className="flex gap-4">
                     <button onClick={() => window.location.reload()} className="bg-white/10 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white hover:text-black transition-colors">
@@ -421,7 +425,7 @@ function PerfilContent() {
                                             <p className="text-[9px] sm:text-[10px] opacity-80 leading-relaxed">Tenés {proximoVencimiento.creditos_restantes} clase(s) {proximoVencimiento.tipo_clase} que vencen el <strong>{format(new Date(proximoVencimiento.fecha_vencimiento), "d 'de' MMMM", { locale: es })}</strong>.</p>
                                         </div>
                                     </div>
-                                    <button onClick={() => router.push('/explorar')} className="w-full sm:w-auto shrink-0 bg-black/20 hover:bg-black/40 text-current px-4 py-2 sm:py-3 rounded-lg text-[10px] font-black uppercase transition-colors">
+                                    <button onClick={() => window.location.href = '/explorar'} className="w-full sm:w-auto shrink-0 bg-black/20 hover:bg-black/40 text-current px-4 py-2 sm:py-3 rounded-lg text-[10px] font-black uppercase transition-colors">
                                         Usar Ahora
                                     </button>
                                 </div>
