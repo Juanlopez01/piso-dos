@@ -41,14 +41,12 @@ export default function PerfilPage() {
 
         const iniciarTodo = async () => {
             try {
-                console.log("🚀 1. Iniciando carga del perfil...");
                 setLoading(true);
 
                 // --- MERCADO PAGO ---
                 const urlParams = new URLSearchParams(window.location.search)
                 const pagoStatus = urlParams.get('pago')
                 if (pagoStatus) {
-                    console.log("💰 Procesando pago:", pagoStatus);
                     if (pagoStatus === 'exito') toast.success('¡Pago aprobado! Tus clases se acreditarán.')
                     else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
                     else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
@@ -56,23 +54,19 @@ export default function PerfilPage() {
                 }
 
                 // --- SESIÓN ---
-                console.log("👤 2. Buscando sesión local...");
                 const { data: { session } } = await supabase.auth.getSession()
                 let userId = session?.user?.id
 
                 if (!userId) {
-                    console.log("⚠️ No hay sesión rápida, consultando al servidor profundo...");
                     const { data: { user } } = await supabase.auth.getUser()
                     userId = user?.id
                 }
 
                 if (!userId) {
-                    console.log("❌ 3. Usuario deslogueado. Redirigiendo...");
                     window.location.href = '/login'
                     return
                 }
 
-                console.log("✅ 4. Usuario detectado:", userId);
 
                 // Limpieza background
                 supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => {
@@ -80,13 +74,11 @@ export default function PerfilPage() {
                 })
 
                 // --- PERFIL ---
-                console.log("📥 5. Descargando datos de la base de datos...");
                 const { data: dataProfile, error: profileError } = await supabase
                     .from('profiles').select('*, creditos_regulares, creditos_seminarios').eq('id', userId).single()
 
                 if (profileError || !dataProfile) throw new Error("Perfil no encontrado en BD")
 
-                console.log("✅ 6. Datos descargados. Sincronizando interfaz...");
                 setProfile(dataProfile)
                 setFormData({
                     nombre: dataProfile.nombre || '', apellido: dataProfile.apellido || '', email: session?.user?.email || '',
@@ -116,7 +108,6 @@ export default function PerfilPage() {
                 console.error("🚨 Error grave capturado en la carga:", error)
                 setProfile(null)
             } finally {
-                console.log("🏁 7. Proceso finalizado. Apagando loader de forma manual.");
                 clearTimeout(timer) // Cancelamos la bomba de tiempo de 5 segundos
                 setLoading(false) // Apagamos la ruedita
             }
@@ -429,11 +420,11 @@ export default function PerfilPage() {
 
                 {/* COLUMNA DER: CARTELERA (SOLO PROFES) */}
                 {isProfe && (
-                    <div className="lg:col-span-1">
-                        <div className="bg-[#111] border border-white/10 rounded-2xl p-5 sm:p-6 relative overflow-hidden lg:sticky lg:top-8">
+                    <div className="lg:col-span-1 h-max lg:sticky lg:top-8 mt-8 lg:mt-0">
+                        <div className="bg-[#111] border border-white/10 rounded-2xl p-5 sm:p-6 relative overflow-hidden">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
                             <h3 className="text-base sm:text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-4 relative z-10"><Megaphone size={18} className="text-blue-400" /> Cartelera Staff</h3>
-                            <div className="space-y-4 max-h-[400px] lg:max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar relative z-10">
                                 {avisos.map(aviso => (
                                     <div key={aviso.id} className="bg-black/40 border-l-2 border-blue-500 p-4 rounded-r-lg group hover:bg-white/5 transition-colors">
                                         <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">{format(new Date(aviso.created_at), 'dd MMM yyyy')}</span>

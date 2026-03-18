@@ -14,10 +14,10 @@ type HistorialAlumno = {
     created_at: string
     presente: boolean
     clase: {
-        id: string // Agregado para poder devolver el credito correctamente
+        id: string
         nombre: string
         inicio: string
-        tipo_clase: string // Agregado para saber qué crédito devolver
+        tipo_clase: string
         imagen_url: string | null
         sala: { nombre: string; sede: { nombre: string } }
         profesor: { nombre_completo: string }
@@ -160,10 +160,14 @@ export default function MisClasesPage() {
 
     if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-8 h-8" /></div>
 
+    const ahora = new Date()
+
     // --- VISTA PARA PROFESORES ---
     if (userRole === 'profesor' || userRole === 'admin') {
-        const clasesActivas = clasesProfe.filter(c => c.estado !== 'cancelada')
-        const clasesInactivas = clasesProfe.filter(c => c.estado === 'cancelada')
+        const clasesActivas = clasesProfe.filter(c => c.estado !== 'cancelada' && new Date(c.fin) > ahora)
+        const clasesInactivas = clasesProfe.filter(c => c.estado === 'cancelada' || new Date(c.fin) <= ahora)
+
+        clasesInactivas.sort((a, b) => new Date(b.inicio).getTime() - new Date(a.inicio).getTime())
 
         return (
             <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
@@ -212,10 +216,11 @@ export default function MisClasesPage() {
                 {clasesInactivas.length > 0 && (
                     <div>
                         <h2 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-4 opacity-50">
-                            <StopCircle size={20} className="text-gray-500" /> Historial
+                            <StopCircle size={20} className="text-gray-500" /> Historial <span className="text-[10px] bg-white/10 px-2 py-1 rounded-full ml-2">Últimas 3</span>
                         </h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 opacity-60">
-                            {clasesInactivas.map((clase) => (
+                            {/* SOLO MOSTRAMOS LAS ÚLTIMAS 3 CLASES */}
+                            {clasesInactivas.slice(0, 3).map((clase) => (
                                 <div key={clase.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex justify-between items-center">
                                     <div>
                                         <h3 className="text-sm font-bold text-gray-400 uppercase leading-tight truncate">{clase.nombre}</h3>
@@ -234,8 +239,8 @@ export default function MisClasesPage() {
     }
 
     // --- VISTA PARA ALUMNOS ---
-    const ahora = new Date()
-    // Separamos las clases
+
+    // Separamos las clases (usamos compensación horaria para estar seguros)
     const clasesProximas = historialAlumno.filter(item => new Date(item.clase.inicio) > ahora)
     const clasesPasadas = historialAlumno.filter(item => new Date(item.clase.inicio) <= ahora)
 
@@ -260,22 +265,25 @@ export default function MisClasesPage() {
                     {clasesProximas.length > 0 ? (
                         <div className="space-y-4">
                             {clasesProximas.map((item) => {
-                                const horasFaltantes = differenceInHours(new Date(item.clase.inicio), ahora)
+                                // Aplicamos la "vacuna de zona horaria" por seguridad
+                                const claseDate = new Date(item.clase.inicio)
+                                const claseDateLocal = new Date(claseDate.getTime() + Math.abs(claseDate.getTimezoneOffset() * 60000))
+                                const horasFaltantes = differenceInHours(claseDateLocal, ahora)
                                 const esCancelable = horasFaltantes >= 24
 
                                 return (
                                     <div key={item.id} className="bg-[#09090b] border border-white/10 rounded-xl overflow-hidden flex flex-row hover:border-[#D4E655]/50 transition-colors shadow-lg group">
                                         {/* Fecha (Columna Izq) */}
                                         <div className="bg-[#111] w-20 flex flex-col items-center justify-center p-3 text-center border-r border-white/10 shrink-0">
-                                            <span className="text-xs font-bold text-[#D4E655] uppercase">{format(new Date(item.clase.inicio), 'MMM', { locale: es })}</span>
-                                            <span className="text-2xl font-black text-white leading-none mt-1">{format(new Date(item.clase.inicio), 'd')}</span>
+                                            <span className="text-xs font-bold text-[#D4E655] uppercase">{format(claseDateLocal, 'MMM', { locale: es })}</span>
+                                            <span className="text-2xl font-black text-white leading-none mt-1">{format(claseDateLocal, 'd')}</span>
                                         </div>
 
                                         {/* Info (Centro) */}
                                         <div className="flex-1 p-4 flex flex-col justify-center min-w-0">
                                             <h4 className="text-sm md:text-base font-bold text-white uppercase leading-tight mb-2 truncate">{item.clase.nombre}</h4>
                                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] md:text-xs text-gray-400 font-medium">
-                                                <p className="flex items-center gap-1.5"><Clock size={12} className="text-[#D4E655]" /> {format(new Date(item.clase.inicio), 'HH:mm')} hs</p>
+                                                <p className="flex items-center gap-1.5"><Clock size={12} className="text-[#D4E655]" /> {format(claseDateLocal, 'HH:mm')} hs</p>
                                                 <p className="flex items-center gap-1.5"><User size={12} className="text-[#D4E655]" /> {item.clase.profesor?.nombre_completo || 'Staff'}</p>
                                                 <p className="flex items-center gap-1.5"><MapPin size={12} className="text-[#D4E655]" /> {item.clase.sala?.sede?.nombre}</p>
                                             </div>
@@ -318,35 +326,41 @@ export default function MisClasesPage() {
                 {/* SECCIÓN 2: HISTORIAL PASADO */}
                 <div>
                     <h3 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-4 text-white opacity-80">
-                        <StopCircle size={20} className="text-gray-500" /> Historial
+                        <StopCircle size={20} className="text-gray-500" /> Historial <span className="text-[10px] bg-white/10 px-2 py-1 rounded-full ml-2">Últimas 3</span>
                     </h3>
 
                     {clasesPasadas.length > 0 ? (
                         <div className="space-y-4 opacity-80">
-                            {clasesPasadas.map((item) => (
-                                <div key={item.id} className="bg-[#111] border border-white/5 rounded-xl overflow-hidden flex flex-row transition-colors">
-                                    {/* Fecha (Columna Izq) */}
-                                    <div className="bg-black/50 w-20 flex flex-col items-center justify-center p-3 text-center border-r border-white/5 shrink-0">
-                                        <span className="text-xs font-bold text-gray-500 uppercase">{format(new Date(item.clase.inicio), 'MMM', { locale: es })}</span>
-                                        <span className="text-2xl font-black text-gray-400 leading-none mt-1">{format(new Date(item.clase.inicio), 'd')}</span>
-                                    </div>
+                            {/* SOLO MOSTRAMOS LAS ÚLTIMAS 3 CLASES */}
+                            {clasesPasadas.slice(0, 3).map((item) => {
+                                const claseDate = new Date(item.clase.inicio)
+                                const claseDateLocal = new Date(claseDate.getTime() + Math.abs(claseDate.getTimezoneOffset() * 60000))
 
-                                    {/* Info (Centro) */}
-                                    <div className="flex-1 p-4 flex flex-col justify-center min-w-0">
-                                        <h4 className="text-sm md:text-base font-bold text-gray-300 uppercase leading-tight mb-2 truncate">{item.clase.nombre}</h4>
-                                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] md:text-xs text-gray-500 font-medium">
-                                            <p className="flex items-center gap-1.5"><Clock size={12} /> {format(new Date(item.clase.inicio), 'HH:mm')} hs</p>
-                                            <p className="flex items-center gap-1.5"><User size={12} /> {item.clase.profesor?.nombre_completo || 'Staff'}</p>
+                                return (
+                                    <div key={item.id} className="bg-[#111] border border-white/5 rounded-xl overflow-hidden flex flex-row transition-colors">
+                                        {/* Fecha (Columna Izq) */}
+                                        <div className="bg-black/50 w-20 flex flex-col items-center justify-center p-3 text-center border-r border-white/5 shrink-0">
+                                            <span className="text-xs font-bold text-gray-500 uppercase">{format(claseDateLocal, 'MMM', { locale: es })}</span>
+                                            <span className="text-2xl font-black text-gray-400 leading-none mt-1">{format(claseDateLocal, 'd')}</span>
+                                        </div>
+
+                                        {/* Info (Centro) */}
+                                        <div className="flex-1 p-4 flex flex-col justify-center min-w-0">
+                                            <h4 className="text-sm md:text-base font-bold text-gray-300 uppercase leading-tight mb-2 truncate">{item.clase.nombre}</h4>
+                                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] md:text-xs text-gray-500 font-medium">
+                                                <p className="flex items-center gap-1.5"><Clock size={12} /> {format(claseDateLocal, 'HH:mm')} hs</p>
+                                                <p className="flex items-center gap-1.5"><User size={12} /> {item.clase.profesor?.nombre_completo || 'Staff'}</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Estado Asistencia (Derecha) */}
+                                        <div className={`w-20 flex flex-col gap-1 items-center justify-center border-l border-white/5 shrink-0 ${item.presente ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+                                            {item.presente ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
+                                            <span className="text-[8px] font-black uppercase tracking-widest">{item.presente ? 'Presente' : 'Ausente'}</span>
                                         </div>
                                     </div>
-
-                                    {/* Estado Asistencia (Derecha) */}
-                                    <div className={`w-20 flex flex-col gap-1 items-center justify-center border-l border-white/5 shrink-0 ${item.presente ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
-                                        {item.presente ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
-                                        <span className="text-[8px] font-black uppercase tracking-widest">{item.presente ? 'Presente' : 'Ausente'}</span>
-                                    </div>
-                                </div>
-                            ))}
+                                )
+                            })}
                         </div>
                     ) : (
                         <div className="text-center py-10 border border-dashed border-white/10 rounded-2xl bg-[#111]/50 text-gray-500">
@@ -359,4 +373,3 @@ export default function MisClasesPage() {
         </div>
     )
 }
-

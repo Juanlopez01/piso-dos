@@ -49,7 +49,7 @@ export default function MobileNav() {
                         Piso <span className="text-[#D4E655]">2</span>
                     </h1>
                     {/* Indicador de Caja (Solo Staff) */}
-                    {!isLoading && (role === 'admin' || role === 'recepcion') && (
+                    {!isLoading && role === 'recepcion' && (
                         <div className="flex items-center gap-1.5 mt-1">
                             <span className={`w-1.5 h-1.5 rounded-full ${isBoxOpen ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
                             <span className="text-[9px] uppercase font-bold text-gray-500">

@@ -23,6 +23,21 @@ type Producto = {
     tipo_clase: 'regular' | 'seminario'
 }
 
+// 🛡️ ESCUDO ANTI-TIPOS: Garantiza que los ritmos siempre sean una lista de textos
+const getInteresesSeguro = (intereses: any): string[] => {
+    if (!intereses) return []
+    if (Array.isArray(intereses)) return intereses.map(String)
+    if (typeof intereses === 'string') {
+        try {
+            const parsed = JSON.parse(intereses)
+            if (Array.isArray(parsed)) return parsed.map(String)
+        } catch (e) {
+            return [intereses]
+        }
+    }
+    return []
+}
+
 function UsuariosContent() {
     const supabase = createClient()
     const searchParams = useSearchParams()
@@ -94,14 +109,17 @@ function UsuariosContent() {
 
         let matchesInterest = true
         if ((roleFilter === 'alumno' || roleFilter === 'todos') && interestFilter) {
-            matchesInterest = u.intereses_ritmos && u.intereses_ritmos.includes(interestFilter)
+            // Usamos el escudo para garantizar que comparemos String con String
+            const interArray = getInteresesSeguro(u.intereses_ritmos)
+            matchesInterest = interArray.includes(String(interestFilter))
         }
 
         return matchesRole && matchesSearch && matchesInterest
     })
 
-    const getRitmoNombre = (id: string) => {
-        const ritmo = ritmosDisponibles.find(r => r.id === id)
+    const getRitmoNombre = (id: string | number) => {
+        // Buscamos comparando como texto para evitar errores de tipo
+        const ritmo = ritmosDisponibles.find(r => String(r.id) === String(id))
         return ritmo ? ritmo.nombre : 'Desconocido'
     }
 
@@ -148,25 +166,40 @@ function UsuariosContent() {
 
     const openEditModal = (user: any) => {
         setSelectedUser(user)
-        setEditForm({ obs: user.staff_observations || '', intereses_ritmos: user.intereses_ritmos || [] })
+        setEditForm({
+            obs: user.staff_observations || '',
+            intereses_ritmos: getInteresesSeguro(user.intereses_ritmos) // Escudo activo
+        })
         setIsEditOpen(true)
     }
 
-    const toggleInterest = (ritmoId: string) => {
+    const toggleInterest = (ritmoId: string | number) => {
+        const strId = String(ritmoId)
         setEditForm(prev => ({
             ...prev,
-            intereses_ritmos: prev.intereses_ritmos.includes(ritmoId) ? prev.intereses_ritmos.filter(id => id !== ritmoId) : [...prev.intereses_ritmos, ritmoId]
+            intereses_ritmos: prev.intereses_ritmos.includes(strId)
+                ? prev.intereses_ritmos.filter(id => id !== strId)
+                : [...prev.intereses_ritmos, strId]
         }))
     }
 
     const handleSaveChanges = async () => {
         if (!selectedUser) return
-        const { error } = await supabase.from('profiles').update({ staff_observations: editForm.obs, intereses_ritmos: editForm.intereses_ritmos }).eq('id', selectedUser.id)
+
+        // Guardamos los intereses (Supabase debería aceptarlo como array JSON/texto sin problema)
+        const { error } = await supabase.from('profiles').update({
+            staff_observations: editForm.obs,
+            intereses_ritmos: editForm.intereses_ritmos
+        }).eq('id', selectedUser.id)
+
         if (!error) {
             toast.success('Cambios guardados')
             setUsers(users.map(u => u.id === selectedUser.id ? { ...u, staff_observations: editForm.obs, intereses_ritmos: editForm.intereses_ritmos } : u))
             setIsEditOpen(false)
-        } else toast.error('Error al guardar')
+        } else {
+            console.error(error)
+            toast.error('Error al guardar')
+        }
     }
 
     const openPackModal = (user: any) => {
@@ -217,7 +250,7 @@ function UsuariosContent() {
     const handleCobrarLigaManual = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!cobroLigaForm.monto) return toast.error('Ingresá el monto a cobrar')
-        setAssigningPack(true) // Reusamos el estado de carga
+        setAssigningPack(true)
 
         try {
             const { data: { user } } = await supabase.auth.getUser()
@@ -230,14 +263,13 @@ function UsuariosContent() {
             const hoy = new Date()
             const payload = {
                 alumno_id: selectedUser.id,
-                mes: hoy.getMonth() + 1, // Mes actual automático
+                mes: hoy.getMonth() + 1,
                 anio: hoy.getFullYear(),
                 monto: montoNum,
                 metodo_pago: cobroLigaForm.metodo,
                 turno_caja_id: turno.id
             }
 
-            // Inyectamos el pago en la base de datos
             const { error } = await supabase.from('liga_pagos').insert(payload)
             if (error) {
                 if (error.code === '23505') throw new Error('Este alumno ya tiene pagada la cuota de este mes.')
@@ -339,16 +371,22 @@ function UsuariosContent() {
                                 </div>
                             )}
 
-                            {u.intereses_ritmos && u.intereses_ritmos.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mb-2">
-                                    {u.intereses_ritmos.slice(0, 3).map((ritmoId: string) => (
-                                        <span key={ritmoId} className="text-[8px] bg-white/5 border border-white/5 text-gray-300 px-1.5 py-0.5 rounded uppercase font-bold">
-                                            {getRitmoNombre(ritmoId)}
-                                        </span>
-                                    ))}
-                                    {u.intereses_ritmos.length > 3 && <span className="text-[8px] text-gray-600 px-1 py-0.5 font-bold">+{u.intereses_ritmos.length - 3}</span>}
-                                </div>
-                            )}
+                            {/* DIBUJO DE INTERESES CON EL ESCUDO ACTIVO */}
+                            {(() => {
+                                const interArray = getInteresesSeguro(u.intereses_ritmos)
+                                if (interArray.length === 0) return null
+
+                                return (
+                                    <div className="flex flex-wrap gap-1 mb-2">
+                                        {interArray.slice(0, 3).map((ritmoId: string) => (
+                                            <span key={ritmoId} className="text-[8px] bg-white/5 border border-white/5 text-gray-300 px-1.5 py-0.5 rounded uppercase font-bold">
+                                                {getRitmoNombre(ritmoId)}
+                                            </span>
+                                        ))}
+                                        {interArray.length > 3 && <span className="text-[8px] text-gray-600 px-1 py-0.5 font-bold">+{interArray.length - 3}</span>}
+                                    </div>
+                                )
+                            })()}
 
                             {u.staff_observations && canCreate && <div className="bg-yellow-500/5 border border-yellow-500/20 p-2.5 rounded-lg mb-2"><p className="text-[10px] text-yellow-200/70 italic line-clamp-2">"{u.staff_observations}"</p></div>}
                         </div>
@@ -373,7 +411,7 @@ function UsuariosContent() {
 
                                 <div className="flex gap-2 w-full">
                                     <button onClick={() => openEditModal(u)} className={`flex-1 py-2.5 rounded-xl border text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-2 ${u.staff_observations ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20' : 'bg-[#111] text-gray-500 border-white/5 hover:border-white/20 hover:text-white'}`}>
-                                        <MessageSquare size={12} /> Notas
+                                        <MessageSquare size={12} /> Notas / Perfil
                                     </button>
 
                                     {isAdmin && (
@@ -434,7 +472,7 @@ function UsuariosContent() {
                                 <label className="text-[10px] font-bold text-[#D4E655] uppercase block mb-3 flex items-center gap-1"><Tag size={12} /> Intereses (Ritmos)</label>
                                 <div className="flex flex-wrap gap-2">
                                     {ritmosDisponibles.map(ritmo => {
-                                        const isActive = editForm.intereses_ritmos.includes(ritmo.id);
+                                        const isActive = editForm.intereses_ritmos.includes(String(ritmo.id)); // Usamos el escudo
                                         return (
                                             <button key={ritmo.id} onClick={() => toggleInterest(ritmo.id)} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase border transition-all ${isActive ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-500 border-white/10 hover:border-white/30'}`}>
                                                 {ritmo.nombre}

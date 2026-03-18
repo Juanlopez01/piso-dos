@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
 
 type CashContextType = {
@@ -29,7 +29,18 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     const [userName, setUserName] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(true)
 
+    // 🛑 EL CANDADO ANTI-SPAM: Evita peticiones duplicadas
+    const isFetchingRef = useRef(false)
+
     const fetchProfileAndBox = async (userId: string, isMounted: boolean = true) => {
+        // Si ya estamos buscando datos, cancelamos esta petición repetida
+        if (isFetchingRef.current) {
+            console.log("🛑 [BLOQUEO] Evitando consulta duplicada a la base de datos...");
+            return;
+        }
+
+        isFetchingRef.current = true; // Cerramos el candado
+
         try {
             // 🛡️ ESCUDO DB: Máximo 4 segundos o pasa de largo
             const { data: profile, error: profileError } = await Promise.race([
@@ -47,7 +58,6 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
             }
 
             if (['admin', 'recepcion'].includes(rolReal)) {
-                // 🛡️ ESCUDO CAJA: Máximo 4 segundos
                 const { data: turno } = await Promise.race([
                     supabase.from('caja_turnos').select('id, sede_id').eq('usuario_id', userId).eq('estado', 'abierta').maybeSingle(),
                     new Promise((resolve) => setTimeout(() => resolve({ data: null }), 4000))
@@ -67,6 +77,9 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
             }
         } catch (err) {
             console.error("Error fetching details:", err)
+        } finally {
+            // Terminamos de buscar, abrimos el candado para la próxima
+            isFetchingRef.current = false;
         }
     }
 
@@ -74,50 +87,43 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
         let isMounted = true;
         console.log("🔄 Iniciando verificación global de sesión...")
 
-        // 🚨 EL FAILSAFE GLOBAL IMPLACABLE: Destraba TODA la aplicación a los 4 segundos
         const failsafeTimeout = setTimeout(() => {
             if (isMounted) {
                 console.warn("⏳ [FAILSAFE GLOBAL] Supabase se tildó. Destrabando la app completa a la fuerza.");
                 setIsLoading(false);
             }
-        }, 4000);
+        }, 5000);
 
         const initSession = async () => {
             try {
                 if (isMounted) setIsLoading(true);
 
-                // 1. Verificación imperativa BLINDADA
                 const { data: sessionData, error } = await Promise.race([
                     supabase.auth.getSession(),
                     new Promise((resolve) => setTimeout(() => resolve({ data: { session: null }, error: new Error("TIMEOUT_SESSION") }), 3000))
                 ]) as any;
 
                 if (error || !sessionData?.session?.user) {
-                    console.log("👀 Sin usuario activo (Visitante)")
                     if (isMounted) {
                         setUserRole('visitante')
                         setUserName(null)
                         setIsBoxOpen(false)
                     }
-                    return; // Cortamos acá
+                    return;
                 }
 
-                console.log("✅ Usuario global detectado:", sessionData.session.user.email)
                 await fetchProfileAndBox(sessionData.session.user.id, isMounted)
 
             } catch (error) {
                 console.error("❌ Error inicializando sesión global:", error)
             } finally {
-                // EL SALVAVIDAS: Pase lo que pase, apagamos el timer y el loading
                 clearTimeout(failsafeTimeout)
                 if (isMounted) setIsLoading(false)
             }
         }
 
-        // Ejecutamos la carga inicial
         initSession()
 
-        // 2. EL DESPERTADOR: Actúa solo si hay un cambio de estado en vivo
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
             console.log("🔔 Evento Auth Global:", event)
 
@@ -146,7 +152,6 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     }, [])
 
     const checkStatus = async () => {
-        // 👈 CAMBIO CLAVE: Usamos getSession para no asfixiar al servidor si se llama desde otra parte
         const { data: { session } } = await supabase.auth.getSession()
         if (session?.user) await fetchProfileAndBox(session.user.id)
     }

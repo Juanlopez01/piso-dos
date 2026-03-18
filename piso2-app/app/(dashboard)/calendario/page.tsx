@@ -38,8 +38,8 @@ type EventoAgenda = {
         tipo_acuerdo: string
         valor_acuerdo: number
         ritmo_id: string | null
-        es_la_liga: boolean     // <-- NUEVO
-        liga_nivel: number | null // <-- NUEVO
+        es_la_liga: boolean
+        liga_nivel: number | null
     }
     alquiler_data?: {
         telefono: string
@@ -80,7 +80,6 @@ export default function CalendarioPage() {
         hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '', profeId: '',
         tipoAcuerdo: 'porcentaje', valorAcuerdo: '',
         fechas: [] as Date[],
-        // --- NUEVOS CAMPOS LA LIGA ---
         esLaLiga: false, ligaNivel: 1
     })
     const [formFile, setFormFile] = useState<File | null>(null)
@@ -99,7 +98,6 @@ export default function CalendarioPage() {
             const startDateStr = format(start, 'yyyy-MM-dd')
             const endDateStr = format(end, 'yyyy-MM-dd')
 
-            // Traemos los datos (Asegurarse de que la tabla clases tenga es_la_liga y liga_nivel)
             const { data: dataClases, error: errClases } = await supabase
                 .from('clases')
                 .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre)`)
@@ -149,20 +147,19 @@ export default function CalendarioPage() {
 
             if (dataAlquileres) {
                 dataAlquileres.forEach((a: any) => {
-                    const [year, month, day] = a.fecha.split('-').map(Number);
-                    const [hInicio, mInicio] = a.hora_inicio.split(':').map(Number);
-                    const [hFin, mFin] = a.hora_fin.split(':').map(Number);
-
-                    const startObj = new Date(year, month - 1, day, hInicio, mInicio);
-                    const endObj = new Date(year, month - 1, day, hFin, mFin);
+                    // EL TRUCO DEFINITIVO: Ensamblado literal de Fechas
+                    // "2026-03-19" y "18:00:00" -> "2026-03-19T18:00:00"
+                    // Al no ponerle una 'Z', Javascript asume que es HORA LOCAL clavada y no le suma horas fantasma.
+                    const inicioLocal = `${a.fecha}T${a.hora_inicio.slice(0, 5)}:00`
+                    const finLocal = `${a.fecha}T${a.hora_fin.slice(0, 5)}:00`
 
                     agenda.push({
                         id: a.id,
                         tipo: 'Alquiler',
                         titulo: a.cliente_nombre || 'Cliente Externo',
                         subtitulo: `Alquiler (${a.tipo_uso})`,
-                        inicio: startObj.toISOString(),
-                        fin: endObj.toISOString(),
+                        inicio: inicioLocal,
+                        fin: finLocal,
                         sala_nombre: a.sala?.nombre,
                         sala_sede: a.sala?.sede?.nombre,
                         alquiler_data: {
@@ -229,7 +226,10 @@ export default function CalendarioPage() {
     const checkConflictos = async (salaId: string, inicio: Date, fin: Date) => {
         const inicioIso = inicio.toISOString()
         const finIso = fin.toISOString()
-        const fechaStr = format(inicio, 'yyyy-MM-dd')
+
+        // TRUCO DE COMPENSACIÓN LOCAL PARA CHEQUEO:
+        const fechaLocalSegura = new Date(inicio.getTime() + Math.abs(inicio.getTimezoneOffset() * 60000))
+        const fechaStr = format(fechaLocalSegura, 'yyyy-MM-dd')
         const hInicio = format(inicio, 'HH:mm')
         const hFin = format(fin, 'HH:mm')
 
@@ -305,7 +305,6 @@ export default function CalendarioPage() {
                     cupo_maximo: Number(form.cupoMaximo) || 0,
                     serie_id: serieUUID,
                     estado: 'activa',
-                    // --- APLICACIÓN LA LIGA ---
                     es_la_liga: form.esLaLiga,
                     liga_nivel: form.esLaLiga ? form.ligaNivel : null
                 })
@@ -471,7 +470,6 @@ export default function CalendarioPage() {
                                                                 <>
                                                                     <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><Briefcase size={10} /> {evt.clase_data?.profesor_nombre || 'Sin asignar'}</span>
                                                                     <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><GraduationCap size={10} /> {evt.clase_data?.nivel}</span>
-                                                                    {/* BADGE DE LA LIGA EN EL MODAL DE VISTA */}
                                                                     {evt.clase_data?.es_la_liga && (
                                                                         <span className="flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]">
                                                                             <Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})
@@ -485,7 +483,6 @@ export default function CalendarioPage() {
                                                         </div>
                                                     </div>
 
-                                                    {/* CONFIRMACIÓN DE BORRADO DE CLASE */}
                                                     {deleteTarget?.id === evt.id && (
                                                         <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-center p-4 text-center animate-in fade-in">
                                                             <AlertCircle className="text-red-500 mb-2" size={32} />
@@ -582,7 +579,7 @@ export default function CalendarioPage() {
                                                     <input type="number" min="0" value={form.cupoMaximo} onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]" placeholder="Ej: 20" />
                                                 </div>
 
-                                                {/* --- NUEVO: TOGGLE DE LA LIGA --- */}
+                                                {/* --- TOGGLE DE LA LIGA --- */}
                                                 <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-purple-500/5 p-3 rounded-xl border-dashed border-purple-500/20">
                                                     <label className="flex items-center gap-3 cursor-pointer">
                                                         <div className="relative flex items-center">

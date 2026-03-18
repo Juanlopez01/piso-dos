@@ -21,7 +21,7 @@ export const menuItems = [
     { name: 'Inicio', href: '/', icon: LayoutDashboard, roles: ['admin', 'recepcion'] },
     { name: 'Agenda', href: '/calendario', icon: CalendarDays, roles: ['admin', 'recepcion'] },
     { name: 'Alumnos / Profes', href: '/usuarios?ver=alumno', icon: GraduationCap, roles: ['admin', 'recepcion'] },
-    { name: 'Alquileres', href: '/alquileres', icon: MapPin, roles: ['admin', 'recepcion'] },
+    { name: 'Alquileres', href: '/alquileres', icon: MapPin, roles: ['recepcion'] },
     { name: 'Staff / Equipo', href: '/usuarios?ver=staff', icon: Users, roles: ['admin'] },
     { name: 'Productos', href: '/productos', icon: ShoppingBasket, roles: ['admin', 'recepcion'] },
     { name: 'Caja', href: '/caja', icon: CreditCard, roles: ['admin', 'recepcion'] },
