@@ -10,7 +10,6 @@ import {
 import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { useRouter } from 'next/navigation'
 
 // --- TIPOS ---
 type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; inicio: string; tipo_clase: string; profesor: { nombre_completo: string } } }
@@ -18,10 +17,8 @@ type PackVencimiento = { fecha_vencimiento: string; creditos_restantes: number; 
 
 export default function PerfilPage() {
     const supabase = createClient()
-    const router = useRouter()
 
     const [loading, setLoading] = useState(true)
-    const [loadingMsg, setLoadingMsg] = useState("Iniciando conexión...") // 👈 Nuevo estado para dar feedback visual
     const [saving, setSaving] = useState(false)
     const [uploadingFile, setUploadingFile] = useState(false)
 
@@ -36,70 +33,75 @@ export default function PerfilPage() {
     })
 
     useEffect(() => {
-        let isMounted = true // Control de montaje nativo y seguro
+        // 🚨 EL FAILSAFE IMPLACABLE: A los 5 segundos apaga el loader sí o sí
+        const timer = setTimeout(() => {
+            console.error("⏳ [FAILSAFE] La carga tardó demasiado. Forzando destrabe de pantalla...");
+            setLoading(false);
+        }, 5000);
 
         const iniciarTodo = async () => {
             try {
-                if (!isMounted) return
-                setLoading(true)
+                console.log("🚀 1. Iniciando carga del perfil...");
+                setLoading(true);
 
-                // 1. LEER MERCADO PAGO (Silencioso)
+                // --- MERCADO PAGO ---
                 const urlParams = new URLSearchParams(window.location.search)
                 const pagoStatus = urlParams.get('pago')
                 if (pagoStatus) {
+                    console.log("💰 Procesando pago:", pagoStatus);
                     if (pagoStatus === 'exito') toast.success('¡Pago aprobado! Tus clases se acreditarán.')
                     else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
                     else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
                     window.history.replaceState(null, '', window.location.pathname)
                 }
 
-                // 2. BUSCAMOS SESIÓN (Lectura local instantánea para resistir el F5)
-                if (isMounted) setLoadingMsg("Verificando credenciales...")
-                const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-
+                // --- SESIÓN ---
+                console.log("👤 2. Buscando sesión local...");
+                const { data: { session } } = await supabase.auth.getSession()
                 let userId = session?.user?.id
 
-                // Si la sesión rápida falla, hacemos un re-intento con el servidor
                 if (!userId) {
+                    console.log("⚠️ No hay sesión rápida, consultando al servidor profundo...");
                     const { data: { user } } = await supabase.auth.getUser()
                     userId = user?.id
                 }
 
                 if (!userId) {
+                    console.log("❌ 3. Usuario deslogueado. Redirigiendo...");
                     window.location.href = '/login'
                     return
                 }
 
-                // 3. LIMPIEZA DE CRÉDITOS (En segundo plano)
-                supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => { if (error) console.error(error) })
+                console.log("✅ 4. Usuario detectado:", userId);
 
-                // 4. CARGAMOS PERFIL
-                if (isMounted) setLoadingMsg("Sincronizando perfil...")
+                // Limpieza background
+                supabase.rpc('limpiar_creditos_vencidos').catch(e => console.log("Aviso en limpieza:", e));
+
+                // --- PERFIL ---
+                console.log("📥 5. Descargando datos de la base de datos...");
                 const { data: dataProfile, error: profileError } = await supabase
                     .from('profiles').select('*, creditos_regulares, creditos_seminarios').eq('id', userId).single()
 
-                if (profileError || !dataProfile) throw new Error("Perfil no encontrado")
+                if (profileError || !dataProfile) throw new Error("Perfil no encontrado en BD")
 
-                if (isMounted) {
-                    setProfile(dataProfile)
-                    setFormData({
-                        nombre: dataProfile.nombre || '', apellido: dataProfile.apellido || '', email: session?.user?.email || '',
-                        telefono: dataProfile.telefono || '', alias_cbu: dataProfile.alias_cbu || '',
-                        nombre_remplazo: dataProfile.nombre_remplazo || '', contacto_remplazo: dataProfile.contacto_remplazo || '',
-                        edad: dataProfile.edad?.toString() || '', direccion: dataProfile.direccion || '',
-                        contacto_emergencia: dataProfile.contacto_emergencia || '', plan_medico: dataProfile.plan_medico || '',
-                        condiciones_medicas: dataProfile.condiciones_medicas || '', apto_fisico_url: dataProfile.apto_fisico_url || ''
-                    })
-                }
+                console.log("✅ 6. Datos descargados. Sincronizando interfaz...");
+                setProfile(dataProfile)
+                setFormData({
+                    nombre: dataProfile.nombre || '', apellido: dataProfile.apellido || '', email: session?.user?.email || '',
+                    telefono: dataProfile.telefono || '', alias_cbu: dataProfile.alias_cbu || '',
+                    nombre_remplazo: dataProfile.nombre_remplazo || '', contacto_remplazo: dataProfile.contacto_remplazo || '',
+                    edad: dataProfile.edad?.toString() || '', direccion: dataProfile.direccion || '',
+                    contacto_emergencia: dataProfile.contacto_emergencia || '', plan_medico: dataProfile.plan_medico || '',
+                    condiciones_medicas: dataProfile.condiciones_medicas || '', apto_fisico_url: dataProfile.apto_fisico_url || ''
+                })
 
-                // 5. DATOS ADICIONALES SEGÚN ROL
-                if (isMounted) setLoadingMsg("Cargando tu información...")
-                if (dataProfile.rol === 'profesor' && isMounted) {
+                // --- DATOS EXTRAS ---
+                if (dataProfile.rol === 'profesor') {
                     const { data: dataAvisos } = await supabase.from('comunicados').select('*').order('created_at', { ascending: false })
                     if (dataAvisos) setAvisos(dataAvisos)
                 }
 
-                if ((dataProfile.rol === 'alumno' || dataProfile.rol === 'user') && isMounted) {
+                if (dataProfile.rol === 'alumno' || dataProfile.rol === 'user') {
                     const { data: dataHistorial } = await supabase.from('inscripciones').select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))').eq('user_id', userId).order('created_at', { ascending: false }).limit(20)
                     if (dataHistorial) setHistorialClases(dataHistorial.filter((h: any) => h.clase !== null) as unknown as HistorialClase[])
 
@@ -109,16 +111,16 @@ export default function PerfilPage() {
                 }
 
             } catch (error) {
-                console.error("Error crítico en la carga:", error)
-                if (isMounted) setProfile(null)
+                console.error("🚨 Error grave capturado en la carga:", error)
+                setProfile(null)
             } finally {
-                if (isMounted) setLoading(false)
+                console.log("🏁 7. Proceso finalizado. Apagando loader de forma manual.");
+                clearTimeout(timer) // Cancelamos la bomba de tiempo de 5 segundos
+                setLoading(false) // Apagamos la ruedita
             }
         }
 
         iniciarTodo()
-
-        return () => { isMounted = false } // Limpiamos si el componente se desmonta
     }, [])
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -193,7 +195,7 @@ export default function PerfilPage() {
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center w-full gap-4">
                 <Loader2 className="animate-spin text-[#D4E655] w-12 h-12" />
                 <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">
-                    {loadingMsg}
+                    Cargando perfil...
                 </p>
             </div>
         )
