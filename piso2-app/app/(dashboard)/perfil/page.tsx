@@ -262,8 +262,15 @@ export default function PerfilPage() {
                     </button>
                     <button
                         onClick={async () => {
-                            await supabase.auth.signOut()
-                            window.location.href = '/login'
+                            try {
+                                // Intentamos limpiar la sesión fantasma
+                                await supabase.auth.signOut()
+                            } catch (error) {
+                                console.error("Error limpiando sesión, forzando salida...", error)
+                            } finally {
+                                // SÍ O SÍ, pase lo que pase, te manda al login
+                                window.location.href = '/login'
+                            }
                         }}
                         className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors"
                     >
