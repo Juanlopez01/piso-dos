@@ -54,12 +54,12 @@ function PerfilContent() {
     })
     const searchParams = useSearchParams()
 
-    // 1. EFECTO PARA CARGAR DATOS (Se ejecuta UNA SOLA VEZ al entrar)
+    // EFECTO 1: Carga los datos una ÚNICA vez al entrar
     useEffect(() => {
         fetchData()
-    }, []) // 👈 El array vacío es clave, evita que se dispare infinitamente
+    }, []) // 👈 Array vacío: no se repite nunca
 
-    // 2. EFECTO PARA LOS CARTELITOS DE MERCADO PAGO
+    // EFECTO 2: Escucha los mensajes de Mercado Pago y limpia la URL sin trabar nada
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
 
@@ -72,21 +72,28 @@ function PerfilContent() {
                 toast.info('Tu pago está pendiente de confirmación.')
             }
 
-            // 🪄 MAGIA PURA: Limpiamos la URL de forma silenciosa sin trabar la página
-            window.history.replaceState(null, '', window.location.pathname)
+            // Limpia la URL de forma segura sin reiniciar la página
+            router.replace('/perfil', { scroll: false })
         }
-    }, [searchParams])
+    }, [searchParams, router])
 
 
     const fetchData = async () => {
         try {
-            await supabase.rpc('limpiar_creditos_vencidos')
             setLoading(true)
+
+            // 1. Buscamos el usuario primero
             const { data: { user } } = await supabase.auth.getUser()
+
             if (!user) {
                 router.push('/login')
                 return
             }
+
+            // 2. Limpiamos los créditos en "segundo plano" (si falla, no rompe la página)
+            supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => {
+                if (error) console.error("Error en RPC:", error)
+            })
 
             const { data: dataProfile } = await supabase
                 .from('profiles')
@@ -273,7 +280,9 @@ function PerfilContent() {
         window.location.href = '/login'
     }
 
-    if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
+    if (loading || !profile) {
+        return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
+    }
 
     const isProfe = profile?.rol === 'profesor'
     const isAlumno = profile?.rol === 'alumno' || profile?.rol === 'user'
