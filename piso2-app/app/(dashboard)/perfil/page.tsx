@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
     AlertTriangle, Mail, Calendar, LogOut, CheckCircle2, History,
@@ -31,7 +31,7 @@ type PackVencimiento = {
     tipo_clase: string
 }
 
-export default function PerfilPage() {
+function PerfilContent() {
     const supabase = createClient()
     const router = useRouter()
 
@@ -575,5 +575,18 @@ export default function PerfilPage() {
 
             </div>
         </div>
+    )
+}
+
+// 2. LA PÁGINA PRINCIPAL QUE ENVUELVE TODO EN SUSPENSE
+export default function PerfilPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+                <Loader2 className="animate-spin text-[#D4E655] w-12 h-12" />
+            </div>
+        }>
+            <PerfilContent />
+        </Suspense>
     )
 }
