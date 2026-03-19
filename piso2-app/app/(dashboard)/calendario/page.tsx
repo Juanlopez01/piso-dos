@@ -375,6 +375,7 @@ export default function CalendarioPage() {
 
         switch (evt.subtitulo) {
             case 'Regular': return { border: 'border-orange-500', text: 'text-orange-500', bg: 'bg-orange-500', glow: 'shadow-orange-500/20' }
+            case 'Seminario': return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500', glow: 'shadow-purple-500/20' }
             case 'Intensivo': return { border: 'border-gray-500', text: 'text-gray-400', bg: 'bg-black', glow: 'shadow-gray-500/20' }
             case 'Formación': return { border: 'border-yellow-400', text: 'text-yellow-400', bg: 'bg-yellow-400', glow: 'shadow-yellow-400/20' }
             case 'Compañía': return { border: 'border-blue-500', text: 'text-blue-500', bg: 'bg-blue-500', glow: 'shadow-blue-500/20' }
@@ -560,6 +561,7 @@ export default function CalendarioPage() {
                                                         setForm({ ...form, tipo: e.target.value, cupoMaximo: isCompania ? 20 : form.cupoMaximo })
                                                     }} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]">
                                                         <option value="Regular">Regular (Naranja)</option>
+                                                        <option value="Seminario">Seminario (Morado)</option>
                                                         <option value="Intensivo">Intensivo (Negro)</option>
                                                         <option value="Formación">Formación (Amarillo)</option>
                                                         <option value="Compañía">Compañías (Azul)</option>

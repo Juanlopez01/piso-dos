@@ -9,7 +9,7 @@ type CashContextType = {
     currentSedeId: string | null
     userRole: string | null
     userName: string | null
-    nivelLiga: number | null // 👈 NUEVA VARIABLE
+    nivelLiga: number | null
     checkStatus: () => Promise<void>
     isLoading: boolean
 }
@@ -28,9 +28,10 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     const [currentSedeId, setCurrentSedeId] = useState<string | null>(null)
     const [userRole, setUserRole] = useState<string | null>(null)
     const [userName, setUserName] = useState<string | null>(null)
-    const [nivelLiga, setNivelLiga] = useState<number | null>(null) // 👈 NUEVO ESTADO
+    const [nivelLiga, setNivelLiga] = useState<number | null>(null)
     const [isLoading, setIsLoading] = useState(true)
 
+    // El candado anti-spam sigue activo para proteger la DB
     const isFetchingRef = useRef(false)
 
     const fetchProfileAndBox = async (userId: string, isMounted: boolean = true) => {
@@ -38,35 +39,40 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
         isFetchingRef.current = true;
 
         try {
-            // 👈 NUEVO: Pedimos el nivel_liga a la BD
-            const { data: profile } = await Promise.race([
-                supabase.from('profiles').select('rol, nombre_completo, nivel_liga').eq('id', userId).maybeSingle(),
-                new Promise((resolve) => setTimeout(() => resolve({ data: null }), 4000))
-            ]) as any;
+            // Le sacamos el límite de tiempo. Ahora espera la respuesta real sí o sí.
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('rol, nombre_completo, nivel_liga')
+                .eq('id', userId)
+                .maybeSingle();
 
-            const rolReal = profile?.rol || 'alumno'
+            if (profileError) throw profileError;
 
-            if (isMounted) {
+            if (isMounted && profile) {
+                const rolReal = profile.rol || 'alumno'
                 setUserRole(rolReal)
-                setUserName(profile?.nombre_completo || 'Usuario')
-                setNivelLiga(profile?.nivel_liga || null) // 👈 LO GUARDAMOS
-            }
+                setUserName(profile.nombre_completo || 'Usuario')
+                setNivelLiga(profile.nivel_liga || null)
 
-            if (['admin', 'recepcion'].includes(rolReal)) {
-                const { data: turno } = await Promise.race([
-                    supabase.from('caja_turnos').select('id, sede_id').eq('usuario_id', userId).eq('estado', 'abierta').maybeSingle(),
-                    new Promise((resolve) => setTimeout(() => resolve({ data: null }), 4000))
-                ]) as any;
+                if (['admin', 'recepcion'].includes(rolReal)) {
+                    // También esperamos tranquilos el estado de la caja
+                    const { data: turno } = await supabase
+                        .from('caja_turnos')
+                        .select('id, sede_id')
+                        .eq('usuario_id', userId)
+                        .eq('estado', 'abierta')
+                        .maybeSingle();
 
-                if (isMounted) {
-                    if (turno) {
-                        setIsBoxOpen(true)
-                        setCurrentTurnoId(turno.id)
-                        setCurrentSedeId(turno.sede_id)
-                    } else {
-                        setIsBoxOpen(false)
-                        setCurrentTurnoId(null)
-                        setCurrentSedeId(null)
+                    if (isMounted) {
+                        if (turno) {
+                            setIsBoxOpen(true)
+                            setCurrentTurnoId(turno.id)
+                            setCurrentSedeId(turno.sede_id)
+                        } else {
+                            setIsBoxOpen(false)
+                            setCurrentTurnoId(null)
+                            setCurrentSedeId(null)
+                        }
                     }
                 }
             }
@@ -79,15 +85,18 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         let isMounted = true;
-        const failsafeTimeout = setTimeout(() => { if (isMounted) setIsLoading(false) }, 5000);
+
+        // Timeout de emergencia gigante (8 segundos) solo para que no se trabe el loader inicial
+        const failsafeTimeout = setTimeout(() => {
+            if (isMounted && isLoading) setIsLoading(false)
+        }, 8000);
 
         const initSession = async () => {
             try {
                 if (isMounted) setIsLoading(true);
-                const { data: sessionData, error } = await Promise.race([
-                    supabase.auth.getSession(),
-                    new Promise((resolve) => setTimeout(() => resolve({ data: { session: null }, error: new Error("TIMEOUT") }), 3000))
-                ]) as any;
+
+                // Pedimos la sesión sin apurarla
+                const { data: sessionData, error } = await supabase.auth.getSession();
 
                 if (error || !sessionData?.session?.user) {
                     if (isMounted) {
@@ -98,7 +107,9 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                     }
                     return;
                 }
+
                 await fetchProfileAndBox(sessionData.session.user.id, isMounted)
+
             } catch (error) {
                 console.error("Error inicializando sesión global:", error)
             } finally {

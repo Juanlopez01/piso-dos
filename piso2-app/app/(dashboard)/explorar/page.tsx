@@ -18,11 +18,11 @@ type ClaseDisponible = {
     nombre: string
     inicio: string
     fin: string
-    tipo_clase: 'Regular' | 'Especial'
+    tipo_clase: string // Ahora acepta cualquier texto
     cupo_maximo: number
     inscritos_count: number
     imagen_url?: string | null
-    ritmo_id?: string | null // Agregado para el perfilado
+    ritmo_id?: string | null
     profesor: { nombre_completo: string }
     sala: { nombre: string; sede: { nombre: string } }
     ya_inscrito?: boolean
@@ -46,13 +46,11 @@ export default function ExplorarClasesPage() {
     }, [])
 
     const fetchData = async () => {
-        // Ejecutamos la limpieza silenciosa de créditos vencidos en background
         await supabase.rpc('limpiar_creditos_vencidos')
         setLoading(true)
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
 
-        // 1. Traer saldo de créditos del alumno
         const { data: userProfile } = await supabase
             .from('profiles')
             .select('id, creditos_regulares, creditos_seminarios')
@@ -61,7 +59,6 @@ export default function ExplorarClasesPage() {
 
         if (userProfile) setPerfil(userProfile)
 
-        // 2. Traer clases futuras (que no estén canceladas)
         const hoy = new Date().toISOString()
         const { data: clasesData } = await supabase
             .from('clases')
@@ -76,8 +73,10 @@ export default function ExplorarClasesPage() {
             .order('inicio', { ascending: true })
 
         if (clasesData) {
-            // Procesar datos para saber cuántos inscritos hay y si el usuario actual ya está anotado
-            const clasesProcesadas = clasesData.map((c: any) => {
+            // 🛑 FILTRO INVISIBLE: Destruimos "Formación" para que no aparezca en la cartelera
+            const clasesPermitidas = clasesData.filter((c: any) => c.tipo_clase !== 'Formación')
+
+            const clasesProcesadas = clasesPermitidas.map((c: any) => {
                 const inscritos = c.inscripciones || []
                 return {
                     ...c,
@@ -90,27 +89,25 @@ export default function ExplorarClasesPage() {
         setLoading(false)
     }
 
-    // --- LÓGICA DE INSCRIPCIÓN (FIFO + Perfilado) ---
     const handleInscribirse = async (clase: ClaseDisponible) => {
         if (!perfil) return
 
-        const esEspecial = clase.tipo_clase === 'Especial'
+        // 🧠 CORRECCIÓN CRÍTICA: Identificamos correctamente a la familia de "Seminarios"
+        const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(clase.tipo_clase)
         const tipoClaseBD = esEspecial ? 'seminario' : 'regular'
 
         setProcesandoId(clase.id)
 
         try {
-            // 1. Disparamos la transacción SQL segura (Evita doble cobro)
             const { data, error } = await supabase.rpc('inscribir_alumno_fifo', {
                 p_user_id: perfil.id,
                 p_clase_id: clase.id,
-                p_tipo_clase: tipoClaseBD
+                p_tipo_clase: tipoClaseBD // Ahora sí manda "seminario" a la base de datos
             })
 
             if (error) throw new Error('Error de conexión al procesar la reserva.')
             if (!data.success) throw new Error(data.message)
 
-            // 2. PERFILADO DE INTERESES (Se mantiene intacto)
             if (clase.ritmo_id) {
                 const { data: currentProfile } = await supabase
                     .from('profiles')
@@ -127,7 +124,7 @@ export default function ExplorarClasesPage() {
                 }
             }
 
-            // 3. Actualizar UI Localmente para respuesta instantánea
+            // Descontamos visualmente el crédito correcto
             const columnaUpdate = esEspecial ? 'creditos_seminarios' : 'creditos_regulares'
             const creditosActuales = perfil[columnaUpdate] || 0
 
@@ -147,15 +144,20 @@ export default function ExplorarClasesPage() {
         }
     }
 
-    // Filtrado dinámico
     const clasesFiltradas = clases.filter(c => {
         const coincideTexto = c.nombre.toLowerCase().includes(filtroTexto.toLowerCase()) ||
             c.profesor?.nombre_completo?.toLowerCase().includes(filtroTexto.toLowerCase())
-        const coincideTipo = filtroTipo === 'Todos' || c.tipo_clase === filtroTipo
+
+        const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(c.tipo_clase)
+
+        let coincideTipo = false
+        if (filtroTipo === 'Todos') coincideTipo = true
+        else if (filtroTipo === 'Especial') coincideTipo = esEspecial
+        else if (filtroTipo === 'Regular') coincideTipo = !esEspecial
+
         return coincideTexto && coincideTipo
     })
 
-    // Extraer "Ritmos" únicos para hacer botones de filtro rápido
     const ritmosSugeridos = Array.from(new Set(clases.map(c => c.nombre.split(' ')[0]))).slice(0, 5)
 
     if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
@@ -164,7 +166,6 @@ export default function ExplorarClasesPage() {
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
             <Toaster position="top-center" richColors theme="dark" />
 
-            {/* HEADER Y CRÉDITOS */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-8 border-b border-white/10 pb-6">
                 <div>
                     <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white mb-1">
@@ -175,7 +176,6 @@ export default function ExplorarClasesPage() {
                     </p>
                 </div>
 
-                {/* Billetera de Créditos del Alumno */}
                 <div className="flex gap-3 w-full md:w-auto">
                     <div className="flex-1 md:flex-none bg-[#D4E655]/10 border border-[#D4E655]/30 rounded-2xl p-3 flex items-center gap-3">
                         <div className="bg-[#D4E655] text-black p-2 rounded-xl"><Ticket size={20} /></div>
@@ -194,7 +194,6 @@ export default function ExplorarClasesPage() {
                 </div>
             </div>
 
-            {/* BUSCADOR Y FILTROS */}
             <div className="mb-8 space-y-4">
                 <div className="flex flex-col md:flex-row gap-4">
                     <div className="relative flex-1">
@@ -220,26 +219,26 @@ export default function ExplorarClasesPage() {
                     </div>
                 </div>
 
-                {/* Filtros rápidos por Ritmo */}
-                <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-2">
-                    {ritmosSugeridos.map(ritmo => (
-                        <button
-                            key={ritmo}
-                            onClick={() => setFiltroTexto(ritmo)}
-                            className="bg-white/5 border border-white/10 hover:bg-white/10 px-4 py-2 rounded-full text-xs font-bold text-gray-300 transition-colors whitespace-nowrap flex items-center gap-2"
-                        >
-                            <Music size={12} /> {ritmo}
-                        </button>
-                    ))}
-                    {filtroTexto && (
-                        <button onClick={() => setFiltroTexto('')} className="bg-red-500/10 text-red-500 border border-red-500/20 px-4 py-2 rounded-full text-xs font-bold transition-colors whitespace-nowrap">
-                            Limpiar Filtros
-                        </button>
-                    )}
-                </div>
+                {ritmosSugeridos.length > 0 && (
+                    <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-2">
+                        {ritmosSugeridos.map(ritmo => (
+                            <button
+                                key={ritmo}
+                                onClick={() => setFiltroTexto(ritmo)}
+                                className="bg-white/5 border border-white/10 hover:bg-white/10 px-4 py-2 rounded-full text-xs font-bold text-gray-300 transition-colors whitespace-nowrap flex items-center gap-2"
+                            >
+                                <Music size={12} /> {ritmo}
+                            </button>
+                        ))}
+                        {filtroTexto && (
+                            <button onClick={() => setFiltroTexto('')} className="bg-red-500/10 text-red-500 border border-red-500/20 px-4 py-2 rounded-full text-xs font-bold transition-colors whitespace-nowrap">
+                                Limpiar Filtros
+                            </button>
+                        )}
+                    </div>
+                )}
             </div>
 
-            {/* GRILLA DE CLASES */}
             {clasesFiltradas.length === 0 ? (
                 <div className="text-center py-20 border border-dashed border-white/10 rounded-3xl bg-[#111]/50">
                     <p className="text-gray-500 font-bold uppercase text-sm">No hay clases disponibles con esos filtros.</p>
@@ -248,59 +247,46 @@ export default function ExplorarClasesPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                     {clasesFiltradas.map((clase) => {
                         const estaLleno = clase.cupo_maximo > 0 && clase.inscritos_count >= clase.cupo_maximo
-                        const esEspecial = clase.tipo_clase === 'Especial'
+                        // Identificamos el color y el comportamiento acá abajo también
+                        const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(clase.tipo_clase)
                         const esHoy = isToday(new Date(clase.inicio))
 
                         return (
-                            <div key={clase.id} className={`bg-[#09090b] rounded-3xl overflow-hidden flex flex-col transition-all group shadow-xl border-2 ${esHoy ? (esEspecial ? 'border-purple-500/50 shadow-[0_0_20px_rgba(168,85,247,0.2)]' : 'border-[#D4E655]/50 shadow-[0_0_20px_rgba(212,230,85,0.2)]') : 'border-white/10 hover:border-white/30'}`}>
+                            <div key={clase.id} className={`bg-[#09090b] rounded-3xl overflow-hidden flex flex-col transition-all group shadow-xl border-2 ${esHoy ? (esEspecial ? 'border-purple-500/50 shadow-[0_0_20px_rgba(168,85,247,0.2)]' : 'border-[#D4E655]/50 shadow-[0_0_20px_rgba(212,230,85,0.2)]') : (esEspecial ? 'border-purple-500/30 hover:border-purple-500/60' : 'border-white/10 hover:border-white/30')}`}>
 
                                 {/* IMAGEN / FLYER */}
                                 <div className="h-48 w-full relative bg-gradient-to-br from-[#1a1a1c] to-[#0a0a0a] border-b border-white/5 flex items-center justify-center overflow-hidden">
                                     {clase.imagen_url ? (
-                                        <Image
-                                            src={clase.imagen_url}
-                                            alt={clase.nombre}
-                                            fill
-                                            priority
-                                            sizes="(max-width: 768px) 100vw, 33vw"
-                                            className="object-cover"
-                                        />
+                                        <Image src={clase.imagen_url} alt={clase.nombre} fill priority sizes="(max-width: 768px) 100vw, 33vw" className="object-cover" />
                                     ) : (
-                                        // Fallback si no hay imagen
                                         <div className="flex flex-col items-center gap-2 text-white/20">
                                             <ImageIcon size={40} strokeWidth={1} />
                                             <span className="text-[10px] font-black uppercase tracking-widest">Sin Flyer</span>
                                         </div>
                                     )}
 
-                                    {/* Badge HOY (Nuevo) */}
                                     {esHoy && (
                                         <span className={`absolute top-4 left-4 text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full backdrop-blur-md flex items-center gap-1 shadow-lg ${esEspecial ? 'bg-purple-500 text-white' : 'bg-[#D4E655] text-black'}`}>
                                             ⚡ Hoy
                                         </span>
                                     )}
 
-                                    {/* Badge Tipo de Clase */}
-                                    <span className={`absolute top-4 right-4 text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full backdrop-blur-md ${esEspecial ? 'bg-purple-500/80 text-white' : 'bg-[#D4E655]/80 text-black'}`}>
+                                    {/* ESTILO MORADITO APLICADO CORRECTAMENTE */}
+                                    <span className={`absolute top-4 right-4 text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full backdrop-blur-md ${esEspecial ? 'bg-purple-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.5)]' : 'bg-[#D4E655]/80 text-black'}`}>
                                         {clase.tipo_clase}
                                     </span>
                                 </div>
 
                                 {/* INFO CLASE */}
                                 <div className="p-5 flex-1 flex flex-col relative">
-
-                                    {/* Nombre de la clase y Profe destacado */}
                                     <div className="mb-4">
-                                        <h3 className="text-xl font-black text-white uppercase leading-tight mb-1">
-                                            {clase.nombre}
-                                        </h3>
+                                        <h3 className="text-xl font-black text-white uppercase leading-tight mb-1">{clase.nombre}</h3>
                                         <p className="flex items-center gap-1.5 text-sm font-bold text-gray-300">
                                             <User size={14} className={esEspecial ? 'text-purple-400' : 'text-[#D4E655]'} />
                                             {clase.profesor?.nombre_completo || 'Staff'}
                                         </p>
                                     </div>
 
-                                    {/* Detalles (Fecha, hora, lugar) */}
                                     <div className="space-y-3 mt-auto pt-4 border-t border-white/5">
                                         <div className={`flex items-center gap-3 text-sm ${esHoy ? 'text-white font-bold' : 'text-gray-400'}`}>
                                             <Calendar size={14} className={esHoy ? (esEspecial ? 'text-purple-400' : 'text-[#D4E655]') : 'text-white/50'} />
@@ -328,10 +314,7 @@ export default function ExplorarClasesPage() {
                                             <AlertCircle size={16} /> Cupo Lleno
                                         </div>
                                     ) : (perfil && (esEspecial ? perfil.creditos_seminarios : perfil.creditos_regulares) <= 0) ? (
-                                        <Link
-                                            href="/tienda"
-                                            className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all shadow-lg bg-[#111] text-white border border-white/20 hover:bg-white hover:text-black"
-                                        >
+                                        <Link href="/tienda" className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all shadow-lg bg-[#111] text-white border border-white/20 hover:bg-white hover:text-black">
                                             <Ticket size={16} /> Comprar Créditos
                                         </Link>
                                     ) : (
@@ -351,8 +334,6 @@ export default function ExplorarClasesPage() {
                                             )}
                                         </button>
                                     )}
-
-                                    {/* Contador de cupos pequeño */}
                                     <p className="text-center text-[9px] text-gray-500 font-bold uppercase mt-3">
                                         {clase.cupo_maximo > 0 ? `${clase.inscritos_count} / ${clase.cupo_maximo} lugares ocupados` : 'Cupo Ilimitado'}
                                     </p>
