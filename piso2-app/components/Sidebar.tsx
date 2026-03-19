@@ -17,8 +17,8 @@ export default function Sidebar() {
     const [isLoggingOut, setIsLoggingOut] = useState(false)
     const [unreadNotifs, setUnreadNotifs] = useState(0)
 
-    // Traemos la data del contexto
-    const { isBoxOpen, userRole, userName, isLoading } = useCash()
+    // 👈 1. Traemos nivelLiga del contexto
+    const { isBoxOpen, userRole, userName, nivelLiga, isLoading } = useCash()
 
     // --- LÓGICA DE NOTIFICACIONES EN TIEMPO REAL ---
     useEffect(() => {
@@ -26,7 +26,6 @@ export default function Sidebar() {
 
         const fetchNotifsCount = async () => {
             try {
-                // 👈 LA MAGIA: Usamos getSession en vez de getUser para no saturar al servidor en el F5
                 const { data: { session } } = await supabase.auth.getSession()
                 const userId = session?.user?.id
 
@@ -46,7 +45,7 @@ export default function Sidebar() {
 
         fetchNotifsCount()
 
-        // Escuchar cambios en la DB (si entra una notificación nueva)
+        // Escuchar cambios en la DB
         const channel = supabase
             .channel('sidebar_notifs')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notificaciones' }, () => {
@@ -54,7 +53,6 @@ export default function Sidebar() {
             })
             .subscribe()
 
-        // Escuchar el evento local que disparamos desde la página de notificaciones al leer una
         const handleLocalUpdate = () => fetchNotifsCount()
         window.addEventListener('notificaciones_actualizadas', handleLocalUpdate)
 
@@ -80,7 +78,6 @@ export default function Sidebar() {
         } catch (error) {
             console.error("Error al cerrar sesión:", error)
         } finally {
-            // Siempre forzamos la salida, falle o no
             window.location.href = '/login'
         }
     }
@@ -89,11 +86,15 @@ export default function Sidebar() {
     const role = isLoading ? 'visitante' : (userRole || 'visitante')
 
     const visibleItems = menuItems.filter(item => {
-        if (role === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        // 👈 2. EL FILTRO MÁGICO: Oculta La Liga si es alumno y no tiene nivel
+        if (item.name === 'La Liga' && role === 'alumno' && !nivelLiga) return false;
+
+        // 👈 3. Listas actualizadas (Le sumé 'La Liga' al Admin y Recepción para que no lo pierdan)
+        if (role === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
         if (role === 'visitante') return ['Inicio', 'Agenda'].includes(item.name)
         if (role === 'recepcion') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
         }
         return item.roles.includes(role)
     })

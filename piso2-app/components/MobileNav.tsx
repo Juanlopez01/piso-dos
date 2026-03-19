@@ -15,7 +15,7 @@ export default function MobileNav() {
     const supabase = createClient()
 
     // Conectamos al mismo cerebro que el Sidebar
-    const { isBoxOpen, userRole, userName, isLoading } = useCash()
+    const { isBoxOpen, userRole, userName, nivelLiga, isLoading } = useCash()
 
     const handleSignOut = async () => {
         if (userRole === 'recepcion' && isBoxOpen) {
@@ -29,11 +29,15 @@ export default function MobileNav() {
     const role = isLoading ? 'visitante' : (userRole || 'visitante')
 
     const visibleItems = menuItems.filter(item => {
-        if (role === 'admin') return true
+        // 🛑 EL FILTRO MÁGICO PARA MÓVIL: Oculta La Liga si es alumno sin nivel
+        if (item.name === 'La Liga' && role === 'alumno' && !nivelLiga) return false;
+
+        // Listas explícitas para asegurar que Admin y Recepción siempre lo vean
+        if (role === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
         if (role === 'visitante') return ['Inicio', 'Agenda'].includes(item.name)
         if (role === 'recepcion') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil'].includes(item.name)
-            return true
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
         }
         return item.roles.includes(role)
     })
@@ -135,19 +139,12 @@ export default function MobileNav() {
                                             </p>
                                         </div>
                                     </div>
-                                    <button
-                                        onClick={handleSignOut}
-                                        className="flex items-center justify-center gap-2 w-full px-4 py-4 text-xs font-black uppercase text-red-500 bg-red-500/10 hover:bg-red-500 hover:text-white rounded-xl transition-all"
-                                    >
+                                    <button onClick={handleSignOut} className="flex items-center justify-center gap-2 w-full px-4 py-4 text-xs font-black uppercase text-red-500 bg-red-500/10 hover:bg-red-500 hover:text-white rounded-xl transition-all">
                                         <LogOut size={16} /> Cerrar Sesión
                                     </button>
                                 </>
                             ) : (
-                                <Link
-                                    href="/login"
-                                    onClick={() => setIsOpen(false)}
-                                    className="flex items-center justify-center gap-2 w-full px-4 py-4 text-xs font-black uppercase text-[#D4E655] bg-[#D4E655]/10 hover:bg-[#D4E655] hover:text-black rounded-xl transition-all"
-                                >
+                                <Link href="/login" onClick={() => setIsOpen(false)} className="flex items-center justify-center gap-2 w-full px-4 py-4 text-xs font-black uppercase text-[#D4E655] bg-[#D4E655]/10 hover:bg-[#D4E655] hover:text-black rounded-xl transition-all">
                                     <LogIn size={16} /> Iniciar Sesión
                                 </Link>
                             )}

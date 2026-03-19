@@ -9,12 +9,13 @@ type CashContextType = {
     currentSedeId: string | null
     userRole: string | null
     userName: string | null
+    nivelLiga: number | null // 👈 NUEVA VARIABLE
     checkStatus: () => Promise<void>
     isLoading: boolean
 }
 
 const CashContext = createContext<CashContextType>({
-    isBoxOpen: false, currentTurnoId: null, currentSedeId: null, userRole: null, userName: null, checkStatus: async () => { }, isLoading: true
+    isBoxOpen: false, currentTurnoId: null, currentSedeId: null, userRole: null, userName: null, nivelLiga: null, checkStatus: async () => { }, isLoading: true
 })
 
 export const useCash = () => useContext(CashContext)
@@ -27,34 +28,28 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     const [currentSedeId, setCurrentSedeId] = useState<string | null>(null)
     const [userRole, setUserRole] = useState<string | null>(null)
     const [userName, setUserName] = useState<string | null>(null)
+    const [nivelLiga, setNivelLiga] = useState<number | null>(null) // 👈 NUEVO ESTADO
     const [isLoading, setIsLoading] = useState(true)
 
-    // 🛑 EL CANDADO ANTI-SPAM: Evita peticiones duplicadas
     const isFetchingRef = useRef(false)
 
     const fetchProfileAndBox = async (userId: string, isMounted: boolean = true) => {
-        // Si ya estamos buscando datos, cancelamos esta petición repetida
-        if (isFetchingRef.current) {
-            console.log("🛑 [BLOQUEO] Evitando consulta duplicada a la base de datos...");
-            return;
-        }
-
-        isFetchingRef.current = true; // Cerramos el candado
+        if (isFetchingRef.current) return;
+        isFetchingRef.current = true;
 
         try {
-            // 🛡️ ESCUDO DB: Máximo 4 segundos o pasa de largo
-            const { data: profile, error: profileError } = await Promise.race([
-                supabase.from('profiles').select('rol, nombre_completo').eq('id', userId).maybeSingle(),
-                new Promise((resolve) => setTimeout(() => resolve({ data: null, error: new Error("TIMEOUT_DB") }), 4000))
+            // 👈 NUEVO: Pedimos el nivel_liga a la BD
+            const { data: profile } = await Promise.race([
+                supabase.from('profiles').select('rol, nombre_completo, nivel_liga').eq('id', userId).maybeSingle(),
+                new Promise((resolve) => setTimeout(() => resolve({ data: null }), 4000))
             ]) as any;
-
-            if (profileError) console.error("Error perfil:", profileError)
 
             const rolReal = profile?.rol || 'alumno'
 
             if (isMounted) {
                 setUserRole(rolReal)
                 setUserName(profile?.nombre_completo || 'Usuario')
+                setNivelLiga(profile?.nivel_liga || null) // 👈 LO GUARDAMOS
             }
 
             if (['admin', 'recepcion'].includes(rolReal)) {
@@ -78,44 +73,34 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
         } catch (err) {
             console.error("Error fetching details:", err)
         } finally {
-            // Terminamos de buscar, abrimos el candado para la próxima
             isFetchingRef.current = false;
         }
     }
 
     useEffect(() => {
         let isMounted = true;
-        console.log("🔄 Iniciando verificación global de sesión...")
-
-        const failsafeTimeout = setTimeout(() => {
-            if (isMounted) {
-                console.warn("⏳ [FAILSAFE GLOBAL] Supabase se tildó. Destrabando la app completa a la fuerza.");
-                setIsLoading(false);
-            }
-        }, 5000);
+        const failsafeTimeout = setTimeout(() => { if (isMounted) setIsLoading(false) }, 5000);
 
         const initSession = async () => {
             try {
                 if (isMounted) setIsLoading(true);
-
                 const { data: sessionData, error } = await Promise.race([
                     supabase.auth.getSession(),
-                    new Promise((resolve) => setTimeout(() => resolve({ data: { session: null }, error: new Error("TIMEOUT_SESSION") }), 3000))
+                    new Promise((resolve) => setTimeout(() => resolve({ data: { session: null }, error: new Error("TIMEOUT") }), 3000))
                 ]) as any;
 
                 if (error || !sessionData?.session?.user) {
                     if (isMounted) {
                         setUserRole('visitante')
                         setUserName(null)
+                        setNivelLiga(null)
                         setIsBoxOpen(false)
                     }
                     return;
                 }
-
                 await fetchProfileAndBox(sessionData.session.user.id, isMounted)
-
             } catch (error) {
-                console.error("❌ Error inicializando sesión global:", error)
+                console.error("Error inicializando sesión global:", error)
             } finally {
                 clearTimeout(failsafeTimeout)
                 if (isMounted) setIsLoading(false)
@@ -125,12 +110,11 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
         initSession()
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            console.log("🔔 Evento Auth Global:", event)
-
             if (event === 'SIGNED_OUT') {
                 if (isMounted) {
                     setUserRole('visitante')
                     setUserName(null)
+                    setNivelLiga(null)
                     setIsBoxOpen(false)
                     setCurrentTurnoId(null)
                     setCurrentSedeId(null)
@@ -157,7 +141,7 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     }
 
     return (
-        <CashContext.Provider value={{ isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, checkStatus, isLoading }}>
+        <CashContext.Provider value={{ isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, checkStatus, isLoading }}>
             {children}
         </CashContext.Provider>
     )
