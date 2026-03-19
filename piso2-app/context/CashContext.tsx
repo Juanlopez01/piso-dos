@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, useRef } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 
 type CashContextType = {
@@ -31,72 +31,61 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     const [nivelLiga, setNivelLiga] = useState<number | null>(null)
     const [isLoading, setIsLoading] = useState(true)
 
-    // El candado anti-spam sigue activo para proteger la DB
-    const isFetchingRef = useRef(false)
-
     const fetchProfileAndBox = async (userId: string, isMounted: boolean = true) => {
-        if (isFetchingRef.current) return;
-        isFetchingRef.current = true;
-
         try {
-            // Le sacamos el límite de tiempo. Ahora espera la respuesta real sí o sí.
-            const { data: profile, error: profileError } = await supabase
-                .from('profiles')
-                .select('rol, nombre_completo, nivel_liga')
-                .eq('id', userId)
-                .maybeSingle();
+            const { data: profile } = await Promise.race([
+                supabase.from('profiles').select('rol, nombre_completo, nivel_liga').eq('id', userId).maybeSingle(),
+                new Promise((resolve) => setTimeout(() => resolve({ data: null }), 4000))
+            ]) as any;
 
-            if (profileError) throw profileError;
+            const rolReal = profile?.rol || 'alumno'
 
-            if (isMounted && profile) {
-                const rolReal = profile.rol || 'alumno'
+            if (isMounted) {
                 setUserRole(rolReal)
-                setUserName(profile.nombre_completo || 'Usuario')
-                setNivelLiga(profile.nivel_liga || null)
+                setUserName(profile?.nombre_completo || 'Usuario')
+                setNivelLiga(profile?.nivel_liga || null)
+            }
 
-                if (['admin', 'recepcion'].includes(rolReal)) {
-                    // También esperamos tranquilos el estado de la caja
-                    const { data: turno } = await supabase
-                        .from('caja_turnos')
-                        .select('id, sede_id')
-                        .eq('usuario_id', userId)
-                        .eq('estado', 'abierta')
-                        .maybeSingle();
+            if (['admin', 'recepcion'].includes(rolReal)) {
+                const { data: turno } = await Promise.race([
+                    supabase.from('caja_turnos').select('id, sede_id').eq('usuario_id', userId).eq('estado', 'abierta').maybeSingle(),
+                    new Promise((resolve) => setTimeout(() => resolve({ data: null }), 4000))
+                ]) as any;
 
-                    if (isMounted) {
-                        if (turno) {
-                            setIsBoxOpen(true)
-                            setCurrentTurnoId(turno.id)
-                            setCurrentSedeId(turno.sede_id)
-                        } else {
-                            setIsBoxOpen(false)
-                            setCurrentTurnoId(null)
-                            setCurrentSedeId(null)
-                        }
+                if (isMounted) {
+                    if (turno) {
+                        setIsBoxOpen(true)
+                        setCurrentTurnoId(turno.id)
+                        setCurrentSedeId(turno.sede_id)
+                    } else {
+                        setIsBoxOpen(false)
+                        setCurrentTurnoId(null)
+                        setCurrentSedeId(null)
                     }
                 }
             }
         } catch (err) {
             console.error("Error fetching details:", err)
-        } finally {
-            isFetchingRef.current = false;
         }
     }
 
     useEffect(() => {
         let isMounted = true;
 
-        // Timeout de emergencia gigante (8 segundos) solo para que no se trabe el loader inicial
         const failsafeTimeout = setTimeout(() => {
-            if (isMounted && isLoading) setIsLoading(false)
-        }, 8000);
+            if (isMounted) {
+                setIsLoading(false);
+            }
+        }, 5000);
 
         const initSession = async () => {
             try {
                 if (isMounted) setIsLoading(true);
 
-                // Pedimos la sesión sin apurarla
-                const { data: sessionData, error } = await supabase.auth.getSession();
+                const { data: sessionData, error } = await Promise.race([
+                    supabase.auth.getSession(),
+                    new Promise((resolve) => setTimeout(() => resolve({ data: { session: null }, error: new Error("TIMEOUT_SESSION") }), 3000))
+                ]) as any;
 
                 if (error || !sessionData?.session?.user) {
                     if (isMounted) {
