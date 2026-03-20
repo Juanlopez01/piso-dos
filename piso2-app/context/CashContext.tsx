@@ -33,10 +33,12 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
     const fetchProfileAndBox = async (userId: string, isMounted: boolean = true) => {
         try {
-            const { data: profile } = await Promise.race([
-                supabase.from('profiles').select('rol, nombre_completo, nivel_liga').eq('id', userId).maybeSingle(),
-                new Promise((resolve) => setTimeout(() => resolve({ data: null }), 4000))
-            ]) as any;
+            // Le damos tiempo al celular para que traiga el perfil sin apurarlo
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('rol, nombre_completo, nivel_liga')
+                .eq('id', userId)
+                .maybeSingle();
 
             const rolReal = profile?.rol || 'alumno'
 
@@ -46,11 +48,14 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                 setNivelLiga(profile?.nivel_liga || null)
             }
 
+            // Solo Admin y Recepción manejan caja
             if (['admin', 'recepcion'].includes(rolReal)) {
-                const { data: turno } = await Promise.race([
-                    supabase.from('caja_turnos').select('id, sede_id').eq('usuario_id', userId).eq('estado', 'abierta').maybeSingle(),
-                    new Promise((resolve) => setTimeout(() => resolve({ data: null }), 4000))
-                ]) as any;
+                const { data: turno } = await supabase
+                    .from('caja_turnos')
+                    .select('id, sede_id')
+                    .eq('usuario_id', userId)
+                    .eq('estado', 'abierta')
+                    .maybeSingle();
 
                 if (isMounted) {
                     if (turno) {
@@ -72,22 +77,15 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         let isMounted = true;
 
-        const failsafeTimeout = setTimeout(() => {
-            if (isMounted) {
-                setIsLoading(false);
-            }
-        }, 5000);
-
         const initSession = async () => {
             try {
                 if (isMounted) setIsLoading(true);
 
-                const { data: sessionData, error } = await Promise.race([
-                    supabase.auth.getSession(),
-                    new Promise((resolve) => setTimeout(() => resolve({ data: { session: null }, error: new Error("TIMEOUT_SESSION") }), 3000))
-                ]) as any;
+                // 🛑 CORRECCIÓN CRÍTICA: Ya no competimos contra el reloj. 
+                // Esperamos la sesión oficial del navegador móvil.
+                const { data: { session }, error } = await supabase.auth.getSession();
 
-                if (error || !sessionData?.session?.user) {
+                if (error || !session?.user) {
                     if (isMounted) {
                         setUserRole('visitante')
                         setUserName(null)
@@ -97,12 +95,11 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                     return;
                 }
 
-                await fetchProfileAndBox(sessionData.session.user.id, isMounted)
+                await fetchProfileAndBox(session.user.id, isMounted)
 
             } catch (error) {
                 console.error("Error inicializando sesión global:", error)
             } finally {
-                clearTimeout(failsafeTimeout)
                 if (isMounted) setIsLoading(false)
             }
         }
@@ -130,7 +127,6 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
         return () => {
             isMounted = false;
-            clearTimeout(failsafeTimeout);
             subscription.unsubscribe()
         }
     }, [])

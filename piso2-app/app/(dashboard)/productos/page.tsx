@@ -388,7 +388,7 @@ export default function TiendaConfigPage() {
                                         <BookOpen size={16} /> Regular
                                     </button>
                                     <button type="button" onClick={() => setFormTipo('seminario')} className={`py-4 text-xs font-black uppercase rounded-xl transition-all flex items-center justify-center gap-2 ${formTipo === 'seminario' ? 'bg-purple-500 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>
-                                        <Star size={16} /> Seminario
+                                        <Star size={16} /> Especial
                                     </button>
                                 </div>
                             </div>

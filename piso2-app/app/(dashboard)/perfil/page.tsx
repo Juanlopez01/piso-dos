@@ -362,7 +362,7 @@ export default function PerfilPage() {
                                 </div>
                                 <div className="bg-[#111] border border-white/5 p-4 rounded-xl flex flex-col items-center justify-center text-center relative overflow-hidden group hover:border-purple-500/30 transition-all">
                                     <Star size={24} className="text-purple-500 mb-2 opacity-50 group-hover:opacity-100 transition-opacity" />
-                                    <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-purple-400 mb-1">Seminarios</p>
+                                    <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-purple-400 mb-1">Especiales</p>
                                     <p className="text-3xl sm:text-4xl font-black text-white">{profile.creditos_seminarios || 0}</p>
                                 </div>
                             </div>

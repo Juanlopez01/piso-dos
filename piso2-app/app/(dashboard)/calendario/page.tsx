@@ -561,7 +561,7 @@ export default function CalendarioPage() {
                                                         setForm({ ...form, tipo: e.target.value, cupoMaximo: isCompania ? 20 : form.cupoMaximo })
                                                     }} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]">
                                                         <option value="Regular">Regular (Naranja)</option>
-                                                        <option value="Seminario">Seminario (Morado)</option>
+                                                        <option value="Seminario">Especial (Morado)</option>
                                                         <option value="Intensivo">Intensivo (Negro)</option>
                                                         <option value="Formación">Formación (Amarillo)</option>
                                                         <option value="Compañía">Compañías (Azul)</option>

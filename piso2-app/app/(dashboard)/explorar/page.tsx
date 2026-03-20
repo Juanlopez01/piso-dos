@@ -187,7 +187,7 @@ export default function ExplorarClasesPage() {
                     <div className="flex-1 md:flex-none bg-purple-500/10 border border-purple-500/30 rounded-2xl p-3 flex items-center gap-3">
                         <div className="bg-purple-500 text-white p-2 rounded-xl"><Star size={20} /></div>
                         <div>
-                            <p className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Seminarios</p>
+                            <p className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Especiales</p>
                             <p className="text-xl font-black leading-none">{perfil?.creditos_seminarios || 0}</p>
                         </div>
                     </div>
