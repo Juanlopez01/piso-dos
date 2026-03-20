@@ -423,6 +423,7 @@ function UsuariosContent() {
                                                 className={`w-full h-full py-2.5 px-1 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoRolId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : 'bg-[#111] text-gray-300 border-white/5 hover:border-white/20 hover:text-white'}`}
                                             >
                                                 <option value="admin">Admin</option>
+                                                <option value="coordinador">Coordinador</option>
                                                 <option value="recepcion">Recep.</option>
                                                 <option value="profesor">Profe</option>
                                                 <option value="alumno">Alumno</option>

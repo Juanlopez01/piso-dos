@@ -90,7 +90,7 @@ export default function Sidebar() {
         if (item.name === 'La Liga' && role === 'alumno' && !nivelLiga) return false;
 
         // 👈 3. Listas actualizadas (Le sumé 'La Liga' al Admin y Recepción para que no lo pierdan)
-        if (role === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
+        if (role === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (role === 'visitante') return ['Inicio', 'Agenda'].includes(item.name)
         if (role === 'recepcion') {
             if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga'].includes(item.name)

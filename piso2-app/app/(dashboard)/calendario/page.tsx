@@ -11,7 +11,7 @@ import { es } from 'date-fns/locale'
 import {
     ChevronLeft, ChevronRight, X, Plus, MapPin, Trash2, Loader2,
     Info, DollarSign, Image as ImageIcon, Briefcase, GraduationCap,
-    Music, User, AlertCircle, CalendarDays, Star
+    Music, User, AlertCircle, CalendarDays, Star, UsersRound
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Image from 'next/image'
@@ -40,6 +40,7 @@ type EventoAgenda = {
         ritmo_id: string | null
         es_la_liga: boolean
         liga_nivel: number | null
+        compania_nombre: string | null // 👈 NUEVO
     }
     alquiler_data?: {
         telefono: string
@@ -51,6 +52,7 @@ type EventoAgenda = {
 type Sede = { id: string; nombre: string; salas: { id: string; nombre: string }[] }
 type Profile = { id: string; nombre_completo: string | null; email: string }
 type Ritmo = { id: string; nombre: string }
+type CompaniaMin = { id: string; nombre: string } // 👈 NUEVO
 
 export default function CalendarioPage() {
     const supabase = createClient()
@@ -64,6 +66,7 @@ export default function CalendarioPage() {
     const [sedes, setSedes] = useState<Sede[]>([])
     const [profesores, setProfesores] = useState<Profile[]>([])
     const [ritmos, setRitmos] = useState<Ritmo[]>([])
+    const [companias, setCompanias] = useState<CompaniaMin[]>([]) // 👈 NUEVO
 
     // UI
     const [loading, setLoading] = useState(true)
@@ -80,7 +83,8 @@ export default function CalendarioPage() {
         hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '', profeId: '',
         tipoAcuerdo: 'porcentaje', valorAcuerdo: '',
         fechas: [] as Date[],
-        esLaLiga: false, ligaNivel: 1
+        esLaLiga: false, ligaNivel: 1,
+        companiaId: '' // 👈 NUEVO
     })
     const [formFile, setFormFile] = useState<File | null>(null)
 
@@ -98,9 +102,10 @@ export default function CalendarioPage() {
             const startDateStr = format(start, 'yyyy-MM-dd')
             const endDateStr = format(end, 'yyyy-MM-dd')
 
+            // 👈 Traemos también el nombre de la compañía
             const { data: dataClases, error: errClases } = await supabase
                 .from('clases')
-                .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre)`)
+                .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre), compania:companias(nombre)`)
                 .gte('inicio', startIso)
                 .lte('fin', endIso)
 
@@ -139,7 +144,8 @@ export default function CalendarioPage() {
                             valor_acuerdo: c.valor_acuerdo,
                             ritmo_id: c.ritmo_id,
                             es_la_liga: c.es_la_liga || false,
-                            liga_nivel: c.liga_nivel || null
+                            liga_nivel: c.liga_nivel || null,
+                            compania_nombre: c.compania?.nombre || null // 👈 NUEVO
                         }
                     })
                 })
@@ -147,9 +153,6 @@ export default function CalendarioPage() {
 
             if (dataAlquileres) {
                 dataAlquileres.forEach((a: any) => {
-                    // EL TRUCO DEFINITIVO: Ensamblado literal de Fechas
-                    // "2026-03-19" y "18:00:00" -> "2026-03-19T18:00:00"
-                    // Al no ponerle una 'Z', Javascript asume que es HORA LOCAL clavada y no le suma horas fantasma.
                     const inicioLocal = `${a.fecha}T${a.hora_inicio.slice(0, 5)}:00`
                     const finLocal = `${a.fecha}T${a.hora_fin.slice(0, 5)}:00`
 
@@ -177,10 +180,12 @@ export default function CalendarioPage() {
             const { data: dataSedes } = await supabase.from('sedes').select('id, nombre, salas(id, nombre)')
             const { data: dataProfes } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'profesor')
             const { data: dataRitmos } = await supabase.from('ritmos').select('id, nombre').order('nombre')
+            const { data: dataCompanias } = await supabase.from('companias').select('id, nombre').order('nombre') // 👈 Traemos las compañías
 
             if (dataSedes) setSedes(dataSedes)
             if (dataProfes) setProfesores(dataProfes)
             if (dataRitmos) setRitmos(dataRitmos)
+            if (dataCompanias) setCompanias(dataCompanias)
 
         } catch (error) {
             console.error("Error al cargar el calendario:", error)
@@ -227,7 +232,6 @@ export default function CalendarioPage() {
         const inicioIso = inicio.toISOString()
         const finIso = fin.toISOString()
 
-        // TRUCO DE COMPENSACIÓN LOCAL PARA CHEQUEO:
         const fechaLocalSegura = new Date(inicio.getTime() + Math.abs(inicio.getTimezoneOffset() * 60000))
         const fechaStr = format(fechaLocalSegura, 'yyyy-MM-dd')
         const hInicio = format(inicio, 'HH:mm')
@@ -263,6 +267,8 @@ export default function CalendarioPage() {
         e.preventDefault()
         if (form.fechas.length === 0) return toast.error('Debe seleccionar al menos una fecha')
         if (!form.salaId || !form.profeId) return toast.error('Faltan datos (Sala o Profe)')
+        // 👈 Validación de Compañía
+        if (form.tipo === 'Compañía' && !form.companiaId) return toast.error('Debe seleccionar a qué Compañía pertenece esta clase')
 
         setUploading(true)
         try {
@@ -306,14 +312,15 @@ export default function CalendarioPage() {
                     serie_id: serieUUID,
                     estado: 'activa',
                     es_la_liga: form.esLaLiga,
-                    liga_nivel: form.esLaLiga ? form.ligaNivel : null
+                    liga_nivel: form.esLaLiga ? form.ligaNivel : null,
+                    compania_id: form.tipo === 'Compañía' ? form.companiaId : null // 👈 ASIGNAMOS LA COMPAÑÍA
                 })
             }
 
             const { error } = await supabase.from('clases').insert(clasesAInsertar)
             if (error) throw new Error('Error al guardar en la base de datos.')
 
-            if (form.ritmoId) {
+            if (form.ritmoId && form.tipo !== 'Compañía') { // No spameamos por ritmos si es una clase cerrada de compañía
                 const ritmoNombre = ritmos.find(r => r.id === form.ritmoId)?.nombre || 'Nuevo Ritmo'
                 const { data: interesados } = await supabase
                     .from('profiles')
@@ -352,7 +359,7 @@ export default function CalendarioPage() {
             nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
             hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '', profeId: '',
             tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: selectedDate ? [selectedDate] : [],
-            esLaLiga: false, ligaNivel: 1
+            esLaLiga: false, ligaNivel: 1, companiaId: ''
         })
         setFormFile(null)
     }
@@ -390,7 +397,6 @@ export default function CalendarioPage() {
         <div className="h-full flex flex-col pb-24 md:pb-10 px-2 pt-2">
             <Toaster position="top-center" richColors theme="dark" />
 
-            {/* HEADER CALENDARIO */}
             <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-3">
                     <div>
@@ -408,7 +414,6 @@ export default function CalendarioPage() {
             </div>
             <div className="grid grid-cols-7 mb-2">{['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(d => <div key={d} className="text-center text-gray-500 text-[9px] font-black uppercase tracking-wider">{d}</div>)}</div>
 
-            {/* GRILLA MES */}
             <div className="grid grid-cols-7 gap-1 auto-rows-fr h-full overflow-y-auto">
                 {eachDayOfInterval({ start: startOfWeek(startOfMonth(currentDate)), end: endOfWeek(endOfMonth(currentDate)) }).map((day) => {
                     const isToday = isSameDay(day, new Date())
@@ -476,6 +481,12 @@ export default function CalendarioPage() {
                                                                             <Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})
                                                                         </span>
                                                                     )}
+                                                                    {/* 👈 BADGE DE LA COMPAÑÍA EN LA VISTA DE LA AGENDA */}
+                                                                    {evt.clase_data?.compania_nombre && (
+                                                                        <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]">
+                                                                            <UsersRound size={10} className="text-blue-500" /> {evt.clase_data.compania_nombre}
+                                                                        </span>
+                                                                    )}
                                                                 </>
                                                             ) : (<span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><User size={10} /> Cliente Externo</span>)}
                                                         </div>
@@ -506,7 +517,6 @@ export default function CalendarioPage() {
                                 </div>
                             )}
 
-                            {/* MODO CREAR (FORMULARIO) */}
                             {modalMode === 'create' && (
                                 <form onSubmit={handleCrearClase} className="space-y-6">
                                     <div className="space-y-3">
@@ -581,7 +591,19 @@ export default function CalendarioPage() {
                                                     <input type="number" min="0" value={form.cupoMaximo} onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]" placeholder="Ej: 20" />
                                                 </div>
 
-                                                {/* --- TOGGLE DE LA LIGA --- */}
+                                                {/* 👈 NUEVO: SELECTOR DE COMPAÑÍA CONDICIONAL */}
+                                                {form.tipo === 'Compañía' && (
+                                                    <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-blue-500/5 p-3 rounded-xl border-dashed border-blue-500/20 animate-in fade-in">
+                                                        <label className="flex items-center gap-1.5 text-[10px] font-black text-blue-400 uppercase tracking-widest">
+                                                            <UsersRound size={12} className="text-blue-500" /> Vincular a Grupo
+                                                        </label>
+                                                        <select required value={form.companiaId} onChange={e => setForm({ ...form, companiaId: e.target.value })} className="w-full bg-[#111] border border-blue-500/30 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-blue-500">
+                                                            <option value="">Seleccionar compañía...</option>
+                                                            {companias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                                                        </select>
+                                                    </div>
+                                                )}
+
                                                 <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-purple-500/5 p-3 rounded-xl border-dashed border-purple-500/20">
                                                     <label className="flex items-center gap-3 cursor-pointer">
                                                         <div className="relative flex items-center">

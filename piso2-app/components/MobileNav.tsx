@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, X, LogOut, UserCircle, Shield, Radio, LogIn } from 'lucide-react'
+import { Menu, X, LogOut, UserCircle, Shield, Radio, LogIn, UsersRound } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { menuItems } from '@/config/menu'
 import { useCash } from '@/context/CashContext'
@@ -33,7 +33,7 @@ export default function MobileNav() {
         if (item.name === 'La Liga' && role === 'alumno' && !nivelLiga) return false;
 
         // Listas explícitas para asegurar que Admin y Recepción siempre lo vean
-        if (role === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
+        if (role === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (role === 'visitante') return ['Inicio', 'Agenda'].includes(item.name)
         if (role === 'recepcion') {
             if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga'].includes(item.name)
@@ -135,7 +135,7 @@ export default function MobileNav() {
                                         <div className="overflow-hidden">
                                             <p className="text-sm font-bold text-white truncate">{userName || 'Usuario'}</p>
                                             <p className="text-[10px] text-[#D4E655] uppercase font-black flex items-center gap-1">
-                                                {role === 'admin' ? <Shield size={10} /> : <Radio size={10} />} {role}
+                                                {role === 'admin' ? <Shield size={10} /> : role === 'coordinador' ? <UsersRound size={10} /> : <Radio size={10} />} {role}
                                             </p>
                                         </div>
                                     </div>
