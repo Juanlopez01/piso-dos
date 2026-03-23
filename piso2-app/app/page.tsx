@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { ArrowUpRight, Triangle, Play, ArrowRight, Menu, X, MapPin, Instagram, Mail, InstagramIcon, Loader2, User as UserIcon } from 'lucide-react'
+import { ArrowUpRight, Triangle, Play, ArrowRight, Menu, X, MapPin, Instagram, Mail, InstagramIcon, Loader2, User as UserIcon, MonitorSmartphone } from 'lucide-react'
 import { Montserrat } from 'next/font/google'
 
 const montserrat = Montserrat({
@@ -404,19 +404,27 @@ export default function LandingPage() {
       </section>
 
       {/* --- FOOTER GIGANTE / CALL TO ACTION --- */}
+      {/* --- FOOTER GIGANTE / CALL TO ACTION --- */}
       <footer className="w-full bg-[#D4E655] text-black text-center pt-24 pb-12 px-6 flex flex-col items-center">
         <h2 className="text-4xl md:text-8xl font-black uppercase tracking-tighter mb-8 max-w-5xl leading-[0.85]">
           Descubrí tu <br />lado Piso2
         </h2>
+
         {loggedUser ? (
-          <Link href={loggedUser.url} className="bg-black text-white px-12 py-5 rounded-full text-sm font-black uppercase tracking-[0.2em] hover:bg-white hover:text-black transition-all mb-24 shadow-2xl flex items-center gap-2">
+          <Link href={loggedUser.url} className="bg-black text-white px-12 py-5 rounded-full text-sm font-black uppercase tracking-[0.2em] hover:bg-white hover:text-black transition-all mb-12 shadow-2xl flex items-center gap-2">
             <UserIcon size={18} /> IR A MI PANEL
           </Link>
         ) : (
-          <Link href="/login" className="bg-black text-white px-12 py-5 rounded-full text-sm font-black uppercase tracking-[0.2em] hover:bg-white hover:text-black transition-all mb-24 shadow-2xl">
+          <Link href="/login" className="bg-black text-white px-12 py-5 rounded-full text-sm font-black uppercase tracking-[0.2em] hover:bg-white hover:text-black transition-all mb-12 shadow-2xl">
             UNIRSE AHORA
           </Link>
         )}
+
+        {/* 👈 NUEVO BOTÓN DE INSTALACIÓN */}
+        <Link href="/instalar" className="flex items-center gap-2 text-xs font-black uppercase tracking-widest mb-16 border border-black/20 px-6 py-3 rounded-full hover:bg-black hover:text-[#D4E655] transition-colors">
+          <MonitorSmartphone size={16} /> ¿Cómo instalar la App?
+        </Link>
+
         <p className="text-[10px] font-bold uppercase tracking-[0.3em] opacity-50">
           Piso 2 Multiespacio © {new Date().getFullYear()} • Todos los derechos reservados
         </p>
