@@ -13,6 +13,7 @@ import {
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { toast, Toaster } from 'sonner'
+import { useCash } from '@/context/CashContext' // 👈 Importamos el cerebro
 
 const CRITERIOS_EVALUACION = [
     "Puntualidad", "Asistencia / regularidad", "Compromiso con la clase", "Actitud de trabajo",
@@ -28,6 +29,9 @@ const CRITERIOS_EVALUACION = [
 export default function LaLigaPage() {
     const supabase = createClient()
     const router = useRouter()
+
+    // 👈 Traemos hasLigaAccess y isLoadingContext
+    const { hasLigaAccess, isLoading: loadingContext } = useCash()
 
     const [loading, setLoading] = useState(true)
     const [profile, setProfile] = useState<any>(null)
@@ -66,9 +70,19 @@ export default function LaLigaPage() {
     const inicializado = useRef(false)
 
     // ==========================================
-    // CARGA INICIAL
+    // CARGA INICIAL Y PATOVICA
     // ==========================================
     useEffect(() => {
+        // Esperamos a que el Context termine de cargar
+        if (loadingContext) return;
+
+        // 👈 EL PATOVICA DE LA PÁGINA
+        if (!hasLigaAccess) {
+            toast.error('Acceso denegado. No pertenecés a La Liga.')
+            router.replace('/explorar')
+            return;
+        }
+
         if (inicializado.current) return
         inicializado.current = true
 
@@ -146,7 +160,7 @@ export default function LaLigaPage() {
                     const { data: dataAvisos } = await queryAvisos
                     if (dataAvisos) setAvisos(dataAvisos)
 
-                    // --- TRAER MATERIAS (EL ALGORITMO NUEVO Y MEJORADO) ---
+                    // --- TRAER MATERIAS ---
                     const hoyIso = new Date().toISOString()
                     const cuatrimestreActual = '2026-1'
 
@@ -155,7 +169,6 @@ export default function LaLigaPage() {
                     if (isProfe && dataProfile.rol !== 'admin') {
                         queryClases = queryClases.eq('profesor_id', userId)
                     } else if (!isProfe) {
-                        // Traemos TODAS las clases de este nivel (pasadas y futuras) para agruparlas bien
                         queryClases = queryClases.eq('liga_nivel', nivelAlumno)
                     }
 
@@ -188,7 +201,6 @@ export default function LaLigaPage() {
                     if (dataClases) {
                         const disciplinasMap: Record<string, any> = {}
 
-                        // Agrupamos inteligentemente todas las clases por nombre de materia
                         dataClases.forEach((clase: any) => {
                             if (!disciplinasMap[clase.nombre]) {
                                 disciplinasMap[clase.nombre] = {
@@ -197,13 +209,12 @@ export default function LaLigaPage() {
                                     liga_nivel: clase.liga_nivel,
                                     profesor: clase.profesor?.nombre_completo || 'Staff',
                                     proxima_clase: null,
-                                    clases_ids: [] // Guardamos todos los IDs de esta materia para buscar la nota en cualquiera
+                                    clases_ids: []
                                 }
                             }
 
                             disciplinasMap[clase.nombre].clases_ids.push(clase.id)
 
-                            // Si esta clase ocurre de hoy en adelante, la guardamos como próxima
                             if (clase.inicio >= hoyIso) {
                                 if (!disciplinasMap[clase.nombre].proxima_clase || clase.inicio < disciplinasMap[clase.nombre].proxima_clase) {
                                     disciplinasMap[clase.nombre].proxima_clase = clase.inicio
@@ -212,7 +223,6 @@ export default function LaLigaPage() {
                             }
                         })
 
-                        // Cruzamos las materias consolidadas con las evaluaciones
                         const disciplinasUnicas = Object.values(disciplinasMap).map((disciplina: any) => {
                             let evaluacion = null
                             if (!isProfe) {
@@ -221,7 +231,6 @@ export default function LaLigaPage() {
                             return { ...disciplina, evaluacion: evaluacion || null }
                         })
 
-                        // Ordenamos alfabéticamente para que quede prolijo
                         disciplinasUnicas.sort((a, b) => a.nombre.localeCompare(b.nombre))
                         setMaterias(disciplinasUnicas)
                     }
@@ -240,7 +249,7 @@ export default function LaLigaPage() {
         }
 
         fetchLaLigaData()
-    }, [])
+    }, [hasLigaAccess, loadingContext, router])
 
     // --- FUNCIONES GESTIÓN ADMIN ---
     const cargarTodosLosAlumnos = async (mostrarLoading = true) => {
@@ -283,7 +292,7 @@ export default function LaLigaPage() {
         if (adminTab === 'gestion' && allStudents.length === 0) {
             cargarTodosLosAlumnos()
         }
-    }, [adminTab])
+    }, [adminTab, allStudents.length])
 
     // --- FUNCIONES COMUNICADOS ---
     const enviarAviso = async (e: React.FormEvent) => {
@@ -427,7 +436,7 @@ export default function LaLigaPage() {
     }
 
     // --- RENDERS ---
-    if (loading) {
+    if (loading || loadingContext) {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center">
                 <Loader2 className="animate-spin text-[#D4E655] w-12 h-12 mb-4" />

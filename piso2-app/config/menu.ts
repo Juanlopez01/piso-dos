@@ -10,7 +10,7 @@ export const menuItems = [
     { name: 'Caja', href: '/caja', icon: ShoppingBag, roles: ['admin', 'recepcion'] },
     { name: 'Sedes', href: '/sedes', icon: MapPin, roles: ['admin'] },
     // 👇 Agregamos Compañías
-    { name: 'Compañías', href: '/companias', icon: UsersRound, roles: ['admin', 'coordinador'] },
+    { name: 'Compañías', href: '/companias', icon: UsersRound, roles: ['admin', 'coordinador', 'profesor', 'alumno'] },
     // Sumamos al coordinador acá 👇
     { name: 'La Liga', href: '/la-liga', icon: GraduationCap, roles: ['admin', 'profesor', 'coordinador', 'alumno'] },
     { name: 'Notificaciones', href: '/notificaciones', icon: Bell, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno'] },

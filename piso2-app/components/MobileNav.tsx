@@ -14,8 +14,8 @@ export default function MobileNav() {
     const pathname = usePathname()
     const supabase = createClient()
 
-    // Conectamos al mismo cerebro que el Sidebar
-    const { isBoxOpen, userRole, userName, nivelLiga, isLoading } = useCash()
+    // 👈 1. Conectamos los accesos inteligentes del contexto
+    const { isBoxOpen, userRole, userName, hasLigaAccess, hasCompaniaAccess, isLoading } = useCash()
 
     const handleSignOut = async () => {
         if (userRole === 'recepcion' && isBoxOpen) {
@@ -29,15 +29,16 @@ export default function MobileNav() {
     const role = isLoading ? 'visitante' : (userRole || 'visitante')
 
     const visibleItems = menuItems.filter(item => {
-        // 🛑 EL FILTRO MÁGICO PARA MÓVIL: Oculta La Liga si es alumno sin nivel
-        if (item.name === 'La Liga' && role === 'alumno' && !nivelLiga) return false;
+        // 👈 2. EL FILTRO MÁGICO: Oculta si el cerebro dice que no tienen acceso
+        if (item.name === 'La Liga' && !hasLigaAccess) return false;
+        if (item.name === 'Compañías' && !hasCompaniaAccess) return false;
 
-        // Listas explícitas para asegurar que Admin y Recepción siempre lo vean
+        // 👈 3. Listas explícitas para asegurar que Admin y Recepción siempre vean su módulo
         if (role === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (role === 'visitante') return ['Inicio', 'Agenda'].includes(item.name)
         if (role === 'recepcion') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga', 'Compañías'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Compañías'].includes(item.name)
         }
         return item.roles.includes(role)
     })
@@ -97,7 +98,7 @@ export default function MobileNav() {
                         </div>
 
                         {/* LISTA DE NAVEGACIÓN */}
-                        <nav className="flex-1 overflow-y-auto p-4 space-y-2">
+                        <nav className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
                             {isLoading ? (
                                 // Esqueleto simple
                                 [1, 2, 3].map(i => <div key={i} className="h-12 bg-white/5 rounded-xl animate-pulse" />)

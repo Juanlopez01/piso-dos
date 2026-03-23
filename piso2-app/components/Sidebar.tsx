@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LogOut, UserCircle, Shield, Radio, LogIn } from 'lucide-react'
+import { LogOut, UserCircle, Shield, Radio, LogIn, UsersRound } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { menuItems } from '@/config/menu'
 import { useCash } from '@/context/CashContext'
@@ -17,8 +17,8 @@ export default function Sidebar() {
     const [isLoggingOut, setIsLoggingOut] = useState(false)
     const [unreadNotifs, setUnreadNotifs] = useState(0)
 
-    // 👈 1. Traemos nivelLiga del contexto
-    const { isBoxOpen, userRole, userName, nivelLiga, isLoading } = useCash()
+    // 👈 1. Traemos los accesos inteligentes del contexto
+    const { isBoxOpen, userRole, userName, hasLigaAccess, hasCompaniaAccess, isLoading } = useCash()
 
     // --- LÓGICA DE NOTIFICACIONES EN TIEMPO REAL ---
     useEffect(() => {
@@ -45,7 +45,6 @@ export default function Sidebar() {
 
         fetchNotifsCount()
 
-        // Escuchar cambios en la DB
         const channel = supabase
             .channel('sidebar_notifs')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notificaciones' }, () => {
@@ -61,7 +60,6 @@ export default function Sidebar() {
             window.removeEventListener('notificaciones_actualizadas', handleLocalUpdate)
         }
     }, [isLoading, userRole, supabase])
-
 
     // --- LÓGICA LOGOUT ---
     const handleSignOut = async () => {
@@ -86,16 +84,18 @@ export default function Sidebar() {
     const role = isLoading ? 'visitante' : (userRole || 'visitante')
 
     const visibleItems = menuItems.filter(item => {
-        // 👈 2. EL FILTRO MÁGICO: Oculta La Liga si es alumno y no tiene nivel
-        if (item.name === 'La Liga' && role === 'alumno' && !nivelLiga) return false;
+        // 👈 2. LOS FILTROS MÁGICOS (Si el cerebro dice que no, los ocultamos)
+        if (item.name === 'La Liga' && !hasLigaAccess) return false;
+        if (item.name === 'Compañías' && !hasCompaniaAccess) return false;
 
-        // 👈 3. Listas actualizadas (Le sumé 'La Liga' al Admin y Recepción para que no lo pierdan)
+        // 👈 3. Listas explícitas asegurando que Admin y Recepción vean todo su módulo
         if (role === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (role === 'visitante') return ['Inicio', 'Agenda'].includes(item.name)
         if (role === 'recepcion') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga', 'Compañías'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Compañías'].includes(item.name)
         }
+
         return item.roles.includes(role)
     })
 
@@ -176,7 +176,8 @@ export default function Sidebar() {
                             <div className="min-w-0">
                                 <p className="text-xs font-bold text-white truncate">{userName || 'Usuario'}</p>
                                 <p className="text-[10px] text-[#D4E655] uppercase font-black flex items-center gap-1">
-                                    {role === 'admin' ? <Shield size={10} /> : <Radio size={10} />} {role}
+                                    {/* 👈 Ícono personalizado para cada tipo de staff */}
+                                    {role === 'admin' ? <Shield size={10} /> : role === 'coordinador' ? <UsersRound size={10} /> : <Radio size={10} />} {role}
                                 </p>
                             </div>
                         </div>
