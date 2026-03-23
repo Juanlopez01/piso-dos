@@ -47,17 +47,18 @@ export default function EscenaPage() {
 
 
     const salas = [
-        { id: 1, nombre: 'SALA BLANCA', img: 'https://images.unsplash.com/photo-1518834107812-67b0b7c58434?q=80&w=1000&auto=format&fit=crop' },
-        { id: 2, nombre: 'SALA NEGRA', img: 'https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=1000&auto=format&fit=crop' },
-        { id: 3, nombre: 'SALA COMPLETA', img: 'https://images.unsplash.com/photo-1503095392237-fc785880c451?q=80&w=1000&auto=format&fit=crop' },
-        { id: 4, nombre: 'PASILLO SUBSUELO', img: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?q=80&w=1000&auto=format&fit=crop' } // Idealmente una foto con luz roja
+        { id: 1, nombre: 'SALA BLANCA', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273186/D6322754-9700-4B2F-BB10-9D5622F2B37D_2_oomwdp.png' },
+        { id: 2, nombre: 'SALA NEGRA', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273185/40F11C05-7457-4AD6-A4D9-6EC3FCDB2568_2_yr9lw9.png' },
+        { id: 3, nombre: 'SALA COMPLETA', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273213/50E7A27C-DAA6-4DB9-B6F2-254CFEBAEF14_2_av71vm.png' },
+        { id: 4, nombre: 'PASILLO SUBSUELO', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273212/IMG_0556_2_mwuo4s.jpg' } // Idealmente una foto con luz roja
     ]
 
     const galeria = [
-        'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?q=80&w=800&auto=format&fit=crop',
-        'https://images.unsplash.com/photo-1516280440502-61db37604318?q=80&w=800&auto=format&fit=crop',
-        'https://images.unsplash.com/photo-1460723237483-7a6dc9d0b212?q=80&w=800&auto=format&fit=crop',
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=800&auto=format&fit=crop'
+        'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273164/DSC08820_fkpapk.jpg',
+        'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273186/DSC09012_qoytmx.jpg',
+        'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273186/5461029F-2CA2-4B36-ABDB-52CEE6B6EECE_2_cfua07.jpg',
+        'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273163/DSC08549_jauf3a.jpg',
+        'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273212/5C318F3E-0064-4DD1-802A-2301A6115FA6_2_iwwqs2.jpg'
     ]
 
     return (
@@ -93,7 +94,7 @@ export default function EscenaPage() {
             <section className="relative min-h-[90vh] flex flex-col items-center justify-center pt-20">
                 {/* Background Image (Black & White) */}
                 <div className="absolute inset-0 z-0">
-                    <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1503095392237-fc785880c451?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center grayscale opacity-50"></div>
+                    <div className="absolute inset-0 bg-[url('https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273212/escenico_kqpvv1.jpg')] bg-cover bg-center grayscale opacity-50"></div>
                     <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-black/40 to-transparent"></div>
                 </div>
 
@@ -106,8 +107,8 @@ export default function EscenaPage() {
                         ESCENA
                     </h2>
 
-                    <div className="bg-black/40 backdrop-blur-sm border border-white/10 p-6 md:p-10 max-w-4xl">
-                        <p className="text-white font-bold uppercase tracking-widest text-sm md:text-lg leading-loose text-center">
+                    <div className="bg-black/40 backdrop-blur-sm  p-6 md:p-10 max-w-4xl">
+                        <p className="text-white font-semibold uppercase tracking-widest text-sm md:text-lg leading-loose text-center">
                             Acompañamos artistas, compañías, productores, creadores,<br /> marcas y proyectos en todas las etapas.<br />
                             De la idea a la presentación frente al público o la cámara,<br /> hacemos posible lo que imaginás.
                         </p>
@@ -141,7 +142,7 @@ export default function EscenaPage() {
 
                     <div className="relative h-[500px] bg-zinc-900 rounded-2xl overflow-hidden border border-white/10 group flex items-center justify-center">
                         {/* Fondo de la imagen inmersiva */}
-                        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1540317580384-e5d43867caa6?q=80&w=1000&auto=format&fit=crop')] bg-cover bg-center opacity-40 group-hover:opacity-60 transition-all duration-700"></div>
+                        <div className="absolute inset-0 bg-[url('https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273153/DSC08249_pqrea2.jpg')] bg-cover bg-center opacity-40 group-hover:opacity-60 transition-all duration-700"></div>
                         <div className="relative z-10 text-center">
                             <h3 className="text-5xl md:text-7xl font-black text-[#D4E655] uppercase tracking-tighter leading-[0.85] drop-shadow-2xl">
                                 INMERSIVO<br />PARTICI-<br />PATIVO
@@ -179,9 +180,6 @@ export default function EscenaPage() {
                         </div>
                     ))}
                 </div>
-                <p className="text-gray-500 text-[10px] font-bold uppercase tracking-widest mt-4 flex items-center gap-2">
-                    <ArrowUpRight size={14} /> Al clickear se agrandan las imágenes de las salas
-                </p>
             </section>
 
             {/* --- DESARROLLAMOS EXPERIENCIAS --- */}
@@ -195,7 +193,7 @@ export default function EscenaPage() {
                     </button>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
                     {galeria.map((img, i) => (
                         <div key={i} className="h-48 md:h-64 bg-zinc-900 overflow-hidden group">
                             <div
@@ -236,18 +234,63 @@ export default function EscenaPage() {
                             PUDIENDO TRANSMITIR EN DIRECTO CON LA POSIBILIDAD DE VENDER ENTRADAS VIRTUALES O GENERANDO CONTENIDO ON DEMAND.
                         </h3>
                     </div>
-                    <div className="grid grid-cols-3 gap-4 h-[400px]">
-                        <div className="bg-zinc-800 rounded-xl overflow-hidden relative border border-white/10 flex items-end p-4 bg-[url('https://images.unsplash.com/photo-1598550476439-c9202113170c?q=80&w=800&auto=format&fit=crop')] bg-cover bg-center">
-                            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
-                            <h4 className="relative z-10 text-[#D4E655] font-black uppercase tracking-tighter text-xl leading-none">Operación<br />Técnica<br />Completa<br />Incluida</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-auto md:h-[360px]">
+                        {/* Tarjeta 1 */}
+                        <div className="bg-zinc-800 rounded-xl overflow-hidden relative border border-white/10 flex items-end p-4 md:p-5 group hover:border-[#D4E655]/50 transition-colors min-h-[280px]">
+                            {/* Usamos una etiqueta img para controlar perfectamente el encuadre (object position) */}
+                            <img
+                                src="https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273186/DSC07164_vi3pne.jpg"
+                                alt="Operación Técnica"
+                                className="absolute inset-0 w-full h-full object-cover object-[center_30%] opacity-90 group-hover:scale-105 transition-transform duration-700"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent"></div>
+
+                            <div className="relative z-10 w-full">
+                                <h4 className="text-[#D4E655] font-black uppercase tracking-tighter text-lg md:text-xl leading-[0.85] mb-2 drop-shadow-md">
+                                    OPERACIÓN<br />TÉCNICA<br />COMPLETA<br />INCLUIDA
+                                </h4>
+                                <p className="text-white font-bold uppercase tracking-[0.2em] text-[7px] md:text-[8px] leading-tight opacity-80">
+                                    LUCES + SONIDO + CONSOLA
+                                </p>
+                            </div>
                         </div>
-                        <div className="bg-zinc-800 rounded-xl overflow-hidden relative border border-white/10 flex items-end p-4 bg-[url('https://images.unsplash.com/photo-1559828551-789fbd42f0d9?q=80&w=800&auto=format&fit=crop')] bg-cover bg-center">
-                            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
-                            <h4 className="relative z-10 text-[#D4E655] font-black uppercase tracking-tighter text-xl leading-none">Equi-<br />pamiento<br />Profesional<br />HD</h4>
+
+                        {/* Tarjeta 2 */}
+                        <div className="bg-zinc-800 rounded-xl overflow-hidden relative border border-white/10 flex items-end p-4 md:p-5 group hover:border-[#D4E655]/50 transition-colors min-h-[280px]">
+                            <img
+                                src="https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273061/DSC07309_ctds9m.jpg"
+                                alt="Equipamiento HD"
+                                className="absolute inset-0 w-full h-full object-cover object-[center_20%] opacity-90 group-hover:scale-105 transition-transform duration-700"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent"></div>
+
+                            <div className="relative z-10 w-full">
+                                <h4 className="text-[#D4E655] font-black uppercase tracking-tighter text-lg md:text-xl leading-[0.85] mb-2 drop-shadow-md">
+                                    EQUI-<br />PAMIENTO<br />PROFESIONAL<br />HD
+                                </h4>
+                                <p className="text-white font-bold uppercase tracking-[0.2em] text-[7px] md:text-[8px] leading-tight opacity-80">
+                                    MICS + AURIS + CAMARAS
+                                </p>
+                            </div>
                         </div>
-                        <div className="bg-zinc-800 rounded-xl overflow-hidden relative border border-white/10 flex items-end p-4 bg-[url('https://images.unsplash.com/photo-1611162617474-5b21e879e113?q=80&w=800&auto=format&fit=crop')] bg-cover bg-center">
-                            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
-                            <h4 className="relative z-10 text-[#D4E655] font-black uppercase tracking-tighter text-xl leading-none">Conte-<br />nido<br />Multi<br />plataforma</h4>
+
+                        {/* Tarjeta 3 */}
+                        <div className="bg-zinc-800 rounded-xl overflow-hidden relative border border-white/10 flex items-end p-4 md:p-5 group hover:border-[#D4E655]/50 transition-colors min-h-[280px]">
+                            <img
+                                src="https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273124/DSC08205_pohing.jpg"
+                                alt="Contenido Multiplataforma"
+                                className="absolute inset-0 w-full h-full object-cover object-[center_30%] opacity-90 group-hover:scale-105 transition-transform duration-700"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-transparent"></div>
+
+                            <div className="relative z-10 w-full">
+                                <h4 className="text-[#D4E655] font-black uppercase tracking-tighter text-lg md:text-xl leading-[0.85] mb-2 drop-shadow-md">
+                                    CONTE-<br />NIDO<br />MULTI<br />PLATAFORMA
+                                </h4>
+                                <p className="text-white font-bold uppercase tracking-[0.2em] text-[7px] md:text-[8px] leading-tight opacity-80">
+                                    YOUTUBE + SPOTIFY + TWITCH
+                                </p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -258,21 +301,21 @@ export default function EscenaPage() {
                 <h3 className="text-white font-black uppercase tracking-widest text-lg mb-6">
                     SI BUSCAS PRODUCIR Y/O PRESENTAR TU SHOW O EVENTO CONTACTANOS
                 </h3>
-                <form className="bg-white p-8 md:p-12 text-black space-y-8" onSubmit={(e) => e.preventDefault()}>
+                <form className=" p-8 md:p-12 text-black space-y-8" onSubmit={(e) => e.preventDefault()}>
                     <div className="flex gap-4 items-end">
-                        <label className="font-black uppercase text-sm whitespace-nowrap shrink-0">NOMBRE:</label>
+                        <label className="text-white uppercase text-sm whitespace-nowrap shrink-0">NOMBRE:</label>
                         <input type="text" className="w-full border-b border-black/30 outline-none focus:border-black transition-colors bg-transparent pb-1" />
                     </div>
                     <div className="flex gap-4 items-end">
-                        <label className="font-black uppercase text-sm whitespace-nowrap shrink-0">TELÉFONO DE CONTACTO:</label>
+                        <label className="text-white uppercase text-sm whitespace-nowrap shrink-0">TELÉFONO DE CONTACTO:</label>
                         <input type="tel" className="w-full border-b border-black/30 outline-none focus:border-black transition-colors bg-transparent pb-1" />
                     </div>
                     <div className="flex gap-4 items-end">
-                        <label className="font-black uppercase text-sm whitespace-nowrap shrink-0">TIPO DE EVENTO / PRESENTACIÓN:</label>
-                        <input type="text" className="w-full border-b border-black/30 outline-none focus:border-black transition-colors bg-transparent pb-1" />
+                        <label className="text-white uppercase text-sm whitespace-nowrap shrink-0">TIPO DE EVENTO / PRESENTACIÓN:</label>
+                        <input type="text" className="w-full border-b border-white/30 outline-none focus:border-black transition-colors bg-transparent pb-1" />
                     </div>
                     <div className="flex gap-4 items-end">
-                        <label className="font-black uppercase text-sm whitespace-nowrap shrink-0">DESCRIPCIÓN DEL EVENTO:</label>
+                        <label className="text-white uppercase text-sm whitespace-nowrap shrink-0">DESCRIPCIÓN DEL EVENTO:</label>
                         <textarea rows={1} className="w-full border-b border-black/30 outline-none focus:border-black transition-colors bg-transparent pb-1 resize-none overflow-hidden" />
                     </div>
                     <div className="pt-4 flex justify-end">

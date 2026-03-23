@@ -134,7 +134,7 @@ export default function LandingPage() {
 
         {/* Imagen de fondo 3D (Asegurate de tener este archivo en la carpeta public) */}
         <img
-          src="/fondo-hero.png"
+          src="https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273062/DSC07437_ymmrtd.jpg"
           alt="Piso 2 Render"
           className="absolute inset-0 w-full h-full object-cover opacity-70 z-0"
         />
@@ -183,7 +183,7 @@ export default function LandingPage() {
           {/* 2M - MOVIMIENTO */}
           <div className={`transition-all duration-700 absolute inset-0 grid grid-cols-1 md:grid-cols-2 ${activeSection === '2m' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
             <div className="relative h-[300px] md:h-auto bg-zinc-900 overflow-hidden group">
-              <div className="absolute inset-0 opacity-40 bg-[url('https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?q=80&w=2069&auto=format&fit=crop')] bg-cover bg-center grayscale group-hover:grayscale-0 transition-all duration-700"></div>
+              <div className="absolute inset-0 opacity-40 bg-[url('https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273151/DSC08825_zkshkf.jpg')] bg-cover bg-center grayscale group-hover:grayscale-0 transition-all duration-700"></div>
               <div className="absolute bottom-8 left-8 text-[#D4E655]"><ArrowUpRight size={140} strokeWidth={1.5} /></div>
             </div>
             <div className="p-10 md:p-16 flex flex-col justify-center">
@@ -196,51 +196,32 @@ export default function LandingPage() {
           {/* 2E - ESCENA */}
           <div className={`transition-all duration-700 absolute inset-0 grid grid-cols-1 md:grid-cols-2 ${activeSection === '2e' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
             <div className="relative h-[300px] md:h-auto bg-zinc-900 overflow-hidden group">
-              <div className="absolute inset-0 opacity-40 bg-[url('https://images.unsplash.com/photo-1503095392237-fc785880c451?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center grayscale group-hover:grayscale-0 transition-all duration-700"></div>
+              <div className="absolute inset-0 opacity-40 bg-[url('https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273185/40F11C05-7457-4AD6-A4D9-6EC3FCDB2568_2_yr9lw9.png')] bg-cover bg-center grayscale group-hover:grayscale-0 transition-all duration-700"></div>
               <div className="absolute bottom-8 left-8 text-[#D4E655]"><Triangle size={140} strokeWidth={1.5} /></div>
             </div>
             <div className="p-10 md:p-16 flex flex-col justify-center">
               <h2 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6 leading-[0.9]">Sala de <br /><span className="text-[#D4E655]">Teatro.</span></h2>
               <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed mb-8 font-medium">Un espacio íntimo y técnicamente equipado para puestas en escena, ensayos y muestras.</p>
-              <div><button onClick={() => scrollTo('alquileres')} className="inline-flex items-center gap-3 border border-white/20 hover:border-[#D4E655] text-white font-bold uppercase px-8 py-4 text-xs tracking-[0.2em] transition-colors">VER SALAS</button></div>
-            </div>
+              <div><a href='/escena'><button className="inline-flex items-center gap-3 border border-white/20 hover:border-[#D4E655] text-white font-bold uppercase px-8 py-4 text-xs tracking-[0.2em] transition-colors">MÁS INFO</button></a>
+              </div></div>
           </div>
 
           {/* 2S - STREAMING */}
           <div className={`transition-all duration-700 absolute inset-0 grid grid-cols-1 md:grid-cols-2 ${activeSection === '2s' ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
             <div className="relative h-[300px] md:h-auto bg-zinc-900 overflow-hidden group">
-              <div className="absolute inset-0 opacity-40 bg-[url('https://images.unsplash.com/photo-1598550476439-c9202113170c?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center grayscale group-hover:grayscale-0 transition-all duration-700"></div>
+              <div className="absolute inset-0 opacity-40 bg-[url('https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273177/2A74E257-AE51-4068-8C66-06BE1A53A3CD_2_landlw.png')] bg-cover bg-center grayscale group-hover:grayscale-0 transition-all duration-700"></div>
               <div className="absolute bottom-8 left-8 text-[#D4E655]"><Play size={140} strokeWidth={1.5} /></div>
             </div>
             <div className="p-10 md:p-16 flex flex-col justify-center">
               <h2 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6 leading-[0.9]">Estudio <br /><span className="text-[#D4E655]">Digital.</span></h2>
               <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed mb-8 font-medium">Transmisión en vivo, grabación de contenidos y producción audiovisual profesional.</p>
-              <div><button onClick={() => scrollTo('contacto')} className="inline-flex items-center gap-3 border border-white/20 hover:border-[#D4E655] text-white font-bold uppercase px-8 py-4 text-xs tracking-[0.2em] transition-colors">CONSULTAR</button></div>
+              <div><a href='/streaming'><button onClick={() => scrollTo('contacto')} className="inline-flex items-center gap-3 border border-white/20 hover:border-[#D4E655] text-white font-bold uppercase px-8 py-4 text-xs tracking-[0.2em] transition-colors">CONSULTAR</button></a>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-
-      {/* --- SECCIÓN NOSOTROS --- */}
-      <section id="nosotros" className="py-24 px-6 max-w-7xl mx-auto border-b border-white/5">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12 md:gap-24 items-center">
-          <div>
-            <h2 className="text-[#D4E655] text-sm font-bold tracking-[0.4em] uppercase mb-4">El Espacio</h2>
-            <h3 className="text-5xl md:text-8xl font-black uppercase tracking-tighter leading-[0.85] mb-6">
-              NOSOTROS.
-            </h3>
-          </div>
-          <div className="flex flex-col items-start">
-            <p className="text-gray-400 text-sm md:text-base leading-relaxed font-medium mb-10 max-w-lg">
-              Piso 2 es un centro creativo en el corazón de la ciudad que une el movimiento, la tecnología y la escena. Nuestro objetivo es brindar un ecosistema completo para artistas, productores y creadores, ofreciendo instalaciones de primer nivel, formación profesional y un espacio para la innovación cultural.
-            </p>
-            <button onClick={() => scrollTo('contacto')} className="inline-flex items-center gap-3 border border-white/20 hover:border-[#D4E655] text-white font-bold uppercase px-8 py-5 text-xs tracking-[0.2em] transition-all hover:bg-white/5">
-              CONOCE NUESTRAS SEDES <ArrowRight size={16} />
-            </button>
-          </div>
-        </div>
-      </section>
 
       {/* --- SECCIÓN ALQUILERES (SALAS) --- */}
       <section id="alquileres" className="py-24 px-6 max-w-7xl mx-auto">
@@ -285,36 +266,84 @@ export default function LandingPage() {
       </section>
 
       {/* --- SECCIÓN DÓNDE ENCONTRARNOS (Sin Correo) --- */}
+      {/* --- SECCIÓN DÓNDE ENCONTRARNOS --- */}
       <section className="bg-[#111] py-24 px-6 border-t border-white/5">
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
+
+          {/* Info de Sedes */}
           <div>
             <h2 className="text-4xl md:text-6xl font-black uppercase tracking-tighter mb-8 leading-none">
               Dónde <br /><span className="text-[#D4E655]">Encontrarnos.</span>
             </h2>
             <div className="space-y-8">
+
+              {/* Sede Congreso */}
               <div className="flex items-start gap-4">
                 <MapPin className="text-[#D4E655] shrink-0" size={32} />
                 <div>
-                  <p className="font-bold text-xl uppercase text-white mb-1">Sede Central</p>
-                  <p className="text-gray-400">Av. Corrientes 1234, Piso 2<br />Buenos Aires, Argentina</p>
+                  <p className="font-bold text-xl uppercase text-white mb-1">Sede Congreso</p>
+                  <p className="text-gray-400 mb-2">Riobamba 46<br />Buenos Aires, Argentina</p>
+                  <a
+                    href="https://maps.google.com/?q=Riobamba+46,+Buenos+Aires"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[#D4E655] text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors"
+                  >
+                    Abrir en Google Maps →
+                  </a>
                 </div>
               </div>
+
+              {/* Sede Obelisco */}
+              <div className="flex items-start gap-4">
+                <MapPin className="text-[#D4E655] shrink-0" size={32} />
+                <div>
+                  <p className="font-bold text-xl uppercase text-white mb-1">Sede Obelisco</p>
+                  <p className="text-gray-400 mb-2">Teniente General Perón 1467<br />Buenos Aires, Argentina</p>
+                  <a
+                    href="https://maps.google.com/?q=Teniente+General+Perón+1467,+Buenos+Aires"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[#D4E655] text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors"
+                  >
+                    Abrir en Google Maps →
+                  </a>
+                </div>
+              </div>
+
+              {/* Redes Sociales */}
               <div className="flex gap-4 pt-4">
-                <a href="#" className="w-12 h-12 rounded-full border border-white/20 flex items-center justify-center hover:bg-[#D4E655] hover:text-black hover:border-[#D4E655] transition-all">
+                <a href="https://www.instagram.com/piso2multiespacio/" target="_blank" rel="noreferrer" className="w-12 h-12 rounded-full border border-white/20 flex items-center justify-center hover:bg-[#D4E655] hover:text-black hover:border-[#D4E655] transition-all">
                   <Instagram size={20} />
                 </a>
               </div>
             </div>
           </div>
 
+          {/* Mapa Interactivo Google Maps */}
           <div className="h-[400px] w-full bg-zinc-900 rounded-3xl overflow-hidden border border-white/10 relative group">
-            <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=2000&auto=format&fit=crop')] bg-cover bg-center opacity-40 group-hover:opacity-60 transition-opacity"></div>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full border border-[#D4E655]/50 text-[#D4E655] text-xs font-black uppercase tracking-widest flex items-center gap-2">
-                <MapPin size={16} /> Ver en Maps
+
+            {/* iFrame de Google Maps centrado en la zona */}
+            <iframe
+              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3283.9935105267554!2d-58.3888365!3d-34.6043137!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x95bccac885970c27%3A0x6b6088d8b9d3380c!2sTte.%20Gral.%20Juan%20D.%20Per%C3%B3n%201467%2C%20C1037ACA%20Cdad.%20Aut%C3%B3noma%20de%20Buenos%20Aires!5e0!3m2!1ses-419!2sar!4v1716382000000!5m2!1ses-419!2sar"
+              width="100%"
+              height="100%"
+              style={{ border: 0 }}
+              allowFullScreen
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+              className="grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-700"
+            />
+
+            {/* Etiqueta Flotante (Se desvanece cuando el usuario interactúa con el mapa) */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none group-hover:opacity-0 transition-opacity duration-500">
+              <div className="bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full border border-[#D4E655]/50 text-[#D4E655] text-xs font-black uppercase tracking-widest flex items-center gap-2 shadow-[0_0_20px_rgba(212,230,85,0.2)]">
+                <MapPin size={16} /> Explorar Mapa
               </div>
             </div>
+
           </div>
+
         </div>
       </section>
 
