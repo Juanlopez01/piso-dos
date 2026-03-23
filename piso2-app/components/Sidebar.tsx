@@ -84,13 +84,19 @@ export default function Sidebar() {
     const role = isLoading ? 'visitante' : (userRole || 'visitante')
 
     const visibleItems = menuItems.filter(item => {
-        // 👈 2. LOS FILTROS MÁGICOS (Si el cerebro dice que no, los ocultamos)
+        // 1. Filtros Mágicos de La Liga y Compañías
         if (item.name === 'La Liga' && !hasLigaAccess) return false;
         if (item.name === 'Compañías' && !hasCompaniaAccess) return false;
 
-        // 👈 3. Listas explícitas asegurando que Admin y Recepción vean todo su módulo
+        // 2. Ocultamos "Agenda" a los alumnos y profesores
+        if ((role === 'alumno' || role === 'profesor') && item.name === 'Agenda') return false;
+
+        // 3. Listas explícitas
         if (role === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
-        if (role === 'visitante') return ['Inicio', 'Agenda'].includes(item.name)
+
+        // 👈 Los visitantes también deben ver Explorar en vez de Agenda
+        if (role === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
+
         if (role === 'recepcion') {
             if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga', 'Compañías'].includes(item.name)
             return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Compañías'].includes(item.name)
