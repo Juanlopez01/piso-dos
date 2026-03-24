@@ -218,7 +218,9 @@ export default function LoginPage() {
                                     placeholder="••••••••"
                                 />
                             </div>
-
+                            <Link href="/rec-password" className="text-[10px] text-gray-500 font-bold uppercase tracking-widest hover:text-[#D4E655] mt-2 inline-block">
+                                ¿Olvidaste tu contraseña?
+                            </Link>
                             <div className="pt-2 space-y-3">
                                 <button type="submit" disabled={loading} className="w-full bg-[#D4E655] text-black font-black uppercase py-4 text-xs tracking-[0.2em] hover:bg-white transition-all disabled:opacity-50 flex justify-center items-center h-[52px]">
                                     {loading ? <Loader2 className="animate-spin" size={18} /> : 'INGRESAR'}

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
     AlertTriangle, Mail, Calendar, LogOut, CheckCircle2, History,
-    BookOpen, Star, Clock, AlertCircle, HeartPulse, FileUp, X
+    BookOpen, Star, Clock, AlertCircle, HeartPulse, FileUp, X, Lock
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
@@ -22,6 +22,12 @@ export default function PerfilPage() {
     const [saving, setSaving] = useState(false)
     const [uploadingFile, setUploadingFile] = useState(false)
 
+    // ESTADOS CAMBIO DE CONTRASEÑA
+    const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
+    const [newPassword, setNewPassword] = useState('')
+    const [confirmNewPassword, setConfirmNewPassword] = useState('')
+    const [changingPassword, setChangingPassword] = useState(false)
+
     const [profile, setProfile] = useState<any>(null)
     const [avisos, setAvisos] = useState<any[]>([])
     const [historialClases, setHistorialClases] = useState<HistorialClase[]>([])
@@ -33,7 +39,6 @@ export default function PerfilPage() {
     })
 
     useEffect(() => {
-        // 🚨 EL FAILSAFE IMPLACABLE: A los 5 segundos apaga el loader sí o sí
         const timer = setTimeout(() => {
             console.error("⏳ [FAILSAFE] La carga tardó demasiado. Forzando destrabe de pantalla...");
             setLoading(false);
@@ -43,7 +48,6 @@ export default function PerfilPage() {
             try {
                 setLoading(true);
 
-                // --- MERCADO PAGO ---
                 const urlParams = new URLSearchParams(window.location.search)
                 const pagoStatus = urlParams.get('pago')
                 if (pagoStatus) {
@@ -53,7 +57,6 @@ export default function PerfilPage() {
                     window.history.replaceState(null, '', window.location.pathname)
                 }
 
-                // --- SESIÓN ---
                 const { data: { session } } = await supabase.auth.getSession()
                 let userId = session?.user?.id
 
@@ -67,13 +70,10 @@ export default function PerfilPage() {
                     return
                 }
 
-
-                // Limpieza background
                 supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => {
                     if (error) console.error("Error en RPC:", error)
                 })
 
-                // --- PERFIL ---
                 const { data: dataProfile, error: profileError } = await supabase
                     .from('profiles').select('*, creditos_regulares, creditos_seminarios').eq('id', userId).single()
 
@@ -89,7 +89,6 @@ export default function PerfilPage() {
                     condiciones_medicas: dataProfile.condiciones_medicas || '', apto_fisico_url: dataProfile.apto_fisico_url || ''
                 })
 
-                // --- DATOS EXTRAS ---
                 if (dataProfile.rol === 'profesor') {
                     const { data: dataAvisos } = await supabase.from('comunicados').select('*').order('created_at', { ascending: false })
                     if (dataAvisos) setAvisos(dataAvisos)
@@ -108,8 +107,8 @@ export default function PerfilPage() {
                 console.error("🚨 Error grave capturado en la carga:", error)
                 setProfile(null)
             } finally {
-                clearTimeout(timer) // Cancelamos la bomba de tiempo de 5 segundos
-                setLoading(false) // Apagamos la ruedita
+                clearTimeout(timer)
+                setLoading(false)
             }
         }
 
@@ -172,6 +171,29 @@ export default function PerfilPage() {
             toast.error('Error al guardar el perfil');
         } finally {
             setSaving(false);
+        }
+    }
+
+    // --- LÓGICA DE CAMBIO DE CONTRASEÑA ---
+    const handlePasswordChange = async (e: React.FormEvent) => {
+        e.preventDefault()
+
+        if (newPassword.length < 6) return toast.error('La contraseña debe tener al menos 6 caracteres')
+        if (newPassword !== confirmNewPassword) return toast.error('Las contraseñas no coinciden')
+
+        setChangingPassword(true)
+        try {
+            const { error } = await supabase.auth.updateUser({ password: newPassword })
+            if (error) throw error
+
+            toast.success('¡Contraseña actualizada con éxito!')
+            setIsPasswordModalOpen(false)
+            setNewPassword('')
+            setConfirmNewPassword('')
+        } catch (error: any) {
+            toast.error(error.message || 'Hubo un error al cambiar la contraseña')
+        } finally {
+            setChangingPassword(false)
         }
     }
 
@@ -277,7 +299,7 @@ export default function PerfilPage() {
                         </div>
                     )}
 
-                    <form onSubmit={handleSave} className="bg-[#09090b] border border-white/10 rounded-2xl p-5 sm:p-8 shadow-2xl space-y-8 flex flex-col h-full">
+                    <form onSubmit={handleSave} className="bg-[#09090b] border border-white/10 rounded-2xl p-5 sm:p-8 shadow-2xl space-y-8 flex flex-col h-full relative">
                         <div className="space-y-4">
                             <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2">
                                 <User size={16} className="text-[#D4E655]" /> Mis Datos
@@ -290,9 +312,23 @@ export default function PerfilPage() {
                             </div>
                         </div>
 
+                        {/* NUEVO: SECCIÓN DE SEGURIDAD PARA CAMBIAR CONTRASEÑA */}
+                        <div className="space-y-4 pt-2 border-t border-white/5 mt-2">
+                            <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 pb-2">
+                                <Lock size={16} className="text-[#D4E655]" /> Seguridad
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={() => setIsPasswordModalOpen(true)}
+                                className="w-full sm:w-auto bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-5 py-3 text-xs font-black uppercase tracking-widest text-white transition-colors flex items-center justify-center gap-2"
+                            >
+                                <Lock size={14} /> Cambiar Contraseña
+                            </button>
+                        </div>
+
                         {isAlumno && (
-                            <div className="space-y-4 pt-2">
-                                <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2">
+                            <div className="space-y-4 pt-2 border-t border-white/5 mt-2">
+                                <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 pb-2">
                                     <HeartPulse size={16} className="text-[#D4E655]" /> Ficha Médica
                                 </h3>
                                 <div className="grid grid-cols-1 gap-4">
@@ -329,12 +365,12 @@ export default function PerfilPage() {
 
                         {isProfe && (
                             <>
-                                <div className="space-y-4 pt-2">
-                                    <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2"><CreditCard size={16} className="text-[#D4E655]" /> Cobros</h3>
+                                <div className="space-y-4 pt-2 border-t border-white/5 mt-2">
+                                    <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 pb-2"><CreditCard size={16} className="text-[#D4E655]" /> Cobros</h3>
                                     <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Alias / CBU</label><input required value={formData.alias_cbu} onChange={e => setFormData({ ...formData, alias_cbu: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white font-bold outline-none focus:border-[#D4E655] font-mono text-sm" /></div>
                                 </div>
-                                <div className="space-y-4 pt-2">
-                                    <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/5 pb-2"><Users size={16} className="text-[#D4E655]" /> Reemplazo</h3>
+                                <div className="space-y-4 pt-2 border-t border-white/5 mt-2">
+                                    <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 pb-2"><Users size={16} className="text-[#D4E655]" /> Reemplazo</h3>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Nombre</label><input required value={formData.nombre_remplazo} onChange={e => setFormData({ ...formData, nombre_remplazo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white font-bold outline-none focus:border-[#D4E655]" /></div>
                                         <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Teléfono</label><input required value={formData.contacto_remplazo} onChange={e => setFormData({ ...formData, contacto_remplazo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white font-bold outline-none focus:border-[#D4E655]" /></div>
@@ -438,6 +474,53 @@ export default function PerfilPage() {
                     </div>
                 )}
             </div>
+
+            {/* MODAL DE CAMBIO DE CONTRASEÑA */}
+            {isPasswordModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setIsPasswordModalOpen(false)}>
+                    <div className="w-full max-w-md bg-[#09090b] border border-white/10 rounded-3xl p-8 shadow-2xl relative z-10" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
+                            <h3 className="text-xl font-black text-white uppercase flex items-center gap-2">
+                                <Lock className="text-[#D4E655]" /> Cambiar Clave
+                            </h3>
+                            <button onClick={() => setIsPasswordModalOpen(false)} className="text-gray-500 hover:text-white transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <form onSubmit={handlePasswordChange} className="space-y-5">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nueva Contraseña</label>
+                                <input
+                                    type="password"
+                                    required
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    placeholder="••••••••"
+                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Confirmar Contraseña</label>
+                                <input
+                                    type="password"
+                                    required
+                                    value={confirmNewPassword}
+                                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                                    placeholder="••••••••"
+                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest"
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={changingPassword}
+                                className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-4 shadow-lg"
+                            >
+                                {changingPassword ? <Loader2 size={16} className="animate-spin" /> : 'Actualizar Contraseña'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
