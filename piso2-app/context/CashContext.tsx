@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react'
 import { createClient } from '@/utils/supabase/client'
 
 type CashContextType = {
@@ -32,13 +32,12 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     const [userName, setUserName] = useState<string | null>(null)
     const [nivelLiga, setNivelLiga] = useState<number | null>(null)
 
-    // NUEVOS ESTADOS DE ACCESO
     const [hasLigaAccess, setHasLigaAccess] = useState(false)
     const [hasCompaniaAccess, setHasCompaniaAccess] = useState(false)
-
     const [isLoading, setIsLoading] = useState(true)
 
-    const fetchProfileAndBox = async (userId: string, isMounted: boolean = true) => {
+    // 🛡️ ESCUDO 1: useCallback evita que esta función se recree infinitamente
+    const fetchProfileAndBox = useCallback(async (userId: string, isMounted: boolean = true) => {
         try {
             const { data: profile } = await supabase
                 .from('profiles')
@@ -48,23 +47,18 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
             const rolReal = profile?.rol || 'alumno'
 
-            // --- LÓGICA INTELIGENTE DE ACCESOS ---
             let ligaAccess = false;
             let compAccess = false;
 
             if (['admin', 'recepcion'].includes(rolReal)) {
-                // Admin y Recep ven todo siempre
                 ligaAccess = true;
                 compAccess = true;
             } else {
                 if (rolReal === 'alumno') {
-                    // Alumno ve La Liga si tiene un nivel asignado
                     ligaAccess = !!profile?.nivel_liga;
-                    // Alumno ve Compañías si pertenece a alguna
                     const { data: comp } = await supabase.from('perfiles_companias').select('compania_id').eq('perfil_id', userId).limit(1);
                     compAccess = !!comp?.length;
                 } else if (rolReal === 'profesor') {
-                    // Profe ve si da clases en La Liga o en alguna Compañía
                     const [resLiga, resComp] = await Promise.all([
                         supabase.from('clases').select('id').eq('profesor_id', userId).eq('es_la_liga', true).limit(1),
                         supabase.from('clases').select('id').eq('profesor_id', userId).not('compania_id', 'is', null).limit(1)
@@ -72,7 +66,6 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                     ligaAccess = !!resLiga.data?.length;
                     compAccess = !!resComp.data?.length;
                 } else if (rolReal === 'coordinador') {
-                    // Coordinador ve La Liga siempre, y Compañías si coordina alguna
                     ligaAccess = true;
                     const { data: comp } = await supabase.from('companias').select('id').eq('coordinador_id', userId).limit(1);
                     compAccess = !!comp?.length;
@@ -87,7 +80,6 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                 setHasCompaniaAccess(compAccess)
             }
 
-            // --- CAJA ---
             if (['admin', 'recepcion'].includes(rolReal)) {
                 const { data: turno } = await supabase
                     .from('caja_turnos')
@@ -111,7 +103,7 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
         } catch (err) {
             console.error("Error fetching details:", err)
         }
-    }
+    }, [supabase])
 
     useEffect(() => {
         let isMounted = true;
@@ -170,15 +162,22 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
             isMounted = false;
             subscription.unsubscribe()
         }
-    }, [])
+    }, [fetchProfileAndBox, supabase.auth])
 
-    const checkStatus = async () => {
+    // 🛡️ ESCUDO 2: useCallback para la función pública checkStatus
+    const checkStatus = useCallback(async () => {
         const { data: { session } } = await supabase.auth.getSession()
         if (session?.user) await fetchProfileAndBox(session.user.id)
-    }
+    }, [fetchProfileAndBox, supabase.auth])
+
+    // 🛡️ ESCUDO 3: useMemo congela el objeto del contexto. 
+    // Ahora React solo va a recargar la app si ALGUNO de estos valores cambia realmente.
+    const contextValue = useMemo(() => ({
+        isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, checkStatus, isLoading
+    }), [isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, checkStatus, isLoading])
 
     return (
-        <CashContext.Provider value={{ isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, checkStatus, isLoading }}>
+        <CashContext.Provider value={contextValue}>
             {children}
         </CashContext.Provider>
     )
