@@ -21,8 +21,12 @@ export default function MobileNav() {
         if (userRole === 'recepcion' && isBoxOpen) {
             return toast.error('¡Caja Abierta! Cerrala antes de salir.')
         }
-        await supabase.auth.signOut()
-        window.location.href = '/'
+
+        try {
+            await supabase.auth.signOut()
+        } finally {
+            window.location.href = '/'
+        }
     }
 
     // --- LÓGICA DE MENÚ (IDÉNTICA AL SIDEBAR) ---

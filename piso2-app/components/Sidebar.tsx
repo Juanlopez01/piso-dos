@@ -76,7 +76,8 @@ export default function Sidebar() {
         } catch (error) {
             console.error("Error al cerrar sesión:", error)
         } finally {
-            window.location.href = '/login'
+            // Forzamos la recarga limpia hacia la Home
+            window.location.href = '/'
         }
     }
 
