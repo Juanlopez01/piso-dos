@@ -104,17 +104,19 @@ export default function CalendarioPage() {
             const startDateStr = format(start, 'yyyy-MM-dd')
             const endDateStr = format(end, 'yyyy-MM-dd')
 
+            // 👈 CORRECCIÓN: Pedimos 'id' dentro de sedes, en lugar de pedir sede_id suelto
             const { data: dataClases, error: errClases } = await supabase
                 .from('clases')
-                .select(`*, sala:salas ( nombre, sede_id, sede:sedes ( nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre), compania:companias(nombre)`)
+                .select(`*, sala:salas ( nombre, sede:sedes ( id, nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre), compania:companias(nombre)`)
                 .gte('inicio', startIso)
                 .lte('fin', endIso)
 
             if (errClases) throw errClases
 
+            // 👈 CORRECCIÓN ACÁ TAMBIÉN
             const { data: dataAlquileres, error: errAlq } = await supabase
                 .from('alquileres')
-                .select(`*, sala:salas ( nombre, sede_id, sede:sedes ( nombre ) )`)
+                .select(`*, sala:salas ( nombre, sede:sedes ( id, nombre ) )`)
                 .gte('fecha', startDateStr)
                 .lte('fecha', endDateStr)
                 .in('estado', ['confirmado', 'pagado'])
@@ -135,7 +137,7 @@ export default function CalendarioPage() {
                         fin: c.fin,
                         sala_nombre: c.sala?.nombre,
                         sala_sede: c.sala?.sede?.nombre,
-                        sede_id: c.sala?.sede_id, // 👈 Guardamos el ID para filtrar
+                        sede_id: c.sala?.sede?.id, // 👈 Lo extraemos de forma segura
                         clase_data: {
                             profesor_nombre: c.profesor?.nombre_completo,
                             nivel: c.nivel,
@@ -167,7 +169,7 @@ export default function CalendarioPage() {
                         fin: finLocal,
                         sala_nombre: a.sala?.nombre,
                         sala_sede: a.sala?.sede?.nombre,
-                        sede_id: a.sala?.sede_id, // 👈 Guardamos el ID para filtrar
+                        sede_id: a.sala?.sede?.id, // 👈 Extraído de forma segura
                         alquiler_data: {
                             telefono: a.cliente_contacto,
                             monto: a.monto_total,
