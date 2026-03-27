@@ -356,7 +356,7 @@ function UsuariosContent() {
                                 {u.telefono ? <div className="flex items-center gap-2 text-xs text-gray-400 bg-[#111] px-2 py-1.5 rounded-lg border border-white/5 w-fit"><Phone size={10} className="text-[#D4E655]" /> {u.telefono}</div> : <div className="text-[10px] text-gray-600 italic px-1">Sin teléfono</div>}
                             </div>
 
-                            {(u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') && (
+                            {u.rol === 'alumno' && (u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') && (
                                 <div className="mb-3">
                                     <span className="inline-flex items-center gap-1.5 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest shadow-[0_0_10px_rgba(212,230,85,0.1)]">
                                         <Trophy size={10} className="text-[#D4E655]" /> La Liga • Nivel {u.nivel_liga}
