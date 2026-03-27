@@ -12,6 +12,7 @@ import { es } from 'date-fns/locale'
 import { Toaster, toast } from 'sonner'
 import { v4 as uuidv4 } from 'uuid'
 import MultiDatePicker from '@/components/MultiDatePicker'
+import { useCash } from '@/context/CashContext'
 
 // Tipos
 type ReservaGroup = {
@@ -28,6 +29,7 @@ type ReservaGroup = {
 
 export default function AlquileresPage() {
     const supabase = createClient()
+    const { isBoxOpen, currentTurnoId } = useCash()
 
     // Datos Globales
     const [grupos, setGrupos] = useState<ReservaGroup[]>([])
@@ -352,42 +354,28 @@ export default function AlquileresPage() {
     const handlePayGroup = async (group: ReservaGroup) => {
         if (!confirm(`¿Cobrar total de $${group.total_grupo.toLocaleString()}?`)) return
 
-        // 1. Averiguar la SEDE de esta SALA
-        const { data: salaData } = await supabase
-            .from('salas')
-            .select('sede_id, nombre')
-            .eq('id', group.sala_id)
-            .single()
-
-        if (!salaData) return toast.error('Error: No se encontró la sede de esta sala')
-
-        // 2. Buscar CAJA ABIERTA para ESA SEDE
-        const { data: turno } = await supabase.from('caja_turnos')
-            .select('id')
-            .eq('sede_id', salaData.sede_id)
-            .eq('estado', 'abierta')
-            .maybeSingle()
-
-        if (!turno) {
-            return toast.error(`No hay caja abierta en la sede ${salaData.nombre}. Abrí la caja en esa sede para cobrar.`)
+        // 1. CHEQUEO DIRECTO DE CAJA DEL USUARIO ACTUAL
+        if (!isBoxOpen || !currentTurnoId) {
+            return toast.error('¡Caja Cerrada! Tenés que abrir la caja en tu sede antes de poder cobrar.')
         }
 
-        // 3. Proceder al cobro
+        // 2. Proceder al cobro actualizando todos los alquileres del grupo
         const { error } = await supabase.from('alquileres').update({ estado: 'pagado' }).in('id', group.items.map(i => i.id))
+        if (error) return toast.error('Error al actualizar estados de los alquileres')
 
-        if (error) return toast.error('Error al actualizar estados')
-
-        // 4. Registrar movimiento
-        await supabase.from('caja_movimientos').insert({
-            turno_id: turno.id,
+        // 3. Registrar el movimiento en la CAJA DE ESTE NAVEGADOR
+        const { error: errorMov } = await supabase.from('caja_movimientos').insert({
+            turno_id: currentTurnoId, // 👈 Usa la caja que yo abrí, sin importar la sala
             tipo: 'ingreso',
             concepto: `Alquiler ${group.sala_nombre}: ${group.cliente_nombre} (${group.items.length} fechas)`,
             monto: group.total_grupo,
-            metodo_pago: 'efectivo',
+            metodo_pago: 'efectivo', // Opcional: Podrías poner un selector para que elijan Mercadopago o Efectivo
             origen_referencia: 'alquileres'
         })
 
-        toast.success('Cobrado y registrado en la caja correcta')
+        if (errorMov) return toast.error('Alquiler pagado, pero hubo un error al registrarlo en la caja.')
+
+        toast.success('Cobrado y registrado en tu caja.')
         fetchData()
     }
 

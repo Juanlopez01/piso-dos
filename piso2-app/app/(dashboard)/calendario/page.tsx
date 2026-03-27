@@ -11,7 +11,7 @@ import { es } from 'date-fns/locale'
 import {
     ChevronLeft, ChevronRight, X, Plus, MapPin, Trash2, Loader2,
     Info, DollarSign, Image as ImageIcon, Briefcase, GraduationCap,
-    Music, User, AlertCircle, CalendarDays, Star, UsersRound
+    Music, User, AlertCircle, CalendarDays, Star, UsersRound, Building2
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Image from 'next/image'
@@ -29,6 +29,7 @@ type EventoAgenda = {
     fin: string
     sala_nombre: string
     sala_sede: string
+    sede_id: string // 👈 NUEVO: Necesario para el filtro
     clase_data?: {
         profesor_nombre: string
         nivel: string
@@ -40,7 +41,7 @@ type EventoAgenda = {
         ritmo_id: string | null
         es_la_liga: boolean
         liga_nivel: number | null
-        compania_nombre: string | null // 👈 NUEVO
+        compania_nombre: string | null
     }
     alquiler_data?: {
         telefono: string
@@ -52,7 +53,7 @@ type EventoAgenda = {
 type Sede = { id: string; nombre: string; salas: { id: string; nombre: string }[] }
 type Profile = { id: string; nombre_completo: string | null; email: string }
 type Ritmo = { id: string; nombre: string }
-type CompaniaMin = { id: string; nombre: string } // 👈 NUEVO
+type CompaniaMin = { id: string; nombre: string }
 
 export default function CalendarioPage() {
     const supabase = createClient()
@@ -61,12 +62,13 @@ export default function CalendarioPage() {
     // Estados
     const [currentDate, setCurrentDate] = useState(new Date())
     const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+    const [sedeFiltro, setSedeFiltro] = useState<string>('todas') // 👈 NUEVO: Estado del filtro
 
     const [eventos, setEventos] = useState<EventoAgenda[]>([])
     const [sedes, setSedes] = useState<Sede[]>([])
     const [profesores, setProfesores] = useState<Profile[]>([])
     const [ritmos, setRitmos] = useState<Ritmo[]>([])
-    const [companias, setCompanias] = useState<CompaniaMin[]>([]) // 👈 NUEVO
+    const [companias, setCompanias] = useState<CompaniaMin[]>([])
 
     // UI
     const [loading, setLoading] = useState(true)
@@ -84,7 +86,7 @@ export default function CalendarioPage() {
         tipoAcuerdo: 'porcentaje', valorAcuerdo: '',
         fechas: [] as Date[],
         esLaLiga: false, ligaNivel: 1,
-        companiaId: '' // 👈 NUEVO
+        companiaId: ''
     })
     const [formFile, setFormFile] = useState<File | null>(null)
 
@@ -102,10 +104,9 @@ export default function CalendarioPage() {
             const startDateStr = format(start, 'yyyy-MM-dd')
             const endDateStr = format(end, 'yyyy-MM-dd')
 
-            // 👈 Traemos también el nombre de la compañía
             const { data: dataClases, error: errClases } = await supabase
                 .from('clases')
-                .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre), compania:companias(nombre)`)
+                .select(`*, sala:salas ( nombre, sede_id, sede:sedes ( nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre), compania:companias(nombre)`)
                 .gte('inicio', startIso)
                 .lte('fin', endIso)
 
@@ -113,7 +114,7 @@ export default function CalendarioPage() {
 
             const { data: dataAlquileres, error: errAlq } = await supabase
                 .from('alquileres')
-                .select(`*, sala:salas ( nombre, sede:sedes ( nombre ) )`)
+                .select(`*, sala:salas ( nombre, sede_id, sede:sedes ( nombre ) )`)
                 .gte('fecha', startDateStr)
                 .lte('fecha', endDateStr)
                 .in('estado', ['confirmado', 'pagado'])
@@ -134,6 +135,7 @@ export default function CalendarioPage() {
                         fin: c.fin,
                         sala_nombre: c.sala?.nombre,
                         sala_sede: c.sala?.sede?.nombre,
+                        sede_id: c.sala?.sede_id, // 👈 Guardamos el ID para filtrar
                         clase_data: {
                             profesor_nombre: c.profesor?.nombre_completo,
                             nivel: c.nivel,
@@ -145,7 +147,7 @@ export default function CalendarioPage() {
                             ritmo_id: c.ritmo_id,
                             es_la_liga: c.es_la_liga || false,
                             liga_nivel: c.liga_nivel || null,
-                            compania_nombre: c.compania?.nombre || null // 👈 NUEVO
+                            compania_nombre: c.compania?.nombre || null
                         }
                     })
                 })
@@ -165,6 +167,7 @@ export default function CalendarioPage() {
                         fin: finLocal,
                         sala_nombre: a.sala?.nombre,
                         sala_sede: a.sala?.sede?.nombre,
+                        sede_id: a.sala?.sede_id, // 👈 Guardamos el ID para filtrar
                         alquiler_data: {
                             telefono: a.cliente_contacto,
                             monto: a.monto_total,
@@ -180,7 +183,7 @@ export default function CalendarioPage() {
             const { data: dataSedes } = await supabase.from('sedes').select('id, nombre, salas(id, nombre)')
             const { data: dataProfes } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'profesor')
             const { data: dataRitmos } = await supabase.from('ritmos').select('id, nombre').order('nombre')
-            const { data: dataCompanias } = await supabase.from('companias').select('id, nombre').order('nombre') // 👈 Traemos las compañías
+            const { data: dataCompanias } = await supabase.from('companias').select('id, nombre').order('nombre')
 
             if (dataSedes) setSedes(dataSedes)
             if (dataProfes) setProfesores(dataProfes)
@@ -267,7 +270,6 @@ export default function CalendarioPage() {
         e.preventDefault()
         if (form.fechas.length === 0) return toast.error('Debe seleccionar al menos una fecha')
         if (!form.salaId || !form.profeId) return toast.error('Faltan datos (Sala o Profe)')
-        // 👈 Validación de Compañía
         if (form.tipo === 'Compañía' && !form.companiaId) return toast.error('Debe seleccionar a qué Compañía pertenece esta clase')
 
         setUploading(true)
@@ -313,14 +315,14 @@ export default function CalendarioPage() {
                     estado: 'activa',
                     es_la_liga: form.esLaLiga,
                     liga_nivel: form.esLaLiga ? form.ligaNivel : null,
-                    compania_id: form.tipo === 'Compañía' ? form.companiaId : null // 👈 ASIGNAMOS LA COMPAÑÍA
+                    compania_id: form.tipo === 'Compañía' ? form.companiaId : null
                 })
             }
 
             const { error } = await supabase.from('clases').insert(clasesAInsertar)
             if (error) throw new Error('Error al guardar en la base de datos.')
 
-            if (form.ritmoId && form.tipo !== 'Compañía') { // No spameamos por ritmos si es una clase cerrada de compañía
+            if (form.ritmoId && form.tipo !== 'Compañía') {
                 const ritmoNombre = ritmos.find(r => r.id === form.ritmoId)?.nombre || 'Nuevo Ritmo'
                 const { data: interesados } = await supabase
                     .from('profiles')
@@ -390,14 +392,18 @@ export default function CalendarioPage() {
         }
     }
 
-    const eventosDelDia = selectedDate ? eventos.filter(e => isSameDay(new Date(e.inicio), selectedDate)) : []
+    // 👈 NUEVO: Filtramos los eventos del mes según la sede elegida
+    const eventosFiltrados = eventos.filter(e => sedeFiltro === 'todas' || e.sede_id === sedeFiltro)
+
+    // 👈 Al calcular los eventos del día, usamos la lista ya filtrada
+    const eventosDelDia = selectedDate ? eventosFiltrados.filter(e => isSameDay(new Date(e.inicio), selectedDate)) : []
     const salasDisponibles = sedes.find(s => s.id === form.sedeId)?.salas || []
 
     return (
         <div className="h-full flex flex-col pb-24 md:pb-10 px-2 pt-2">
             <Toaster position="top-center" richColors theme="dark" />
 
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 md:gap-0">
                 <div className="flex items-center gap-3">
                     <div>
                         <h2 className="text-3xl font-black text-white uppercase tracking-tighter flex items-center gap-2">
@@ -407,18 +413,42 @@ export default function CalendarioPage() {
                         <p className="text-[#D4E655] font-bold text-xs tracking-widest uppercase">{format(currentDate, 'yyyy', { locale: es })} • Agenda Completa</p>
                     </div>
                 </div>
-                <div className="flex gap-2">
-                    <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-[#D4E655] hover:text-[#D4E655] transition-all rounded-full"><ChevronLeft size={18} /></button>
-                    <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-[#D4E655] hover:text-[#D4E655] transition-all rounded-full"><ChevronRight size={18} /></button>
+
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
+                    {/* 👈 NUEVO: Botonera de Filtro de Sedes */}
+                    <div className="flex bg-[#111] rounded-full p-1 border border-white/10 w-full sm:w-auto">
+                        <button
+                            onClick={() => setSedeFiltro('todas')}
+                            className={`flex-1 sm:flex-none px-4 py-2 rounded-full text-[10px] font-black uppercase transition-all ${sedeFiltro === 'todas' ? 'bg-[#D4E655] text-black shadow' : 'text-gray-500 hover:text-white'}`}
+                        >
+                            Todas
+                        </button>
+                        {sedes.map(sede => (
+                            <button
+                                key={sede.id}
+                                onClick={() => setSedeFiltro(sede.id)}
+                                className={`flex-1 sm:flex-none px-4 py-2 rounded-full text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1 ${sedeFiltro === sede.id ? 'bg-[#D4E655] text-black shadow' : 'text-gray-500 hover:text-white'}`}
+                            >
+                                <Building2 size={10} className={sedeFiltro === sede.id ? 'text-black' : ''} /> {sede.nombre}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="flex gap-2 w-full sm:w-auto justify-end">
+                        <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-[#D4E655] hover:text-[#D4E655] transition-all rounded-full"><ChevronLeft size={18} /></button>
+                        <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-[#D4E655] hover:text-[#D4E655] transition-all rounded-full"><ChevronRight size={18} /></button>
+                    </div>
                 </div>
             </div>
+
             <div className="grid grid-cols-7 mb-2">{['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(d => <div key={d} className="text-center text-gray-500 text-[9px] font-black uppercase tracking-wider">{d}</div>)}</div>
 
             <div className="grid grid-cols-7 gap-1 auto-rows-fr h-full overflow-y-auto">
                 {eachDayOfInterval({ start: startOfWeek(startOfMonth(currentDate)), end: endOfWeek(endOfMonth(currentDate)) }).map((day) => {
                     const isToday = isSameDay(day, new Date())
                     const isCurrentMonth = isSameMonth(day, currentDate)
-                    const evtsDia = eventos.filter(e => isSameDay(new Date(e.inicio), day))
+                    // 👈 Usamos la lista filtrada acá también
+                    const evtsDia = eventosFiltrados.filter(e => isSameDay(new Date(e.inicio), day))
 
                     let dayClass = "opacity-20 border-transparent"
                     if (isCurrentMonth) {
@@ -460,6 +490,16 @@ export default function CalendarioPage() {
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pb-20">
                             {modalMode === 'view' && (
                                 <div className="space-y-4">
+                                    {/* 👈 EN EL MODAL MOSTRAMOS UN AVISO SI ESTÁ FILTRANDO */}
+                                    {sedeFiltro !== 'todas' && (
+                                        <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 p-3 rounded-lg flex items-center justify-between">
+                                            <p className="text-[10px] text-[#D4E655] font-black uppercase tracking-widest flex items-center gap-2">
+                                                <Building2 size={12} /> Mostrando solo sede {sedes.find(s => s.id === sedeFiltro)?.nombre}
+                                            </p>
+                                            <button onClick={() => setSedeFiltro('todas')} className="text-[9px] bg-black/40 text-white px-2 py-1 rounded hover:bg-white hover:text-black transition-colors font-bold uppercase">Ver Todas</button>
+                                        </div>
+                                    )}
+
                                     {eventosDelDia.length > 0 ? (
                                         eventosDelDia.map((evt) => {
                                             const style = getEventStyle(evt)
@@ -467,7 +507,7 @@ export default function CalendarioPage() {
                                                 <div key={evt.id} className={`flex flex-row bg-[#111] border rounded-xl overflow-hidden group transition-all relative ${style.border} border-l-[6px]`}>
                                                     <div className="relative w-24 md:w-32 flex-shrink-0 bg-white/5 flex flex-col">
                                                         {evt.tipo === 'Clase' && evt.clase_data?.imagen_url ? (<Image src={evt.clase_data.imagen_url} alt={evt.titulo} fill className="object-cover" />) : (<div className="w-full h-full flex flex-col items-center justify-center text-white/10 p-2">{evt.tipo === 'Alquiler' ? <Music size={24} className="opacity-50" /> : <ImageIcon size={24} />}<span className="text-[8px] font-bold uppercase mt-1 opacity-50 text-center">{evt.tipo === 'Alquiler' ? 'Externo' : 'Sin Flyer'}</span></div>)}
-                                                        <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{format(new Date(evt.inicio), 'HH:mm')}</span><span className="text-[8px] uppercase font-bold text-gray-400 block">{evt.sala_nombre}</span></div>
+                                                        <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{format(new Date(evt.inicio), 'HH:mm')}</span><span className="text-[8px] uppercase font-bold text-gray-400 block">{evt.sala_nombre} ({evt.sala_sede})</span></div>
                                                     </div>
                                                     <div className="flex-1 p-3 flex flex-col justify-center relative">
                                                         <div className="flex justify-between items-start mb-1"><h4 className="text-sm font-bold text-white uppercase leading-tight pr-2">{evt.titulo}</h4><span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${style.bg}/10 ${style.text} border ${style.border}/20`}>{evt.subtitulo}</span></div>
@@ -481,7 +521,6 @@ export default function CalendarioPage() {
                                                                             <Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})
                                                                         </span>
                                                                     )}
-                                                                    {/* 👈 BADGE DE LA COMPAÑÍA EN LA VISTA DE LA AGENDA */}
                                                                     {evt.clase_data?.compania_nombre && (
                                                                         <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]">
                                                                             <UsersRound size={10} className="text-blue-500" /> {evt.clase_data.compania_nombre}
@@ -511,7 +550,7 @@ export default function CalendarioPage() {
                                             )
                                         })
                                     ) : (
-                                        <div className="py-10 text-center text-gray-600 opacity-50"><p className="text-xs font-bold uppercase">No hay actividades programadas</p></div>
+                                        <div className="py-10 text-center text-gray-600 opacity-50"><p className="text-xs font-bold uppercase">No hay actividades {sedeFiltro !== 'todas' ? 'en esta sede' : 'programadas'}</p></div>
                                     )}
                                     <button onClick={() => setModalMode('create')} className="w-full mt-4 px-6 py-4 font-black text-black transition-all bg-[#D4E655] rounded-xl hover:bg-white uppercase tracking-widest text-xs flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(212,230,85,0.2)]"><Plus size={16} strokeWidth={3} /> Cargar Clase Nueva</button>
                                 </div>
@@ -591,7 +630,6 @@ export default function CalendarioPage() {
                                                     <input type="number" min="0" value={form.cupoMaximo} onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]" placeholder="Ej: 20" />
                                                 </div>
 
-                                                {/* 👈 NUEVO: SELECTOR DE COMPAÑÍA CONDICIONAL */}
                                                 {form.tipo === 'Compañía' && (
                                                     <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-blue-500/5 p-3 rounded-xl border-dashed border-blue-500/20 animate-in fade-in">
                                                         <label className="flex items-center gap-1.5 text-[10px] font-black text-blue-400 uppercase tracking-widest">
