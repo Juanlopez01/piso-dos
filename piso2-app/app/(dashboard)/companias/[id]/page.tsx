@@ -42,7 +42,7 @@ type ClaseCompania = {
 export default function CompaniaDetallePage() {
     const params = useParams()
     const router = useRouter()
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const { userRole, isLoading: loadingContext } = useCash()
 
     const [compania, setCompania] = useState<Compania | null>(null)
@@ -113,7 +113,9 @@ export default function CompaniaDetallePage() {
 
         if (dataMiembros) {
             const miembrosLimpios = dataMiembros.map((m: any) => m.perfil)
-            miembrosLimpios.sort((a, b) => a.nombre_completo.localeCompare(b.nombre_completo))
+            miembrosLimpios.sort((a: { nombre_completo: string | null }, b: { nombre_completo: string | null }) =>
+                (a.nombre_completo || '').localeCompare(b.nombre_completo || '')
+            )
             setMiembros(miembrosLimpios)
         }
 

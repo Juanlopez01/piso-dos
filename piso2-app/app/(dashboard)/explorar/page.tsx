@@ -36,7 +36,7 @@ type ClaseAgrupada = {
 }
 
 export default function ExplorarClasesPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
 
     // Ahora usamos el estado agrupado
     const [clasesAgrupadas, setClasesAgrupadas] = useState<ClaseAgrupada[]>([])

@@ -27,7 +27,7 @@ const CRITERIOS_EVALUACION = [
 ]
 
 export default function LaLigaPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const router = useRouter()
 
     // 👈 Traemos hasLigaAccess y isLoadingContext
@@ -263,7 +263,7 @@ export default function LaLigaPage() {
                 .order('nombre', { ascending: true })
 
             if (error) throw error
-            if (data) setAllStudents(data.filter(p => p.nombre))
+            if (data) setAllStudents(data.filter((p: { nombre: string | null }) => p.nombre))
         } catch (error) {
             console.error("Error al cargar alumnos", error)
         } finally {
@@ -348,7 +348,7 @@ export default function LaLigaPage() {
                 .eq('nivel_liga', materia.liga_nivel)
 
             if (errorPerfiles) throw errorPerfiles
-            const alumnosReales = perfiles ? perfiles.filter(p => p.nombre && p.nombre.trim() !== '') : []
+            const alumnosReales = perfiles ? perfiles.filter((p: { nombre: string | null }) => p.nombre && p.nombre.trim() !== '') : []
             const cuatrimestreActual = '2026-1'
             const { data: evaluaciones } = await supabase
                 .from('liga_evaluaciones')
@@ -356,8 +356,8 @@ export default function LaLigaPage() {
                 .eq('clase_id', materia.id)
                 .eq('cuatrimestre', cuatrimestreActual)
 
-            const alumnosMapeados = alumnosReales.map(perfil => {
-                const evalExistente = evaluaciones?.find(e => e.alumno_id === perfil.id)
+            const alumnosMapeados = alumnosReales.map((perfil: { id: string, nombre: string }) => {
+                const evalExistente = evaluaciones?.find((e: { alumno_id: string }) => e.alumno_id === perfil.id)
                 return { ...perfil, evaluacion: evalExistente || null }
             })
 

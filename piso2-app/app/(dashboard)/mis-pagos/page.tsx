@@ -35,7 +35,7 @@ type MesAgrupado = {
 }
 
 export default function MisPagosPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const [meses, setMeses] = useState<MesAgrupado[]>([])
     const [loading, setLoading] = useState(true)
     const [expandedMonth, setExpandedGroup] = useState<string | null>(null)

@@ -39,7 +39,7 @@ const getInteresesSeguro = (intereses: any): string[] => {
 }
 
 function UsuariosContent() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const searchParams = useSearchParams()
 
     const { userRole, isLoading: loadingContext } = useCash()

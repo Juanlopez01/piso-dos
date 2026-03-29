@@ -11,7 +11,7 @@ type Sala = { id: string; nombre: string; sede_id: string; sede: { nombre: strin
 type Ocupacion = { inicio: Date; fin: Date; motivo: string }
 
 export default function PublicAlquilerPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const [loading, setLoading] = useState(true)
 
     // Datos
@@ -71,7 +71,7 @@ export default function PublicAlquilerPage() {
         const ocupacionesDia: Ocupacion[] = []
 
         if (clases) {
-            clases.forEach(c => ocupacionesDia.push({
+            clases.forEach((c: any) => ocupacionesDia.push({
                 inicio: new Date(c.inicio),
                 fin: new Date(c.fin),
                 motivo: 'Clase'
@@ -79,7 +79,7 @@ export default function PublicAlquilerPage() {
         }
 
         if (alquileres) {
-            alquileres.forEach(a => {
+            alquileres.forEach((a: any) => {
                 // Reconstruimos la fecha/hora de inicio y fin localmente
                 const [hIni, mIni] = a.hora_inicio.split(':').map(Number)
                 const [hFin, mFin] = a.hora_fin.split(':').map(Number)

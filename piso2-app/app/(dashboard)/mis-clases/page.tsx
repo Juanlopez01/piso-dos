@@ -35,7 +35,7 @@ type ClaseProfe = {
 }
 
 export default function MisClasesPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const [loading, setLoading] = useState(true)
     const [userRole, setUserRole] = useState<string>('alumno')
     const [userName, setUserName] = useState('')

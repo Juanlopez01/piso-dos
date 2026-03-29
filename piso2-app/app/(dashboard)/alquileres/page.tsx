@@ -28,7 +28,7 @@ type ReservaGroup = {
 }
 
 export default function AlquileresPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const { isBoxOpen, currentTurnoId } = useCash()
 
     // Datos Globales

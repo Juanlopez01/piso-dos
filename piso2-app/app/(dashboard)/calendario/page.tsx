@@ -56,7 +56,7 @@ type Ritmo = { id: string; nombre: string }
 type CompaniaMin = { id: string; nombre: string }
 
 export default function CalendarioPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const router = useRouter()
 
     // Estados
@@ -333,7 +333,7 @@ export default function CalendarioPage() {
 
                 if (interesados && interesados.length > 0) {
                     const primerDia = format(new Date(form.fechas[0]), "EEEE d 'de' MMMM", { locale: es })
-                    const notificaciones = interesados.map(user => ({
+                    const notificaciones = interesados.map((user: { id: string }) => ({
                         usuario_id: user.id,
                         titulo: '¡Nueva clase disponible! 🎉',
                         mensaje: `Se abrió una nueva clase de ${ritmoNombre} el ${primerDia}. ¡Reservá tu lugar antes de que se llene!`,

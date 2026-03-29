@@ -4,7 +4,7 @@ export const menuItems = [
     { name: 'Inicio', href: '/', icon: Home, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'visitante'] },
     { name: 'Agenda', href: '/calendario', icon: CalendarIcon, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'visitante'] },
     { name: 'Alumnos / Profes', href: '/usuarios', icon: Users, roles: ['admin', 'recepcion'] },
-    { name: 'Staff / Equipo', href: '/staff', icon: Settings, roles: ['admin'] },
+    { name: 'Staff / Equipo', href: '/usuarios?ver=staff', icon: Settings, roles: ['admin'] },
     { name: 'Alquileres', href: '/alquileres', icon: ShoppingBag, roles: ['admin', 'recepcion'] },
     { name: 'Productos', href: '/productos', icon: Package, roles: ['admin', 'recepcion'] },
     { name: 'Caja', href: '/caja', icon: ShoppingBag, roles: ['admin', 'recepcion'] },

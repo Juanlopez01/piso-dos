@@ -5,7 +5,7 @@ import { createClient } from '@/utils/supabase/client'
 import { TrendingUp, Users, Ticket, Star, Loader2 } from 'lucide-react'
 
 export default function AdminDashboard() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const [stats, setStats] = useState<any>(null)
     const [loading, setLoading] = useState(true)
 

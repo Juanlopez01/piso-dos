@@ -18,7 +18,7 @@ type Sede = {
 }
 
 export default function SedesPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const [sedes, setSedes] = useState<Sede[]>([])
     const [loading, setLoading] = useState(true)
 

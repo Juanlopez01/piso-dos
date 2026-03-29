@@ -25,7 +25,7 @@ type Alumno = {
 }
 
 export default function CompaniasPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const [loading, setLoading] = useState(true)
     const [userRole, setUserRole] = useState<string>('alumno')
     const [userId, setUserId] = useState<string>('')
@@ -67,7 +67,7 @@ export default function CompaniasPage() {
         } else if (rol === 'alumno') {
             const { data: misCompanias } = await supabase.from('perfiles_companias').select('compania_id').eq('perfil_id', user.id)
             if (misCompanias && misCompanias.length > 0) {
-                const ids = misCompanias.map(mc => mc.compania_id)
+                const ids = misCompanias.map((mc: { compania_id: string }) => mc.compania_id)
                 queryCompanias = queryCompanias.in('id', ids)
             } else {
                 queryCompanias = queryCompanias.eq('id', '00000000-0000-0000-0000-000000000000')
@@ -77,7 +77,7 @@ export default function CompaniasPage() {
         const { data: dataCompanias } = await queryCompanias
 
         if (dataCompanias) {
-            const companiasConConteo = await Promise.all(dataCompanias.map(async (c) => {
+            const companiasConConteo = await Promise.all(dataCompanias.map(async (c: { id: string, nombre?: string }) => {
                 const { count } = await supabase.from('perfiles_companias').select('*', { count: 'exact', head: true }).eq('compania_id', c.id)
                 return { ...c, miembros_count: count || 0 }
             }))
@@ -128,7 +128,7 @@ export default function CompaniasPage() {
         setSelectedCompania(compania)
         setSearchAlumno('')
         const { data } = await supabase.from('perfiles_companias').select('perfil_id').eq('compania_id', compania.id)
-        if (data) setMiembrosActuales(data.map(d => d.perfil_id))
+        if (data) setMiembrosActuales(data.map((d: { perfil_id: string }) => d.perfil_id))
     }
 
     const toggleMiembro = async (alumnoId: string) => {

@@ -24,7 +24,7 @@ type Cupon = {
 }
 
 export default function TiendaConfigPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
 
     // UI States
     const [activeTab, setActiveTab] = useState<'packs' | 'cupones'>('packs')

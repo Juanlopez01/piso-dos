@@ -19,7 +19,7 @@ type Notificacion = {
 }
 
 export default function NotificacionesPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const router = useRouter()
     const [notificaciones, setNotificaciones] = useState<Notificacion[]>([])
     const [loading, setLoading] = useState(true)

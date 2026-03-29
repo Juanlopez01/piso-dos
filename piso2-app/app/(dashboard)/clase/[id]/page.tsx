@@ -50,7 +50,7 @@ type ProductoPack = {
 export default function ClaseDetallePage() {
     const params = useParams()
     const router = useRouter()
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
 
     const [clase, setClase] = useState<ClaseDetalle | null>(null)
     const [inscripciones, setInscripciones] = useState<Inscripcion[]>([])

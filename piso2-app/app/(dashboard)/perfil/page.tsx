@@ -16,7 +16,7 @@ type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; 
 type PackVencimiento = { fecha_vencimiento: string; creditos_restantes: number; tipo_clase: string }
 
 export default function PerfilPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
 
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)

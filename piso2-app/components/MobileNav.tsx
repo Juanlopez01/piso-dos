@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Menu, X, LogOut, UserCircle, Shield, Radio, LogIn, UsersRound } from 'lucide-react'
@@ -10,160 +10,133 @@ import { useCash } from '@/context/CashContext'
 import { toast } from 'sonner'
 
 export default function MobileNav() {
-    const [isOpen, setIsOpen] = useState(false) // Controla si el menú está abierto
+    const [isOpen, setIsOpen] = useState(false)
     const pathname = usePathname()
-    const supabase = createClient()
+    const [unreadNotifs, setUnreadNotifs] = useState(0)
+    const [isLoggingOut, setIsLoggingOut] = useState(false)
 
-    // 👈 1. Conectamos los accesos inteligentes del contexto
-    const { isBoxOpen, userRole, userName, hasLigaAccess, hasCompaniaAccess, isLoading } = useCash()
+    // 🛡️ ESCUDO: Congela la conexión a la base de datos
+    const [supabase] = useState(() => createClient())
 
-    const handleSignOut = async () => {
-        if (userRole === 'recepcion' && isBoxOpen) {
-            return toast.error('¡Caja Abierta! Cerrala antes de salir.')
+    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, isLoading } = useCash()
+
+    useEffect(() => {
+        setIsOpen(false) // Cierra el menú al cambiar de ruta
+    }, [pathname])
+
+    useEffect(() => {
+        if (!isLoading && userRole && userRole !== 'visitante') {
+            const fetchNotifs = async () => {
+                const { data: { user } } = await supabase.auth.getUser()
+                if (user) {
+                    const { count } = await supabase.from('notificaciones').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id).eq('leido', false)
+                    setUnreadNotifs(count || 0)
+                }
+            }
+            fetchNotifs()
         }
-
-        try {
-            await supabase.auth.signOut()
-        } finally {
-            window.location.href = '/'
-        }
-    }
-
-    // --- LÓGICA DE MENÚ (IDÉNTICA AL SIDEBAR) ---
-    const role = isLoading ? 'visitante' : (userRole || 'visitante')
+    }, [pathname, isLoading, userRole, supabase])
 
     const visibleItems = menuItems.filter(item => {
-        // 1. Filtros Mágicos de La Liga y Compañías
         if (item.name === 'La Liga' && !hasLigaAccess) return false;
         if (item.name === 'Compañías' && !hasCompaniaAccess) return false;
+        if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
-        // 2. Ocultamos "Agenda" a los alumnos y profesores
-        if ((role === 'alumno' || role === 'profesor') && item.name === 'Agenda') return false;
+        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
-        // 3. Listas explícitas
-        if (role === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
-
-        // 👈 Los visitantes también deben ver Explorar en vez de Agenda
-        if (role === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
-
-        if (role === 'recepcion') {
+        if (userRole === 'recepcion') {
             if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga', 'Compañías'].includes(item.name)
             return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Compañías'].includes(item.name)
         }
 
-        return item.roles.includes(role)
+        return item.roles.includes(userRole || 'visitante')
     })
 
+    const handleSignOut = async () => {
+        if (isLoggingOut) return;
+        if (userRole === 'recepcion' && isBoxOpen) {
+            return toast.error('¡Caja Abierta! Cerrala antes de salir.')
+        }
+        setIsLoggingOut(true)
+        try {
+            await supabase.auth.signOut()
+        } finally {
+            window.location.href = '/' // 👈 Redirección dura
+        }
+    }
+
+    if (isLoading) return null
+
     return (
-        <>
-            {/* BARRA SUPERIOR (Visible solo en móvil) */}
-            <div className="md:hidden h-16 bg-[#09090b] border-b border-white/10 flex items-center justify-between px-4 sticky top-0 z-40 shrink-0">
-
-                {/* LOGO + INDICADOR */}
-                <div className="flex flex-col justify-center">
-                    <h1 className="text-xl font-black uppercase tracking-tighter text-white leading-none">
-                        Piso <span className="text-[#D4E655]">2</span>
-                    </h1>
-                    {/* Indicador de Caja (Solo Staff) */}
-                    {!isLoading && role === 'recepcion' && (
-                        <div className="flex items-center gap-1.5 mt-1">
-                            <span className={`w-1.5 h-1.5 rounded-full ${isBoxOpen ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-                            <span className="text-[9px] uppercase font-bold text-gray-500">
-                                {isBoxOpen ? 'Abierta' : 'Cerrada'}
-                            </span>
-                        </div>
-                    )}
-                </div>
-
-                {/* BOTÓN HAMBURGUESA */}
-                <button
-                    onClick={() => setIsOpen(true)}
-                    className="p-2 text-white hover:bg-white/10 rounded-xl transition-all"
-                >
-                    <Menu size={24} />
+        <div className="md:hidden relative z-50">
+            <div className="fixed bottom-0 left-0 right-0 bg-[#09090b] border-t border-white/10 h-16 flex items-center justify-around px-4 z-40 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+                {visibleItems.slice(0, 4).map((item) => {
+                    const isActive = pathname === item.href
+                    return (
+                        <Link key={item.name} href={item.href} className={`flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors relative ${isActive ? 'text-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                            {isActive && <div className="absolute top-0 w-8 h-1 bg-[#D4E655] rounded-b-full shadow-[0_0_10px_rgba(212,230,85,0.5)]"></div>}
+                            <div className="relative">
+                                <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'mt-1' : ''} />
+                                {item.name === 'Notificaciones' && unreadNotifs > 0 && (
+                                    <span className="absolute -top-1.5 -right-2 w-4 h-4 bg-red-500 text-white rounded-full text-[8px] font-black flex items-center justify-center border border-black shadow-lg">
+                                        {unreadNotifs}
+                                    </span>
+                                )}
+                            </div>
+                            <span className="text-[8px] font-black uppercase tracking-wider">{item.name}</span>
+                        </Link>
+                    )
+                })}
+                <button onClick={() => setIsOpen(!isOpen)} className="flex flex-col items-center justify-center w-16 h-full gap-1 text-gray-500 hover:text-white transition-colors">
+                    <Menu size={20} />
+                    <span className="text-[8px] font-black uppercase tracking-wider">Menú</span>
                 </button>
             </div>
 
-            {/* MENÚ DESPLEGABLE (OVERLAY) */}
+            {/* OVERLAY DEL MENÚ */}
             {isOpen && (
-                <div className="fixed inset-0 z-50 md:hidden flex flex-col">
+                <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-50 flex flex-col animate-in fade-in slide-in-from-bottom-10 pb-16">
+                    <div className="flex justify-between items-center p-6 border-b border-white/10">
+                        <span className="font-black text-2xl tracking-tighter text-white">PISO<span className="text-[#D4E655]">2</span></span>
+                        <button onClick={() => setIsOpen(false)} className="p-2 bg-white/5 rounded-full text-white"><X size={20} /></button>
+                    </div>
 
-                    {/* FONDO OSCURO (Click para cerrar) */}
-                    <div
-                        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-                        onClick={() => setIsOpen(false)}
-                    />
+                    <div className="p-4 px-6 flex items-center gap-2 border-b border-white/5 pb-4">
+                        {userRole === 'admin' ? <Shield size={14} className="text-red-500" /> : userRole === 'recepcion' ? <Radio size={14} className="text-blue-500" /> : userRole === 'visitante' ? <UserCircle size={14} className="text-gray-500" /> : <UsersRound size={14} className="text-[#D4E655]" />}
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Conectado como: {userRole || 'visitante'}</span>
+                    </div>
 
-                    {/* CONTENIDO DEL MENÚ (Desliza desde la derecha) */}
-                    <div className="relative w-4/5 max-w-xs h-full bg-[#09090b] border-l border-white/10 ml-auto flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
-
-                        {/* CABECERA DEL MENÚ */}
-                        <div className="p-6 flex items-center justify-between border-b border-white/10">
-                            <h2 className="text-lg font-black uppercase text-white">Menú</h2>
-                            <button
-                                onClick={() => setIsOpen(false)}
-                                className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
-                            >
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        {/* LISTA DE NAVEGACIÓN */}
-                        <nav className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
-                            {isLoading ? (
-                                // Esqueleto simple
-                                [1, 2, 3].map(i => <div key={i} className="h-12 bg-white/5 rounded-xl animate-pulse" />)
-                            ) : (
-                                visibleItems.map((item) => {
-                                    const isActive = pathname === item.href
-                                    return (
-                                        <Link
-                                            key={item.href}
-                                            href={item.href}
-                                            onClick={() => setIsOpen(false)} // Cerrar al hacer click
-                                            className={`
-                                                flex items-center gap-4 px-4 py-4 rounded-xl text-sm font-bold transition-all
-                                                ${isActive
-                                                    ? "bg-[#D4E655] text-black shadow-[0_0_15px_rgba(212,230,85,0.3)]"
-                                                    : "text-gray-400 hover:text-white hover:bg-white/5"}
-                                            `}
-                                        >
-                                            <item.icon size={20} />
-                                            {item.name}
-                                        </Link>
-                                    )
-                                })
-                            )}
-                        </nav>
-
-                        {/* FOOTER DEL MENÚ */}
-                        <div className="p-4 border-t border-white/10 bg-[#050505]">
-                            {!isLoading && role !== 'visitante' ? (
-                                <>
-                                    <div className="flex items-center gap-3 mb-4 px-2">
-                                        <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0">
-                                            <UserCircle size={24} />
-                                        </div>
-                                        <div className="overflow-hidden">
-                                            <p className="text-sm font-bold text-white truncate">{userName || 'Usuario'}</p>
-                                            <p className="text-[10px] text-[#D4E655] uppercase font-black flex items-center gap-1">
-                                                {role === 'admin' ? <Shield size={10} /> : role === 'coordinador' ? <UsersRound size={10} /> : <Radio size={10} />} {role}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <button onClick={handleSignOut} className="flex items-center justify-center gap-2 w-full px-4 py-4 text-xs font-black uppercase text-red-500 bg-red-500/10 hover:bg-red-500 hover:text-white rounded-xl transition-all">
-                                        <LogOut size={16} /> Cerrar Sesión
-                                    </button>
-                                </>
-                            ) : (
-                                <Link href="/login" onClick={() => setIsOpen(false)} className="flex items-center justify-center gap-2 w-full px-4 py-4 text-xs font-black uppercase text-[#D4E655] bg-[#D4E655]/10 hover:bg-[#D4E655] hover:text-black rounded-xl transition-all">
-                                    <LogIn size={16} /> Iniciar Sesión
+                    <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+                        {visibleItems.map((item) => {
+                            const isActive = pathname === item.href
+                            return (
+                                <Link key={item.name} href={item.href} className={`flex items-center gap-4 px-4 py-4 rounded-xl text-sm font-bold uppercase tracking-widest transition-all ${isActive ? 'bg-[#D4E655] text-black shadow-lg' : 'text-gray-300 hover:text-white bg-white/5 hover:bg-white/10'}`}>
+                                    <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+                                    {item.name}
+                                    {item.name === 'Notificaciones' && unreadNotifs > 0 && (
+                                        <span className={`ml-auto w-6 h-6 flex items-center justify-center rounded-full text-[10px] font-black ${isActive ? 'bg-black text-[#D4E655]' : 'bg-[#D4E655] text-black'}`}>
+                                            {unreadNotifs}
+                                        </span>
+                                    )}
                                 </Link>
-                            )}
-                        </div>
+                            )
+                        })}
+                    </div>
+
+                    <div className="p-6 border-t border-white/10 mt-auto">
+                        {userRole === 'visitante' ? (
+                            <Link href="/login" className="flex items-center justify-center gap-3 px-4 py-4 rounded-xl text-sm font-black uppercase tracking-widest transition-all bg-[#D4E655] text-black shadow-[0_0_20px_rgba(212,230,85,0.3)]">
+                                <LogIn size={20} /> Iniciar Sesión
+                            </Link>
+                        ) : (
+                            <button onClick={handleSignOut} disabled={isLoggingOut} className="w-full flex items-center justify-center gap-3 px-4 py-4 rounded-xl text-sm font-black uppercase tracking-widest transition-all bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 hover:text-white disabled:opacity-50">
+                                <LogOut size={20} /> {isLoggingOut ? 'Saliendo...' : 'Cerrar Sesión'}
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
-        </>
+        </div>
     )
 }

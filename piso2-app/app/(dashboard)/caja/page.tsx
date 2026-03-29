@@ -14,7 +14,7 @@ import { useCash } from '@/context/CashContext'
 
 
 export default function CajaPage() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const { checkStatus, userRole, isLoading: loadingContext } = useCash()
 
     // Estados de Carga
@@ -74,7 +74,7 @@ export default function CajaPage() {
             .eq('estado', 'abierta')
 
         if (activas) {
-            const activasCalculadas = activas.map(caja => {
+            const activasCalculadas = activas.map((caja: any) => {
                 const montoInicial = Number(caja.monto_inicial) || 0
 
                 // Sumamos movimientos
@@ -105,7 +105,7 @@ export default function CajaPage() {
             .limit(20)
 
         if (historial) {
-            const historialCalculado = historial.map(caja => ({
+            const historialCalculado = historial.map((caja: any) => ({
                 ...caja,
                 ingresos_con_inicial: Number(caja.total_ingresos) + Number(caja.monto_inicial)
             }))

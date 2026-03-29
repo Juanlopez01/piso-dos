@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react'
 import { createClient } from '@/utils/supabase/client'
+import { AuthChangeEvent, Session } from '@supabase/supabase-js' // 👈 NUEVO: Importamos los tipos oficiales
 
 type CashContextType = {
     isBoxOpen: boolean
@@ -23,7 +24,8 @@ const CashContext = createContext<CashContextType>({
 export const useCash = () => useContext(CashContext)
 
 export function CashProvider({ children }: { children: React.ReactNode }) {
-    const supabase = createClient()
+    // La forma oficial de Supabase para App Router:
+    const [supabase] = useState(() => createClient())
 
     const [isBoxOpen, setIsBoxOpen] = useState(false)
     const [currentTurnoId, setCurrentTurnoId] = useState<string | null>(null)
@@ -36,7 +38,6 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     const [hasCompaniaAccess, setHasCompaniaAccess] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
 
-    // 🛡️ ESCUDO 1: useCallback evita que esta función se recree infinitamente
     const fetchProfileAndBox = useCallback(async (userId: string, isMounted: boolean = true) => {
         try {
             const { data: profile } = await supabase
@@ -137,7 +138,22 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
         initSession()
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        // 👇 EL DESPERTADOR DE PESTAÑAS INACTIVAS 👇
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                // Le decimos a TS exactamente qué estamos recibiendo y desestructurando
+                supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
+                    if (session?.user && isMounted) {
+                        fetchProfileAndBox(session.user.id, isMounted);
+                    }
+                });
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        // 👇 SOLUCIÓN TYPESCRIPT: Le agregamos los tipos "AuthChangeEvent" y "Session | null"
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
             if (event === 'SIGNED_OUT') {
                 if (isMounted) {
                     setUserRole('visitante')
@@ -160,18 +176,16 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
         return () => {
             isMounted = false;
-            subscription.unsubscribe()
+            subscription.unsubscribe();
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
         }
-    }, [fetchProfileAndBox, supabase.auth])
+    }, [fetchProfileAndBox, supabase]) // <-- Actualizamos dependencias
 
-    // 🛡️ ESCUDO 2: useCallback para la función pública checkStatus
     const checkStatus = useCallback(async () => {
         const { data: { session } } = await supabase.auth.getSession()
         if (session?.user) await fetchProfileAndBox(session.user.id)
-    }, [fetchProfileAndBox, supabase.auth])
+    }, [fetchProfileAndBox, supabase])
 
-    // 🛡️ ESCUDO 3: useMemo congela el objeto del contexto. 
-    // Ahora React solo va a recargar la app si ALGUNO de estos valores cambia realmente.
     const contextValue = useMemo(() => ({
         isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, checkStatus, isLoading
     }), [isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, checkStatus, isLoading])

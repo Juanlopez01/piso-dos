@@ -26,7 +26,7 @@ type Cupon = {
 }
 
 function TiendaContent() {
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
     const searchParams = useSearchParams() // Para leer si vuelve de MercadoPago
     const router = useRouter()
     const [productos, setProductos] = useState<Producto[]>([])
