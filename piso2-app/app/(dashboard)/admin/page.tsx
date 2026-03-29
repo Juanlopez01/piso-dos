@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { TrendingUp, Users, Ticket, Star, Loader2 } from 'lucide-react'
 
-export default function AdminDashboard() {
+// 👇 1. Renombramos el componente principal a AdminContent
+function AdminContent() {
     const [supabase] = useState(() => createClient())
     const [stats, setStats] = useState<any>(null)
     const [loading, setLoading] = useState(true)
@@ -19,7 +20,7 @@ export default function AdminDashboard() {
             setLoading(false)
         }
         fetchStats()
-    }, [])
+    }, [supabase])
 
     if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
@@ -74,5 +75,18 @@ export default function AdminDashboard() {
                 </div>
             </div>
         </div>
+    )
+}
+
+// 👇 2. Creamos el nuevo componente principal que envuelve todo en el Suspense
+export default function AdminDashboard() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+                <Loader2 className="animate-spin text-[#D4E655] w-12 h-12" />
+            </div>
+        }>
+            <AdminContent />
+        </Suspense>
     )
 }

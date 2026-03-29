@@ -1,17 +1,19 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { Menu, X, LogOut, UserCircle, Shield, Radio, LogIn, UsersRound } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { menuItems } from '@/config/menu'
 import { useCash } from '@/context/CashContext'
 import { toast } from 'sonner'
 
-export default function MobileNav() {
+// 👇 1. Le cambiamos el nombre al componente principal
+function MobileNavContent() {
     const [isOpen, setIsOpen] = useState(false)
     const pathname = usePathname()
+    const searchParams = useSearchParams()
     const [unreadNotifs, setUnreadNotifs] = useState(0)
     const [isLoggingOut, setIsLoggingOut] = useState(false)
 
@@ -22,7 +24,7 @@ export default function MobileNav() {
 
     useEffect(() => {
         setIsOpen(false) // Cierra el menú al cambiar de ruta
-    }, [pathname])
+    }, [pathname, searchParams])
 
     useEffect(() => {
         if (!isLoading && userRole && userRole !== 'visitante') {
@@ -66,13 +68,23 @@ export default function MobileNav() {
         }
     }
 
+    // 👈 Función para que detecte Staff vs Alumnos correctamente
+    const checkIsActive = (itemName: string, itemHref: string) => {
+        if (itemName === 'Staff / Equipo') {
+            return pathname === '/usuarios' && searchParams.get('ver') === 'staff';
+        } else if (itemName === 'Alumnos / Profes') {
+            return pathname === '/usuarios' && searchParams.get('ver') !== 'staff';
+        }
+        return pathname === itemHref;
+    }
+
     if (isLoading) return null
 
     return (
         <div className="md:hidden relative z-50">
             <div className="fixed bottom-0 left-0 right-0 bg-[#09090b] border-t border-white/10 h-16 flex items-center justify-around px-4 z-40 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
                 {visibleItems.slice(0, 4).map((item) => {
-                    const isActive = pathname === item.href
+                    const isActive = checkIsActive(item.name, item.href)
                     return (
                         <Link key={item.name} href={item.href} className={`flex flex-col items-center justify-center w-16 h-full gap-1 transition-colors relative ${isActive ? 'text-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                             {isActive && <div className="absolute top-0 w-8 h-1 bg-[#D4E655] rounded-b-full shadow-[0_0_10px_rgba(212,230,85,0.5)]"></div>}
@@ -109,7 +121,7 @@ export default function MobileNav() {
 
                     <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
                         {visibleItems.map((item) => {
-                            const isActive = pathname === item.href
+                            const isActive = checkIsActive(item.name, item.href)
                             return (
                                 <Link key={item.name} href={item.href} className={`flex items-center gap-4 px-4 py-4 rounded-xl text-sm font-bold uppercase tracking-widest transition-all ${isActive ? 'bg-[#D4E655] text-black shadow-lg' : 'text-gray-300 hover:text-white bg-white/5 hover:bg-white/10'}`}>
                                     <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} />
@@ -138,5 +150,14 @@ export default function MobileNav() {
                 </div>
             )}
         </div>
+    )
+}
+
+// 👇 2. Exportamos por defecto el componente blindado
+export default function MobileNav() {
+    return (
+        <Suspense fallback={<div className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-[#09090b] border-t border-white/10 z-40" />}>
+            <MobileNavContent />
+        </Suspense>
     )
 }

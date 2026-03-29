@@ -7,13 +7,12 @@ import { createClient } from '@/utils/supabase/client'
 import { menuItems } from '@/config/menu'
 import { useCash } from '@/context/CashContext'
 import { toast } from 'sonner'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 
-export default function Sidebar() {
+function SidebarContent() {
     const pathname = usePathname()
     const searchParams = useSearchParams()
 
-    // 🛡️ ESCUDO: Congela la conexión a la base de datos
     const [supabase] = useState(() => createClient())
 
     const [isLoggingOut, setIsLoggingOut] = useState(false)
@@ -34,12 +33,10 @@ export default function Sidebar() {
         }
     }, [pathname, isLoading, userRole, supabase])
 
-    // --- FILTRO DE MENÚ MÁGICO ---
     const visibleItems = menuItems.filter(item => {
         if (item.name === 'La Liga' && !hasLigaAccess) return false;
         if (item.name === 'Compañías' && !hasCompaniaAccess) return false;
 
-        // Ocultar agenda a profes y alumnos
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
         if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
@@ -62,7 +59,7 @@ export default function Sidebar() {
         try {
             await supabase.auth.signOut()
         } finally {
-            window.location.href = '/' // 👈 Redirección dura
+            window.location.href = '/'
         }
     }
 
@@ -85,7 +82,6 @@ export default function Sidebar() {
                 </div>
 
                 {visibleItems.map((item) => {
-                    // 👈 LÓGICA INTELIGENTE DE PESTAÑA ACTIVA
                     let isActive = false;
                     if (item.name === 'Staff / Equipo') {
                         isActive = pathname === '/usuarios' && searchParams.get('ver') === 'staff';
@@ -129,5 +125,14 @@ export default function Sidebar() {
                 )}
             </div>
         </aside>
+    )
+}
+
+// EL ESCUDO ESTÁ ACÁ 👇
+export default function Sidebar() {
+    return (
+        <Suspense fallback={<div className="w-64 bg-[#09090b] border-r border-white/5 hidden md:flex" />}>
+            <SidebarContent />
+        </Suspense>
     )
 }

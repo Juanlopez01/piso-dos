@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { format, startOfDay, endOfDay, isBefore, startOfToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { Calendar, Clock, MapPin, Loader2, Music, AlertCircle, MessageCircle, Info, CheckCircle } from 'lucide-react'
@@ -10,7 +10,8 @@ import { Toaster, toast } from 'sonner'
 type Sala = { id: string; nombre: string; sede_id: string; sede: { nombre: string } }
 type Ocupacion = { inicio: Date; fin: Date; motivo: string }
 
-export default function PublicAlquilerPage() {
+// 👇 1. Le sacamos el export default y lo renombramos a Content
+function PublicAlquilerContent() {
     const [supabase] = useState(() => createClient())
     const [loading, setLoading] = useState(true)
 
@@ -155,7 +156,6 @@ export default function PublicAlquilerPage() {
         window.open(url, '_blank')
     }
 
-
     if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
 
     // Agrupar salas por sede para el select
@@ -282,5 +282,18 @@ export default function PublicAlquilerPage() {
                 </div>
             </div>
         </div>
+    )
+}
+
+// 👇 2. Creamos el nuevo componente exportado por defecto con el escudo Suspense
+export default function PublicAlquilerPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+                <Loader2 className="animate-spin text-[#D4E655]" />
+            </div>
+        }>
+            <PublicAlquilerContent />
+        </Suspense>
     )
 }

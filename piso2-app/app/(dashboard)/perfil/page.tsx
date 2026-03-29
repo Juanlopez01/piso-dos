@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
     AlertTriangle, Mail, Calendar, LogOut, CheckCircle2, History,
@@ -15,7 +15,8 @@ import { es } from 'date-fns/locale'
 type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; inicio: string; tipo_clase: string; profesor: { nombre_completo: string } } }
 type PackVencimiento = { fecha_vencimiento: string; creditos_restantes: number; tipo_clase: string }
 
-export default function PerfilPage() {
+// 👇 PASO 1: Le sacamos el "export default" y lo renombramos a PerfilContent
+function PerfilContent() {
     const [supabase] = useState(() => createClient())
 
     const [loading, setLoading] = useState(true)
@@ -70,7 +71,7 @@ export default function PerfilPage() {
                     return
                 }
 
-                supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => {
+                supabase.rpc('limpiar_creditos_vencidos').then(({ error }: { error: any }) => {
                     if (error) console.error("Error en RPC:", error)
                 })
 
@@ -525,5 +526,21 @@ export default function PerfilPage() {
                 </div>
             )}
         </div>
+    )
+}
+
+// 👇 PASO 2: El nuevo componente principal que envuelve al PerfilContent en un Suspense
+export default function PerfilPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center w-full gap-4">
+                <Loader2 className="animate-spin text-[#D4E655] w-12 h-12" />
+                <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">
+                    Cargando perfil...
+                </p>
+            </div>
+        }>
+            <PerfilContent />
+        </Suspense>
     )
 }

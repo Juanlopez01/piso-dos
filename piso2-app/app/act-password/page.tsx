@@ -5,6 +5,7 @@ import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Lock, Loader2, CheckCircle2 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { AuthChangeEvent, Session } from '@supabase/supabase-js'
 
 export default function ActualizarPasswordPage() {
     const supabase = createClient()
@@ -32,7 +33,7 @@ export default function ActualizarPasswordPage() {
         canjearCodigo()
 
         // Por si acaso viene por otro método (Implicit flow antiguo)
-        supabase.auth.onAuthStateChange((event, session) => {
+        supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
             if (event === 'PASSWORD_RECOVERY' || session) {
                 setAuthReady(true)
             }
