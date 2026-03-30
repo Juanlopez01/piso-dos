@@ -13,7 +13,7 @@ import {
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { toast, Toaster } from 'sonner'
-import { useCash } from '@/context/CashContext' // 👈 Importamos el cerebro
+import { useCash } from '@/context/CashContext'
 
 const CRITERIOS_EVALUACION = [
     "Puntualidad", "Asistencia / regularidad", "Compromiso con la clase", "Actitud de trabajo",
@@ -30,7 +30,6 @@ export default function LaLigaPage() {
     const [supabase] = useState(() => createClient())
     const router = useRouter()
 
-    // 👈 Traemos hasLigaAccess y isLoadingContext
     const { hasLigaAccess, isLoading: loadingContext } = useCash()
 
     const [loading, setLoading] = useState(true)
@@ -69,14 +68,9 @@ export default function LaLigaPage() {
 
     const inicializado = useRef(false)
 
-    // ==========================================
-    // CARGA INICIAL Y PATOVICA
-    // ==========================================
     useEffect(() => {
-        // Esperamos a que el Context termine de cargar
         if (loadingContext) return;
 
-        // 👈 EL PATOVICA DE LA PÁGINA
         if (!hasLigaAccess) {
             toast.error('Acceso denegado. No pertenecés a La Liga.')
             router.replace('/explorar')
@@ -127,9 +121,11 @@ export default function LaLigaPage() {
 
                 if (dataProfile) {
                     setProfile(dataProfile)
-                    const isProfe = dataProfile.rol === 'profesor' || dataProfile.rol === 'admin'
 
-                    if (!isProfe) {
+                    // 🌟 SOLUCIÓN: Englobamos a todos los trabajadores como "Staff"
+                    const isStaff = ['admin', 'recepcion', 'profesor'].includes(dataProfile.rol)
+
+                    if (!isStaff) {
                         const tieneDatos = Boolean(
                             dataProfile.edad && dataProfile.direccion &&
                             dataProfile.contacto_emergencia && dataProfile.plan_medico &&
@@ -138,6 +134,7 @@ export default function LaLigaPage() {
                         setLegajoCompleto(tieneDatos)
                         if (!tieneDatos) return
                     } else {
+                        // El staff se saltea el legajo automáticamente
                         setLegajoCompleto(true)
                     }
 
@@ -150,10 +147,12 @@ export default function LaLigaPage() {
                         .order('created_at', { ascending: false })
                         .limit(30)
 
-                    if (dataProfile.rol === 'admin') {
-                    } else if (isProfe) {
+                    if (['admin', 'recepcion'].includes(dataProfile.rol)) {
+                        // Ven todos los avisos
+                    } else if (dataProfile.rol === 'profesor') {
                         queryAvisos = queryAvisos.or(`autor_id.eq.${userId},tipo_destino.eq.general`)
                     } else {
+                        // Alumno
                         queryAvisos = queryAvisos.or(`tipo_destino.eq.general,and(tipo_destino.eq.nivel,nivel_destino.eq.${nivelAlumno}),and(tipo_destino.eq.individual,alumno_id.eq.${userId})`)
                     }
 
@@ -166,16 +165,17 @@ export default function LaLigaPage() {
 
                     let queryClases = supabase.from('clases').select('id, nombre, inicio, liga_nivel, profesor_id, profesor:profiles(nombre_completo)').eq('es_la_liga', true).neq('estado', 'cancelada')
 
-                    if (isProfe && dataProfile.rol !== 'admin') {
+                    if (dataProfile.rol === 'profesor') {
                         queryClases = queryClases.eq('profesor_id', userId)
-                    } else if (!isProfe) {
+                    } else if (!isStaff) {
                         queryClases = queryClases.eq('liga_nivel', nivelAlumno)
                     }
+                    // Admin y Recepcion cargan TODAS las materias
 
                     const { data: dataClases } = await queryClases
 
                     let misEvaluaciones: any[] = []
-                    if (!isProfe) {
+                    if (!isStaff) {
                         const mesActual = new Date().getMonth() + 1
                         const anioActual = new Date().getFullYear()
 
@@ -225,7 +225,7 @@ export default function LaLigaPage() {
 
                         const disciplinasUnicas = Object.values(disciplinasMap).map((disciplina: any) => {
                             let evaluacion = null
-                            if (!isProfe) {
+                            if (!isStaff) {
                                 evaluacion = misEvaluaciones.find(e => disciplina.clases_ids.includes(e.clase_id))
                             }
                             return { ...disciplina, evaluacion: evaluacion || null }
@@ -235,7 +235,8 @@ export default function LaLigaPage() {
                         setMaterias(disciplinasUnicas)
                     }
 
-                    if (isProfe) {
+                    // Cargamos alumnos en background si es staff (para acelerar la vista)
+                    if (isStaff) {
                         cargarTodosLosAlumnos(false)
                     }
                 }
@@ -251,7 +252,6 @@ export default function LaLigaPage() {
         fetchLaLigaData()
     }, [hasLigaAccess, loadingContext, router])
 
-    // --- FUNCIONES GESTIÓN ADMIN ---
     const cargarTodosLosAlumnos = async (mostrarLoading = true) => {
         if (mostrarLoading) setLoadingGestion(true)
         try {
@@ -294,7 +294,6 @@ export default function LaLigaPage() {
         }
     }, [adminTab, allStudents.length])
 
-    // --- FUNCIONES COMUNICADOS ---
     const enviarAviso = async (e: React.FormEvent) => {
         e.preventDefault()
         setEnviandoAviso(true)
@@ -336,7 +335,6 @@ export default function LaLigaPage() {
         }
     }
 
-    // --- FUNCIONES EVALUACIÓN ---
     const cargarAlumnos = async (materia: any) => {
         setSelectedMateria(materia)
         setLoadingAlumnos(true)
@@ -435,7 +433,6 @@ export default function LaLigaPage() {
         }
     }
 
-    // --- RENDERS ---
     if (loading || loadingContext) {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center">
@@ -458,12 +455,14 @@ export default function LaLigaPage() {
         )
     }
 
-    const isAdmin = profile?.rol === 'admin'
-    const isProfe = profile?.rol === 'profesor' || profile?.rol === 'admin'
+    // 🌟 ROLES Y PERMISOS ACTUALIZADOS 🌟
+    const isStaff = ['admin', 'recepcion', 'profesor'].includes(profile?.rol)
+    const canManage = ['admin', 'recepcion'].includes(profile?.rol)
+
     const nivelActual = profile?.nivel_liga || profile?.nivel || 1
     const faltaAptoFisico = !profile?.apto_fisico_url
 
-    if (!isProfe && !legajoCompleto) {
+    if (!isStaff && !legajoCompleto) {
         return (
             <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8 flex flex-col items-center justify-center relative overflow-hidden">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#D4E655]/5 rounded-full blur-[100px] pointer-events-none" />
@@ -529,10 +528,10 @@ export default function LaLigaPage() {
                                 <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.3em] uppercase">Programa de Formación</span>
                             </div>
                             <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter text-white leading-none">
-                                La Liga {isProfe && <span className="text-gray-500 text-2xl">/ Staff</span>}
+                                La Liga {isStaff && <span className="text-gray-500 text-2xl">/ Staff</span>}
                             </h1>
                         </div>
-                        {!isProfe && (
+                        {!isStaff && (
                             <div className="flex items-center gap-3">
                                 <span className="bg-[#D4E655] text-black px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest shadow-[0_0_15px_rgba(212,230,85,0.2)]">
                                     Nivel {nivelActual}
@@ -541,8 +540,8 @@ export default function LaLigaPage() {
                         )}
                     </div>
 
-                    {/* TABS PARA ADMIN / PROFESOR */}
-                    {isProfe && (
+                    {/* TABS PARA ADMIN / RECEPCIÓN / PROFESOR */}
+                    {isStaff && (
                         <div className="flex gap-6 border-b border-white/10 relative z-10 mt-2 overflow-x-auto custom-scrollbar">
                             <button
                                 onClick={() => setAdminTab('evaluaciones')}
@@ -556,7 +555,8 @@ export default function LaLigaPage() {
                             >
                                 <Megaphone size={14} className="inline mr-2 -mt-1" /> Comunicados
                             </button>
-                            {isAdmin && (
+                            {/* Recepción y Admin ven el padrón para gestionar niveles */}
+                            {canManage && (
                                 <button
                                     onClick={() => setAdminTab('gestion')}
                                     className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'gestion' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}
@@ -572,7 +572,7 @@ export default function LaLigaPage() {
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
 
                 {/* --- ALERTAS CRÍTICAS (SOLO ALUMNO) --- */}
-                {!isProfe && (faltaAptoFisico || deudaCuota) && (
+                {!isStaff && (faltaAptoFisico || deudaCuota) && (
                     <div className="space-y-3">
                         {faltaAptoFisico && (
                             <div className="bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -610,9 +610,9 @@ export default function LaLigaPage() {
                 )}
 
                 {/* =========================================
-                    VISTA GESTIÓN ADMIN
+                    VISTA GESTIÓN ADMIN / RECEPCION
                 ========================================= */}
-                {isAdmin && adminTab === 'gestion' && (
+                {canManage && adminTab === 'gestion' && (
                     <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[500px] flex flex-col shadow-xl animate-in fade-in">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-6 border-b border-white/5">
                             <div>
@@ -692,9 +692,9 @@ export default function LaLigaPage() {
 
 
                 {/* =========================================
-                    VISTA COMUNICADOS (NUEVA PESTAÑA PROFE/ADMIN)
+                    VISTA COMUNICADOS (PESTAÑA STAFF)
                 ========================================= */}
-                {isProfe && adminTab === 'comunicados' && (
+                {isStaff && adminTab === 'comunicados' && (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
                         {/* Redactar Aviso */}
                         <div className="lg:col-span-5 bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl">
@@ -766,7 +766,7 @@ export default function LaLigaPage() {
                             </form>
                         </div>
 
-                        {/* Historial de Avisos (Vista Profe) */}
+                        {/* Historial de Avisos (Vista Staff) */}
                         <div className="lg:col-span-7 bg-[#111] border border-white/5 rounded-3xl p-6">
                             <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6 border-b border-white/5 pb-4">
                                 <Megaphone size={20} className="text-[#D4E655]" /> Cartelera Activa
@@ -774,8 +774,8 @@ export default function LaLigaPage() {
                             <div className="space-y-4 max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
                                 {avisos.length > 0 ? avisos.map(aviso => (
                                     <div key={aviso.id} className="bg-[#09090b] border-l-2 border-[#D4E655] p-5 rounded-r-xl border-y border-r border-white/5 relative group">
-                                        {/* Botón Borrar (Solo admin o el autor del aviso) */}
-                                        {(isAdmin || aviso.autor_id === profile.id) && (
+                                        {/* Botón Borrar (Para admins o el que escribió el aviso) */}
+                                        {(canManage || aviso.autor_id === profile.id) && (
                                             <button
                                                 onClick={() => eliminarAviso(aviso.id)}
                                                 className="absolute top-4 right-4 text-gray-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
@@ -811,7 +811,7 @@ export default function LaLigaPage() {
                 {/* =========================================
                     VISTA DOCENTE / STAFF (EVALUACIONES)
                 ========================================= */}
-                {isProfe && adminTab === 'evaluaciones' && (
+                {isStaff && adminTab === 'evaluaciones' && (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
                         <div className="lg:col-span-4 space-y-4">
                             <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/10 pb-2">
@@ -894,7 +894,7 @@ export default function LaLigaPage() {
                 {/* =========================================
                     VISTA ALUMNO (Dashboard Normal)
                 ========================================= */}
-                {!isProfe && (
+                {!isStaff && (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
                         {/* Materias del alumno */}
                         <div className="lg:col-span-2 space-y-6">
@@ -934,7 +934,6 @@ export default function LaLigaPage() {
                                                     Prof: {materia.profesor}
                                                 </p>
 
-                                                {/* NUEVO: Próxima Clase SÍ O SÍ VISIBLE */}
                                                 <div className="mb-5 relative z-10">
                                                     <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block mb-1 flex items-center gap-1">
                                                         <Clock size={10} /> Próxima Clase
@@ -1003,11 +1002,11 @@ export default function LaLigaPage() {
             </div>
 
             {/* =========================================
-                MODALES (Evaluación y Boletín se mantienen igual)
+                MODALES
             ========================================= */}
 
-            {/* MODAL DE EVALUACIÓN (Solo Docentes) */}
-            {isProfe && evalModalOpen && selectedAlumno && (
+            {/* MODAL DE EVALUACIÓN (Solo Docentes / Staff) */}
+            {isStaff && evalModalOpen && selectedAlumno && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setEvalModalOpen(false)}>
                     <div className="w-full max-w-5xl max-h-[95vh] bg-[#09090b] border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
                         <div className="p-6 border-b border-white/5 bg-[#111] flex justify-between items-center shrink-0">
@@ -1053,7 +1052,7 @@ export default function LaLigaPage() {
             )}
 
             {/* MODAL DE BOLETÍN (Solo Alumnos) */}
-            {!isProfe && boletinModalOpen && selectedBoletin?.evaluacion && (
+            {!isStaff && boletinModalOpen && selectedBoletin?.evaluacion && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setBoletinModalOpen(false)}>
                     <div className="w-full max-w-4xl max-h-[95vh] bg-[#09090b] border border-[#D4E655]/30 rounded-2xl flex flex-col overflow-hidden shadow-2xl shadow-[#D4E655]/5" onClick={e => e.stopPropagation()}>
                         <div className="p-6 md:p-8 border-b border-white/5 bg-[#111] flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shrink-0 relative overflow-hidden">
