@@ -27,8 +27,39 @@ export async function proxy(request: NextRequest) {
         }
     )
 
-    // IMPORTANTE: Mantiene la sesión viva a la fuerza
-    await supabase.auth.getUser()
+    try {
+        // 1. Intentamos validar al usuario (esto refresca el token automáticamente)
+        const { data: { user }, error } = await supabase.auth.getUser()
+
+        // 2. Si tira un error de autenticación (ej: Invalid Refresh Token)
+        if (error) {
+            // Rutas públicas donde no pasa nada si no hay sesión
+            const isPublicRoute = request.nextUrl.pathname === '/' ||
+                request.nextUrl.pathname.startsWith('/login') ||
+                request.nextUrl.pathname.startsWith('/rec-password')
+
+            // Si está intentando entrar a una ruta privada con un token roto, lo pateamos al login
+            if (!isPublicRoute) {
+                const url = request.nextUrl.clone()
+                url.pathname = '/login'
+                const redirectResponse = NextResponse.redirect(url)
+
+                // 🌟 MAGIA PURA: Le pasamos a la nueva respuesta las cookies limpias (vacías) 
+                // que Supabase generó al fallar, para que el navegador "olvide" al fantasma.
+                supabaseResponse.cookies.getAll().forEach((cookie) => {
+                    redirectResponse.cookies.set(cookie.name, cookie.value)
+                })
+
+                return redirectResponse
+            }
+        }
+    } catch (e) {
+        // Failsafe absoluto por si el servidor de Supabase se cae
+        console.error('Middleware Auth Error:', e)
+        const url = request.nextUrl.clone()
+        url.pathname = '/login'
+        return NextResponse.redirect(url)
+    }
 
     return supabaseResponse
 }
