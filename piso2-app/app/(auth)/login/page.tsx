@@ -93,9 +93,6 @@ export default function LoginPage() {
 
             if (error) throw error
 
-            // 2. (Opcional) Si tenés una tabla de perfiles, Supabase Triggers suele hacer el resto, 
-            // pero si usas tu propia API, podés llamarla acá.
-
             toast.success('¡Cuenta creada con éxito! Ya podés ingresar.')
             setIsRegistering(false) // Lo devolvemos a la vista de login
             setEmail(regForm.email) // Le precargamos el email
@@ -106,7 +103,8 @@ export default function LoginPage() {
             setLoading(false)
         }
     }
-    // NUEVO: Verificamos si ya está logueado apenas carga la página
+
+    // --- CHEQUEO INICIAL DE SESIÓN (CON MATA-FANTASMAS) ---
     useEffect(() => {
         const checkSession = async () => {
             const { data: { session } } = await supabase.auth.getSession()
@@ -116,9 +114,16 @@ export default function LoginPage() {
                     .from('profiles')
                     .select('rol')
                     .eq('id', session.user.id)
-                    .single()
+                    .maybeSingle() // Usamos maybeSingle para que no tire error si no existe
 
-                const userRole = profile?.rol || 'alumno'
+                // Si hay sesión en el búnker PERO no hay perfil en la DB (usuario fantasma)
+                if (!profile) {
+                    await supabase.auth.signOut() // ¡Mata al fantasma!
+                    setCheckingAuth(false)
+                    return
+                }
+
+                const userRole = profile.rol || 'alumno'
 
                 // Redirección inteligente
                 if (userRole === 'admin') router.push('/admin')
@@ -140,6 +145,7 @@ export default function LoginPage() {
             </div>
         )
     }
+
     return (
         <div className={`min-h-screen bg-[#050505] text-white flex flex-col relative overflow-x-hidden selection:bg-[#D4E655] selection:text-black ${montserrat.className}`}>
             <Toaster position="top-center" richColors theme="dark" />
