@@ -6,7 +6,7 @@ import { useSearchParams } from 'next/navigation'
 import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
-    Wallet, Trophy, Star
+    Wallet, Trophy, Star, Snowflake
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
@@ -53,6 +53,7 @@ function UsuariosContent() {
     // Filtros
     const [roleFilter, setRoleFilter] = useState('todos')
     const [interestFilter, setInterestFilter] = useState('')
+    const [statusFilter, setStatusFilter] = useState('todos') // NUEVO FILTRO: 'todos' | 'activos' | 'frios'
     const [searchTerm, setSearchTerm] = useState('')
 
     // Modales y Procesos
@@ -88,8 +89,30 @@ function UsuariosContent() {
         const { data: ritmosData } = await supabase.from('ritmos').select('id, nombre').order('nombre')
         if (ritmosData) setRitmosDisponibles(ritmosData)
 
+        // 1. Buscamos todos los usuarios (traemos created_at para saber cuándo se registraron)
         const { data: usersData } = await supabase.from('profiles').select('*').order('nombre_completo', { ascending: true })
-        if (usersData) setUsers(usersData)
+
+        // 2. LÓGICA DE ALUMNOS FRÍOS: Buscamos inscripciones de los últimos 30 días
+        const thirtyDaysAgo = new Date()
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
+        const { data: inscripcionesRecientes } = await supabase
+            .from('inscripciones')
+            .select('user_id')
+            .gte('created_at', thirtyDaysAgo.toISOString())
+
+        // Armamos un set (lista única) con los IDs de los alumnos que SI tomaron clases
+        const activosIds = new Set(inscripcionesRecientes?.map((i: { user_id: string }) => i.user_id) || [])
+
+        if (usersData) {
+            // Mapeamos los usuarios y les agregamos la etiqueta "is_frio"
+            const usersWithStatus = usersData.map((u: any) => {
+                // Es frío si: es alumno, no está en la lista de activos, y su cuenta tiene más de 30 días
+                const isFrio = u.rol === 'alumno' && !activosIds.has(u.id) && (new Date(u.created_at || 0) < thirtyDaysAgo)
+                return { ...u, is_frio: isFrio }
+            })
+            setUsers(usersWithStatus)
+        }
 
         const { data: prodsData } = await supabase.from('productos').select('*').eq('activo', true).order('tipo_clase').order('creditos')
         if (prodsData) setProductos(prodsData)
@@ -109,16 +132,21 @@ function UsuariosContent() {
 
         let matchesInterest = true
         if ((roleFilter === 'alumno' || roleFilter === 'todos') && interestFilter) {
-            // Usamos el escudo para garantizar que comparemos String con String
             const interArray = getInteresesSeguro(u.intereses_ritmos)
             matchesInterest = interArray.includes(String(interestFilter))
         }
 
-        return matchesRole && matchesSearch && matchesInterest
+        // LÓGICA DEL NUEVO FILTRO DE ESTADO (FRÍOS / ACTIVOS)
+        let matchesStatus = true
+        if ((roleFilter === 'alumno' || roleFilter === 'todos')) {
+            if (statusFilter === 'frios') matchesStatus = u.is_frio
+            if (statusFilter === 'activos') matchesStatus = !u.is_frio
+        }
+
+        return matchesRole && matchesSearch && matchesInterest && matchesStatus
     })
 
     const getRitmoNombre = (id: string | number) => {
-        // Buscamos comparando como texto para evitar errores de tipo
         const ritmo = ritmosDisponibles.find(r => String(r.id) === String(id))
         return ritmo ? ritmo.nombre : 'Desconocido'
     }
@@ -168,7 +196,7 @@ function UsuariosContent() {
         setSelectedUser(user)
         setEditForm({
             obs: user.staff_observations || '',
-            intereses_ritmos: getInteresesSeguro(user.intereses_ritmos) // Escudo activo
+            intereses_ritmos: getInteresesSeguro(user.intereses_ritmos)
         })
         setIsEditOpen(true)
     }
@@ -185,8 +213,6 @@ function UsuariosContent() {
 
     const handleSaveChanges = async () => {
         if (!selectedUser) return
-
-        // Guardamos los intereses (Supabase debería aceptarlo como array JSON/texto sin problema)
         const { error } = await supabase.from('profiles').update({
             staff_observations: editForm.obs,
             intereses_ritmos: editForm.intereses_ritmos
@@ -240,7 +266,6 @@ function UsuariosContent() {
         } catch (error: any) { toast.error(error.message || 'Error al asignar el pack') } finally { setAssigningPack(false) }
     }
 
-    // --- FUNCIONES DE COBRO LA LIGA ---
     const openCobroLigaModal = (user: any) => {
         setSelectedUser(user)
         setCobroLigaForm({ monto: '', metodo: 'efectivo' })
@@ -256,7 +281,6 @@ function UsuariosContent() {
             const { data: { user } } = await supabase.auth.getUser()
             const montoNum = Number(cobroLigaForm.monto)
 
-            // Validamos caja
             const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user?.id).eq('estado', 'abierta').maybeSingle()
             if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
 
@@ -310,11 +334,11 @@ function UsuariosContent() {
 
                 <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
                     <div className="bg-[#111] p-1 rounded-xl border border-white/10 flex gap-1 w-full md:w-auto overflow-x-auto">
-                        <button onClick={() => { setRoleFilter('todos'); setInterestFilter('') }} className={`flex items-center gap-2 px-4 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${roleFilter === 'todos' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}><User size={14} /> Todos</button>
+                        <button onClick={() => { setRoleFilter('todos'); setInterestFilter(''); setStatusFilter('todos') }} className={`flex items-center gap-2 px-4 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${roleFilter === 'todos' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}><User size={14} /> Todos</button>
                         <button onClick={() => { setRoleFilter('alumno'); setInterestFilter('') }} className={`flex items-center gap-2 px-4 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${roleFilter === 'alumno' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}><GraduationCap size={14} /> Alumnos</button>
-                        <button onClick={() => { setRoleFilter('profesor'); setInterestFilter('') }} className={`flex items-center gap-2 px-4 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${roleFilter === 'profesor' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}><Briefcase size={14} /> Profesores</button>
+                        <button onClick={() => { setRoleFilter('profesor'); setInterestFilter(''); setStatusFilter('todos') }} className={`flex items-center gap-2 px-4 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${roleFilter === 'profesor' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}><Briefcase size={14} /> Profesores</button>
                         {isAdmin && (
-                            <button onClick={() => { setRoleFilter('staff'); setInterestFilter('') }} className={`flex items-center gap-2 px-4 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${roleFilter === 'staff' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}><Shield size={14} /> Staff</button>
+                            <button onClick={() => { setRoleFilter('staff'); setInterestFilter(''); setStatusFilter('todos') }} className={`flex items-center gap-2 px-4 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${roleFilter === 'staff' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}><Shield size={14} /> Staff</button>
                         )}
                     </div>
                     <div className="relative w-full md:w-72">
@@ -323,13 +347,27 @@ function UsuariosContent() {
                     </div>
                 </div>
 
-                {(roleFilter === 'alumno' || roleFilter === 'todos') && ritmosDisponibles.length > 0 && (
-                    <div className="flex gap-2 flex-wrap pt-2">
-                        <div className="flex items-center gap-2 mr-2"><Filter size={12} className="text-[#D4E655]" /><span className="text-[10px] font-bold text-gray-500 uppercase">Intereses:</span></div>
-                        <button onClick={() => setInterestFilter('')} className={`text-[9px] font-bold px-3 py-1.5 rounded-lg border uppercase ${!interestFilter ? 'bg-white text-black border-white' : 'bg-transparent text-gray-600 border-white/10'}`}>Todos</button>
-                        {ritmosDisponibles.map(ritmo => (
-                            <button key={ritmo.id} onClick={() => setInterestFilter(ritmo.id === interestFilter ? '' : ritmo.id)} className={`text-[9px] font-bold px-3 py-1.5 rounded-lg border uppercase ${interestFilter === ritmo.id ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-500 border-white/10'}`}>{ritmo.nombre}</button>
-                        ))}
+                {/* FILTROS EXTRAS PARA ALUMNOS (INTERESES Y ESTADO FRIO) */}
+                {(roleFilter === 'alumno' || roleFilter === 'todos') && (
+                    <div className="flex flex-col gap-3 pt-2">
+                        {/* Filtro de Estado (Fríos) */}
+                        <div className="flex gap-2 flex-wrap items-center">
+                            <div className="flex items-center gap-2 mr-2"><User size={12} className="text-[#D4E655]" /><span className="text-[10px] font-bold text-gray-500 uppercase">Actividad:</span></div>
+                            <button onClick={() => setStatusFilter('todos')} className={`text-[9px] font-bold px-3 py-1.5 rounded-lg border uppercase transition-colors ${statusFilter === 'todos' ? 'bg-white text-black border-white' : 'bg-transparent text-gray-600 border-white/10 hover:bg-white/5'}`}>Todos</button>
+                            <button onClick={() => setStatusFilter('activos')} className={`text-[9px] font-bold px-3 py-1.5 rounded-lg border uppercase transition-colors ${statusFilter === 'activos' ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-transparent text-gray-600 border-white/10 hover:bg-white/5'}`}>Activos</button>
+                            <button onClick={() => setStatusFilter('frios')} className={`text-[9px] font-bold px-3 py-1.5 rounded-lg border uppercase transition-colors flex items-center gap-1 ${statusFilter === 'frios' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.2)]' : 'bg-transparent text-gray-600 border-white/10 hover:bg-white/5'}`}><Snowflake size={10} /> Fríos</button>
+                        </div>
+
+                        {/* Filtro de Ritmos */}
+                        {ritmosDisponibles.length > 0 && (
+                            <div className="flex gap-2 flex-wrap items-center border-t border-white/5 pt-3">
+                                <div className="flex items-center gap-2 mr-2"><Filter size={12} className="text-[#D4E655]" /><span className="text-[10px] font-bold text-gray-500 uppercase">Intereses:</span></div>
+                                <button onClick={() => setInterestFilter('')} className={`text-[9px] font-bold px-3 py-1.5 rounded-lg border uppercase transition-colors ${!interestFilter ? 'bg-white text-black border-white' : 'bg-transparent text-gray-600 border-white/10 hover:bg-white/5'}`}>Todos</button>
+                                {ritmosDisponibles.map(ritmo => (
+                                    <button key={ritmo.id} onClick={() => setInterestFilter(ritmo.id === interestFilter ? '' : ritmo.id)} className={`text-[9px] font-bold px-3 py-1.5 rounded-lg border uppercase transition-colors ${interestFilter === ritmo.id ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-500 border-white/10 hover:bg-white/5'}`}>{ritmo.nombre}</button>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -337,12 +375,21 @@ function UsuariosContent() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {filteredUsers.map((u) => (
                     <div key={u.id} className="bg-[#09090b] border border-white/10 p-5 rounded-2xl flex flex-col justify-between gap-4 group hover:border-[#D4E655]/30 transition-all relative overflow-hidden shadow-sm">
+
+                        {/* ETIQUETA ALUMNO FRÍO ❄️ */}
+                        {u.is_frio && (
+                            <div className="absolute top-0 left-0 px-3 py-1.5 rounded-br-xl bg-blue-500/10 text-blue-400 text-[8px] font-black uppercase tracking-widest flex items-center gap-1 border-r border-b border-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.1)]">
+                                <Snowflake size={10} className="animate-pulse" /> Frío
+                            </div>
+                        )}
+
+                        {/* ETIQUETA ROL */}
                         <div className={`absolute top-0 right-0 px-3 py-1.5 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${u.rol === 'admin' ? 'bg-red-500/20 text-red-500' : u.rol === 'recepcion' ? 'bg-blue-500/20 text-blue-500' : u.rol === 'profesor' ? 'bg-purple-500/20 text-purple-500' : 'bg-white/5 text-gray-500'}`}>
                             {u.rol}
                         </div>
 
                         <div>
-                            <div className="flex items-start gap-4 mb-3 mt-2">
+                            <div className="flex items-start gap-4 mb-3 mt-4">
                                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-black uppercase shrink-0 ${u.rol === 'alumno' ? 'bg-white/10 text-white' : 'bg-[#D4E655] text-black'}`}>
                                     {u.nombre_completo?.[0] || '?'}
                                 </div>

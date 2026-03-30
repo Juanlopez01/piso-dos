@@ -5,7 +5,8 @@ import { useEffect, useState } from 'react'
 import {
     Plus, Calendar, Clock, DollarSign, User, MapPin,
     Trash2, CheckCircle, Loader2, X, MessageCircle,
-    Repeat, Settings, ChevronDown, ChevronUp, Layers, Sun, Moon, Zap, Copy, Tag
+    Repeat, Settings, ChevronDown, ChevronUp, Layers, Sun, Moon, Zap, Copy, Tag,
+    Banknote, Landmark
 } from 'lucide-react'
 import { format, isSunday, isSaturday } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -23,7 +24,9 @@ type ReservaGroup = {
     sala_id: string
     tipo_uso: string
     estado: string
+    estado_pago: string
     total_grupo: number
+    total_pagado: number
     items: any[]
 }
 
@@ -43,18 +46,24 @@ export default function AlquileresPage() {
     const [expandedSala, setExpandedSala] = useState<string | null>(null)
     const [creating, setCreating] = useState(false)
 
+    // --- ESTADOS NUEVOS PARA EL MODAL DE COBRO ---
+    const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
+    const [selectedGroup, setSelectedGroup] = useState<ReservaGroup | null>(null)
+    const [paymentType, setPaymentType] = useState<'seña' | 'total' | 'resto'>('total')
+    const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'transferencia'>('efectivo')
+    const [processingPayment, setProcessingPayment] = useState(false)
+
     const [form, setForm] = useState({
         cliente_nombre: '',
         cliente_contacto: '',
         sala_id: '',
         fechas: [] as Date[],
-        hora_inicio: '18:00', // Default a horario popular
+        hora_inicio: '18:00',
         hora_fin: '22:00',
         tipo_uso: 'ensayo',
-        descuento: 0 // <--- NUEVO CAMPO DE DESCUENTO
+        descuento: 0
     })
 
-    // Estado para el desglose de precios (Resumen)
     const [priceBreakdown, setPriceBreakdown] = useState({
         manana: { horas: 0, precio: 0, subtotal: 0 },
         noche: { horas: 0, precio: 0, subtotal: 0 },
@@ -66,7 +75,6 @@ export default function AlquileresPage() {
 
     useEffect(() => { fetchData() }, [])
 
-    // --- CALCULADORA AVANZADA (Desglose) ---
     useEffect(() => {
         if (!form.sala_id || !form.hora_inicio || !form.hora_fin || form.fechas.length === 0) {
             setPriceBreakdown({ manana: { horas: 0, precio: 0, subtotal: 0 }, noche: { horas: 0, precio: 0, subtotal: 0 }, finde: { horas: 0, precio: 0, subtotal: 0 }, subtotalBase: 0, montoDescuento: 0, total: 0 })
@@ -76,49 +84,31 @@ export default function AlquileresPage() {
         const sala = salas.find(s => s.id === form.sala_id)
         if (!sala) return
 
-        // Precios según tipo
         const tipoPrefix = form.tipo_uso === 'produccion' ? 'p_prod' : `p_${form.tipo_uso}`
         const pManana = Number(sala[`${tipoPrefix}_manana`] || 0)
         const pNoche = Number(sala[`${tipoPrefix}_noche`] || 0)
         const pFinde = Number(sala[`${tipoPrefix}_finde`] || 0)
 
-        // Calcular duración base en horas decimales
         const parseTime = (t: string) => { const [h, m] = t.split(':').map(Number); return h + m / 60 }
         const start = parseTime(form.hora_inicio)
         const end = parseTime(form.hora_fin)
         let duration = end - start
         if (duration < 0) duration = 0
 
-        // Contadores globales
         let totalHManana = 0
         let totalHNoche = 0
         let totalHFinde = 0
+        const CORTE_HORARIO = 18.0
 
-        const CORTE_HORARIO = 18.0 // 18:00hs cambia la tarifa
-
-        // Iterar por cada fecha seleccionada para clasificarla
         form.fechas.forEach(fecha => {
-            if (isSunday(fecha)) { // Asumimos Domingo como Finde/Feriado
+            if (isSunday(fecha)) {
                 totalHFinde += duration
             } else {
-                // Lógica de Franja Horaria (Lunes a Sábado)
                 let hManana = 0
                 let hNoche = 0
-
-                // 1. Todo Mañana (termina antes de las 18)
-                if (end <= CORTE_HORARIO) {
-                    hManana = duration
-                }
-                // 2. Todo Noche (empieza a las 18 o después)
-                else if (start >= CORTE_HORARIO) {
-                    hNoche = duration
-                }
-                // 3. Mixto (cruza las 18)
-                else {
-                    hManana = CORTE_HORARIO - start
-                    hNoche = end - CORTE_HORARIO
-                }
-
+                if (end <= CORTE_HORARIO) { hManana = duration }
+                else if (start >= CORTE_HORARIO) { hNoche = duration }
+                else { hManana = CORTE_HORARIO - start; hNoche = end - CORTE_HORARIO }
                 totalHManana += hManana
                 totalHNoche += hNoche
             }
@@ -150,7 +140,6 @@ export default function AlquileresPage() {
             .limit(100)
 
         if (rawData) {
-            // Lógica de Agrupación
             const agrupados: Record<string, ReservaGroup> = {}
             rawData.forEach((item: any) => {
                 const gId = item.group_id || item.id
@@ -163,17 +152,27 @@ export default function AlquileresPage() {
                         sala_id: item.sala_id,
                         tipo_uso: item.tipo_uso || 'ensayo',
                         estado: 'pendiente',
+                        estado_pago: 'pendiente',
                         total_grupo: 0,
+                        total_pagado: 0,
                         items: []
                     }
                 }
                 agrupados[gId].items.push(item)
                 agrupados[gId].total_grupo += Number(item.monto_total)
+                agrupados[gId].total_pagado += Number(item.monto_pagado || 0) // ACUMULAMOS LO PAGADO
             })
 
             const listaGrupos = Object.values(agrupados).map(g => {
-                const todosPagados = g.items.every(i => i.estado === 'pagado')
-                g.estado = todosPagados ? 'pagado' : 'pendiente'
+                // CALCULAMOS EL ESTADO REAL EN BASE AL MONTO PAGADO VS TOTAL
+                if (g.total_pagado >= g.total_grupo && g.total_grupo > 0) {
+                    g.estado_pago = 'pagado'
+                } else if (g.total_pagado > 0) {
+                    g.estado_pago = 'seña_pagada'
+                } else {
+                    g.estado_pago = 'pendiente'
+                }
+                g.estado = g.estado_pago
                 g.items.sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
                 return g
             })
@@ -183,7 +182,6 @@ export default function AlquileresPage() {
         setLoading(false)
     }
 
-    // --- MANEJO DE TARIFAS ---
     const handleTarifaChange = (salaId: string, field: string, value: string) => {
         const numValue = value === '' ? 0 : Number(value)
         setSalas(prev => prev.map(s => s.id === salaId ? { ...s, [field]: numValue } : s))
@@ -195,11 +193,8 @@ export default function AlquileresPage() {
         else toast.success('Precio actualizado')
     }
 
-    // --- NUEVA FUNCIÓN: VALIDADOR DE CONFLICTOS ---
     const checkConflictos = async (salaId: string, dateObj: Date, hInicio: string, hFin: string) => {
         const fechaStr = format(dateObj, 'yyyy-MM-dd')
-
-        // 1. Armamos las fechas completas para comparar con las CLASES (que usan timestamp)
         const [hs, ms] = hInicio.split(':')
         const [he, me] = hFin.split(':')
 
@@ -209,33 +204,19 @@ export default function AlquileresPage() {
         const reqEnd = new Date(dateObj)
         reqEnd.setHours(Number(he), Number(me), 0, 0)
 
-        // Buscar cruce con Clases
         const { data: clases } = await supabase.from('clases')
-            .select('nombre')
-            .eq('sala_id', salaId)
-            .neq('estado', 'cancelada')
-            .lt('inicio', reqEnd.toISOString())
-            .gt('fin', reqStart.toISOString())
-            .maybeSingle()
-
+            .select('nombre').eq('sala_id', salaId).neq('estado', 'cancelada')
+            .lt('inicio', reqEnd.toISOString()).gt('fin', reqStart.toISOString()).maybeSingle()
         if (clases) return `Clase: ${clases.nombre}`
 
-        // 2. Buscar cruce con otros Alquileres (que usan fecha, hora_inicio, hora_fin)
         const { data: alqs } = await supabase.from('alquileres')
-            .select('cliente_nombre')
-            .eq('sala_id', salaId)
-            .eq('fecha', fechaStr)
-            .in('estado', ['confirmado', 'pagado', 'pendiente'])
-            .lt('hora_inicio', hFin)
-            .gt('hora_fin', hInicio)
-            .maybeSingle()
-
+            .select('cliente_nombre').eq('sala_id', salaId).eq('fecha', fechaStr)
+            .in('estado', ['confirmado', 'pagado', 'pendiente']).lt('hora_inicio', hFin).gt('hora_fin', hInicio).maybeSingle()
         if (alqs) return `Alquiler: ${alqs.cliente_nombre}`
 
         return null
     }
 
-    // --- HANDLE CREATE ACTUALIZADO ---
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault()
         if (form.fechas.length === 0) return toast.error('Seleccioná fechas')
@@ -245,7 +226,6 @@ export default function AlquileresPage() {
         const sala = salas.find(s => s.id === form.sala_id)
 
         try {
-            // NUEVO: Validar conflictos ANTES de armar los inserts
             for (const date of form.fechas) {
                 const conflicto = await checkConflictos(form.sala_id, date, form.hora_inicio, form.hora_fin)
                 if (conflicto) {
@@ -253,137 +233,162 @@ export default function AlquileresPage() {
                 }
             }
 
-            // Función auxiliar para calcular costo de un día específico
             const calculateDayCost = (date: Date) => {
                 if (!sala) return 0
                 const tipoPrefix = form.tipo_uso === 'produccion' ? 'p_prod' : `p_${form.tipo_uso}`
-
                 const parseTime = (t: string) => { const [h, m] = t.split(':').map(Number); return h + m / 60 }
                 const start = parseTime(form.hora_inicio)
                 const end = parseTime(form.hora_fin)
                 const duration = Math.max(0, end - start)
 
                 let baseCost = 0
-
                 if (isSunday(date)) {
                     baseCost = duration * Number(sala[`${tipoPrefix}_finde`] || 0)
                 } else {
                     const CORTE = 18.0
                     let hManana = 0, hNoche = 0
-
                     if (end <= CORTE) hManana = duration
                     else if (start >= CORTE) hNoche = duration
                     else { hManana = CORTE - start; hNoche = end - CORTE }
-
                     baseCost = (hManana * Number(sala[`${tipoPrefix}_manana`] || 0)) + (hNoche * Number(sala[`${tipoPrefix}_noche`] || 0))
                 }
-
-                // Aplicamos el porcentaje de descuento a este día específico
                 const multiplier = 1 - ((form.descuento || 0) / 100)
                 return baseCost * multiplier
             }
 
-            // Creamos los inserts calculando el precio INDIVIDUAL de cada fecha
             const inserts = form.fechas.map(date => ({
                 group_id: newGroupId,
                 cliente_nombre: form.cliente_nombre,
                 cliente_contacto: form.cliente_contacto,
                 sala_id: form.sala_id,
-                fecha: format(date, 'yyyy-MM-dd'), // Guardamos la fecha limpia en formato DB
+                fecha: format(date, 'yyyy-MM-dd'),
                 hora_inicio: form.hora_inicio,
                 hora_fin: form.hora_fin,
                 monto_total: calculateDayCost(date),
+                monto_pagado: 0,
+                estado_pago: 'pendiente',
                 tipo_uso: form.tipo_uso,
                 estado: 'pendiente'
             }))
 
             const { error } = await supabase.from('alquileres').insert(inserts)
-
-            if (error) {
-                console.error("Error en DB:", error)
-                throw new Error('Error al guardar en la base de datos.')
-            }
+            if (error) throw new Error('Error al guardar en la base de datos.')
 
             toast.success('Reserva creada con éxito')
             setIsModalOpen(false)
             setForm({ ...form, cliente_nombre: '', fechas: [], descuento: 0 })
             fetchData()
-
         } catch (err: any) {
-            // Si hay un error (como un conflicto de horario), entra acá y aborta la creación
             toast.error(err.message, { duration: 5000 })
         } finally {
             setCreating(false)
         }
     }
-    // --- COPIAR PRESUPUESTO ---
-    const handleCopyPresupuesto = () => {
-        if (form.fechas.length === 0 || !form.sala_id) {
-            toast.error("Faltan datos para armar el presupuesto")
-            return
-        }
 
+    const handleCopyPresupuesto = () => {
+        if (form.fechas.length === 0 || !form.sala_id) return toast.error("Faltan datos")
         const sala = salas.find(s => s.id === form.sala_id)
         const nombreSala = sala ? sala.nombre : "Sala seleccionada"
         const actividad = form.tipo_uso.charAt(0).toUpperCase() + form.tipo_uso.slice(1)
 
         let fechasTexto = form.fechas.map(d => `- ${format(d, 'EEEE dd/MM', { locale: es })}`).join('\n')
 
-        let textoWsp = `*Presupuesto de Alquiler* 🏢\n\n` +
-            `*Actividad:* ${actividad}\n` +
-            `*Sala:* ${nombreSala}\n` +
-            `*Horario:* ${form.hora_inicio} a ${form.hora_fin} hs\n\n` +
-            `*Fechas solicitadas:*\n${fechasTexto}\n\n`
-
+        let textoWsp = `*Presupuesto de Alquiler* 🏢\n\n*Actividad:* ${actividad}\n*Sala:* ${nombreSala}\n*Horario:* ${form.hora_inicio} a ${form.hora_fin} hs\n\n*Fechas solicitadas:*\n${fechasTexto}\n\n`
         if (form.descuento > 0) {
-            textoWsp += `*Subtotal:* $${priceBreakdown.subtotalBase.toLocaleString()}\n`
-            textoWsp += `*Descuento especial (${form.descuento}%):* -$${priceBreakdown.montoDescuento.toLocaleString()}\n`
+            textoWsp += `*Subtotal:* $${priceBreakdown.subtotalBase.toLocaleString()}\n*Descuento especial (${form.descuento}%):* -$${priceBreakdown.montoDescuento.toLocaleString()}\n`
         }
+        textoWsp += `*Total a pagar: $${priceBreakdown.total.toLocaleString()}*\n\n_Para confirmar la reserva, por favor envianos el comprobante de seña. ¡Gracias!_`
 
-        textoWsp += `*Total a pagar: $${priceBreakdown.total.toLocaleString()}*\n\n` +
-            `_Para confirmar la reserva, por favor envianos el comprobante de seña. ¡Gracias!_`
-
-        navigator.clipboard.writeText(textoWsp).then(() => {
-            toast.success('¡Presupuesto copiado!')
-        }).catch(() => {
-            toast.error('Error al copiar al portapapeles')
-        })
+        navigator.clipboard.writeText(textoWsp).then(() => toast.success('¡Presupuesto copiado!')).catch(() => toast.error('Error al copiar'))
     }
 
-    // --- RESTO DE ACCIONES ---
-    const handlePayGroup = async (group: ReservaGroup) => {
-        if (!confirm(`¿Cobrar total de $${group.total_grupo.toLocaleString()}?`)) return
-
-        // 1. CHEQUEO DIRECTO DE CAJA DEL USUARIO ACTUAL
+    // --- FUNCIONES NUEVAS DE COBRO AVANZADO ---
+    const openPaymentModal = (group: ReservaGroup) => {
         if (!isBoxOpen || !currentTurnoId) {
             return toast.error('¡Caja Cerrada! Tenés que abrir la caja en tu sede antes de poder cobrar.')
         }
+        setSelectedGroup(group)
+        // Por defecto: Si no pagó nada, ofrecemos la seña. Si ya pagó la seña, ofrecemos el resto.
+        setPaymentType(group.estado_pago === 'pendiente' ? 'seña' : 'resto')
+        setPaymentMethod('efectivo')
+        setIsPaymentModalOpen(true)
+    }
 
-        // 2. Proceder al cobro actualizando todos los alquileres del grupo
-        const { error } = await supabase.from('alquileres').update({ estado: 'pagado' }).in('id', group.items.map(i => i.id))
-        if (error) return toast.error('Error al actualizar estados de los alquileres')
+    const handleConfirmPayment = async () => {
+        if (!selectedGroup) return
+        setProcessingPayment(true)
 
-        // 3. Registrar el movimiento en la CAJA DE ESTE NAVEGADOR
-        const { error: errorMov } = await supabase.from('caja_movimientos').insert({
-            turno_id: currentTurnoId, // 👈 Usa la caja que yo abrí, sin importar la sala
-            tipo: 'ingreso',
-            concepto: `Alquiler ${group.sala_nombre}: ${group.cliente_nombre} (${group.items.length} fechas)`,
-            monto: group.total_grupo,
-            metodo_pago: 'efectivo', // Opcional: Podrías poner un selector para que elijan Mercadopago o Efectivo
-            origen_referencia: 'alquileres'
-        })
+        try {
+            let montoACobrar = 0
+            let labelCobro = ''
 
-        if (errorMov) return toast.error('Alquiler pagado, pero hubo un error al registrarlo en la caja.')
+            // Preparamos las actualizaciones para cada ítem del grupo
+            const updates = selectedGroup.items.map(item => {
+                let nuevoMontoPagado = Number(item.monto_pagado || 0)
+                let nuevoEstadoPago = item.estado_pago || 'pendiente'
+                let nuevoEstado = item.estado
+                let addAmount = 0
 
-        toast.success('Cobrado y registrado en tu caja.')
-        fetchData()
+                if (paymentType === 'seña') {
+                    addAmount = Number(item.monto_total) / 2
+                    nuevoMontoPagado = addAmount
+                    nuevoEstadoPago = 'seña_pagada'
+                    nuevoEstado = 'confirmado' // Se reserva la sala
+                    labelCobro = 'Seña 50%'
+                } else if (paymentType === 'total') {
+                    addAmount = Number(item.monto_total)
+                    nuevoMontoPagado = addAmount
+                    nuevoEstadoPago = 'pagado'
+                    nuevoEstado = 'pagado'
+                    labelCobro = 'Total 100%'
+                } else if (paymentType === 'resto') {
+                    addAmount = Number(item.monto_total) - nuevoMontoPagado
+                    nuevoMontoPagado = Number(item.monto_total)
+                    nuevoEstadoPago = 'pagado'
+                    nuevoEstado = 'pagado'
+                    labelCobro = 'Saldo Restante'
+                }
+
+                montoACobrar += addAmount
+
+                return supabase.from('alquileres').update({
+                    monto_pagado: nuevoMontoPagado,
+                    estado_pago: nuevoEstadoPago,
+                    estado: nuevoEstado,
+                    metodo_pago: paymentMethod
+                }).eq('id', item.id)
+            })
+
+            // Ejecutamos todos los updates en paralelo
+            await Promise.all(updates)
+
+            // Registramos el ingreso en la Caja del usuario
+            const { error: errorMov } = await supabase.from('caja_movimientos').insert({
+                turno_id: currentTurnoId,
+                tipo: 'ingreso',
+                concepto: `Alquiler ${selectedGroup.sala_nombre}: ${selectedGroup.cliente_nombre} - ${labelCobro}`,
+                monto: montoACobrar,
+                metodo_pago: paymentMethod,
+                origen_referencia: 'alquileres'
+            })
+
+            if (errorMov) throw new Error('Error al registrar en caja')
+
+            toast.success(`¡${labelCobro} cobrado con éxito! ($${montoACobrar.toLocaleString()})`)
+            setIsPaymentModalOpen(false)
+            fetchData()
+        } catch (error) {
+            toast.error('Hubo un error al procesar el pago.')
+        } finally {
+            setProcessingPayment(false)
+        }
     }
 
     const handleDeleteGroup = async (group: ReservaGroup) => {
-        if (!confirm('¿Eliminar grupo completo?')) return
+        if (!confirm('¿Eliminar reserva completa?')) return
         await supabase.from('alquileres').delete().in('id', group.items.map(i => i.id))
         setGrupos(prev => prev.filter(g => g.group_id !== group.group_id))
-        toast.success('Grupo eliminado')
+        toast.success('Reserva eliminada')
     }
 
     const handleRenovar = (group: ReservaGroup) => {
@@ -429,21 +434,36 @@ export default function AlquileresPage() {
             {/* GRILLA GRUPOS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {grupos.map((group) => {
-                    const isPaid = group.estado === 'pagado'
+                    const isFullyPaid = group.estado_pago === 'pagado'
+                    const isSena = group.estado_pago === 'seña_pagada'
                     const isOpen = expandedGroup === group.group_id
+
+                    // Colores de la etiqueta según el estado de pago
+                    let tagClass = 'bg-red-500/20 text-red-500'
+                    let tagText = 'Pendiente'
+                    if (isSena) { tagClass = 'bg-yellow-500/20 text-yellow-500'; tagText = 'Seña 50%' }
+                    if (isFullyPaid) { tagClass = 'bg-green-500/20 text-green-500'; tagText = 'Pagado' }
+
+                    const saldoRestante = group.total_grupo - group.total_pagado
+
                     return (
                         <div key={group.group_id} className="bg-[#09090b] border border-white/10 rounded-2xl overflow-hidden flex flex-col hover:border-[#D4E655]/30 transition-all">
                             <div className="p-4 border-b border-white/5 bg-[#111]/50 relative">
-                                <div className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${isPaid ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>{isPaid ? 'Pagado' : 'Pendiente'}</div>
+                                <div className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${tagClass}`}>{tagText}</div>
                                 <div className="flex items-center gap-2 mb-1 text-[#D4E655] text-[10px] font-black uppercase tracking-wider"><MapPin size={12} /> {group.sala_nombre} • {group.tipo_uso}</div>
                                 <h3 className="text-lg font-bold text-white truncate pr-16">{group.cliente_nombre}</h3>
                                 {group.cliente_contacto && <div className="flex items-center gap-2 mt-1"><a href={`https://wa.me/${group.cliente_contacto.replace(/[^0-9]/g, '')}`} target="_blank" className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-green-400 transition-colors"><MessageCircle size={12} /> {group.cliente_contacto}</a></div>}
                             </div>
                             <div className="p-4 flex-1">
-                                <div className="flex justify-between items-center mb-3">
+                                <div className="flex justify-between items-center mb-1">
                                     <div className="flex items-center gap-2 text-xs font-bold text-gray-300"><Layers size={14} /> {group.items.length} Reservas</div>
-                                    <div className="text-right"><span className="block text-[10px] text-gray-500 uppercase font-bold">Total</span><span className={`text-sm font-black ${isPaid ? 'text-green-500' : 'text-white'}`}>${group.total_grupo.toLocaleString()}</span></div>
+                                    <div className="text-right"><span className="block text-[10px] text-gray-500 uppercase font-bold">Total</span><span className="text-sm font-black text-white">${group.total_grupo.toLocaleString()}</span></div>
                                 </div>
+                                <div className="flex justify-between items-center mb-3 pt-2 border-t border-white/5">
+                                    <div className="text-[9px] uppercase font-bold text-gray-500">Abonado: <span className={isSena || isFullyPaid ? 'text-green-400' : 'text-gray-400'}>${group.total_pagado.toLocaleString()}</span></div>
+                                    <div className="text-[9px] uppercase font-bold text-gray-500">Saldo: <span className={saldoRestante > 0 ? 'text-red-400' : 'text-gray-400'}>${saldoRestante.toLocaleString()}</span></div>
+                                </div>
+
                                 <div className={`space-y-1 overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-64 overflow-y-auto custom-scrollbar' : 'max-h-0'}`}>
                                     {group.items.map(item => (
                                         <div key={item.id} className="flex justify-between items-center text-[10px] p-2 rounded bg-white/5 border border-white/5">
@@ -459,7 +479,13 @@ export default function AlquileresPage() {
                             </div>
                             <div className="p-3 bg-[#111] flex gap-2 border-t border-white/5">
                                 <button onClick={() => handleRenovar(group)} className="p-2 text-gray-500 hover:text-white bg-white/5 rounded-lg transition-colors"><Repeat size={16} /></button>
-                                {!isPaid ? <button onClick={() => handlePayGroup(group)} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase rounded-lg hover:bg-white transition-colors flex items-center justify-center gap-2"><DollarSign size={14} /> Cobrar Todo</button> : <div className="flex-1 flex items-center justify-center gap-2 text-[10px] font-black uppercase text-green-500 opacity-50 cursor-default border border-green-500/20 rounded-lg"><CheckCircle size={14} /> Cobrado</div>}
+                                {!isFullyPaid ? (
+                                    <button onClick={() => openPaymentModal(group)} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase rounded-lg hover:bg-white transition-colors flex items-center justify-center gap-2">
+                                        <DollarSign size={14} /> Cobrar
+                                    </button>
+                                ) : (
+                                    <div className="flex-1 flex items-center justify-center gap-2 text-[10px] font-black uppercase text-green-500 opacity-50 cursor-default border border-green-500/20 rounded-lg"><CheckCircle size={14} /> Cobrado</div>
+                                )}
                                 <button onClick={() => handleDeleteGroup(group)} className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={16} /></button>
                             </div>
                         </div>
@@ -467,6 +493,83 @@ export default function AlquileresPage() {
                 })}
                 {grupos.length === 0 && <div className="col-span-full text-center py-20 opacity-50"><p className="text-gray-500 font-bold uppercase text-xs">No hay reservas activas.</p></div>}
             </div>
+
+            {/* MODAL COBRO INTELIGENTE */}
+            {isPaymentModalOpen && selectedGroup && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-[#09090b] border border-[#D4E655]/30 w-full max-w-md rounded-3xl p-6 shadow-2xl shadow-[#D4E655]/10 relative">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-black text-white uppercase flex items-center gap-2"><DollarSign className="text-[#D4E655]" /> Cobrar Reserva</h3>
+                            <button onClick={() => setIsPaymentModalOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
+                        </div>
+
+                        <div className="bg-[#111] p-4 rounded-2xl mb-6 border border-white/5 text-center">
+                            <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">{selectedGroup.cliente_nombre}</p>
+                            <div className="flex justify-center gap-8 mt-4 text-sm font-black text-white">
+                                <div><span className="block text-[10px] text-gray-500 uppercase">Total</span>${selectedGroup.total_grupo.toLocaleString()}</div>
+                                <div><span className="block text-[10px] text-green-500 uppercase">Abonado</span>${selectedGroup.total_pagado.toLocaleString()}</div>
+                                <div><span className="block text-[10px] text-red-500 uppercase">Saldo</span>${(selectedGroup.total_grupo - selectedGroup.total_pagado).toLocaleString()}</div>
+                            </div>
+                        </div>
+
+                        {/* TIPO DE COBRO */}
+                        <div className="space-y-3 mb-6">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase">1. ¿Qué vas a cobrar?</label>
+                            <div className="grid grid-cols-1 gap-2">
+                                {/* Mostrar opción de Seña solo si no pagó nada */}
+                                {selectedGroup.estado_pago === 'pendiente' && (
+                                    <button
+                                        onClick={() => setPaymentType('seña')}
+                                        className={`p-4 rounded-xl border flex justify-between items-center transition-all ${paymentType === 'seña' ? 'bg-[#D4E655]/10 border-[#D4E655] text-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-400 hover:bg-white/5'}`}
+                                    >
+                                        <span className="font-bold text-xs uppercase">Seña (50%)</span>
+                                        <span className="font-black text-lg">${(selectedGroup.total_grupo / 2).toLocaleString()}</span>
+                                    </button>
+                                )}
+                                {/* Mostrar opción de Total solo si no pagó nada */}
+                                {selectedGroup.estado_pago === 'pendiente' && (
+                                    <button
+                                        onClick={() => setPaymentType('total')}
+                                        className={`p-4 rounded-xl border flex justify-between items-center transition-all ${paymentType === 'total' ? 'bg-[#D4E655]/10 border-[#D4E655] text-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-400 hover:bg-white/5'}`}
+                                    >
+                                        <span className="font-bold text-xs uppercase">Total (100%)</span>
+                                        <span className="font-black text-lg">${selectedGroup.total_grupo.toLocaleString()}</span>
+                                    </button>
+                                )}
+                                {/* Mostrar opción de Saldo solo si ya pagó la seña */}
+                                {selectedGroup.estado_pago === 'seña_pagada' && (
+                                    <button
+                                        onClick={() => setPaymentType('resto')}
+                                        className={`p-4 rounded-xl border flex justify-between items-center transition-all ${paymentType === 'resto' ? 'bg-[#D4E655]/10 border-[#D4E655] text-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-400 hover:bg-white/5'}`}
+                                    >
+                                        <span className="font-bold text-xs uppercase">Saldo Restante</span>
+                                        <span className="font-black text-lg">${(selectedGroup.total_grupo - selectedGroup.total_pagado).toLocaleString()}</span>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* METODO DE PAGO */}
+                        <div className="space-y-3 mb-8">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase">2. Método de Pago</label>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button onClick={() => setPaymentMethod('efectivo')} className={`p-4 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all ${paymentMethod === 'efectivo' ? 'bg-green-500/10 border-green-500 text-green-400' : 'bg-[#111] border-white/5 text-gray-500 hover:bg-white/5'}`}>
+                                    <Banknote size={24} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Efectivo</span>
+                                </button>
+                                <button onClick={() => setPaymentMethod('transferencia')} className={`p-4 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all ${paymentMethod === 'transferencia' ? 'bg-blue-500/10 border-blue-500 text-blue-400' : 'bg-[#111] border-white/5 text-gray-500 hover:bg-white/5'}`}>
+                                    <Landmark size={24} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Transf. / MP</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <button onClick={handleConfirmPayment} disabled={processingPayment} className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest shadow-lg flex items-center justify-center gap-2">
+                            {processingPayment ? <Loader2 className="animate-spin" /> : 'Confirmar Ingreso en Caja'}
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL NUEVA RESERVA */}
             {isModalOpen && (
@@ -481,7 +584,6 @@ export default function AlquileresPage() {
                                 <label className="text-[10px] font-bold text-gray-500 uppercase block mb-3 text-center">1. Seleccionar Fechas</label>
                                 <MultiDatePicker selectedDates={form.fechas} onChange={(dates) => setForm({ ...form, fechas: dates })} />
 
-                                {/* Tags de Fechas */}
                                 <div className="mt-4 bg-[#111] p-3 rounded-xl border border-white/10">
                                     <div className="flex justify-between items-center mb-2">
                                         <p className="text-[10px] text-gray-500 uppercase font-bold">Fechas ({form.fechas.length})</p>
@@ -529,9 +631,7 @@ export default function AlquileresPage() {
                                     </div>
                                 </div>
 
-                                {/* --- RESUMEN DE COSTOS DETALLADO --- */}
                                 <div className="bg-[#111] p-4 rounded-xl border border-white/10 mt-2 space-y-2 relative">
-                                    {/* Botón de copiar presupueseto */}
                                     {priceBreakdown.total > 0 && form.fechas.length > 0 && form.sala_id && (
                                         <button
                                             onClick={handleCopyPresupuesto}
@@ -544,7 +644,6 @@ export default function AlquileresPage() {
 
                                     <label className="text-[10px] font-bold text-[#D4E655] uppercase block border-b border-white/10 pb-2 mb-2 pr-6">Resumen de Costos</label>
 
-                                    {/* Renglones de Desglose */}
                                     <div className="space-y-1.5 text-xs text-gray-300">
                                         {priceBreakdown.manana.horas > 0 && (
                                             <div className="flex justify-between">
@@ -568,7 +667,6 @@ export default function AlquileresPage() {
                                         {priceBreakdown.total === 0 && <p className="text-[10px] text-gray-500 italic text-center">Seleccioná días y horarios para calcular</p>}
                                     </div>
 
-                                    {/* Total Final y Descuentos */}
                                     <div className="flex flex-col gap-1 mt-3 pt-3 border-t border-white/10">
                                         {form.descuento > 0 && (
                                             <>

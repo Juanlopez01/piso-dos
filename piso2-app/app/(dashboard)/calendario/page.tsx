@@ -11,7 +11,7 @@ import { es } from 'date-fns/locale'
 import {
     ChevronLeft, ChevronRight, X, Plus, MapPin, Trash2, Loader2,
     Info, DollarSign, Image as ImageIcon, Briefcase, GraduationCap,
-    Music, User, AlertCircle, CalendarDays, Star, UsersRound, Building2
+    Music, User, AlertCircle, CalendarDays, Star, UsersRound, Building2, Sparkles
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Image from 'next/image'
@@ -29,7 +29,7 @@ type EventoAgenda = {
     fin: string
     sala_nombre: string
     sala_sede: string
-    sede_id: string // 👈 NUEVO: Necesario para el filtro
+    sede_id: string
     clase_data?: {
         profesor_nombre: string
         nivel: string
@@ -42,6 +42,7 @@ type EventoAgenda = {
         es_la_liga: boolean
         liga_nivel: number | null
         compania_nombre: string | null
+        es_audicion: boolean // 👈 NUEVO: Campo de Audición
     }
     alquiler_data?: {
         telefono: string
@@ -62,7 +63,7 @@ export default function CalendarioPage() {
     // Estados
     const [currentDate, setCurrentDate] = useState(new Date())
     const [selectedDate, setSelectedDate] = useState<Date | null>(null)
-    const [sedeFiltro, setSedeFiltro] = useState<string>('todas') // 👈 NUEVO: Estado del filtro
+    const [sedeFiltro, setSedeFiltro] = useState<string>('todas')
 
     const [eventos, setEventos] = useState<EventoAgenda[]>([])
     const [sedes, setSedes] = useState<Sede[]>([])
@@ -86,7 +87,8 @@ export default function CalendarioPage() {
         tipoAcuerdo: 'porcentaje', valorAcuerdo: '',
         fechas: [] as Date[],
         esLaLiga: false, ligaNivel: 1,
-        companiaId: ''
+        companiaId: '',
+        esAudicion: false // 👈 NUEVO: Estado Audición
     })
     const [formFile, setFormFile] = useState<File | null>(null)
 
@@ -104,7 +106,6 @@ export default function CalendarioPage() {
             const startDateStr = format(start, 'yyyy-MM-dd')
             const endDateStr = format(end, 'yyyy-MM-dd')
 
-            // 👈 CORRECCIÓN: Pedimos 'id' dentro de sedes, en lugar de pedir sede_id suelto
             const { data: dataClases, error: errClases } = await supabase
                 .from('clases')
                 .select(`*, sala:salas ( nombre, sede:sedes ( id, nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre), compania:companias(nombre)`)
@@ -113,7 +114,6 @@ export default function CalendarioPage() {
 
             if (errClases) throw errClases
 
-            // 👈 CORRECCIÓN ACÁ TAMBIÉN
             const { data: dataAlquileres, error: errAlq } = await supabase
                 .from('alquileres')
                 .select(`*, sala:salas ( nombre, sede:sedes ( id, nombre ) )`)
@@ -137,7 +137,7 @@ export default function CalendarioPage() {
                         fin: c.fin,
                         sala_nombre: c.sala?.nombre,
                         sala_sede: c.sala?.sede?.nombre,
-                        sede_id: c.sala?.sede?.id, // 👈 Lo extraemos de forma segura
+                        sede_id: c.sala?.sede?.id,
                         clase_data: {
                             profesor_nombre: c.profesor?.nombre_completo,
                             nivel: c.nivel,
@@ -149,7 +149,8 @@ export default function CalendarioPage() {
                             ritmo_id: c.ritmo_id,
                             es_la_liga: c.es_la_liga || false,
                             liga_nivel: c.liga_nivel || null,
-                            compania_nombre: c.compania?.nombre || null
+                            compania_nombre: c.compania?.nombre || null,
+                            es_audicion: c.es_audicion || false // 👈 Guardamos el estado
                         }
                     })
                 })
@@ -169,7 +170,7 @@ export default function CalendarioPage() {
                         fin: finLocal,
                         sala_nombre: a.sala?.nombre,
                         sala_sede: a.sala?.sede?.nombre,
-                        sede_id: a.sala?.sede?.id, // 👈 Extraído de forma segura
+                        sede_id: a.sala?.sede?.id,
                         alquiler_data: {
                             telefono: a.cliente_contacto,
                             monto: a.monto_total,
@@ -312,19 +313,20 @@ export default function CalendarioPage() {
                     tipo_acuerdo: form.tipoAcuerdo,
                     valor_acuerdo: Number(form.valorAcuerdo),
                     imagen_url: publicUrl,
-                    cupo_maximo: Number(form.cupoMaximo) || 0,
+                    cupo_maximo: form.esAudicion ? 9999 : (Number(form.cupoMaximo) || 0), // 👈 MÁGICO: Si es audición, cupo infinito
                     serie_id: serieUUID,
                     estado: 'activa',
                     es_la_liga: form.esLaLiga,
                     liga_nivel: form.esLaLiga ? form.ligaNivel : null,
-                    compania_id: form.tipo === 'Compañía' ? form.companiaId : null
+                    compania_id: form.tipo === 'Compañía' ? form.companiaId : null,
+                    es_audicion: form.esAudicion // 👈 Guardamos el flag
                 })
             }
 
             const { error } = await supabase.from('clases').insert(clasesAInsertar)
             if (error) throw new Error('Error al guardar en la base de datos.')
 
-            if (form.ritmoId && form.tipo !== 'Compañía') {
+            if (form.ritmoId && form.tipo !== 'Compañía' && !form.esAudicion) {
                 const ritmoNombre = ritmos.find(r => r.id === form.ritmoId)?.nombre || 'Nuevo Ritmo'
                 const { data: interesados } = await supabase
                     .from('profiles')
@@ -363,7 +365,7 @@ export default function CalendarioPage() {
             nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
             hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '', profeId: '',
             tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: selectedDate ? [selectedDate] : [],
-            esLaLiga: false, ligaNivel: 1, companiaId: ''
+            esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false // 👈 RESET
         })
         setFormFile(null)
     }
@@ -382,6 +384,7 @@ export default function CalendarioPage() {
 
     const getEventStyle = (evt: EventoAgenda) => {
         if (evt.tipo === 'Alquiler') return { border: 'border-white', text: 'text-white', bg: 'bg-white', glow: 'shadow-white/20' }
+        if (evt.clase_data?.es_audicion) return { border: 'border-pink-500', text: 'text-pink-500', bg: 'bg-pink-500', glow: 'shadow-pink-500/20' } // 👈 COLOR AUDICIONES
         if (evt.clase_data?.es_la_liga) return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500', glow: 'shadow-purple-500/20' }
 
         switch (evt.subtitulo) {
@@ -394,10 +397,7 @@ export default function CalendarioPage() {
         }
     }
 
-    // 👈 NUEVO: Filtramos los eventos del mes según la sede elegida
     const eventosFiltrados = eventos.filter(e => sedeFiltro === 'todas' || e.sede_id === sedeFiltro)
-
-    // 👈 Al calcular los eventos del día, usamos la lista ya filtrada
     const eventosDelDia = selectedDate ? eventosFiltrados.filter(e => isSameDay(new Date(e.inicio), selectedDate)) : []
     const salasDisponibles = sedes.find(s => s.id === form.sedeId)?.salas || []
 
@@ -417,7 +417,6 @@ export default function CalendarioPage() {
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
-                    {/* 👈 NUEVO: Botonera de Filtro de Sedes */}
                     <div className="flex bg-[#111] rounded-full p-1 border border-white/10 w-full sm:w-auto">
                         <button
                             onClick={() => setSedeFiltro('todas')}
@@ -449,7 +448,6 @@ export default function CalendarioPage() {
                 {eachDayOfInterval({ start: startOfWeek(startOfMonth(currentDate)), end: endOfWeek(endOfMonth(currentDate)) }).map((day) => {
                     const isToday = isSameDay(day, new Date())
                     const isCurrentMonth = isSameMonth(day, currentDate)
-                    // 👈 Usamos la lista filtrada acá también
                     const evtsDia = eventosFiltrados.filter(e => isSameDay(new Date(e.inicio), day))
 
                     let dayClass = "opacity-20 border-transparent"
@@ -492,7 +490,6 @@ export default function CalendarioPage() {
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pb-20">
                             {modalMode === 'view' && (
                                 <div className="space-y-4">
-                                    {/* 👈 EN EL MODAL MOSTRAMOS UN AVISO SI ESTÁ FILTRANDO */}
                                     {sedeFiltro !== 'todas' && (
                                         <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 p-3 rounded-lg flex items-center justify-between">
                                             <p className="text-[10px] text-[#D4E655] font-black uppercase tracking-widest flex items-center gap-2">
@@ -518,6 +515,13 @@ export default function CalendarioPage() {
                                                                 <>
                                                                     <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><Briefcase size={10} /> {evt.clase_data?.profesor_nombre || 'Sin asignar'}</span>
                                                                     <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><GraduationCap size={10} /> {evt.clase_data?.nivel}</span>
+
+                                                                    {/* 👈 ETIQUETAS ESPECIALES */}
+                                                                    {evt.clase_data?.es_audicion && (
+                                                                        <span className="flex items-center gap-1 bg-pink-500/10 text-pink-400 border border-pink-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]">
+                                                                            <Sparkles size={10} className="text-pink-500" /> Audición
+                                                                        </span>
+                                                                    )}
                                                                     {evt.clase_data?.es_la_liga && (
                                                                         <span className="flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]">
                                                                             <Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})
@@ -627,9 +631,18 @@ export default function CalendarioPage() {
                                                         <option value="Avanzado">Avanzado</option>
                                                     </select>
                                                 </div>
+
                                                 <div className="space-y-1">
                                                     <label className="text-[9px] font-bold text-[#D4E655] uppercase">Cupo Máx.</label>
-                                                    <input type="number" min="0" value={form.cupoMaximo} onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]" placeholder="Ej: 20" />
+                                                    <input
+                                                        type={form.esAudicion ? "text" : "number"}
+                                                        min="0"
+                                                        disabled={form.esAudicion}
+                                                        value={form.esAudicion ? "Sin límite" : form.cupoMaximo}
+                                                        onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })}
+                                                        className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655] disabled:opacity-50 disabled:text-[#D4E655]"
+                                                        placeholder="Ej: 20"
+                                                    />
                                                 </div>
 
                                                 {form.tipo === 'Compañía' && (
@@ -643,6 +656,24 @@ export default function CalendarioPage() {
                                                         </select>
                                                     </div>
                                                 )}
+
+                                                {/* 👈 NUEVO: TOGGLE DE AUDICIONES */}
+                                                <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-pink-500/5 p-3 rounded-xl border-dashed border-pink-500/20">
+                                                    <label className="flex items-center gap-3 cursor-pointer">
+                                                        <div className="relative flex items-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={form.esAudicion}
+                                                                onChange={e => setForm({ ...form, esAudicion: e.target.checked })}
+                                                                className="peer sr-only"
+                                                            />
+                                                            <div className="w-10 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-pink-500"></div>
+                                                        </div>
+                                                        <span className="text-[10px] font-black uppercase text-pink-400 flex items-center gap-1">
+                                                            <Sparkles size={12} className="text-pink-500" /> Es una Audición (Sin cupo)
+                                                        </span>
+                                                    </label>
+                                                </div>
 
                                                 <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-purple-500/5 p-3 rounded-xl border-dashed border-purple-500/20">
                                                     <label className="flex items-center gap-3 cursor-pointer">
