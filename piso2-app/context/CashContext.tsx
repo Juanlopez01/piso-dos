@@ -1,8 +1,8 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { AuthChangeEvent, Session } from '@supabase/supabase-js' // 👈 NUEVO: Importamos los tipos oficiales
+import { AuthChangeEvent, Session } from '@supabase/supabase-js'
 
 type CashContextType = {
     isBoxOpen: boolean
@@ -24,7 +24,6 @@ const CashContext = createContext<CashContextType>({
 export const useCash = () => useContext(CashContext)
 
 export function CashProvider({ children }: { children: React.ReactNode }) {
-    // La forma oficial de Supabase para App Router:
     const [supabase] = useState(() => createClient())
 
     const [isBoxOpen, setIsBoxOpen] = useState(false)
@@ -38,7 +37,17 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     const [hasCompaniaAccess, setHasCompaniaAccess] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
 
-    const fetchProfileAndBox = useCallback(async (userId: string, isMounted: boolean = true) => {
+    // 🌟 OPTIMIZACIÓN: Ref para saber quién fue el último usuario chequeado y no recargar de más
+    const lastCheckedUser = useRef<string | null>(null)
+    const isFetching = useRef(false)
+
+    const fetchProfileAndBox = useCallback(async (userId: string, isMounted: boolean = true, force: boolean = false) => {
+        // 🌟 OPTIMIZACIÓN: Si ya estamos trayendo datos o si es el mismo usuario y no forzamos, cortamos.
+        if (isFetching.current) return;
+        if (!force && lastCheckedUser.current === userId) return;
+
+        isFetching.current = true;
+
         try {
             const { data: profile } = await supabase
                 .from('profiles')
@@ -101,8 +110,12 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                     }
                 }
             }
+
+            lastCheckedUser.current = userId; // Marcamos como último chequeado exitoso
         } catch (err) {
             console.error("Error fetching details:", err)
+        } finally {
+            isFetching.current = false;
         }
     }, [supabase])
 
@@ -123,11 +136,12 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                         setIsBoxOpen(false)
                         setHasLigaAccess(false)
                         setHasCompaniaAccess(false)
+                        lastCheckedUser.current = null;
                     }
                     return;
                 }
 
-                await fetchProfileAndBox(session.user.id, isMounted)
+                await fetchProfileAndBox(session.user.id, isMounted, true) // Forzamos en la primera carga
 
             } catch (error) {
                 console.error("Error inicializando sesión global:", error)
@@ -138,13 +152,15 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
         initSession()
 
-        // 👇 EL DESPERTADOR DE PESTAÑAS INACTIVAS 👇
+        // 👇 EL DESPERTADOR CON FRENO 👇
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
-                // Le decimos a TS exactamente qué estamos recibiendo y desestructurando
                 supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
                     if (session?.user && isMounted) {
-                        fetchProfileAndBox(session.user.id, isMounted);
+                        // Solo recarga si cambió de usuario de fondo
+                        if (session.user.id !== lastCheckedUser.current) {
+                            fetchProfileAndBox(session.user.id, isMounted, true);
+                        }
                     }
                 });
             }
@@ -152,7 +168,6 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
         document.addEventListener('visibilitychange', handleVisibilityChange);
 
-        // 👇 SOLUCIÓN TYPESCRIPT: Le agregamos los tipos "AuthChangeEvent" y "Session | null"
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
             if (event === 'SIGNED_OUT') {
                 if (isMounted) {
@@ -165,10 +180,11 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                     setHasLigaAccess(false)
                     setHasCompaniaAccess(false)
                     setIsLoading(false)
+                    lastCheckedUser.current = null;
                 }
-            } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+            } else if (event === 'SIGNED_IN') { // Sacamos el TOKEN_REFRESHED para no spamear la base de datos
                 if (session?.user) {
-                    await fetchProfileAndBox(session.user.id, isMounted)
+                    await fetchProfileAndBox(session.user.id, isMounted, true)
                     if (isMounted) setIsLoading(false)
                 }
             }
@@ -179,11 +195,11 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
             subscription.unsubscribe();
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         }
-    }, [fetchProfileAndBox, supabase]) // <-- Actualizamos dependencias
+    }, [fetchProfileAndBox, supabase])
 
     const checkStatus = useCallback(async () => {
         const { data: { session } } = await supabase.auth.getSession()
-        if (session?.user) await fetchProfileAndBox(session.user.id)
+        if (session?.user) await fetchProfileAndBox(session.user.id, true, true) // Check manual fuerza la recarga
     }, [fetchProfileAndBox, supabase])
 
     const contextValue = useMemo(() => ({

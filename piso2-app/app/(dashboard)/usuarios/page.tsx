@@ -1,8 +1,9 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState, Suspense } from 'react'
+import { useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
+import useSWR from 'swr' // 🚀 LA MAGIA SWR
 import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
@@ -10,20 +11,35 @@ import {
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
-import { addDays, format } from 'date-fns'
+import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 
+// --- TIPOS ESTRICTOS ---
 type Ritmo = { id: string; nombre: string }
+type Producto = { id: string; nombre: string; precio: number; creditos: number; tipo_clase: 'regular' | 'seminario' }
 
-type Producto = {
+type RPCUsuario = {
     id: string
-    nombre: string
-    precio: number
-    creditos: number
-    tipo_clase: 'regular' | 'seminario'
+    nombre_completo: string | null
+    email: string
+    telefono: string | null
+    rol: string
+    nivel_liga: number | string | null
+    creditos_regulares: number
+    creditos_seminarios: number
+    staff_observations: string | null
+    intereses_ritmos: any
+    is_frio: boolean
+    intereses_procesados?: string[]
 }
 
-// 🛡️ ESCUDO ANTI-TIPOS: Garantiza que los ritmos siempre sean una lista de textos
+type RPCUsuariosData = {
+    usuarios: RPCUsuario[] | null
+    ritmos: Ritmo[] | null
+    productos: Producto[] | null
+}
+
+// 🛡️ ESCUDO ANTI-TIPOS SEGURO
 const getInteresesSeguro = (intereses: any): string[] => {
     if (!intereses) return []
     if (Array.isArray(intereses)) return intereses.map(String)
@@ -38,33 +54,46 @@ const getInteresesSeguro = (intereses: any): string[] => {
     return []
 }
 
+// 🚀 EL FETCHER
+const fetcher = async () => {
+    const supabase = createClient()
+    const { data, error } = await supabase.rpc('get_usuarios_completo')
+
+    if (error) throw error
+
+    const typedData = data as unknown as RPCUsuariosData
+
+    const usuariosProcesados = (typedData.usuarios || []).map(u => ({
+        ...u,
+        intereses_procesados: getInteresesSeguro(u.intereses_ritmos)
+    }))
+
+    return {
+        usuarios: usuariosProcesados,
+        ritmos: typedData.ritmos || [],
+        productos: typedData.productos || []
+    }
+}
+
 function UsuariosContent() {
     const [supabase] = useState(() => createClient())
     const searchParams = useSearchParams()
 
     const { userRole, isLoading: loadingContext } = useCash()
 
-    // Estado Datos
-    const [users, setUsers] = useState<any[]>([])
-    const [ritmosDisponibles, setRitmosDisponibles] = useState<Ritmo[]>([])
-    const [productos, setProductos] = useState<Producto[]>([])
-    const [loading, setLoading] = useState(true)
-
     // Filtros
-    const [roleFilter, setRoleFilter] = useState('todos')
+    const [roleFilter, setRoleFilter] = useState(searchParams.get('ver') || 'todos')
     const [interestFilter, setInterestFilter] = useState('')
-    const [statusFilter, setStatusFilter] = useState('todos') // NUEVO FILTRO: 'todos' | 'activos' | 'frios'
+    const [statusFilter, setStatusFilter] = useState('todos')
     const [searchTerm, setSearchTerm] = useState('')
 
     // Modales y Procesos
     const [isEditOpen, setIsEditOpen] = useState(false)
     const [isCreateOpen, setIsCreateOpen] = useState(false)
     const [isPackModalOpen, setIsPackModalOpen] = useState(false)
-
-    // --- NUEVOS ESTADOS PARA COBRO LA LIGA ---
     const [isCobroLigaOpen, setIsCobroLigaOpen] = useState(false)
-    const [cobroLigaForm, setCobroLigaForm] = useState({ monto: '', metodo: 'efectivo' })
 
+    const [cobroLigaForm, setCobroLigaForm] = useState({ monto: '', metodo: 'efectivo' })
     const [selectedUser, setSelectedUser] = useState<any>(null)
     const [cambiandoRolId, setCambiandoRolId] = useState<string | null>(null)
     const [cambiandoLigaId, setCambiandoLigaId] = useState<string | null>(null)
@@ -73,52 +102,32 @@ function UsuariosContent() {
 
     // Forms
     const [editForm, setEditForm] = useState({ obs: '', intereses_ritmos: [] as string[] })
-    const [createForm, setCreateForm] = useState({
-        nombre: '', email: '', dni: '', telefono: '', rol: 'alumno'
-    })
+    const [createForm, setCreateForm] = useState({ nombre: '', email: '', dni: '', telefono: '', rol: 'alumno' })
     const [packForm, setPackForm] = useState({ packId: '', monto: '', metodo: 'efectivo' })
 
-    useEffect(() => {
-        if (!loadingContext) fetchData()
-        const paramRole = searchParams.get('ver')
-        if (paramRole) setRoleFilter(paramRole)
-    }, [searchParams, loadingContext])
-
-    const fetchData = async () => {
-        setLoading(true)
-        const { data: ritmosData } = await supabase.from('ritmos').select('id, nombre').order('nombre')
-        if (ritmosData) setRitmosDisponibles(ritmosData)
-
-        // 1. Buscamos todos los usuarios (traemos created_at para saber cuándo se registraron)
-        const { data: usersData } = await supabase.from('profiles').select('*').order('nombre_completo', { ascending: true })
-
-        // 2. LÓGICA DE ALUMNOS FRÍOS: Buscamos inscripciones de los últimos 30 días
-        const thirtyDaysAgo = new Date()
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-
-        const { data: inscripcionesRecientes } = await supabase
-            .from('inscripciones')
-            .select('user_id')
-            .gte('created_at', thirtyDaysAgo.toISOString())
-
-        // Armamos un set (lista única) con los IDs de los alumnos que SI tomaron clases
-        const activosIds = new Set(inscripcionesRecientes?.map((i: { user_id: string }) => i.user_id) || [])
-
-        if (usersData) {
-            // Mapeamos los usuarios y les agregamos la etiqueta "is_frio"
-            const usersWithStatus = usersData.map((u: any) => {
-                // Es frío si: es alumno, no está en la lista de activos, y su cuenta tiene más de 30 días
-                const isFrio = u.rol === 'alumno' && !activosIds.has(u.id) && (new Date(u.created_at || 0) < thirtyDaysAgo)
-                return { ...u, is_frio: isFrio }
-            })
-            setUsers(usersWithStatus)
+    // 🚀 SWR CON AUTO-RECARGA INTELIGENTE (FAILSAFE)
+    const { data, error, isLoading, mutate } = useSWR('usuarios_completo', fetcher, {
+        revalidateOnFocus: true,
+        dedupingInterval: 5000,
+        onError: (err) => {
+            const yaRecargo = sessionStorage.getItem('swr_failsafe_usuarios')
+            if (!yaRecargo) {
+                console.warn("Fallo detectado por SWR. Auto-recargando por seguridad...")
+                sessionStorage.setItem('swr_failsafe_usuarios', 'true')
+                window.location.reload() // ♻️ Auto-recarga salvadora
+            } else {
+                toast.error('Error persistente de red. Revisá tu conexión.')
+            }
+        },
+        onSuccess: () => {
+            // Si carga bien, reseteamos el seguro para la próxima vez
+            sessionStorage.removeItem('swr_failsafe_usuarios')
         }
+    })
 
-        const { data: prodsData } = await supabase.from('productos').select('*').eq('activo', true).order('tipo_clase').order('creditos')
-        if (prodsData) setProductos(prodsData)
-
-        setLoading(false)
-    }
+    const users = data?.usuarios || []
+    const ritmosDisponibles = data?.ritmos || []
+    const productos = data?.productos || []
 
     const filteredUsers = users.filter(u => {
         let matchesRole = true
@@ -132,11 +141,9 @@ function UsuariosContent() {
 
         let matchesInterest = true
         if ((roleFilter === 'alumno' || roleFilter === 'todos') && interestFilter) {
-            const interArray = getInteresesSeguro(u.intereses_ritmos)
-            matchesInterest = interArray.includes(String(interestFilter))
+            matchesInterest = u.intereses_procesados?.includes(String(interestFilter)) || false
         }
 
-        // LÓGICA DEL NUEVO FILTRO DE ESTADO (FRÍOS / ACTIVOS)
         let matchesStatus = true
         if ((roleFilter === 'alumno' || roleFilter === 'todos')) {
             if (statusFilter === 'frios') matchesStatus = u.is_frio
@@ -157,7 +164,7 @@ function UsuariosContent() {
         const { error } = await supabase.from('profiles').update({ rol: nuevoRol as any }).eq('id', usuarioId)
         if (!error) {
             toast.success('Rol actualizado correctamente')
-            setUsers(users.map(u => u.id === usuarioId ? { ...u, rol: nuevoRol } : u))
+            mutate()
         } else toast.error('Error al cambiar el rol')
         setCambiandoRolId(null)
     }
@@ -169,7 +176,7 @@ function UsuariosContent() {
         const { error } = await supabase.from('profiles').update({ nivel_liga: nuevoNivel }).eq('id', usuarioId)
         if (!error) {
             toast.success(nuevoNivel ? `Promovido a La Liga (Nivel ${nuevoNivel})` : 'Removido de La Liga')
-            setUsers(users.map(u => u.id === usuarioId ? { ...u, nivel_liga: nuevoNivel } : u))
+            mutate()
         } else toast.error('Error al actualizar el nivel')
         setCambiandoLigaId(null)
     }
@@ -183,12 +190,12 @@ function UsuariosContent() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: createForm.email, password: createForm.dni, nombre: createForm.nombre, rol: createForm.rol, telefono: createForm.telefono })
             })
-            const data = await res.json()
-            if (!res.ok) throw new Error(data.error || 'Error al crear')
+            const dataRes = await res.json()
+            if (!res.ok) throw new Error(dataRes.error || 'Error al crear')
             toast.success(`${createForm.rol === 'profesor' ? 'Profesor' : 'Alumno'} creado correctamente`)
             setIsCreateOpen(false)
             setCreateForm({ nombre: '', email: '', dni: '', telefono: '', rol: 'alumno' })
-            fetchData()
+            mutate()
         } catch (error: any) { toast.error(error.message) } finally { setCreating(false) }
     }
 
@@ -196,7 +203,7 @@ function UsuariosContent() {
         setSelectedUser(user)
         setEditForm({
             obs: user.staff_observations || '',
-            intereses_ritmos: getInteresesSeguro(user.intereses_ritmos)
+            intereses_ritmos: user.intereses_procesados || []
         })
         setIsEditOpen(true)
     }
@@ -220,10 +227,9 @@ function UsuariosContent() {
 
         if (!error) {
             toast.success('Cambios guardados')
-            setUsers(users.map(u => u.id === selectedUser.id ? { ...u, staff_observations: editForm.obs, intereses_ritmos: editForm.intereses_ritmos } : u))
             setIsEditOpen(false)
+            mutate()
         } else {
-            console.error(error)
             toast.error('Error al guardar')
         }
     }
@@ -262,7 +268,7 @@ function UsuariosContent() {
 
             toast.success(`Pack asignado correctamente. Créditos actualizados.`)
             setIsPackModalOpen(false)
-            fetchData()
+            mutate()
         } catch (error: any) { toast.error(error.message || 'Error al asignar el pack') } finally { setAssigningPack(false) }
     }
 
@@ -302,7 +308,6 @@ function UsuariosContent() {
 
             toast.success('Cuota de La Liga cobrada exitosamente')
             setIsCobroLigaOpen(false)
-
         } catch (error: any) {
             toast.error(error.message || 'Error al cobrar')
         } finally {
@@ -311,7 +316,7 @@ function UsuariosContent() {
     }
 
 
-    if (loading || loadingContext) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
+    if ((isLoading && !users.length) || loadingContext) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
     const canCreate = userRole === 'admin' || userRole === 'recepcion'
     const isAdmin = userRole === 'admin'
 
@@ -322,7 +327,10 @@ function UsuariosContent() {
             <div className="flex flex-col gap-6 mb-8">
                 <div className="flex justify-between items-end border-b border-white/10 pb-6">
                     <div>
-                        <h1 className="text-3xl font-black uppercase tracking-tighter text-white leading-none">Directorio</h1>
+                        <h1 className="text-3xl font-black uppercase tracking-tighter text-white leading-none">
+                            Directorio
+                            {isLoading && <Loader2 size={16} className="inline ml-3 animate-spin text-[#D4E655]" />}
+                        </h1>
                         <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">Gestión de Usuarios</p>
                     </div>
                     {canCreate && (
@@ -347,10 +355,8 @@ function UsuariosContent() {
                     </div>
                 </div>
 
-                {/* FILTROS EXTRAS PARA ALUMNOS (INTERESES Y ESTADO FRIO) */}
                 {(roleFilter === 'alumno' || roleFilter === 'todos') && (
                     <div className="flex flex-col gap-3 pt-2">
-                        {/* Filtro de Estado (Fríos) */}
                         <div className="flex gap-2 flex-wrap items-center">
                             <div className="flex items-center gap-2 mr-2"><User size={12} className="text-[#D4E655]" /><span className="text-[10px] font-bold text-gray-500 uppercase">Actividad:</span></div>
                             <button onClick={() => setStatusFilter('todos')} className={`text-[9px] font-bold px-3 py-1.5 rounded-lg border uppercase transition-colors ${statusFilter === 'todos' ? 'bg-white text-black border-white' : 'bg-transparent text-gray-600 border-white/10 hover:bg-white/5'}`}>Todos</button>
@@ -358,7 +364,6 @@ function UsuariosContent() {
                             <button onClick={() => setStatusFilter('frios')} className={`text-[9px] font-bold px-3 py-1.5 rounded-lg border uppercase transition-colors flex items-center gap-1 ${statusFilter === 'frios' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.2)]' : 'bg-transparent text-gray-600 border-white/10 hover:bg-white/5'}`}><Snowflake size={10} /> Fríos</button>
                         </div>
 
-                        {/* Filtro de Ritmos */}
                         {ritmosDisponibles.length > 0 && (
                             <div className="flex gap-2 flex-wrap items-center border-t border-white/5 pt-3">
                                 <div className="flex items-center gap-2 mr-2"><Filter size={12} className="text-[#D4E655]" /><span className="text-[10px] font-bold text-gray-500 uppercase">Intereses:</span></div>
@@ -376,14 +381,12 @@ function UsuariosContent() {
                 {filteredUsers.map((u) => (
                     <div key={u.id} className="bg-[#09090b] border border-white/10 p-5 rounded-2xl flex flex-col justify-between gap-4 group hover:border-[#D4E655]/30 transition-all relative overflow-hidden shadow-sm">
 
-                        {/* ETIQUETA ALUMNO FRÍO ❄️ */}
                         {u.is_frio && (
                             <div className="absolute top-0 left-0 px-3 py-1.5 rounded-br-xl bg-blue-500/10 text-blue-400 text-[8px] font-black uppercase tracking-widest flex items-center gap-1 border-r border-b border-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.1)]">
                                 <Snowflake size={10} className="animate-pulse" /> Frío
                             </div>
                         )}
 
-                        {/* ETIQUETA ROL */}
                         <div className={`absolute top-0 right-0 px-3 py-1.5 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${u.rol === 'admin' ? 'bg-red-500/20 text-red-500' : u.rol === 'recepcion' ? 'bg-blue-500/20 text-blue-500' : u.rol === 'profesor' ? 'bg-purple-500/20 text-purple-500' : 'bg-white/5 text-gray-500'}`}>
                             {u.rol}
                         </div>
@@ -418,9 +421,8 @@ function UsuariosContent() {
                                 </div>
                             )}
 
-                            {/* DIBUJO DE INTERESES CON EL ESCUDO ACTIVO */}
                             {(() => {
-                                const interArray = getInteresesSeguro(u.intereses_ritmos)
+                                const interArray = u.intereses_procesados || []
                                 if (interArray.length === 0) return null
 
                                 return (
@@ -440,14 +442,12 @@ function UsuariosContent() {
 
                         {canCreate && (
                             <div className="flex flex-col gap-2 mt-auto pt-3 border-t border-white/5">
-                                {/* Botones Financieros */}
                                 {u.rol === 'alumno' && (
                                     <div className="flex gap-2 w-full mb-2">
                                         <button onClick={() => openPackModal(u)} className="flex-1 py-2 rounded-xl border bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500 hover:text-black text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1.5">
                                             <CreditCard size={12} /> Pack
                                         </button>
 
-                                        {/* Solo si está en la liga le aparece el botón de cobro */}
                                         {(u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') && (
                                             <button onClick={() => openCobroLigaModal(u)} className="flex-1 py-2 rounded-xl border bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20 hover:bg-[#D4E655] hover:text-black text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1.5 shadow-[0_0_10px_rgba(212,230,85,0.05)]">
                                                 <Trophy size={12} /> Cuota Liga
@@ -507,7 +507,7 @@ function UsuariosContent() {
                 )}
             </div>
 
-            {/* MODALES EDITAR Y CREAR */}
+            {/* MODALES */}
             {isEditOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-6 shadow-2xl relative">
@@ -520,7 +520,7 @@ function UsuariosContent() {
                                 <label className="text-[10px] font-bold text-[#D4E655] uppercase block mb-3 flex items-center gap-1"><Tag size={12} /> Intereses (Ritmos)</label>
                                 <div className="flex flex-wrap gap-2">
                                     {ritmosDisponibles.map(ritmo => {
-                                        const isActive = editForm.intereses_ritmos.includes(String(ritmo.id)); // Usamos el escudo
+                                        const isActive = editForm.intereses_ritmos.includes(String(ritmo.id));
                                         return (
                                             <button key={ritmo.id} onClick={() => toggleInterest(ritmo.id)} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase border transition-all ${isActive ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-500 border-white/10 hover:border-white/30'}`}>
                                                 {ritmo.nombre}
@@ -582,7 +582,6 @@ function UsuariosContent() {
                 </div>
             )}
 
-            {/* MODAL CARGAR PACK */}
             {isPackModalOpen && selectedUser && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-8 shadow-2xl relative">
@@ -627,7 +626,6 @@ function UsuariosContent() {
                 </div>
             )}
 
-            {/* MODAL COBRAR CUOTA LIGA */}
             {isCobroLigaOpen && selectedUser && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-8 shadow-2xl relative">

@@ -1,7 +1,8 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import {
     DollarSign, Lock, Unlock, TrendingUp, TrendingDown,
     Loader2, History, MapPin, Wallet, CreditCard, LayoutDashboard,
@@ -12,89 +13,47 @@ import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 
+// --- TIPOS Y ESTRUCTURAS ---
+type CajaData = {
+    admin: {
+        cajasActivas: any[]
+        historialCajas: any[]
+    } | null
+    recepcion: {
+        sedes: any[]
+        turnoActivo: any | null
+        movimientos: any[]
+    } | null
+}
 
-export default function CajaPage() {
-    const [supabase] = useState(() => createClient())
-    const { checkStatus, userRole, isLoading: loadingContext } = useCash()
+// 🚀 FETCHER PRINCIPAL (Maneja Admin y Recepción dinámicamente)
+const fetcherCaja = async ([key, role]: [string, string]): Promise<CajaData> => {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // Estados de Carga
-    const [loading, setLoading] = useState(true)
-    const [procesando, setProcesando] = useState(false)
-
-    // --- ESTADOS RECEPCION ---
-    const [turnoActivo, setTurnoActivo] = useState<any>(null)
-    const [movimientos, setMovimientos] = useState<any[]>([])
-    const [sedes, setSedes] = useState<any[]>([])
-    const [montoInicial, setMontoInicial] = useState('')
-    const [sedeSeleccionada, setSedeSeleccionada] = useState('')
-    const [recienCerrada, setRecienCerrada] = useState(false)
-
-    // Formulario Movimientos
-    const [nuevoMovimiento, setNuevoMovimiento] = useState({
-        tipo: 'ingreso', concepto: '', monto: '', metodo: 'efectivo'
-    })
-
-    // --- ESTADOS ADMIN ---
-    const [cajasActivas, setCajasActivas] = useState<any[]>([])
-    const [historialCajas, setHistorialCajas] = useState<any[]>([])
-
-    // Estados Modal de Detalle (Admin)
-    const [cajaDetalle, setCajaDetalle] = useState<any>(null)
-    const [movimientosDetalle, setMovimientosDetalle] = useState<any[]>([])
-    const [loadingDetalle, setLoadingDetalle] = useState(false)
-
-    // Efecto Maestro
-    useEffect(() => {
-        const cargarDatos = async () => {
-            if (!loadingContext) {
-                setLoading(true)
-                try {
-                    if (userRole === 'admin') {
-                        await fetchAdminData()
-                    } else {
-                        await fetchRecepcionData()
-                    }
-                } catch (error) {
-                    console.error("Error cargando caja:", error)
-                } finally {
-                    setLoading(false)
-                }
-            }
-        }
-        cargarDatos()
-    }, [userRole, loadingContext])
-
-    // =================================================================
-    // LÓGICA DE ADMIN (VER TOTALES + HISTORIAL)
-    // =================================================================
-    const fetchAdminData = async () => {
+    if (role === 'admin') {
         // 1. Cajas Activas
         const { data: activas } = await supabase.from('caja_turnos')
             .select(`*, sede:sedes(nombre), usuario:profiles(nombre_completo), caja_movimientos(*)`)
             .eq('estado', 'abierta')
 
+        let activasCalculadas = []
         if (activas) {
-            const activasCalculadas = activas.map((caja: any) => {
+            activasCalculadas = activas.map((caja: any) => {
                 const montoInicial = Number(caja.monto_inicial) || 0
-
-                // Sumamos movimientos
                 const ingresosMovs = caja.caja_movimientos?.filter((m: any) => m.tipo === 'ingreso').reduce((a: any, b: any) => a + Number(b.monto), 0) || 0
                 const egresos = caja.caja_movimientos?.filter((m: any) => m.tipo === 'egreso').reduce((a: any, b: any) => a + Number(b.monto), 0) || 0
-
                 const ingresosEfecMovs = caja.caja_movimientos?.filter((m: any) => m.tipo === 'ingreso' && m.metodo_pago === 'efectivo').reduce((a: any, b: any) => a + Number(b.monto), 0) || 0
                 const egresosEfec = caja.caja_movimientos?.filter((m: any) => m.tipo === 'egreso' && m.metodo_pago === 'efectivo').reduce((a: any, b: any) => a + Number(b.monto), 0) || 0
-
-                const ingresosTotales = montoInicial + ingresosMovs
 
                 return {
                     ...caja,
                     ingresos_movimientos: ingresosMovs,
-                    total_ingresos_vista: ingresosTotales,
+                    total_ingresos_vista: montoInicial + ingresosMovs,
                     saldo_total: montoInicial + ingresosMovs - egresos,
                     saldo_fisico: montoInicial + ingresosEfecMovs - egresosEfec
                 }
             })
-            setCajasActivas(activasCalculadas)
         }
 
         // 2. Historial
@@ -104,64 +63,83 @@ export default function CajaPage() {
             .order('fecha_cierre', { ascending: false })
             .limit(20)
 
-        if (historial) {
-            const historialCalculado = historial.map((caja: any) => ({
-                ...caja,
-                ingresos_con_inicial: Number(caja.total_ingresos) + Number(caja.monto_inicial)
-            }))
-            setHistorialCajas(historialCalculado)
-        }
-    }
+        const historialCalculado = (historial || []).map((caja: any) => ({
+            ...caja,
+            ingresos_con_inicial: Number(caja.total_ingresos) + Number(caja.monto_inicial)
+        }))
 
-    const abrirDetalleCaja = async (caja: any) => {
-        setCajaDetalle(caja)
-        setLoadingDetalle(true)
-        const { data } = await supabase.from('caja_movimientos')
-            .select('*')
-            .eq('turno_id', caja.id)
-            .order('created_at', { ascending: false })
+        return { admin: { cajasActivas: activasCalculadas, historialCajas: historialCalculado }, recepcion: null }
+    } else {
+        if (!user) throw new Error("No user")
 
-        if (data) setMovimientosDetalle(data)
-        setLoadingDetalle(false)
-    }
+        const { data: sedes } = await supabase.from('sedes').select('*').order('nombre')
 
-    // =================================================================
-    // LÓGICA DE RECEPCIÓN (OPERAR)
-    // =================================================================
-    const fetchRecepcionData = async () => {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return
-
-        const { data: dataSedes } = await supabase.from('sedes').select('*').order('nombre')
-        if (dataSedes) setSedes(dataSedes)
-
-        const { data: turno } = await supabase.from('caja_turnos')
+        const { data: turnoActivo } = await supabase.from('caja_turnos')
             .select(`*, sede:sedes(nombre), usuario:profiles(nombre_completo)`)
             .eq('usuario_id', user.id)
             .eq('estado', 'abierta')
             .maybeSingle()
 
-        if (turno) {
-            setTurnoActivo(turno)
+        let movimientos: any[] = []
+        if (turnoActivo) {
             const { data: movs } = await supabase.from('caja_movimientos')
                 .select('*')
-                .eq('turno_id', turno.id)
+                .eq('turno_id', turnoActivo.id)
                 .order('created_at', { ascending: false })
-            setMovimientos(movs || [])
-        } else {
-            setTurnoActivo(null)
-            setMovimientos([])
+            movimientos = movs || []
         }
+
+        return { admin: null, recepcion: { sedes: sedes || [], turnoActivo, movimientos } }
     }
+}
 
-    // --- CÁLCULOS GLOBALES DEL TURNO ACTIVO ---
-    let saldoFisico = 0;
-    let saldoDigital = 0;
-    let ingresosEfec = 0;
-    let egresosEfec = 0;
-    let ingresosDig = 0;
-    let egresosDig = 0;
+// 🚀 FETCHER SECUNDARIO (Solo para el modal de auditoría del Admin)
+const fetcherDetalle = async ([key, turnoId]: [string, string]) => {
+    const supabase = createClient()
+    const { data } = await supabase.from('caja_movimientos')
+        .select('*')
+        .eq('turno_id', turnoId)
+        .order('created_at', { ascending: false })
+    return data || []
+}
 
+export default function CajaPage() {
+    const [supabase] = useState(() => createClient())
+    const { checkStatus, userRole, isLoading: loadingContext } = useCash()
+
+    // 🚀 SWR: Orquestador Principal
+    const { data, isLoading, mutate } = useSWR(
+        !loadingContext && userRole ? ['caja-dashboard', userRole] : null,
+        fetcherCaja,
+        { refreshInterval: userRole === 'admin' ? 10000 : 0 } // Al admin se le refresca cada 10s para ver lo que pasa en las sedes
+    )
+
+    // Estados Locales
+    const [procesando, setProcesando] = useState(false)
+    const [montoInicial, setMontoInicial] = useState('')
+    const [sedeSeleccionada, setSedeSeleccionada] = useState('')
+    const [recienCerrada, setRecienCerrada] = useState(false)
+    const [nuevoMovimiento, setNuevoMovimiento] = useState({ tipo: 'ingreso', concepto: '', monto: '', metodo: 'efectivo' })
+    const [cajaDetalle, setCajaDetalle] = useState<any>(null)
+
+    // 🚀 SWR: Fetcher bajo demanda para el modal
+    const { data: movimientosDetalle, isLoading: loadingDetalle } = useSWR(
+        cajaDetalle ? ['caja-detalle', cajaDetalle.id] : null,
+        fetcherDetalle
+    )
+
+    // --- VARIABLES DERIVADAS ---
+    const adminData = data?.admin
+    const repData = data?.recepcion
+
+    const cajasActivas = adminData?.cajasActivas || []
+    const historialCajas = adminData?.historialCajas || []
+
+    const sedes = repData?.sedes || []
+    const turnoActivo = repData?.turnoActivo || null
+    const movimientos = repData?.movimientos || []
+
+    let saldoFisico = 0, saldoDigital = 0, ingresosEfec = 0, egresosEfec = 0, ingresosDig = 0, egresosDig = 0
     if (turnoActivo) {
         const movsEfectivo = movimientos.filter(m => m.metodo_pago === 'efectivo')
         ingresosEfec = movsEfectivo.filter(m => m.tipo === 'ingreso').reduce((a, b) => a + Number(b.monto), 0)
@@ -174,11 +152,12 @@ export default function CajaPage() {
         saldoDigital = ingresosDig - egresosDig
     }
 
-    // --- ACCIONES RECEPCIÓN ---
+    // --- ACCIONES DE RECEPCIÓN ---
     const handleAbrirCaja = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!sedeSeleccionada) return toast.error('Seleccioná una sede')
         setProcesando(true)
+
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
             const { error } = await supabase.from('caja_turnos').insert({
@@ -188,7 +167,7 @@ export default function CajaPage() {
                 toast.success('Caja Abierta')
                 setRecienCerrada(false)
                 await checkStatus()
-                fetchRecepcionData()
+                mutate() // Recarga SWR
             } else {
                 toast.error('Error al abrir caja')
             }
@@ -198,34 +177,20 @@ export default function CajaPage() {
 
     const handleCerrarCaja = async () => {
         if (!turnoActivo) return
-
-        // Mantenemos los cálculos locales SOLO para mostrarle al usuario la alerta antes de confirmar
-        const totalIngresos = ingresosEfec + ingresosDig
-        const totalEgresos = egresosEfec + egresosDig
         const saldoFinalTotal = saldoFisico + saldoDigital
-
         if (!confirm(`¿Cerrar caja con saldo TOTAL $${saldoFinalTotal.toLocaleString()}? \n(Efectivo: $${saldoFisico.toLocaleString()} | Digital: $${saldoDigital.toLocaleString()})`)) return
 
         setProcesando(true)
-
         try {
-            // Disparamos la función SQL de cierre atómico
-            const { data, error } = await supabase.rpc('cerrar_turno_caja', {
-                p_turno_id: turnoActivo.id
-            })
+            const { data: res, error } = await supabase.rpc('cerrar_turno_caja', { p_turno_id: turnoActivo.id })
+            if (error || !res.success) throw new Error(res?.message || 'Fallo de red al intentar cerrar caja.')
 
-            if (error) throw new Error('Fallo de red al intentar cerrar caja.')
-            if (!data.success) throw new Error(data.message)
-
-            toast.success(data.message)
-            setTurnoActivo(null)
+            toast.success(res.message)
             setRecienCerrada(true)
-            await checkStatus() // Actualiza el contexto global
-            fetchRecepcionData() // Limpia la pantalla
-
+            await checkStatus()
+            mutate() // Limpia la vista
         } catch (error: any) {
-            console.error("Error al cerrar caja:", error)
-            toast.error(error.message || 'Error desconocido al cerrar')
+            toast.error(error.message)
         } finally {
             setProcesando(false)
         }
@@ -234,6 +199,27 @@ export default function CajaPage() {
     const handleMovimiento = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!turnoActivo) return
+
+        // 🚀 MUTACIÓN OPTIMISTA: Lo inyectamos en la UI antes de ir a BD
+        const optimisticMov = {
+            id: 'temp-' + Date.now(),
+            turno_id: turnoActivo.id,
+            tipo: nuevoMovimiento.tipo,
+            concepto: nuevoMovimiento.concepto,
+            monto: Number(nuevoMovimiento.monto),
+            metodo_pago: nuevoMovimiento.metodo,
+            origen_referencia: 'manual',
+            created_at: new Date().toISOString()
+        }
+
+        mutate({
+            ...data!,
+            recepcion: {
+                ...data!.recepcion!,
+                movimientos: [optimisticMov, ...data!.recepcion!.movimientos]
+            }
+        }, false)
+
         setProcesando(true)
         const { error } = await supabase.from('caja_movimientos').insert({
             turno_id: turnoActivo.id,
@@ -243,18 +229,20 @@ export default function CajaPage() {
             metodo_pago: nuevoMovimiento.metodo,
             origen_referencia: 'manual'
         })
+
         if (!error) {
             toast.success('Registrado')
             setNuevoMovimiento({ tipo: 'ingreso', concepto: '', monto: '', metodo: 'efectivo' })
-            fetchRecepcionData()
+            mutate() // Revalida para tener el ID real
         } else {
             toast.error('Error al registrar')
+            mutate() // Revertir en caso de error
         }
         setProcesando(false)
     }
 
-    // RENDERIZADO DE CARGA
-    if (loading || loadingContext) return (
+    // RENDERIZADO DE CARGA GLOBAL
+    if (isLoading || loadingContext) return (
         <div className="min-h-screen bg-[#050505] flex items-center justify-center">
             <Loader2 className="animate-spin text-[#D4E655] w-10 h-10" />
         </div>
@@ -327,12 +315,12 @@ export default function CajaPage() {
                             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-2">
                                 {loadingDetalle ? (
                                     <div className="flex justify-center py-10"><Loader2 className="animate-spin text-[#D4E655]" /></div>
-                                ) : movimientosDetalle.length === 0 ? (
+                                ) : movimientosDetalle?.length === 0 ? (
                                     <div className="text-center py-10 border border-dashed border-white/10 rounded-2xl">
                                         <p className="text-gray-500 text-xs font-bold uppercase">Esta caja no tiene movimientos registrados</p>
                                     </div>
                                 ) : (
-                                    movimientosDetalle.map(mov => (
+                                    movimientosDetalle?.map((mov: any) => (
                                         <div key={mov.id} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors">
                                             <div className="flex items-center gap-4">
                                                 <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${mov.tipo === 'ingreso' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
@@ -389,7 +377,7 @@ export default function CajaPage() {
                         {cajasActivas.map(caja => (
                             <div
                                 key={caja.id}
-                                onClick={() => abrirDetalleCaja(caja)}
+                                onClick={() => setCajaDetalle(caja)}
                                 className="bg-[#09090b] border border-white/10 rounded-2xl p-6 shadow-lg relative overflow-hidden group hover:border-[#D4E655]/50 hover:shadow-[0_0_20px_rgba(212,230,85,0.1)] transition-all cursor-pointer"
                             >
                                 <div className="absolute top-0 right-0 bg-[#D4E655] text-black text-[9px] font-black uppercase px-3 py-1 rounded-bl-xl z-10 shadow-[0_0_10px_rgba(212,230,85,0.4)]">
@@ -456,7 +444,7 @@ export default function CajaPage() {
                                 {historialCajas.map((caja) => (
                                     <tr
                                         key={caja.id}
-                                        onClick={() => abrirDetalleCaja(caja)}
+                                        onClick={() => setCajaDetalle(caja)}
                                         className="hover:bg-white/10 transition-colors group cursor-pointer"
                                     >
                                         <td className="p-4 font-bold text-gray-300">

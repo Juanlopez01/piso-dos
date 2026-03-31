@@ -1,8 +1,9 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import useSWR from 'swr' // 🚀 ACÁ ESTÁ LA MAGIA SWR
 import {
     format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
     eachDayOfInterval, isSameDay, addMonths, subMonths, isSameMonth
@@ -19,7 +20,7 @@ import { Toaster, toast } from 'sonner'
 import MultiDatePicker from '@/components/MultiDatePicker'
 import { v4 as uuidv4 } from 'uuid'
 
-// --- TIPOS ---
+// --- TIPOS ESTRICTOS ---
 type EventoAgenda = {
     id: string
     tipo: 'Clase' | 'Alquiler'
@@ -27,6 +28,7 @@ type EventoAgenda = {
     subtitulo: string
     inicio: string
     fin: string
+    fecha_render: string
     sala_nombre: string
     sala_sede: string
     sede_id: string
@@ -42,7 +44,7 @@ type EventoAgenda = {
         es_la_liga: boolean
         liga_nivel: number | null
         compania_nombre: string | null
-        es_audicion: boolean // 👈 NUEVO: Campo de Audición
+        es_audicion: boolean
     }
     alquiler_data?: {
         telefono: string
@@ -56,23 +58,118 @@ type Profile = { id: string; nombre_completo: string | null; email: string }
 type Ritmo = { id: string; nombre: string }
 type CompaniaMin = { id: string; nombre: string }
 
+type RPCClase = {
+    id: string
+    nombre: string
+    tipo_clase: string
+    inicio: string
+    fin: string
+    sala_nombre: string
+    sala_sede: string
+    sede_id: string
+    profesor_nombre: string
+    nivel: string
+    imagen_url: string | null
+    serie_id: string | null
+    tipo_acuerdo: string
+    valor_acuerdo: number
+    ritmo_id: string | null
+    es_la_liga: boolean
+    liga_nivel: number | null
+    compania_nombre: string | null
+    es_audicion: boolean
+    estado: string
+}
+
+type RPCAlquiler = {
+    id: string
+    cliente_nombre: string | null
+    tipo_uso: string
+    fecha: string
+    hora_inicio: string
+    hora_fin: string
+    sala_nombre: string
+    sala_sede: string
+    sede_id: string
+    cliente_contacto: string
+    monto_total: number
+    estado: string
+}
+
+type RPCAgendaData = {
+    clases: RPCClase[] | null
+    alquileres: RPCAlquiler[] | null
+    sedes: Sede[] | null
+    profesores: Profile[] | null
+    ritmos: Ritmo[] | null
+    companias: CompaniaMin[] | null
+}
+
+// 🚀 FETCHER PARA SWR
+const fetcher = async ([key, startIso, endIso, startDateStr, endDateStr]: string[]) => {
+    const supabase = createClient()
+    const { data, error } = await supabase.rpc('get_agenda_completa', {
+        p_start_iso: startIso,
+        p_end_iso: endIso,
+        p_start_date: startDateStr,
+        p_end_date: endDateStr
+    })
+
+    if (error) throw error
+
+    const typedData = data as unknown as RPCAgendaData
+    const agenda: EventoAgenda[] = []
+
+    if (typedData.clases) {
+        typedData.clases.forEach((c) => {
+            if (c.estado === 'cancelada') return;
+            agenda.push({
+                id: c.id, tipo: 'Clase', titulo: c.nombre, subtitulo: c.tipo_clase,
+                inicio: c.inicio, fin: c.fin, fecha_render: format(new Date(c.inicio), 'yyyy-MM-dd'),
+                sala_nombre: c.sala_nombre, sala_sede: c.sala_sede, sede_id: c.sede_id,
+                clase_data: {
+                    profesor_nombre: c.profesor_nombre || 'Sin Asignar', nivel: c.nivel, imagen_url: c.imagen_url,
+                    serie_id: c.serie_id, tipo_clase: c.tipo_clase, tipo_acuerdo: c.tipo_acuerdo,
+                    valor_acuerdo: c.valor_acuerdo, ritmo_id: c.ritmo_id, es_la_liga: c.es_la_liga || false,
+                    liga_nivel: c.liga_nivel || null, compania_nombre: c.compania_nombre || null,
+                    es_audicion: c.es_audicion || false
+                }
+            })
+        })
+    }
+
+    if (typedData.alquileres) {
+        typedData.alquileres.forEach((a) => {
+            const inicioLocal = `${a.fecha}T${a.hora_inicio.slice(0, 5)}:00`
+            const finLocal = `${a.fecha}T${a.hora_fin.slice(0, 5)}:00`
+            agenda.push({
+                id: a.id, tipo: 'Alquiler', titulo: a.cliente_nombre || 'Cliente Externo',
+                subtitulo: `Alquiler (${a.tipo_uso})`, inicio: inicioLocal, fin: finLocal,
+                fecha_render: a.fecha, sala_nombre: a.sala_nombre, sala_sede: a.sala_sede, sede_id: a.sede_id,
+                alquiler_data: { telefono: a.cliente_contacto, monto: a.monto_total, estado: a.estado }
+            })
+        })
+    }
+
+    agenda.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime())
+
+    return {
+        eventos: agenda,
+        sedes: typedData.sedes || [],
+        profesores: typedData.profesores || [],
+        ritmos: typedData.ritmos || [],
+        companias: typedData.companias || []
+    }
+}
+
 export default function CalendarioPage() {
     const [supabase] = useState(() => createClient())
     const router = useRouter()
 
-    // Estados
     const [currentDate, setCurrentDate] = useState(new Date())
     const [selectedDate, setSelectedDate] = useState<Date | null>(null)
     const [sedeFiltro, setSedeFiltro] = useState<string>('todas')
 
-    const [eventos, setEventos] = useState<EventoAgenda[]>([])
-    const [sedes, setSedes] = useState<Sede[]>([])
-    const [profesores, setProfesores] = useState<Profile[]>([])
-    const [ritmos, setRitmos] = useState<Ritmo[]>([])
-    const [companias, setCompanias] = useState<CompaniaMin[]>([])
-
-    // UI
-    const [loading, setLoading] = useState(true)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [modalMode, setModalMode] = useState<'view' | 'create'>('view')
     const [deleteTarget, setDeleteTarget] = useState<{ id: string, serieId: string | null } | null>(null)
@@ -80,190 +177,72 @@ export default function CalendarioPage() {
     const [isCreatingRitmo, setIsCreatingRitmo] = useState(false)
     const [nuevoRitmoNombre, setNuevoRitmoNombre] = useState('')
 
-    // Form
     const [form, setForm] = useState({
         nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
         hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '', profeId: '',
-        tipoAcuerdo: 'porcentaje', valorAcuerdo: '',
-        fechas: [] as Date[],
-        esLaLiga: false, ligaNivel: 1,
-        companiaId: '',
-        esAudicion: false // 👈 NUEVO: Estado Audición
+        tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: [] as Date[],
+        esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false
     })
     const [formFile, setFormFile] = useState<File | null>(null)
 
-    useEffect(() => { fetchData() }, [currentDate])
+    // 🚀 SWR IMPLEMENTADO AQUÍ
+    const startIso = startOfWeek(startOfMonth(currentDate)).toISOString()
+    const endIso = endOfWeek(endOfMonth(currentDate)).toISOString()
+    const startDateStr = format(startOfWeek(startOfMonth(currentDate)), 'yyyy-MM-dd')
+    const endDateStr = format(endOfWeek(endOfMonth(currentDate)), 'yyyy-MM-dd')
 
-    const fetchData = async () => {
-        try {
-            setLoading(true)
-            const start = startOfWeek(startOfMonth(currentDate))
-            const end = endOfWeek(endOfMonth(currentDate))
-
-            const startIso = start.toISOString()
-            const endIso = end.toISOString()
-
-            const startDateStr = format(start, 'yyyy-MM-dd')
-            const endDateStr = format(end, 'yyyy-MM-dd')
-
-            const { data: dataClases, error: errClases } = await supabase
-                .from('clases')
-                .select(`*, sala:salas ( nombre, sede:sedes ( id, nombre ) ), profesor:profiles ( nombre_completo ), ritmo:ritmos(nombre), compania:companias(nombre)`)
-                .gte('inicio', startIso)
-                .lte('fin', endIso)
-
-            if (errClases) throw errClases
-
-            const { data: dataAlquileres, error: errAlq } = await supabase
-                .from('alquileres')
-                .select(`*, sala:salas ( nombre, sede:sedes ( id, nombre ) )`)
-                .gte('fecha', startDateStr)
-                .lte('fecha', endDateStr)
-                .in('estado', ['confirmado', 'pagado'])
-
-            if (errAlq) throw errAlq
-
-            const agenda: EventoAgenda[] = []
-
-            if (dataClases) {
-                dataClases.forEach((c: any) => {
-                    if (c.estado === 'cancelada') return;
-                    agenda.push({
-                        id: c.id,
-                        tipo: 'Clase',
-                        titulo: c.nombre,
-                        subtitulo: c.tipo_clase,
-                        inicio: c.inicio,
-                        fin: c.fin,
-                        sala_nombre: c.sala?.nombre,
-                        sala_sede: c.sala?.sede?.nombre,
-                        sede_id: c.sala?.sede?.id,
-                        clase_data: {
-                            profesor_nombre: c.profesor?.nombre_completo,
-                            nivel: c.nivel,
-                            imagen_url: c.imagen_url,
-                            serie_id: c.serie_id,
-                            tipo_clase: c.tipo_clase,
-                            tipo_acuerdo: c.tipo_acuerdo,
-                            valor_acuerdo: c.valor_acuerdo,
-                            ritmo_id: c.ritmo_id,
-                            es_la_liga: c.es_la_liga || false,
-                            liga_nivel: c.liga_nivel || null,
-                            compania_nombre: c.compania?.nombre || null,
-                            es_audicion: c.es_audicion || false // 👈 Guardamos el estado
-                        }
-                    })
-                })
-            }
-
-            if (dataAlquileres) {
-                dataAlquileres.forEach((a: any) => {
-                    const inicioLocal = `${a.fecha}T${a.hora_inicio.slice(0, 5)}:00`
-                    const finLocal = `${a.fecha}T${a.hora_fin.slice(0, 5)}:00`
-
-                    agenda.push({
-                        id: a.id,
-                        tipo: 'Alquiler',
-                        titulo: a.cliente_nombre || 'Cliente Externo',
-                        subtitulo: `Alquiler (${a.tipo_uso})`,
-                        inicio: inicioLocal,
-                        fin: finLocal,
-                        sala_nombre: a.sala?.nombre,
-                        sala_sede: a.sala?.sede?.nombre,
-                        sede_id: a.sala?.sede?.id,
-                        alquiler_data: {
-                            telefono: a.cliente_contacto,
-                            monto: a.monto_total,
-                            estado: a.estado
-                        }
-                    })
-                })
-            }
-
-            agenda.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime())
-            setEventos(agenda)
-
-            const { data: dataSedes } = await supabase.from('sedes').select('id, nombre, salas(id, nombre)')
-            const { data: dataProfes } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'profesor')
-            const { data: dataRitmos } = await supabase.from('ritmos').select('id, nombre').order('nombre')
-            const { data: dataCompanias } = await supabase.from('companias').select('id, nombre').order('nombre')
-
-            if (dataSedes) setSedes(dataSedes)
-            if (dataProfes) setProfesores(dataProfes)
-            if (dataRitmos) setRitmos(dataRitmos)
-            if (dataCompanias) setCompanias(dataCompanias)
-
-        } catch (error) {
-            console.error("Error al cargar el calendario:", error)
-            toast.error("Error al cargar la agenda. Refrescá la página.")
-        } finally {
-            setLoading(false)
+    const { data, error, isLoading, mutate } = useSWR(
+        ['agenda', startIso, endIso, startDateStr, endDateStr],
+        fetcher,
+        {
+            revalidateOnFocus: true,
+            dedupingInterval: 3000
         }
+    )
+
+    const eventos = data?.eventos || []
+    const sedes = data?.sedes || []
+    const profesores = data?.profesores || []
+    const ritmos = data?.ritmos || []
+    const companias = data?.companias || []
+
+    if (error) {
+        toast.error('Error de red. SWR está intentando reconectar...')
     }
 
-    const handleCrearRitmo = async (e?: any) => {
+    const handleCrearRitmo = async (e?: React.FormEvent | React.KeyboardEvent) => {
         if (e) e.preventDefault()
         const nombreLimpio = nuevoRitmoNombre.trim()
         if (!nombreLimpio) return
 
         try {
-            const { data, error } = await supabase
-                .from('ritmos')
-                .insert([{ nombre: nombreLimpio }])
-                .select()
-                .single()
-
-            if (error) {
-                if (error.code === '23505') {
-                    toast.error('Ese ritmo ya existe en la lista')
-                } else {
-                    toast.error(`Error: ${error.message}`)
-                }
-                return
-            }
-
-            if (data) {
-                toast.success(`Ritmo ${data.nombre} creado`)
-                setRitmos(prev => [...prev, data].sort((a, b) => a.nombre.localeCompare(b.nombre)))
-                setForm({ ...form, ritmoId: data.id })
+            const { data: nuevoRitmo, error } = await supabase.from('ritmos').insert([{ nombre: nombreLimpio }]).select().single()
+            if (error) { toast.error('Error al guardar ritmo'); return }
+            if (nuevoRitmo) {
+                toast.success(`Ritmo creado`)
+                setForm({ ...form, ritmoId: nuevoRitmo.id })
                 setIsCreatingRitmo(false)
                 setNuevoRitmoNombre('')
+                mutate()
             }
-        } catch (err) {
-            console.error("Error inesperado:", err)
+        } catch (err: unknown) {
+            const error = err as Error;
+            toast.error(error.message || 'Ocurrió un error inesperado al crear el ritmo');
         }
     }
 
     const checkConflictos = async (salaId: string, inicio: Date, fin: Date) => {
         const inicioIso = inicio.toISOString()
         const finIso = fin.toISOString()
-
         const fechaLocalSegura = new Date(inicio.getTime() + Math.abs(inicio.getTimezoneOffset() * 60000))
         const fechaStr = format(fechaLocalSegura, 'yyyy-MM-dd')
         const hInicio = format(inicio, 'HH:mm')
         const hFin = format(fin, 'HH:mm')
 
-        const { data: conflictoClase } = await supabase
-            .from('clases')
-            .select('id, nombre')
-            .eq('sala_id', salaId)
-            .neq('estado', 'cancelada')
-            .lt('inicio', finIso)
-            .gt('fin', inicioIso)
-            .maybeSingle()
-
+        const { data: conflictoClase } = await supabase.from('clases').select('id, nombre').eq('sala_id', salaId).neq('estado', 'cancelada').lt('inicio', finIso).gt('fin', inicioIso).maybeSingle()
         if (conflictoClase) return `Clase: ${conflictoClase.nombre}`
 
-        const { data: conflictoAlquiler } = await supabase
-            .from('alquileres')
-            .select('id, cliente_nombre')
-            .eq('sala_id', salaId)
-            .eq('fecha', fechaStr)
-            .in('estado', ['confirmado', 'pagado', 'pendiente'])
-            .lt('hora_inicio', hFin)
-            .gt('hora_fin', hInicio)
-            .maybeSingle()
-
+        const { data: conflictoAlquiler } = await supabase.from('alquileres').select('id, cliente_nombre').eq('sala_id', salaId).eq('fecha', fechaStr).in('estado', ['confirmado', 'pagado', 'pendiente']).lt('hora_inicio', hFin).gt('hora_fin', hInicio).maybeSingle()
         if (conflictoAlquiler) return `Alquiler: ${conflictoAlquiler.cliente_nombre}`
 
         return null
@@ -273,7 +252,7 @@ export default function CalendarioPage() {
         e.preventDefault()
         if (form.fechas.length === 0) return toast.error('Debe seleccionar al menos una fecha')
         if (!form.salaId || !form.profeId) return toast.error('Faltan datos (Sala o Profe)')
-        if (form.tipo === 'Compañía' && !form.companiaId) return toast.error('Debe seleccionar a qué Compañía pertenece esta clase')
+        if (form.tipo === 'Compañía' && !form.companiaId) return toast.error('Falta seleccionar Compañía')
 
         setUploading(true)
         try {
@@ -284,90 +263,77 @@ export default function CalendarioPage() {
                 const fileExt = formFile.name.split('.').pop();
                 const fileName = `${Date.now()}.${fileExt}`
                 const { error: uploadError } = await supabase.storage.from('clases').upload(fileName, formFile)
-
                 if (uploadError) throw new Error('No se pudo subir la imagen.')
                 publicUrl = supabase.storage.from('clases').getPublicUrl(fileName).data.publicUrl
             }
 
             const serieUUID = form.fechas.length > 1 ? uuidv4() : null;
-            const clasesAInsertar = []
 
-            for (const fecha of form.fechas) {
+            // 🚀 OPTIMIZACIÓN: Preparamos las fechas y chequemos conflictos en paralelo
+            const fechasCalculadas = form.fechas.map(fecha => {
                 const baseDate = new Date(fecha)
                 baseDate.setHours(parseInt(horas), parseInt(minutos), 0, 0)
                 const endDateTime = new Date(baseDate.getTime() + form.duracion * 60000)
+                return { baseDate, endDateTime }
+            })
 
+            const conflictosPromises = fechasCalculadas.map(async ({ baseDate, endDateTime }) => {
                 const conflicto = await checkConflictos(form.salaId, baseDate, endDateTime)
-                if (conflicto) throw new Error(`Conflicto el ${format(baseDate, 'dd/MM')}: ${conflicto}`)
+                if (conflicto) return `Conflicto el ${format(baseDate, 'dd/MM')}: ${conflicto}`
+                return null
+            })
 
-                clasesAInsertar.push({
-                    nombre: form.nombre,
-                    descripcion: form.descripcion,
-                    tipo_clase: form.tipo,
-                    nivel: form.nivel,
-                    ritmo_id: form.ritmoId || null,
-                    inicio: baseDate.toISOString(),
-                    fin: endDateTime.toISOString(),
-                    sala_id: form.salaId,
-                    profesor_id: form.profeId,
-                    tipo_acuerdo: form.tipoAcuerdo,
-                    valor_acuerdo: Number(form.valorAcuerdo),
-                    imagen_url: publicUrl,
-                    cupo_maximo: form.esAudicion ? 9999 : (Number(form.cupoMaximo) || 0), // 👈 MÁGICO: Si es audición, cupo infinito
-                    serie_id: serieUUID,
-                    estado: 'activa',
-                    es_la_liga: form.esLaLiga,
-                    liga_nivel: form.esLaLiga ? form.ligaNivel : null,
-                    compania_id: form.tipo === 'Compañía' ? form.companiaId : null,
-                    es_audicion: form.esAudicion // 👈 Guardamos el flag
-                })
+            const resultadosConflictos = await Promise.all(conflictosPromises)
+            const conflictoEncontrado = resultadosConflictos.find(c => c !== null)
+
+            if (conflictoEncontrado) {
+                throw new Error(conflictoEncontrado)
             }
+
+            // Si llegamos acá, no hay conflictos. Armamos el array de inserción.
+            const clasesAInsertar = fechasCalculadas.map(({ baseDate, endDateTime }) => ({
+                nombre: form.nombre,
+                descripcion: form.descripcion,
+                tipo_clase: form.tipo,
+                nivel: form.nivel,
+                ritmo_id: form.ritmoId || null,
+                inicio: baseDate.toISOString(),
+                fin: endDateTime.toISOString(),
+                sala_id: form.salaId,
+                profesor_id: form.profeId,
+                tipo_acuerdo: form.tipoAcuerdo,
+                valor_acuerdo: Number(form.valorAcuerdo),
+                imagen_url: publicUrl,
+                cupo_maximo: form.esAudicion ? 9999 : (Number(form.cupoMaximo) || 0),
+                serie_id: serieUUID,
+                estado: 'activa',
+                es_la_liga: form.esLaLiga,
+                liga_nivel: form.esLaLiga ? form.ligaNivel : null,
+                compania_id: form.tipo === 'Compañía' ? form.companiaId : null,
+                es_audicion: form.esAudicion
+            }))
 
             const { error } = await supabase.from('clases').insert(clasesAInsertar)
             if (error) throw new Error('Error al guardar en la base de datos.')
 
-            if (form.ritmoId && form.tipo !== 'Compañía' && !form.esAudicion) {
-                const ritmoNombre = ritmos.find(r => r.id === form.ritmoId)?.nombre || 'Nuevo Ritmo'
-                const { data: interesados } = await supabase
-                    .from('profiles')
-                    .select('id')
-                    .contains('intereses_ritmos', [form.ritmoId])
-
-                if (interesados && interesados.length > 0) {
-                    const primerDia = format(new Date(form.fechas[0]), "EEEE d 'de' MMMM", { locale: es })
-                    const notificaciones = interesados.map((user: { id: string }) => ({
-                        usuario_id: user.id,
-                        titulo: '¡Nueva clase disponible! 🎉',
-                        mensaje: `Se abrió una nueva clase de ${ritmoNombre} el ${primerDia}. ¡Reservá tu lugar antes de que se llene!`,
-                        leido: false,
-                        link: '/explorar'
-                    }))
-                    await supabase.from('notificaciones').insert(notificaciones)
-                }
-            }
-
             toast.success(`${clasesAInsertar.length} clase(s) creada(s) correctamente`)
-
-            await fetchData()
             setModalMode('view')
-            resetForm()
-            router.refresh()
+            setForm({
+                nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
+                hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '', profeId: '',
+                tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: selectedDate ? [selectedDate] : [],
+                esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false
+            })
+            setFormFile(null)
 
-        } catch (error: any) {
-            toast.error(error.message, { duration: 6000, icon: <AlertCircle /> })
+            mutate()
+
+        } catch (err: unknown) {
+            const error = err as Error;
+            toast.error(error.message)
         } finally {
             setUploading(false)
         }
-    }
-
-    const resetForm = () => {
-        setForm({
-            nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
-            hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '', profeId: '',
-            tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: selectedDate ? [selectedDate] : [],
-            esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false // 👈 RESET
-        })
-        setFormFile(null)
     }
 
     const handleConfirmDelete = async (option: 'single' | 'serie') => {
@@ -377,14 +343,12 @@ export default function CalendarioPage() {
 
         toast.success('Eliminado')
         setDeleteTarget(null)
-
-        await fetchData()
-        router.refresh()
+        mutate()
     }
 
     const getEventStyle = (evt: EventoAgenda) => {
         if (evt.tipo === 'Alquiler') return { border: 'border-white', text: 'text-white', bg: 'bg-white', glow: 'shadow-white/20' }
-        if (evt.clase_data?.es_audicion) return { border: 'border-pink-500', text: 'text-pink-500', bg: 'bg-pink-500', glow: 'shadow-pink-500/20' } // 👈 COLOR AUDICIONES
+        if (evt.clase_data?.es_audicion) return { border: 'border-pink-500', text: 'text-pink-500', bg: 'bg-pink-500', glow: 'shadow-pink-500/20' }
         if (evt.clase_data?.es_la_liga) return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500', glow: 'shadow-purple-500/20' }
 
         switch (evt.subtitulo) {
@@ -398,8 +362,10 @@ export default function CalendarioPage() {
     }
 
     const eventosFiltrados = eventos.filter(e => sedeFiltro === 'todas' || e.sede_id === sedeFiltro)
-    const eventosDelDia = selectedDate ? eventosFiltrados.filter(e => isSameDay(new Date(e.inicio), selectedDate)) : []
     const salasDisponibles = sedes.find(s => s.id === form.sedeId)?.salas || []
+    const dayStrSelected = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''
+
+    const eventosDelDia = dayStrSelected ? eventosFiltrados.filter(e => e.fecha_render === dayStrSelected) : []
 
     return (
         <div className="h-full flex flex-col pb-24 md:pb-10 px-2 pt-2">
@@ -410,7 +376,7 @@ export default function CalendarioPage() {
                     <div>
                         <h2 className="text-3xl font-black text-white uppercase tracking-tighter flex items-center gap-2">
                             {format(currentDate, 'MMMM', { locale: es })}
-                            {loading && <Loader2 size={20} className="animate-spin text-[#D4E655]" />}
+                            {isLoading && <Loader2 size={20} className="animate-spin text-[#D4E655]" />}
                         </h2>
                         <p className="text-[#D4E655] font-bold text-xs tracking-widest uppercase">{format(currentDate, 'yyyy', { locale: es })} • Agenda Completa</p>
                     </div>
@@ -418,23 +384,13 @@ export default function CalendarioPage() {
 
                 <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
                     <div className="flex bg-[#111] rounded-full p-1 border border-white/10 w-full sm:w-auto">
-                        <button
-                            onClick={() => setSedeFiltro('todas')}
-                            className={`flex-1 sm:flex-none px-4 py-2 rounded-full text-[10px] font-black uppercase transition-all ${sedeFiltro === 'todas' ? 'bg-[#D4E655] text-black shadow' : 'text-gray-500 hover:text-white'}`}
-                        >
-                            Todas
-                        </button>
+                        <button onClick={() => setSedeFiltro('todas')} className={`flex-1 sm:flex-none px-4 py-2 rounded-full text-[10px] font-black uppercase transition-all ${sedeFiltro === 'todas' ? 'bg-[#D4E655] text-black shadow' : 'text-gray-500 hover:text-white'}`}>Todas</button>
                         {sedes.map(sede => (
-                            <button
-                                key={sede.id}
-                                onClick={() => setSedeFiltro(sede.id)}
-                                className={`flex-1 sm:flex-none px-4 py-2 rounded-full text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1 ${sedeFiltro === sede.id ? 'bg-[#D4E655] text-black shadow' : 'text-gray-500 hover:text-white'}`}
-                            >
+                            <button key={sede.id} onClick={() => setSedeFiltro(sede.id)} className={`flex-1 sm:flex-none px-4 py-2 rounded-full text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1 ${sedeFiltro === sede.id ? 'bg-[#D4E655] text-black shadow' : 'text-gray-500 hover:text-white'}`}>
                                 <Building2 size={10} className={sedeFiltro === sede.id ? 'text-black' : ''} /> {sede.nombre}
                             </button>
                         ))}
                     </div>
-
                     <div className="flex gap-2 w-full sm:w-auto justify-end">
                         <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-[#D4E655] hover:text-[#D4E655] transition-all rounded-full"><ChevronLeft size={18} /></button>
                         <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-[#D4E655] hover:text-[#D4E655] transition-all rounded-full"><ChevronRight size={18} /></button>
@@ -448,7 +404,9 @@ export default function CalendarioPage() {
                 {eachDayOfInterval({ start: startOfWeek(startOfMonth(currentDate)), end: endOfWeek(endOfMonth(currentDate)) }).map((day) => {
                     const isToday = isSameDay(day, new Date())
                     const isCurrentMonth = isSameMonth(day, currentDate)
-                    const evtsDia = eventosFiltrados.filter(e => isSameDay(new Date(e.inicio), day))
+                    const dayStr = format(day, 'yyyy-MM-dd')
+
+                    const evtsDia = eventosFiltrados.filter(e => e.fecha_render === dayStr)
 
                     let dayClass = "opacity-20 border-transparent"
                     if (isCurrentMonth) {
@@ -515,23 +473,9 @@ export default function CalendarioPage() {
                                                                 <>
                                                                     <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><Briefcase size={10} /> {evt.clase_data?.profesor_nombre || 'Sin asignar'}</span>
                                                                     <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><GraduationCap size={10} /> {evt.clase_data?.nivel}</span>
-
-                                                                    {/* 👈 ETIQUETAS ESPECIALES */}
-                                                                    {evt.clase_data?.es_audicion && (
-                                                                        <span className="flex items-center gap-1 bg-pink-500/10 text-pink-400 border border-pink-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]">
-                                                                            <Sparkles size={10} className="text-pink-500" /> Audición
-                                                                        </span>
-                                                                    )}
-                                                                    {evt.clase_data?.es_la_liga && (
-                                                                        <span className="flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]">
-                                                                            <Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})
-                                                                        </span>
-                                                                    )}
-                                                                    {evt.clase_data?.compania_nombre && (
-                                                                        <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]">
-                                                                            <UsersRound size={10} className="text-blue-500" /> {evt.clase_data.compania_nombre}
-                                                                        </span>
-                                                                    )}
+                                                                    {evt.clase_data?.es_audicion && <span className="flex items-center gap-1 bg-pink-500/10 text-pink-400 border border-pink-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Sparkles size={10} className="text-pink-500" /> Audición</span>}
+                                                                    {evt.clase_data?.es_la_liga && <span className="flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})</span>}
+                                                                    {evt.clase_data?.compania_nombre && <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><UsersRound size={10} className="text-blue-500" /> {evt.clase_data.compania_nombre}</span>}
                                                                 </>
                                                             ) : (<span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><User size={10} /> Cliente Externo</span>)}
                                                         </div>
@@ -657,7 +601,6 @@ export default function CalendarioPage() {
                                                     </div>
                                                 )}
 
-                                                {/* 👈 NUEVO: TOGGLE DE AUDICIONES */}
                                                 <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-pink-500/5 p-3 rounded-xl border-dashed border-pink-500/20">
                                                     <label className="flex items-center gap-3 cursor-pointer">
                                                         <div className="relative flex items-center">

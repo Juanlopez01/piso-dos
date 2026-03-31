@@ -3,13 +3,14 @@
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import useSWR from 'swr'
 import {
     ShoppingBasket, Ticket, Star, Check,
-    Smartphone, Zap, Loader2, Info, Tag, X, Lock, CreditCard
+    Smartphone, Zap, Loader2, Info, Tag, X, CreditCard
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 
-// ... (Tipos iguales) ...
+// --- TIPOS ---
 type Producto = {
     id: string
     nombre: string
@@ -25,18 +26,60 @@ type Cupon = {
     porcentaje: number
 }
 
+type TiendaData = {
+    userProfile: { id: string, creditos_regulares: number, creditos_seminarios: number } | null
+    productos: Producto[]
+}
+
+// 🚀 FETCHER UNIFICADO DE SWR
+const fetcherTienda = async (): Promise<TiendaData> => {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    let userProfile = null
+    if (user) {
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('id, creditos_regulares, creditos_seminarios')
+            .eq('id', user.id)
+            .single()
+        if (profile) userProfile = profile
+    }
+
+    const { data: productos } = await supabase
+        .from('productos')
+        .select('*')
+        .eq('activo', true)
+        .order('precio', { ascending: true })
+
+    return {
+        userProfile,
+        productos: (productos as Producto[]) || []
+    }
+}
+
 function TiendaContent() {
     const [supabase] = useState(() => createClient())
-    const searchParams = useSearchParams() // Para leer si vuelve de MercadoPago
+    const searchParams = useSearchParams()
     const router = useRouter()
-    const [productos, setProductos] = useState<Producto[]>([])
-    const [loading, setLoading] = useState(true)
+
+    // 🚀 SWR AL MANDO
+    const { data, isLoading, mutate } = useSWR<TiendaData>(
+        'tienda-datos',
+        fetcherTienda,
+        {
+            revalidateOnFocus: true, // Clave para cuando vuelven de MercadoPago
+            dedupingInterval: 5000 // Evita doble fetch rápido
+        }
+    )
+
+    const productos = data?.productos || []
+    const userProfile = data?.userProfile || null
+    const userId = userProfile?.id || null
 
     // Checkout States
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
     const [selectedPack, setSelectedPack] = useState<Producto | null>(null)
-    const [userId, setUserId] = useState<string | null>(null)
-    const [userProfile, setUserProfile] = useState<{ creditos_regulares: number, creditos_seminarios: number } | null>(null)
 
     // Cupones States
     const [cuponInput, setCuponInput] = useState('')
@@ -46,57 +89,24 @@ function TiendaContent() {
     // MP States
     const [generandoPago, setGenerandoPago] = useState(false)
 
-    // 1. EFECTO PARA CARGAR DATOS (Se ejecuta UNA SOLA VEZ al entrar)
-    useEffect(() => {
-        fetchData()
-    }, []) // 👈 El array vacío es clave, evita que se dispare infinitamente
-
-    // 2. EFECTO PARA LOS CARTELITOS DE MERCADO PAGO
+    // 🪄 EFECTO PARA LOS CARTELITOS DE MERCADO PAGO
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
 
         if (pagoStatus) {
             if (pagoStatus === 'exito') {
                 toast.success('¡Pago aprobado! Tus clases se acreditarán en breves instantes.', { duration: 8000 })
+                mutate() // Forzamos actualización de créditos si el pago fue un éxito
             } else if (pagoStatus === 'error') {
                 toast.error('El pago no se pudo procesar o fue cancelado.')
             } else if (pagoStatus === 'pendiente') {
                 toast.info('Tu pago está pendiente de confirmación.')
             }
 
-            // 🪄 MAGIA PURA: Limpiamos la URL de forma silenciosa sin trabar la página
+            // Limpiamos la URL de forma silenciosa
             window.history.replaceState(null, '', window.location.pathname)
         }
-    }, [searchParams])
-
-    const fetchData = async () => {
-        try {
-            setLoading(true)
-            const { data: { user } } = await supabase.auth.getUser()
-            if (user) {
-                setUserId(user.id)
-                const { data: profile } = await supabase
-                    .from('profiles')
-                    .select('creditos_regulares, creditos_seminarios')
-                    .eq('id', user.id)
-                    .single()
-
-                if (profile) setUserProfile(profile)
-            }
-
-            const { data } = await supabase
-                .from('productos')
-                .select('*')
-                .eq('activo', true)
-                .order('precio', { ascending: true })
-
-            if (data) setProductos(data as Producto[])
-        } catch (error) {
-            console.error(error)
-        } finally {
-            setLoading(false)
-        }
-    }
+    }, [searchParams, mutate])
 
     const openCheckout = (producto: Producto) => {
         if (!userId) {
@@ -109,7 +119,7 @@ function TiendaContent() {
         setIsCheckoutOpen(true)
     }
 
-    // --- LÓGICA DE CUPONES (Igual que antes) ---
+    // --- LÓGICA DE CUPONES ---
     const handleValidarCupon = async () => {
         if (!cuponInput.trim()) return toast.error('Ingresá un código válido')
         if (!userId) return toast.error('Debes iniciar sesión para usar cupones')
@@ -162,7 +172,6 @@ function TiendaContent() {
 
         setGenerandoPago(true)
         try {
-            // Dentro de tu handlePagarConMP en TiendaContent
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -170,22 +179,21 @@ function TiendaContent() {
                     productoId: selectedPack.id,
                     userId: userId,
                     cuponId: cuponAplicado ? cuponAplicado.id : null,
-                    tipo_pago: 'pack' // 👈 AGREGAR ESTA LÍNEA
+                    tipo_pago: 'pack'
                 })
             })
 
-            const data = await res.json()
+            const responseData = await res.json()
 
-            if (!res.ok || data.error) {
-                // Si el backend tiró error, lo mostramos y frenamos la redirección
-                console.error("Error del backend:", data.error);
-                alert("Hubo un error al generar el pago: " + data.error);
-                return; // Frenamos la ejecución acá
+            if (!res.ok || responseData.error) {
+                console.error("Error del backend:", responseData.error);
+                alert("Hubo un error al generar el pago: " + responseData.error);
+                setGenerandoPago(false);
+                return;
             }
 
-            // Si todo salió bien, recién ahí redirigimos
-            if (data.url) {
-                window.location.href = data.url;
+            if (responseData.url) {
+                window.location.href = responseData.url;
             }
 
         } catch (error: any) {
@@ -198,14 +206,13 @@ function TiendaContent() {
     const descuentoDinero = cuponAplicado ? (precioBase * (cuponAplicado.porcentaje / 100)) : 0
     const precioFinal = precioBase - descuentoDinero
 
-    // Mensaje para transferencia manual (lo dejamos como plan B)
     const getMensajeWhatsApp = () => {
         let msg = `Hola! Quiero pagar por transferencia el ${selectedPack?.nombre} de $${precioBase.toLocaleString()}`
         if (cuponAplicado) msg += `.\n\n*Aviso:* Apliqué el cupón ${cuponAplicado.codigo}, así que el total es $${precioFinal.toLocaleString()}`
         return encodeURIComponent(msg)
     }
 
-    if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
+    if (isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
     const regulares = productos.filter(p => p.tipo_clase === 'regular')
     const seminarios = productos.filter(p => p.tipo_clase === 'seminario')
@@ -359,7 +366,6 @@ function TiendaContent() {
     )
 }
 
-// Envolvemos todo en Suspense porque usamos useSearchParams de Next.js
 export default function TiendaPage() {
     return (
         <Suspense fallback={<div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>}>

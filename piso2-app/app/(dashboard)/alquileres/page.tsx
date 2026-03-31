@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import {
     Plus, Calendar, Clock, DollarSign, User, MapPin,
     Trash2, CheckCircle, Loader2, X, MessageCircle,
@@ -15,7 +16,7 @@ import { v4 as uuidv4 } from 'uuid'
 import MultiDatePicker from '@/components/MultiDatePicker'
 import { useCash } from '@/context/CashContext'
 
-// Tipos
+// --- TIPOS ---
 type ReservaGroup = {
     group_id: string
     cliente_nombre: string
@@ -30,14 +31,90 @@ type ReservaGroup = {
     items: any[]
 }
 
+type AlquileresData = {
+    grupos: ReservaGroup[]
+    salas: any[]
+}
+
+// 🚀 FETCHER PARA SWR
+const fetcher = async (): Promise<AlquileresData> => {
+    const supabase = createClient()
+
+    // 1. Obtener salas
+    const { data: s } = await supabase.from('salas').select('*').order('nombre')
+    const salas = s || []
+
+    // 2. Obtener alquileres
+    const { data: rawData } = await supabase
+        .from('alquileres')
+        .select(`*, sala:salas(nombre)`)
+        .order('fecha', { ascending: false })
+        .limit(100)
+
+    let grupos: ReservaGroup[] = []
+
+    if (rawData) {
+        const agrupados: Record<string, ReservaGroup> = {}
+        rawData.forEach((item: any) => {
+            const gId = item.group_id || item.id
+            if (!agrupados[gId]) {
+                agrupados[gId] = {
+                    group_id: gId,
+                    cliente_nombre: item.cliente_nombre || 'Sin Nombre',
+                    cliente_contacto: item.cliente_contacto || '',
+                    sala_nombre: item.sala?.nombre || 'Sala',
+                    sala_id: item.sala_id,
+                    tipo_uso: item.tipo_uso || 'ensayo',
+                    estado: 'pendiente',
+                    estado_pago: 'pendiente',
+                    total_grupo: 0,
+                    total_pagado: 0,
+                    items: []
+                }
+            }
+            agrupados[gId].items.push(item)
+            agrupados[gId].total_grupo += Number(item.monto_total)
+            agrupados[gId].total_pagado += Number(item.monto_pagado || 0)
+        })
+
+        grupos = Object.values(agrupados).map(g => {
+            if (g.total_pagado >= g.total_grupo && g.total_grupo > 0) {
+                g.estado_pago = 'pagado'
+            } else if (g.total_pagado > 0) {
+                g.estado_pago = 'seña_pagada'
+            } else {
+                g.estado_pago = 'pendiente'
+            }
+            g.estado = g.estado_pago
+            g.items.sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
+            return g
+        })
+        grupos.sort((a, b) => new Date(b.items[0].fecha).getTime() - new Date(a.items[0].fecha).getTime())
+    }
+
+    return { grupos, salas }
+}
+
 export default function AlquileresPage() {
     const [supabase] = useState(() => createClient())
     const { isBoxOpen, currentTurnoId } = useCash()
 
-    // Datos Globales
-    const [grupos, setGrupos] = useState<ReservaGroup[]>([])
-    const [salas, setSalas] = useState<any[]>([])
-    const [loading, setLoading] = useState(true)
+    // 🚀 SWR INTEGRACIÓN
+    const { data, error, isLoading, mutate } = useSWR<AlquileresData>(
+        'alquileres',
+        fetcher,
+        {
+            revalidateOnFocus: true,
+            dedupingInterval: 3000
+        }
+    )
+
+    const grupos = data?.grupos || []
+    const salas = data?.salas || []
+
+    if (error) {
+        toast.error('Error de red. SWR está intentando reconectar...')
+    }
 
     // UI States
     const [isModalOpen, setIsModalOpen] = useState(false)
@@ -46,7 +123,7 @@ export default function AlquileresPage() {
     const [expandedSala, setExpandedSala] = useState<string | null>(null)
     const [creating, setCreating] = useState(false)
 
-    // --- ESTADOS NUEVOS PARA EL MODAL DE COBRO ---
+    // Modal Cobro
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
     const [selectedGroup, setSelectedGroup] = useState<ReservaGroup | null>(null)
     const [paymentType, setPaymentType] = useState<'seña' | 'total' | 'resto'>('total')
@@ -72,8 +149,6 @@ export default function AlquileresPage() {
         montoDescuento: 0,
         total: 0
     })
-
-    useEffect(() => { fetchData() }, [])
 
     useEffect(() => {
         if (!form.sala_id || !form.hora_inicio || !form.hora_fin || form.fechas.length === 0) {
@@ -128,69 +203,22 @@ export default function AlquileresPage() {
 
     }, [form.sala_id, form.hora_inicio, form.hora_fin, form.tipo_uso, form.fechas, form.descuento, salas])
 
-    const fetchData = async () => {
-        setLoading(true)
-        const { data: s } = await supabase.from('salas').select('*').order('nombre')
-        if (s) setSalas(s)
-
-        const { data: rawData } = await supabase
-            .from('alquileres')
-            .select(`*, sala:salas(nombre)`)
-            .order('fecha', { ascending: false })
-            .limit(100)
-
-        if (rawData) {
-            const agrupados: Record<string, ReservaGroup> = {}
-            rawData.forEach((item: any) => {
-                const gId = item.group_id || item.id
-                if (!agrupados[gId]) {
-                    agrupados[gId] = {
-                        group_id: gId,
-                        cliente_nombre: item.cliente_nombre || 'Sin Nombre',
-                        cliente_contacto: item.cliente_contacto || '',
-                        sala_nombre: item.sala?.nombre || 'Sala',
-                        sala_id: item.sala_id,
-                        tipo_uso: item.tipo_uso || 'ensayo',
-                        estado: 'pendiente',
-                        estado_pago: 'pendiente',
-                        total_grupo: 0,
-                        total_pagado: 0,
-                        items: []
-                    }
-                }
-                agrupados[gId].items.push(item)
-                agrupados[gId].total_grupo += Number(item.monto_total)
-                agrupados[gId].total_pagado += Number(item.monto_pagado || 0) // ACUMULAMOS LO PAGADO
-            })
-
-            const listaGrupos = Object.values(agrupados).map(g => {
-                // CALCULAMOS EL ESTADO REAL EN BASE AL MONTO PAGADO VS TOTAL
-                if (g.total_pagado >= g.total_grupo && g.total_grupo > 0) {
-                    g.estado_pago = 'pagado'
-                } else if (g.total_pagado > 0) {
-                    g.estado_pago = 'seña_pagada'
-                } else {
-                    g.estado_pago = 'pendiente'
-                }
-                g.estado = g.estado_pago
-                g.items.sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime())
-                return g
-            })
-            listaGrupos.sort((a, b) => new Date(b.items[0].fecha).getTime() - new Date(a.items[0].fecha).getTime())
-            setGrupos(listaGrupos)
-        }
-        setLoading(false)
-    }
-
     const handleTarifaChange = (salaId: string, field: string, value: string) => {
         const numValue = value === '' ? 0 : Number(value)
-        setSalas(prev => prev.map(s => s.id === salaId ? { ...s, [field]: numValue } : s))
+
+        // Optimistic UI Update para Tarifas
+        const optimisticSalas = salas.map(s => s.id === salaId ? { ...s, [field]: numValue } : s)
+        mutate({ grupos, salas: optimisticSalas }, false)
     }
 
     const handleTarifaBlur = async (salaId: string, field: string, value: number) => {
         const { error } = await supabase.from('salas').update({ [field]: value }).eq('id', salaId)
-        if (error) toast.error('Error al guardar precio')
-        else toast.success('Precio actualizado')
+        if (error) {
+            toast.error('Error al guardar precio')
+            mutate() // Revert on error
+        } else {
+            toast.success('Precio actualizado')
+        }
     }
 
     const checkConflictos = async (salaId: string, dateObj: Date, hInicio: string, hFin: string) => {
@@ -226,11 +254,18 @@ export default function AlquileresPage() {
         const sala = salas.find(s => s.id === form.sala_id)
 
         try {
-            for (const date of form.fechas) {
+            // 🚀 OPTIMIZACIÓN: Promise.all para check de conflictos
+            const conflictosPromises = form.fechas.map(async (date) => {
                 const conflicto = await checkConflictos(form.sala_id, date, form.hora_inicio, form.hora_fin)
-                if (conflicto) {
-                    throw new Error(`Conflicto el ${format(date, 'dd/MM')}: ya existe un/a ${conflicto}`)
-                }
+                if (conflicto) return `Conflicto el ${format(date, 'dd/MM')}: ya existe un/a ${conflicto}`
+                return null
+            })
+
+            const resultadosConflictos = await Promise.all(conflictosPromises)
+            const conflictoEncontrado = resultadosConflictos.find(c => c !== null)
+
+            if (conflictoEncontrado) {
+                throw new Error(conflictoEncontrado)
             }
 
             const calculateDayCost = (date: Date) => {
@@ -277,7 +312,7 @@ export default function AlquileresPage() {
             toast.success('Reserva creada con éxito')
             setIsModalOpen(false)
             setForm({ ...form, cliente_nombre: '', fechas: [], descuento: 0 })
-            fetchData()
+            mutate() // 🚀 SWR actualiza data
         } catch (err: any) {
             toast.error(err.message, { duration: 5000 })
         } finally {
@@ -302,13 +337,11 @@ export default function AlquileresPage() {
         navigator.clipboard.writeText(textoWsp).then(() => toast.success('¡Presupuesto copiado!')).catch(() => toast.error('Error al copiar'))
     }
 
-    // --- FUNCIONES NUEVAS DE COBRO AVANZADO ---
     const openPaymentModal = (group: ReservaGroup) => {
         if (!isBoxOpen || !currentTurnoId) {
             return toast.error('¡Caja Cerrada! Tenés que abrir la caja en tu sede antes de poder cobrar.')
         }
         setSelectedGroup(group)
-        // Por defecto: Si no pagó nada, ofrecemos la seña. Si ya pagó la seña, ofrecemos el resto.
         setPaymentType(group.estado_pago === 'pendiente' ? 'seña' : 'resto')
         setPaymentMethod('efectivo')
         setIsPaymentModalOpen(true)
@@ -322,7 +355,6 @@ export default function AlquileresPage() {
             let montoACobrar = 0
             let labelCobro = ''
 
-            // Preparamos las actualizaciones para cada ítem del grupo
             const updates = selectedGroup.items.map(item => {
                 let nuevoMontoPagado = Number(item.monto_pagado || 0)
                 let nuevoEstadoPago = item.estado_pago || 'pendiente'
@@ -333,7 +365,7 @@ export default function AlquileresPage() {
                     addAmount = Number(item.monto_total) / 2
                     nuevoMontoPagado = addAmount
                     nuevoEstadoPago = 'seña_pagada'
-                    nuevoEstado = 'confirmado' // Se reserva la sala
+                    nuevoEstado = 'confirmado'
                     labelCobro = 'Seña 50%'
                 } else if (paymentType === 'total') {
                     addAmount = Number(item.monto_total)
@@ -359,10 +391,8 @@ export default function AlquileresPage() {
                 }).eq('id', item.id)
             })
 
-            // Ejecutamos todos los updates en paralelo
             await Promise.all(updates)
 
-            // Registramos el ingreso en la Caja del usuario
             const { error: errorMov } = await supabase.from('caja_movimientos').insert({
                 turno_id: currentTurnoId,
                 tipo: 'ingreso',
@@ -376,7 +406,7 @@ export default function AlquileresPage() {
 
             toast.success(`¡${labelCobro} cobrado con éxito! ($${montoACobrar.toLocaleString()})`)
             setIsPaymentModalOpen(false)
-            fetchData()
+            mutate() // 🚀 SWR refetch data
         } catch (error) {
             toast.error('Hubo un error al procesar el pago.')
         } finally {
@@ -386,9 +416,19 @@ export default function AlquileresPage() {
 
     const handleDeleteGroup = async (group: ReservaGroup) => {
         if (!confirm('¿Eliminar reserva completa?')) return
-        await supabase.from('alquileres').delete().in('id', group.items.map(i => i.id))
-        setGrupos(prev => prev.filter(g => g.group_id !== group.group_id))
-        toast.success('Reserva eliminada')
+
+        // Optimistic Delete
+        const filteredGroups = grupos.filter(g => g.group_id !== group.group_id)
+        mutate({ salas, grupos: filteredGroups }, false)
+
+        try {
+            const { error } = await supabase.from('alquileres').delete().in('id', group.items.map(i => i.id))
+            if (error) throw error
+            toast.success('Reserva eliminada')
+        } catch (err) {
+            toast.error("Error al eliminar")
+            mutate()
+        }
     }
 
     const handleRenovar = (group: ReservaGroup) => {
@@ -407,8 +447,6 @@ export default function AlquileresPage() {
         toast.info('Elegí nuevas fechas')
     }
 
-    if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
-
     const VISIBLE_TAGS = 12
 
     return (
@@ -418,7 +456,10 @@ export default function AlquileresPage() {
             {/* HEADER */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
                 <div>
-                    <h1 className="text-3xl font-black uppercase tracking-tighter text-white">Alquileres</h1>
+                    <h1 className="text-3xl font-black uppercase tracking-tighter text-white flex items-center gap-2">
+                        Alquileres
+                        {isLoading && <Loader2 size={20} className="animate-spin text-[#D4E655]" />}
+                    </h1>
                     <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest">Gestión de Salas</p>
                 </div>
                 <div className="flex gap-2 w-full md:w-auto">
@@ -432,67 +473,71 @@ export default function AlquileresPage() {
             </div>
 
             {/* GRILLA GRUPOS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {grupos.map((group) => {
-                    const isFullyPaid = group.estado_pago === 'pagado'
-                    const isSena = group.estado_pago === 'seña_pagada'
-                    const isOpen = expandedGroup === group.group_id
+            {isLoading && grupos.length === 0 ? (
+                <div className="min-h-[50vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {grupos.map((group) => {
+                        const isFullyPaid = group.estado_pago === 'pagado'
+                        const isSena = group.estado_pago === 'seña_pagada'
+                        const isOpen = expandedGroup === group.group_id
 
-                    // Colores de la etiqueta según el estado de pago
-                    let tagClass = 'bg-red-500/20 text-red-500'
-                    let tagText = 'Pendiente'
-                    if (isSena) { tagClass = 'bg-yellow-500/20 text-yellow-500'; tagText = 'Seña 50%' }
-                    if (isFullyPaid) { tagClass = 'bg-green-500/20 text-green-500'; tagText = 'Pagado' }
+                        let tagClass = 'bg-red-500/20 text-red-500'
+                        let tagText = 'Pendiente'
+                        if (isSena) { tagClass = 'bg-yellow-500/20 text-yellow-500'; tagText = 'Seña 50%' }
+                        if (isFullyPaid) { tagClass = 'bg-green-500/20 text-green-500'; tagText = 'Pagado' }
 
-                    const saldoRestante = group.total_grupo - group.total_pagado
+                        const saldoRestante = group.total_grupo - group.total_pagado
 
-                    return (
-                        <div key={group.group_id} className="bg-[#09090b] border border-white/10 rounded-2xl overflow-hidden flex flex-col hover:border-[#D4E655]/30 transition-all">
-                            <div className="p-4 border-b border-white/5 bg-[#111]/50 relative">
-                                <div className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${tagClass}`}>{tagText}</div>
-                                <div className="flex items-center gap-2 mb-1 text-[#D4E655] text-[10px] font-black uppercase tracking-wider"><MapPin size={12} /> {group.sala_nombre} • {group.tipo_uso}</div>
-                                <h3 className="text-lg font-bold text-white truncate pr-16">{group.cliente_nombre}</h3>
-                                {group.cliente_contacto && <div className="flex items-center gap-2 mt-1"><a href={`https://wa.me/${group.cliente_contacto.replace(/[^0-9]/g, '')}`} target="_blank" className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-green-400 transition-colors"><MessageCircle size={12} /> {group.cliente_contacto}</a></div>}
-                            </div>
-                            <div className="p-4 flex-1">
-                                <div className="flex justify-between items-center mb-1">
-                                    <div className="flex items-center gap-2 text-xs font-bold text-gray-300"><Layers size={14} /> {group.items.length} Reservas</div>
-                                    <div className="text-right"><span className="block text-[10px] text-gray-500 uppercase font-bold">Total</span><span className="text-sm font-black text-white">${group.total_grupo.toLocaleString()}</span></div>
+                        return (
+                            <div key={group.group_id} className="bg-[#09090b] border border-white/10 rounded-2xl overflow-hidden flex flex-col hover:border-[#D4E655]/30 transition-all">
+                                <div className="p-4 border-b border-white/5 bg-[#111]/50 relative">
+                                    <div className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${tagClass}`}>{tagText}</div>
+                                    <div className="flex items-center gap-2 mb-1 text-[#D4E655] text-[10px] font-black uppercase tracking-wider"><MapPin size={12} /> {group.sala_nombre} • {group.tipo_uso}</div>
+                                    <h3 className="text-lg font-bold text-white truncate pr-16">{group.cliente_nombre}</h3>
+                                    {group.cliente_contacto && <div className="flex items-center gap-2 mt-1"><a href={`https://wa.me/${group.cliente_contacto.replace(/[^0-9]/g, '')}`} target="_blank" className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-green-400 transition-colors"><MessageCircle size={12} /> {group.cliente_contacto}</a></div>}
                                 </div>
-                                <div className="flex justify-between items-center mb-3 pt-2 border-t border-white/5">
-                                    <div className="text-[9px] uppercase font-bold text-gray-500">Abonado: <span className={isSena || isFullyPaid ? 'text-green-400' : 'text-gray-400'}>${group.total_pagado.toLocaleString()}</span></div>
-                                    <div className="text-[9px] uppercase font-bold text-gray-500">Saldo: <span className={saldoRestante > 0 ? 'text-red-400' : 'text-gray-400'}>${saldoRestante.toLocaleString()}</span></div>
-                                </div>
+                                <div className="p-4 flex-1">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <div className="flex items-center gap-2 text-xs font-bold text-gray-300"><Layers size={14} /> {group.items.length} Reservas</div>
+                                        <div className="text-right"><span className="block text-[10px] text-gray-500 uppercase font-bold">Total</span><span className="text-sm font-black text-white">${group.total_grupo.toLocaleString()}</span></div>
+                                    </div>
+                                    <div className="flex justify-between items-center mb-3 pt-2 border-t border-white/5">
+                                        <div className="text-[9px] uppercase font-bold text-gray-500">Abonado: <span className={isSena || isFullyPaid ? 'text-green-400' : 'text-gray-400'}>${group.total_pagado.toLocaleString()}</span></div>
+                                        <div className="text-[9px] uppercase font-bold text-gray-500">Saldo: <span className={saldoRestante > 0 ? 'text-red-400' : 'text-gray-400'}>${saldoRestante.toLocaleString()}</span></div>
+                                    </div>
 
-                                <div className={`space-y-1 overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-64 overflow-y-auto custom-scrollbar' : 'max-h-0'}`}>
-                                    {group.items.map(item => (
-                                        <div key={item.id} className="flex justify-between items-center text-[10px] p-2 rounded bg-white/5 border border-white/5">
-                                            <div className="flex items-center gap-2 text-gray-300"><Calendar size={10} /> {format(new Date(item.fecha), "EEE d MMM", { locale: es })}</div>
-                                            <div className="flex gap-2">
-                                                <span className="font-mono text-gray-500">{item.hora_inicio}-{item.hora_fin}</span>
-                                                <span className="font-bold text-[#D4E655]">${item.monto_total}</span>
+                                    <div className={`space-y-1 overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-64 overflow-y-auto custom-scrollbar' : 'max-h-0'}`}>
+                                        {group.items.map(item => (
+                                            <div key={item.id} className="flex justify-between items-center text-[10px] p-2 rounded bg-white/5 border border-white/5">
+                                                <div className="flex items-center gap-2 text-gray-300"><Calendar size={10} /> {format(new Date(item.fecha), "EEE d MMM", { locale: es })}</div>
+                                                <div className="flex gap-2">
+                                                    <span className="font-mono text-gray-500">{item.hora_inicio}-{item.hora_fin}</span>
+                                                    <span className="font-bold text-[#D4E655]">${item.monto_total}</span>
+                                                </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        ))}
+                                    </div>
+                                    <button onClick={() => setExpandedGroup(isOpen ? null : group.group_id)} className="w-full mt-2 py-1 flex items-center justify-center gap-1 text-[9px] font-bold text-gray-500 uppercase hover:text-white transition-colors">{isOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />} {isOpen ? 'Ocultar' : 'Ver detalle'}</button>
                                 </div>
-                                <button onClick={() => setExpandedGroup(isOpen ? null : group.group_id)} className="w-full mt-2 py-1 flex items-center justify-center gap-1 text-[9px] font-bold text-gray-500 uppercase hover:text-white transition-colors">{isOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />} {isOpen ? 'Ocultar' : 'Ver detalle'}</button>
+                                <div className="p-3 bg-[#111] flex gap-2 border-t border-white/5">
+                                    <button onClick={() => handleRenovar(group)} className="p-2 text-gray-500 hover:text-white bg-white/5 rounded-lg transition-colors"><Repeat size={16} /></button>
+                                    {!isFullyPaid ? (
+                                        <button onClick={() => openPaymentModal(group)} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase rounded-lg hover:bg-white transition-colors flex items-center justify-center gap-2">
+                                            <DollarSign size={14} /> Cobrar
+                                        </button>
+                                    ) : (
+                                        <div className="flex-1 flex items-center justify-center gap-2 text-[10px] font-black uppercase text-green-500 opacity-50 cursor-default border border-green-500/20 rounded-lg"><CheckCircle size={14} /> Cobrado</div>
+                                    )}
+                                    <button onClick={() => handleDeleteGroup(group)} className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={16} /></button>
+                                </div>
                             </div>
-                            <div className="p-3 bg-[#111] flex gap-2 border-t border-white/5">
-                                <button onClick={() => handleRenovar(group)} className="p-2 text-gray-500 hover:text-white bg-white/5 rounded-lg transition-colors"><Repeat size={16} /></button>
-                                {!isFullyPaid ? (
-                                    <button onClick={() => openPaymentModal(group)} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase rounded-lg hover:bg-white transition-colors flex items-center justify-center gap-2">
-                                        <DollarSign size={14} /> Cobrar
-                                    </button>
-                                ) : (
-                                    <div className="flex-1 flex items-center justify-center gap-2 text-[10px] font-black uppercase text-green-500 opacity-50 cursor-default border border-green-500/20 rounded-lg"><CheckCircle size={14} /> Cobrado</div>
-                                )}
-                                <button onClick={() => handleDeleteGroup(group)} className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={16} /></button>
-                            </div>
-                        </div>
-                    )
-                })}
-                {grupos.length === 0 && <div className="col-span-full text-center py-20 opacity-50"><p className="text-gray-500 font-bold uppercase text-xs">No hay reservas activas.</p></div>}
-            </div>
+                        )
+                    })}
+                    {grupos.length === 0 && <div className="col-span-full text-center py-20 opacity-50"><p className="text-gray-500 font-bold uppercase text-xs">No hay reservas activas.</p></div>}
+                </div>
+            )}
+
 
             {/* MODAL COBRO INTELIGENTE */}
             {isPaymentModalOpen && selectedGroup && (
