@@ -1,7 +1,8 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
+import { useState, useMemo } from 'react'
+import useSWR from 'swr'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
@@ -13,7 +14,7 @@ import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
 import Image from 'next/image'
 
-// --- NUEVOS TIPOS PARA AGRUPACIÓN ---
+// --- TIPOS ---
 type ClaseInstancia = {
     id: string
     inicio: string
@@ -35,179 +36,199 @@ type ClaseAgrupada = {
     instancias: ClaseInstancia[]
 }
 
+type CarteleraData = {
+    perfil: { id: string, creditos_regulares: number, creditos_seminarios: number } | null
+    clasesAgrupadas: ClaseAgrupada[]
+}
+
+// 🚀 FETCHER UNIFICADO + AGRUPADOR
+const fetcherCartelera = async (): Promise<CarteleraData> => {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) throw new Error('No user')
+
+    // 1. Limpieza en background (Fire and forget)
+    supabase.rpc('limpiar_creditos_vencidos').then()
+
+    // 2. Traemos Perfil
+    const { data: profile } = await supabase
+        .from('profiles')
+        .select('id, creditos_regulares, creditos_seminarios')
+        .eq('id', user.id)
+        .single()
+
+    // 3. Traemos Clases
+    const hoy = new Date().toISOString()
+    const { data: clasesData } = await supabase
+        .from('clases')
+        .select(`
+            id, nombre, inicio, fin, tipo_clase, cupo_maximo, estado, imagen_url, ritmo_id,
+            profesor:profiles!clases_profesor_id_fkey(nombre_completo),
+            sala:salas(nombre, sede:sedes(nombre)),
+            inscripciones(user_id)
+        `)
+        .gte('inicio', hoy)
+        .neq('estado', 'cancelada')
+        .neq('tipo_clase', 'Formación') // Filtramos directo en la DB
+        .order('inicio', { ascending: true })
+
+    // 4. AGRUPACIÓN (Se hace una vez y SWR lo guarda en caché)
+    const agrupador: Record<string, ClaseAgrupada> = {}
+
+    if (clasesData) {
+        clasesData.forEach((c: any) => {
+            const nombreProfe = c.profesor?.nombre_completo || 'Staff'
+            const key = `${c.nombre}-${nombreProfe}-${c.tipo_clase}`
+
+            const inscritos = c.inscripciones || []
+            const instancia: ClaseInstancia = {
+                id: c.id,
+                inicio: c.inicio,
+                fin: c.fin,
+                cupo_maximo: c.cupo_maximo,
+                inscritos_count: inscritos.length,
+                ya_inscrito: inscritos.some((i: any) => i.user_id === user.id),
+                estado: c.estado,
+                sala: c.sala
+            }
+
+            if (!agrupador[key]) {
+                agrupador[key] = {
+                    key_grupo: key,
+                    nombre: c.nombre,
+                    tipo_clase: c.tipo_clase,
+                    imagen_url: c.imagen_url,
+                    ritmo_id: c.ritmo_id,
+                    profesor: { nombre_completo: nombreProfe },
+                    instancias: []
+                }
+            }
+            agrupador[key].instancias.push(instancia)
+        })
+    }
+
+    const arrAgrupado = Object.values(agrupador)
+    arrAgrupado.forEach(g => g.instancias.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime()))
+    arrAgrupado.sort((a, b) => new Date(a.instancias[0].inicio).getTime() - new Date(b.instancias[0].inicio).getTime())
+
+    return {
+        perfil: profile,
+        clasesAgrupadas: arrAgrupado
+    }
+}
+
 export default function ExplorarClasesPage() {
     const [supabase] = useState(() => createClient())
 
-    // Ahora usamos el estado agrupado
-    const [clasesAgrupadas, setClasesAgrupadas] = useState<ClaseAgrupada[]>([])
-    const [loading, setLoading] = useState(true)
+    // 🚀 SWR
+    const { data, isLoading, mutate } = useSWR<CarteleraData>(
+        'cartelera',
+        fetcherCartelera,
+        {
+            revalidateOnFocus: true,
+            dedupingInterval: 3000
+        }
+    )
+
+    const clasesAgrupadas = data?.clasesAgrupadas || []
+    const perfil = data?.perfil || null
+
+    // UI States
     const [procesandoId, setProcesandoId] = useState<string | null>(null)
-
-    // Modal de Fechas
     const [selectedGrupo, setSelectedGrupo] = useState<ClaseAgrupada | null>(null)
-
-    // Filtros
     const [filtroTexto, setFiltroTexto] = useState('')
     const [filtroTipo, setFiltroTipo] = useState<'Todos' | 'Regular' | 'Especial'>('Todos')
-
-    // Perfil del Alumno
-    const [perfil, setPerfil] = useState<{ id: string, creditos_regulares: number, creditos_seminarios: number } | null>(null)
-
-    useEffect(() => {
-        fetchData()
-    }, [])
-
-    const fetchData = async () => {
-        await supabase.rpc('limpiar_creditos_vencidos')
-        setLoading(true)
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return
-
-        const { data: userProfile } = await supabase
-            .from('profiles')
-            .select('id, creditos_regulares, creditos_seminarios')
-            .eq('id', user.id)
-            .single()
-
-        if (userProfile) setPerfil(userProfile)
-
-        const hoy = new Date().toISOString()
-        const { data: clasesData } = await supabase
-            .from('clases')
-            .select(`
-                id, nombre, inicio, fin, tipo_clase, cupo_maximo, estado, imagen_url, ritmo_id,
-                profesor:profiles!clases_profesor_id_fkey(nombre_completo),
-                sala:salas(nombre, sede:sedes(nombre)),
-                inscripciones(user_id)
-            `)
-            .gte('inicio', hoy)
-            .neq('estado', 'cancelada')
-            .order('inicio', { ascending: true })
-
-        if (clasesData) {
-            // 🛑 FILTRO INVISIBLE: Destruimos "Formación" para que no aparezca en la cartelera
-            const clasesPermitidas = clasesData.filter((c: any) => c.tipo_clase !== 'Formación')
-
-            // 🧠 AGRUPADOR LÓGICO
-            const agrupador: Record<string, ClaseAgrupada> = {}
-
-            clasesPermitidas.forEach((c: any) => {
-                const nombreProfe = c.profesor?.nombre_completo || 'Staff'
-                const key = `${c.nombre}-${nombreProfe}-${c.tipo_clase}`
-
-                const inscritos = c.inscripciones || []
-                const instancia: ClaseInstancia = {
-                    id: c.id,
-                    inicio: c.inicio,
-                    fin: c.fin,
-                    cupo_maximo: c.cupo_maximo,
-                    inscritos_count: inscritos.length,
-                    ya_inscrito: inscritos.some((i: any) => i.user_id === user.id),
-                    estado: c.estado,
-                    sala: c.sala
-                }
-
-                if (!agrupador[key]) {
-                    agrupador[key] = {
-                        key_grupo: key,
-                        nombre: c.nombre,
-                        tipo_clase: c.tipo_clase,
-                        imagen_url: c.imagen_url,
-                        ritmo_id: c.ritmo_id,
-                        profesor: { nombre_completo: nombreProfe },
-                        instancias: []
-                    }
-                }
-                agrupador[key].instancias.push(instancia)
-            })
-
-            const arrAgrupado = Object.values(agrupador)
-            // Ordenamos las fechas de cada grupo (la más próxima primero)
-            arrAgrupado.forEach(g => g.instancias.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime()))
-            // Ordenamos los grupos en la grilla para que el que tenga la clase más inminente salga primero
-            arrAgrupado.sort((a, b) => new Date(a.instancias[0].inicio).getTime() - new Date(b.instancias[0].inicio).getTime())
-
-            setClasesAgrupadas(arrAgrupado)
-        }
-        setLoading(false)
-    }
 
     const handleInscribirse = async (instancia: ClaseInstancia, grupo: ClaseAgrupada) => {
         if (!perfil) return
 
-        // 🧠 CORRECCIÓN CRÍTICA: Identificamos correctamente a la familia de "Seminarios"
         const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(grupo.tipo_clase)
         const tipoClaseBD = esEspecial ? 'seminario' : 'regular'
+        const columnaUpdate = esEspecial ? 'creditos_seminarios' : 'creditos_regulares'
+        const creditosActuales = perfil[columnaUpdate] || 0
+
+        if (creditosActuales <= 0) {
+            toast.error("No tenés créditos suficientes para esta clase.")
+            return
+        }
 
         setProcesandoId(instancia.id)
 
-        try {
-            const { data, error } = await supabase.rpc('inscribir_alumno_fifo', {
-                p_user_id: perfil.id,
-                p_clase_id: instancia.id,
-                p_tipo_clase: tipoClaseBD // Ahora sí manda "seminario" a la base de datos
-            })
-
-            if (error) throw new Error('Error de conexión al procesar la reserva.')
-            if (!data.success) throw new Error(data.message)
-
-            if (grupo.ritmo_id) {
-                const { data: currentProfile } = await supabase
-                    .from('profiles')
-                    .select('intereses_ritmos')
-                    .eq('id', perfil.id)
-                    .single()
-
-                let nuevosIntereses = currentProfile?.intereses_ritmos || []
-                if (!nuevosIntereses.includes(grupo.ritmo_id)) {
-                    await supabase
-                        .from('profiles')
-                        .update({ intereses_ritmos: [...nuevosIntereses, grupo.ritmo_id] })
-                        .eq('id', perfil.id)
+        // 🚀 MUTACIÓN OPTIMISTA
+        const optimisticAgrupadas = clasesAgrupadas.map(g => {
+            if (g.key_grupo === grupo.key_grupo) {
+                return {
+                    ...g,
+                    instancias: g.instancias.map(i => i.id === instancia.id ? { ...i, ya_inscrito: true, inscritos_count: i.inscritos_count + 1 } : i)
                 }
             }
+            return g
+        })
 
-            // Descontamos visualmente el crédito correcto
-            const columnaUpdate = esEspecial ? 'creditos_seminarios' : 'creditos_regulares'
-            const creditosActuales = perfil[columnaUpdate] || 0
+        const optimisticPerfil = { ...perfil, [columnaUpdate]: creditosActuales - 1 }
 
-            setPerfil(prev => prev ? { ...prev, [columnaUpdate]: Math.max(0, creditosActuales - 1) } : null)
+        mutate({ perfil: optimisticPerfil, clasesAgrupadas: optimisticAgrupadas }, false)
 
-            // Actualizamos la instancia localmente para pintar de verde
-            const updateInstancias = (insts: ClaseInstancia[]) =>
-                insts.map(i => i.id === instancia.id ? { ...i, ya_inscrito: true, inscritos_count: i.inscritos_count + 1 } : i)
+        if (selectedGrupo?.key_grupo === grupo.key_grupo) {
+            setSelectedGrupo(optimisticAgrupadas.find(g => g.key_grupo === grupo.key_grupo) || null)
+        }
 
-            setClasesAgrupadas(prev => prev.map(g => g.key_grupo === grupo.key_grupo ? { ...g, instancias: updateInstancias(g.instancias) } : g))
-            if (selectedGrupo?.key_grupo === grupo.key_grupo) {
-                setSelectedGrupo(prev => prev ? { ...prev, instancias: updateInstancias(prev.instancias) } : null)
+        try {
+            const { data: res, error } = await supabase.rpc('inscribir_alumno_fifo', {
+                p_user_id: perfil.id,
+                p_clase_id: instancia.id,
+                p_tipo_clase: tipoClaseBD
+            })
+
+            if (error || !res.success) throw new Error(res?.message || 'Error de conexión al procesar la reserva.')
+
+            // Lógica secundaria de ritmos (Background, no trabamos al usuario)
+            if (grupo.ritmo_id) {
+                supabase.from('profiles').select('intereses_ritmos').eq('id', perfil.id).single().then(({ data }: any) => {
+                    // Le indicamos explícitamente a TypeScript la forma de esta data
+                    const currentProfile = data as { intereses_ritmos: string[] | null } | null;
+
+                    let nuevosIntereses = currentProfile?.intereses_ritmos || [];
+
+                    // Verificamos que grupo.ritmo_id no sea null explícitamente para el array
+                    if (grupo.ritmo_id && !nuevosIntereses.includes(grupo.ritmo_id)) {
+                        supabase.from('profiles').update({ intereses_ritmos: [...nuevosIntereses, grupo.ritmo_id] }).eq('id', perfil.id).then();
+                    }
+                })
             }
 
-            toast.success(data.message)
+            toast.success(res.message)
+            mutate() // Revalidamos silenciosamente
 
         } catch (error: any) {
             toast.error(error.message)
+            mutate() // Revertimos en caso de error
         } finally {
             setProcesandoId(null)
         }
     }
 
-    const gruposFiltrados = clasesAgrupadas.filter(g => {
-        const coincideTexto = g.nombre.toLowerCase().includes(filtroTexto.toLowerCase()) ||
-            g.profesor.nombre_completo.toLowerCase().includes(filtroTexto.toLowerCase())
+    // 🚀 FILTROS (Memoizados para mejor performance al tipear)
+    const gruposFiltrados = useMemo(() => {
+        return clasesAgrupadas.filter(g => {
+            const coincideTexto = g.nombre.toLowerCase().includes(filtroTexto.toLowerCase()) ||
+                g.profesor.nombre_completo.toLowerCase().includes(filtroTexto.toLowerCase())
 
-        const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(g.tipo_clase)
+            const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(g.tipo_clase)
+            let coincideTipo = false
+            if (filtroTipo === 'Todos') coincideTipo = true
+            else if (filtroTipo === 'Especial') coincideTipo = esEspecial
+            else if (filtroTipo === 'Regular') coincideTipo = !esEspecial
 
-        let coincideTipo = false
-        if (filtroTipo === 'Todos') coincideTipo = true
-        else if (filtroTipo === 'Especial') coincideTipo = esEspecial
-        else if (filtroTipo === 'Regular') coincideTipo = !esEspecial
+            return coincideTexto && coincideTipo
+        })
+    }, [clasesAgrupadas, filtroTexto, filtroTipo])
 
-        return coincideTexto && coincideTipo
-    })
+    const ritmosSugeridos = useMemo(() => {
+        return Array.from(new Set(clasesAgrupadas.map(c => c.nombre.split(' ')[0]))).slice(0, 5)
+    }, [clasesAgrupadas])
 
-    const ritmosSugeridos = Array.from(new Set(clasesAgrupadas.map(c => c.nombre.split(' ')[0]))).slice(0, 5)
-
-    if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
+    if (isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
@@ -253,12 +274,12 @@ export default function ExplorarClasesPage() {
                             className="w-full bg-[#111] border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white outline-none focus:border-[#D4E655] transition-colors"
                         />
                     </div>
-                    <div className="flex bg-[#111] p-1 rounded-2xl border border-white/10 shrink-0">
+                    <div className="flex bg-[#111] p-1 rounded-2xl border border-white/10 shrink-0 overflow-x-auto">
                         {['Todos', 'Regular', 'Especial'].map(tipo => (
                             <button
                                 key={tipo}
                                 onClick={() => setFiltroTipo(tipo as any)}
-                                className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${filtroTipo === tipo ? 'bg-[#D4E655] text-black shadow-lg' : 'text-gray-500 hover:text-white'}`}
+                                className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${filtroTipo === tipo ? 'bg-[#D4E655] text-black shadow-lg' : 'text-gray-500 hover:text-white'}`}
                             >
                                 {tipo}
                             </button>
@@ -294,13 +315,11 @@ export default function ExplorarClasesPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                     {gruposFiltrados.map((grupo) => {
                         const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(grupo.tipo_clase)
-                        const proximaClase = grupo.instancias[0] // La primera de la lista siempre es la más cercana
+                        const proximaClase = grupo.instancias[0]
                         const esHoy = isToday(new Date(proximaClase.inicio))
 
                         return (
                             <div key={grupo.key_grupo} className={`bg-[#09090b] rounded-3xl overflow-hidden flex flex-col transition-all group shadow-xl border-2 ${esHoy ? (esEspecial ? 'border-purple-500/50 shadow-[0_0_20px_rgba(168,85,247,0.2)]' : 'border-[#D4E655]/50 shadow-[0_0_20px_rgba(212,230,85,0.2)]') : (esEspecial ? 'border-purple-500/30 hover:border-purple-500/60' : 'border-white/10 hover:border-white/30')}`}>
-
-                                {/* IMAGEN / FLYER */}
                                 <div className="h-48 w-full relative bg-gradient-to-br from-[#1a1a1c] to-[#0a0a0a] border-b border-white/5 flex items-center justify-center overflow-hidden">
                                     {grupo.imagen_url ? (
                                         <Image src={grupo.imagen_url} alt={grupo.nombre} fill priority sizes="(max-width: 768px) 100vw, 33vw" className="object-cover group-hover:scale-105 transition-transform duration-500" />
@@ -322,7 +341,6 @@ export default function ExplorarClasesPage() {
                                     </span>
                                 </div>
 
-                                {/* INFO CLASE */}
                                 <div className="p-5 flex-1 flex flex-col relative">
                                     <div className="mb-4">
                                         <h3 className="text-xl font-black text-white uppercase leading-tight mb-1">{grupo.nombre}</h3>
@@ -341,14 +359,11 @@ export default function ExplorarClasesPage() {
                                     </div>
                                 </div>
 
-                                {/* ACCIÓN / BOTÓN ABRIR MODAL */}
                                 <div className="p-5 bg-[#111] border-t border-white/5 mt-auto">
                                     <button
                                         onClick={() => setSelectedGrupo(grupo)}
                                         className={`w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all shadow-lg
-                                            ${esEspecial
-                                                ? 'bg-purple-600 text-white hover:bg-purple-500'
-                                                : 'bg-[#D4E655] text-black hover:bg-white'}
+                                            ${esEspecial ? 'bg-purple-600 text-white hover:bg-purple-500' : 'bg-[#D4E655] text-black hover:bg-white'}
                                         `}
                                     >
                                         Ver Fechas <ArrowRight size={16} />
@@ -360,12 +375,10 @@ export default function ExplorarClasesPage() {
                 </div>
             )}
 
-            {/* MODAL DE FECHAS (El submenú de cada tarjeta) */}
+            {/* MODAL DE FECHAS */}
             {selectedGrupo && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setSelectedGrupo(null)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-xl rounded-3xl overflow-hidden shadow-2xl relative flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
-
-                        {/* HEADER DEL MODAL */}
                         <div className="p-6 border-b border-white/10 shrink-0 relative overflow-hidden">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-[#D4E655]/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
                             <div className="flex justify-between items-start relative z-10">
@@ -382,7 +395,6 @@ export default function ExplorarClasesPage() {
                             </div>
                         </div>
 
-                        {/* LISTA DE FECHAS */}
                         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar">
                             <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Elegí la fecha para anotarte:</h4>
 
@@ -394,7 +406,6 @@ export default function ExplorarClasesPage() {
 
                                 return (
                                     <div key={inst.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between hover:border-white/20 transition-colors">
-                                        {/* INFO FECHA */}
                                         <div className="flex-1 w-full">
                                             <div className="flex items-center gap-2 mb-1">
                                                 <Calendar size={14} className={esEspecial ? 'text-purple-400' : 'text-[#D4E655]'} />
@@ -404,7 +415,6 @@ export default function ExplorarClasesPage() {
                                                 <span className="flex items-center gap-1"><Clock size={12} /> {format(new Date(inst.inicio), "HH:mm")} a {format(new Date(inst.fin), "HH:mm")}</span>
                                                 <span className="flex items-center gap-1"><MapPin size={12} /> {inst.sala.nombre}</span>
                                             </div>
-                                            {/* Barrita de progreso de cupos */}
                                             {inst.cupo_maximo > 0 && (
                                                 <div className="pl-5 mt-3 pr-4">
                                                     <div className="w-full bg-black rounded-full h-1.5 mb-1 overflow-hidden">
@@ -415,7 +425,6 @@ export default function ExplorarClasesPage() {
                                             )}
                                         </div>
 
-                                        {/* BOTÓN DE ESTA FECHA */}
                                         <div className="w-full sm:w-auto shrink-0 flex flex-col justify-end">
                                             {inst.ya_inscrito ? (
                                                 <div className="w-full sm:w-32 py-2.5 bg-green-500/10 text-green-500 border border-green-500/20 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase tracking-widest cursor-default">

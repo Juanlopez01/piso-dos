@@ -569,9 +569,11 @@ export default function CalendarioPage() {
                                                 <div className="space-y-1">
                                                     <label className="text-[9px] font-bold text-gray-500 uppercase">Nivel</label>
                                                     <select value={form.nivel} onChange={e => setForm({ ...form, nivel: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]">
-                                                        <option value="Open">Open</option>
+                                                        <option value="Todos">Todos</option>
                                                         <option value="Principiante">Principiante</option>
+                                                        <option value="Principiante/Intermedio">Principiante/Intermedio</option>
                                                         <option value="Intermedio">Intermedio</option>
+                                                        <option value="Intermedio/Avanzado">Intermedio/Avanzado</option>
                                                         <option value="Avanzado">Avanzado</option>
                                                     </select>
                                                 </div>

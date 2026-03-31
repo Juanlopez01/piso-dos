@@ -1,14 +1,15 @@
 'use client'
-import { Lock } from 'lucide-react';
+
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import { format, differenceInHours } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { CalendarCheck, MapPin, User, Clock, Loader2, ArrowRight, PlayCircle, StopCircle, Calendar, CheckCircle2, XCircle, Trash2 } from 'lucide-react'
+import { CalendarCheck, MapPin, User, Clock, Loader2, ArrowRight, PlayCircle, StopCircle, Calendar, CheckCircle2, XCircle, Trash2, Lock } from 'lucide-react'
 import Link from 'next/link'
 import { toast, Toaster } from 'sonner'
 
-// Tipos
+// --- TIPOS ---
 type HistorialAlumno = {
     id: string
     created_at: string
@@ -34,89 +35,98 @@ type ClaseProfe = {
     sala: { nombre: string; sede: { nombre: string } }
 }
 
+type MisClasesData = {
+    profile: { id: string, rol: string, nombre: string }
+    clasesProfe: ClaseProfe[]
+    historialAlumno: HistorialAlumno[]
+}
+
+// 🚀 FETCHER UNIFICADO DE SWR
+const fetcherMisClases = async (): Promise<MisClasesData> => {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+        window.location.href = '/login'
+        throw new Error("No auth")
+    }
+
+    // 1. Averiguar quién es (Rol y Nombre)
+    const { data: profile, error: errProfile } = await supabase
+        .from('profiles')
+        .select('id, rol, nombre')
+        .eq('id', user.id)
+        .single()
+
+    if (errProfile || !profile) throw new Error("Perfil no encontrado")
+
+    let clasesProfe: ClaseProfe[] = []
+    let historialAlumno: HistorialAlumno[] = []
+
+    // 2. Traer datos según el rol
+    if (profile.rol === 'profesor' || profile.rol === 'admin') {
+        const { data: misClasesData } = await supabase
+            .from('clases')
+            .select(`
+                id, nombre, inicio, fin, tipo_clase, estado,
+                sala:salas(nombre, sede:sedes(nombre))
+            `)
+            .eq('profesor_id', user.id)
+            .order('inicio', { ascending: true })
+
+        clasesProfe = (misClasesData as any) || []
+    } else {
+        const { data: historialData } = await supabase
+            .from('inscripciones')
+            .select(`
+                id, created_at, presente,
+                clase:clases (
+                    id, nombre, inicio, tipo_clase, imagen_url,
+                    sala:salas ( nombre, sede:sedes ( nombre ) ),
+                    profesor:profiles ( nombre_completo )
+                )
+            `)
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+
+        if (historialData) {
+            historialAlumno = (historialData as any).sort((a: any, b: any) =>
+                new Date(b.clase.inicio).getTime() - new Date(a.clase.inicio).getTime()
+            )
+        }
+    }
+
+    return { profile, clasesProfe, historialAlumno }
+}
+
 export default function MisClasesPage() {
     const [supabase] = useState(() => createClient())
-    const [loading, setLoading] = useState(true)
-    const [userRole, setUserRole] = useState<string>('alumno')
-    const [userName, setUserName] = useState('')
-    const [userId, setUserId] = useState('')
 
-    // Estados según el rol
-    const [historialAlumno, setHistorialAlumno] = useState<HistorialAlumno[]>([])
-    const [clasesProfe, setClasesProfe] = useState<ClaseProfe[]>([])
+    // 🚀 SWR AL MANDO
+    const { data, error, isLoading, mutate } = useSWR<MisClasesData>(
+        'mis-clases',
+        fetcherMisClases,
+        { revalidateOnFocus: true }
+    )
+
+    const profile = data?.profile || null
+    const userRole = profile?.rol || 'alumno'
+    const userName = profile?.nombre || ''
+    const userId = profile?.id || ''
+    const clasesProfe = data?.clasesProfe || []
+    const historialAlumno = data?.historialAlumno || []
+
     const [procesandoId, setProcesandoId] = useState<string | null>(null)
-
-    useEffect(() => {
-        fetchData()
-    }, [])
-
-    const fetchData = async () => {
-        setLoading(true)
-        const { data: { user } } = await supabase.auth.getUser()
-
-        if (!user) {
-            setLoading(false)
-            return
-        }
-        setUserId(user.id)
-
-        // 1. Averiguar quién es (Rol y Nombre)
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('rol, nombre')
-            .eq('id', user.id)
-            .single()
-
-        if (profile) {
-            setUserRole(profile.rol)
-            setUserName(profile.nombre)
-
-            // 2. Traer datos según el rol
-            if (profile.rol === 'profesor' || profile.rol === 'admin') {
-                // DATA PARA EL PROFE: Clases que dicta
-                const { data: misClasesData } = await supabase
-                    .from('clases')
-                    .select(`
-                        id, nombre, inicio, fin, tipo_clase, estado,
-                        sala:salas(nombre, sede:sedes(nombre))
-                    `)
-                    .eq('profesor_id', user.id)
-                    .order('inicio', { ascending: true })
-
-                if (misClasesData) setClasesProfe(misClasesData as any)
-            } else {
-                // DATA PARA EL ALUMNO: TODO el historial (sin filtrar por presente)
-                const { data: historialData } = await supabase
-                    .from('inscripciones')
-                    .select(`
-                        id, created_at, presente,
-                        clase:clases (
-                            id, nombre, inicio, tipo_clase, imagen_url,
-                            sala:salas ( nombre, sede:sedes ( nombre ) ),
-                            profesor:profiles ( nombre_completo )
-                        )
-                    `)
-                    .eq('user_id', user.id)
-                    .order('created_at', { ascending: false })
-
-                if (historialData) {
-                    // Ordenamos para que las más recientes queden arriba en cada grupo
-                    const sortedData = (historialData as any).sort((a: any, b: any) =>
-                        new Date(b.clase.inicio).getTime() - new Date(a.clase.inicio).getTime()
-                    )
-                    setHistorialAlumno(sortedData)
-                }
-            }
-        }
-
-        setLoading(false)
-    }
 
     // --- FUNCIÓN DE CANCELACIÓN (ALUMNO) ---
     const handleCancelarInscripcion = async (inscripcionId: string, claseTipo: string) => {
         if (!confirm('¿Seguro que querés cancelar tu inscripción? Se te devolverá el crédito.')) return
 
         setProcesandoId(inscripcionId)
+
+        // 🚀 MUTACIÓN OPTIMISTA
+        const optimisticHistorial = historialAlumno.filter(item => item.id !== inscripcionId)
+        mutate({ ...data!, historialAlumno: optimisticHistorial }, false)
 
         try {
             // 1. Borramos la inscripción
@@ -127,46 +137,38 @@ export default function MisClasesPage() {
 
             if (errDelete) throw errDelete
 
-            // 2. Le devolvemos el crédito al alumno
+            // 2. Le devolvemos el crédito al alumno (Proceso Background)
             const columnaCreditos = claseTipo === 'Especial' ? 'creditos_seminarios' : 'creditos_regulares'
+            supabase.from('profiles').select(columnaCreditos).eq('id', userId).single().then(({ data: currentProfile }: any) => {
+                if (currentProfile) {
+                    const saldoActual = Number(currentProfile[columnaCreditos as keyof typeof currentProfile] || 0)
+                    supabase.from('profiles').update({ [columnaCreditos]: saldoActual + 1 }).eq('id', userId).then()
+                }
+            })
 
-            // Buscamos cuántos tiene actualmente para sumarle 1
-            const { data: currentProfile } = await supabase
-                .from('profiles')
-                .select(columnaCreditos)
-                .eq('id', userId)
-                .single()
-
-            if (currentProfile) {
-                const saldoActual = Number(currentProfile[columnaCreditos as keyof typeof currentProfile] || 0)
-                await supabase
-                    .from('profiles')
-                    .update({ [columnaCreditos]: saldoActual + 1 })
-                    .eq('id', userId)
-            }
-
-            // 3. Actualizamos la UI
-            setHistorialAlumno(prev => prev.filter(item => item.id !== inscripcionId))
             toast.success('Reserva cancelada. Crédito devuelto.')
-
+            mutate() // Revalidamos silenciosamente
         } catch (error) {
             console.error("Error al cancelar:", error)
             toast.error('Hubo un error al intentar cancelar la reserva.')
+            mutate() // Revertimos en caso de error
         } finally {
             setProcesandoId(null)
         }
     }
 
 
-    if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-8 h-8" /></div>
+    if (isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-8 h-8" /></div>
+    if (error || !profile) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-red-500 font-bold uppercase">Error al cargar datos. Refrescá la página.</div>
 
     const ahora = new Date()
 
-    // --- VISTA PARA PROFESORES ---
+    // ==========================================
+    // VISTA PARA PROFESORES
+    // ==========================================
     if (userRole === 'profesor' || userRole === 'admin') {
         const clasesActivas = clasesProfe.filter(c => c.estado !== 'cancelada' && new Date(c.fin) > ahora)
         const clasesInactivas = clasesProfe.filter(c => c.estado === 'cancelada' || new Date(c.fin) <= ahora)
-
         clasesInactivas.sort((a, b) => new Date(b.inicio).getTime() - new Date(a.inicio).getTime())
 
         return (
@@ -219,7 +221,6 @@ export default function MisClasesPage() {
                             <StopCircle size={20} className="text-gray-500" /> Historial <span className="text-[10px] bg-white/10 px-2 py-1 rounded-full ml-2">Últimas 3</span>
                         </h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 opacity-60">
-                            {/* SOLO MOSTRAMOS LAS ÚLTIMAS 3 CLASES */}
                             {clasesInactivas.slice(0, 3).map((clase) => (
                                 <div key={clase.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex justify-between items-center">
                                     <div>
@@ -238,9 +239,9 @@ export default function MisClasesPage() {
         )
     }
 
-    // --- VISTA PARA ALUMNOS ---
-
-    // Separamos las clases (usamos compensación horaria para estar seguros)
+    // ==========================================
+    // VISTA PARA ALUMNOS
+    // ==========================================
     const clasesProximas = historialAlumno.filter(item => new Date(item.clase.inicio) > ahora)
     const clasesPasadas = historialAlumno.filter(item => new Date(item.clase.inicio) <= ahora)
 
@@ -255,7 +256,6 @@ export default function MisClasesPage() {
             </div>
 
             <div className="space-y-10 max-w-3xl">
-
                 {/* SECCIÓN 1: PRÓXIMAS CLASES */}
                 <div>
                     <h3 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-4 text-white">
@@ -265,7 +265,6 @@ export default function MisClasesPage() {
                     {clasesProximas.length > 0 ? (
                         <div className="space-y-4">
                             {clasesProximas.map((item) => {
-                                // Aplicamos la "vacuna de zona horaria" por seguridad
                                 const claseDate = new Date(item.clase.inicio)
                                 const claseDateLocal = new Date(claseDate.getTime() + Math.abs(claseDate.getTimezoneOffset() * 60000))
                                 const horasFaltantes = differenceInHours(claseDateLocal, ahora)
@@ -273,13 +272,11 @@ export default function MisClasesPage() {
 
                                 return (
                                     <div key={item.id} className="bg-[#09090b] border border-white/10 rounded-xl overflow-hidden flex flex-row hover:border-[#D4E655]/50 transition-colors shadow-lg group">
-                                        {/* Fecha (Columna Izq) */}
                                         <div className="bg-[#111] w-20 flex flex-col items-center justify-center p-3 text-center border-r border-white/10 shrink-0">
                                             <span className="text-xs font-bold text-[#D4E655] uppercase">{format(claseDateLocal, 'MMM', { locale: es })}</span>
                                             <span className="text-2xl font-black text-white leading-none mt-1">{format(claseDateLocal, 'd')}</span>
                                         </div>
 
-                                        {/* Info (Centro) */}
                                         <div className="flex-1 p-4 flex flex-col justify-center min-w-0">
                                             <h4 className="text-sm md:text-base font-bold text-white uppercase leading-tight mb-2 truncate">{item.clase.nombre}</h4>
                                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] md:text-xs text-gray-400 font-medium">
@@ -289,7 +286,6 @@ export default function MisClasesPage() {
                                             </div>
                                         </div>
 
-                                        {/* Botón Acción (Derecha) */}
                                         <div className="w-24 md:w-32 flex flex-col shrink-0 border-l border-white/5">
                                             {esCancelable ? (
                                                 <button
@@ -331,20 +327,17 @@ export default function MisClasesPage() {
 
                     {clasesPasadas.length > 0 ? (
                         <div className="space-y-4 opacity-80">
-                            {/* SOLO MOSTRAMOS LAS ÚLTIMAS 3 CLASES */}
                             {clasesPasadas.slice(0, 3).map((item) => {
                                 const claseDate = new Date(item.clase.inicio)
                                 const claseDateLocal = new Date(claseDate.getTime() + Math.abs(claseDate.getTimezoneOffset() * 60000))
 
                                 return (
                                     <div key={item.id} className="bg-[#111] border border-white/5 rounded-xl overflow-hidden flex flex-row transition-colors">
-                                        {/* Fecha (Columna Izq) */}
                                         <div className="bg-black/50 w-20 flex flex-col items-center justify-center p-3 text-center border-r border-white/5 shrink-0">
                                             <span className="text-xs font-bold text-gray-500 uppercase">{format(claseDateLocal, 'MMM', { locale: es })}</span>
                                             <span className="text-2xl font-black text-gray-400 leading-none mt-1">{format(claseDateLocal, 'd')}</span>
                                         </div>
 
-                                        {/* Info (Centro) */}
                                         <div className="flex-1 p-4 flex flex-col justify-center min-w-0">
                                             <h4 className="text-sm md:text-base font-bold text-gray-300 uppercase leading-tight mb-2 truncate">{item.clase.nombre}</h4>
                                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] md:text-xs text-gray-500 font-medium">
@@ -353,7 +346,6 @@ export default function MisClasesPage() {
                                             </div>
                                         </div>
 
-                                        {/* Estado Asistencia (Derecha) */}
                                         <div className={`w-20 flex flex-col gap-1 items-center justify-center border-l border-white/5 shrink-0 ${item.presente ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
                                             {item.presente ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
                                             <span className="text-[8px] font-black uppercase tracking-widest">{item.presente ? 'Presente' : 'Ausente'}</span>
@@ -368,7 +360,6 @@ export default function MisClasesPage() {
                         </div>
                     )}
                 </div>
-
             </div>
         </div>
     )

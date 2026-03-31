@@ -1,11 +1,14 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import useSWR from 'swr'
 import { Plus, Tag, Edit2, Trash2, Power, Loader2, Layers, BookOpen, Star, Percent, Ticket } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
+import { es } from 'date-fns/locale'
 
+// --- TIPOS ---
 type Producto = {
     id: string
     nombre: string
@@ -23,16 +26,50 @@ type Cupon = {
     created_at: string
 }
 
+type TiendaConfigData = {
+    productos: Producto[]
+    cupones: Cupon[]
+}
+
+// 🚀 FETCHER UNIFICADO DE SWR
+const fetcherTiendaConfig = async (): Promise<TiendaConfigData> => {
+    const supabase = createClient()
+
+    // Traer Productos
+    const { data: dataProds } = await supabase
+        .from('productos')
+        .select('*')
+        .order('tipo_clase', { ascending: true })
+        .order('creditos', { ascending: true })
+
+    // Traer Cupones
+    const { data: dataCupones } = await supabase
+        .from('cupones')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+    return {
+        productos: (dataProds as Producto[]) || [],
+        cupones: (dataCupones as Cupon[]) || []
+    }
+}
+
 export default function TiendaConfigPage() {
     const [supabase] = useState(() => createClient())
 
+    // 🚀 SWR AL MANDO
+    const { data, isLoading, mutate } = useSWR<TiendaConfigData>(
+        'tienda-config',
+        fetcherTiendaConfig,
+        { revalidateOnFocus: true }
+    )
+
+    const productos = data?.productos || []
+    const cupones = data?.cupones || []
+
     // UI States
     const [activeTab, setActiveTab] = useState<'packs' | 'cupones'>('packs')
-    const [loading, setLoading] = useState(true)
-
-    // Data States
-    const [productos, setProductos] = useState<Producto[]>([])
-    const [cupones, setCupones] = useState<Cupon[]>([])
+    const [saving, setSaving] = useState(false)
 
     // Modal Producto State
     const [isProductModalOpen, setIsProductModalOpen] = useState(false)
@@ -46,33 +83,6 @@ export default function TiendaConfigPage() {
     const [isCuponModalOpen, setIsCuponModalOpen] = useState(false)
     const [formCuponCodigo, setFormCuponCodigo] = useState('')
     const [formCuponPorcentaje, setFormCuponPorcentaje] = useState('')
-
-    const [saving, setSaving] = useState(false)
-
-    useEffect(() => {
-        fetchData()
-    }, [])
-
-    const fetchData = async () => {
-        setLoading(true)
-
-        // Traer Productos
-        const { data: dataProds } = await supabase
-            .from('productos')
-            .select('*')
-            .order('tipo_clase', { ascending: true })
-            .order('creditos', { ascending: true })
-        if (dataProds) setProductos(dataProds)
-
-        // Traer Cupones
-        const { data: dataCupones } = await supabase
-            .from('cupones')
-            .select('*')
-            .order('created_at', { ascending: false })
-        if (dataCupones) setCupones(dataCupones)
-
-        setLoading(false)
-    }
 
     // ==========================================
     // LÓGICA PRODUCTOS
@@ -116,7 +126,7 @@ export default function TiendaConfigPage() {
                 toast.success('Producto creado')
             }
             setIsProductModalOpen(false)
-            fetchData()
+            mutate() // 🚀 Revalidamos SWR
         } catch (error: any) {
             toast.error('Error: ' + error.message)
         } finally {
@@ -125,11 +135,18 @@ export default function TiendaConfigPage() {
     }
 
     const toggleProductStatus = async (id: string, currentStatus: boolean) => {
-        const { error } = await supabase.from('productos').update({ activo: !currentStatus }).eq('id', id)
-        if (error) toast.error('Error al cambiar estado')
-        else {
+        // 🚀 MUTACIÓN OPTIMISTA
+        const optimisticProds = productos.map(p => p.id === id ? { ...p, activo: !currentStatus } : p)
+        mutate({ ...data!, productos: optimisticProds }, false)
+
+        try {
+            const { error } = await supabase.from('productos').update({ activo: !currentStatus }).eq('id', id)
+            if (error) throw error
             toast.success(currentStatus ? 'Desactivado' : 'Activado')
-            fetchData()
+            mutate() // Confirma con BD
+        } catch (err) {
+            toast.error('Error al cambiar estado')
+            mutate() // Revierte en caso de fallo
         }
     }
 
@@ -157,7 +174,7 @@ export default function TiendaConfigPage() {
             setIsCuponModalOpen(false)
             setFormCuponCodigo('')
             setFormCuponPorcentaje('')
-            fetchData()
+            mutate() // 🚀 Revalidamos SWR
         } catch (error: any) {
             toast.error(error.message)
         } finally {
@@ -166,22 +183,36 @@ export default function TiendaConfigPage() {
     }
 
     const toggleCuponStatus = async (id: string, currentStatus: boolean) => {
-        const { error } = await supabase.from('cupones').update({ activo: !currentStatus }).eq('id', id)
-        if (error) toast.error('Error al cambiar estado')
-        else {
+        // 🚀 MUTACIÓN OPTIMISTA
+        const optimisticCupones = cupones.map(c => c.id === id ? { ...c, activo: !currentStatus } : c)
+        mutate({ ...data!, cupones: optimisticCupones }, false)
+
+        try {
+            const { error } = await supabase.from('cupones').update({ activo: !currentStatus }).eq('id', id)
+            if (error) throw error
             toast.success(currentStatus ? 'Cupón Apagado' : 'Cupón Activado')
-            fetchData()
+            mutate()
+        } catch (err) {
+            toast.error('Error al cambiar estado')
+            mutate()
         }
     }
 
     const deleteCupon = async (id: string) => {
         if (!confirm('¿Eliminar cupón definitivamente? Los alumnos que ya lo usaron no perderán su descuento, pero nadie más podrá usarlo.')) return
 
-        const { error } = await supabase.from('cupones').delete().eq('id', id)
-        if (error) toast.error('Error al eliminar')
-        else {
+        // 🚀 MUTACIÓN OPTIMISTA
+        const optimisticCupones = cupones.filter(c => c.id !== id)
+        mutate({ ...data!, cupones: optimisticCupones }, false)
+
+        try {
+            const { error } = await supabase.from('cupones').delete().eq('id', id)
+            if (error) throw error
             toast.success('Cupón eliminado')
-            fetchData()
+            mutate()
+        } catch (err) {
+            toast.error('Error al eliminar')
+            mutate()
         }
     }
 
@@ -193,7 +224,7 @@ export default function TiendaConfigPage() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4 border-b border-white/10 pb-6">
                 <div>
                     <h2 className="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter">Tienda Config</h2>
-                    <p className="text-piso2-lime font-bold text-xs tracking-widest uppercase mt-1">
+                    <p className="text-piso2-lime font-bold text-xs tracking-widest uppercase mt-1 text-[#D4E655]">
                         Gestión de Precios y Descuentos
                     </p>
                 </div>
@@ -215,8 +246,8 @@ export default function TiendaConfigPage() {
                 </div>
             </div>
 
-            {loading ? (
-                <div className="flex justify-center p-20"><Loader2 className="animate-spin text-piso2-lime w-10 h-10" /></div>
+            {isLoading ? (
+                <div className="flex justify-center p-20"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
             ) : (
                 <>
                     {/* ========================================================= */}
@@ -227,7 +258,7 @@ export default function TiendaConfigPage() {
                             <div className="flex justify-end mb-4">
                                 <button
                                     onClick={() => handleOpenProductModal()}
-                                    className="bg-piso2-lime text-black font-black uppercase tracking-widest text-xs px-6 py-3 rounded-xl shadow-[0_0_15px_rgba(204,255,0,0.3)] hover:scale-105 transition-transform flex items-center gap-2"
+                                    className="bg-[#D4E655] text-black font-black uppercase tracking-widest text-xs px-6 py-3 rounded-xl shadow-[0_0_15px_rgba(204,255,0,0.3)] hover:scale-105 transition-transform flex items-center gap-2"
                                 >
                                     <Plus size={16} /> Nuevo Pack
                                 </button>
@@ -238,7 +269,7 @@ export default function TiendaConfigPage() {
                                     <div
                                         key={prod.id}
                                         className={`border rounded-xl p-5 relative group transition-all ${prod.activo
-                                            ? 'bg-[#111] border-white/10 hover:border-piso2-lime/50'
+                                            ? 'bg-[#111] border-white/10 hover:border-[#D4E655]/50'
                                             : 'bg-black border-white/5 opacity-50 grayscale'
                                             }`}
                                     >
@@ -252,12 +283,12 @@ export default function TiendaConfigPage() {
                                         </div>
 
                                         <div className="absolute top-4 right-4 bg-white/10 px-2 py-1 rounded text-[10px] font-bold uppercase text-white flex items-center gap-1 mt-6">
-                                            <Layers size={10} className="text-piso2-lime" /> {prod.creditos} Créditos
+                                            <Layers size={10} className="text-[#D4E655]" /> {prod.creditos} Créditos
                                         </div>
 
                                         <div className="mb-4 mt-8">
                                             <h3 className="text-xl font-black text-white uppercase leading-none mb-2 pr-16">{prod.nombre}</h3>
-                                            <p className="text-2xl font-bold text-piso2-lime flex items-baseline gap-0.5">
+                                            <p className="text-2xl font-bold text-[#D4E655] flex items-baseline gap-0.5">
                                                 <span className="text-sm opacity-50">$</span>
                                                 {prod.precio.toLocaleString('es-AR')}
                                             </p>
@@ -324,7 +355,7 @@ export default function TiendaConfigPage() {
                                                         -{cupon.porcentaje}%
                                                     </td>
                                                     <td className="p-5 text-xs text-gray-400 font-medium">
-                                                        {format(new Date(cupon.created_at), "dd MMM yyyy")}
+                                                        {format(new Date(cupon.created_at), "dd MMM yyyy", { locale: es })}
                                                     </td>
                                                     <td className="p-5 text-center">
                                                         <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${cupon.activo ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
@@ -456,7 +487,6 @@ export default function TiendaConfigPage() {
                     </div>
                 </div>
             )}
-
         </div>
     )
 }
