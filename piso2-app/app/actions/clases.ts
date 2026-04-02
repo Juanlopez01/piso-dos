@@ -4,6 +4,7 @@
 import { createClient } from '@supabase/supabase-js' // 👈 Usamos el cliente puro
 import { v4 as uuidv4 } from 'uuid'
 import { format } from 'date-fns'
+import { revalidatePath } from 'next/cache'
 
 // Recibimos el token como tercer parámetro
 export async function crearClasesAction(form: any, publicUrl: string | null, token: string | undefined) {
@@ -75,6 +76,7 @@ export async function crearClasesAction(form: any, publicUrl: string | null, tok
         const { error } = await supabase.from('clases').insert(clasesAInsertar)
         if (error) throw new Error(error.message)
 
+        revalidatePath('/calendario')
         return { success: true, cantidad: clasesAInsertar.length }
 
     } catch (error: any) {

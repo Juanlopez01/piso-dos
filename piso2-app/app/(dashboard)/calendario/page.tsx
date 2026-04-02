@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useState, useEffect } from 'react'
+import { crearClasesAction } from '@/app/actions/clases'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import {
@@ -19,9 +20,6 @@ import Image from 'next/image'
 import { Toaster, toast } from 'sonner'
 import MultiDatePicker from '@/components/MultiDatePicker'
 import { v4 as uuidv4 } from 'uuid'
-
-// 🚀 IMPORTAMOS LA SERVER ACTION
-import { crearClasesAction } from '@/app/actions/clases'
 
 // --- TIPOS ESTRICTOS ---
 type EventoAgenda = {
@@ -184,6 +182,9 @@ export default function CalendarioPage() {
     const [isCreatingRitmo, setIsCreatingRitmo] = useState(false)
     const [nuevoRitmoNombre, setNuevoRitmoNombre] = useState('')
 
+    // 🛡️ TRUCO ANTI-BLOQUEO: Guardamos el token de sesión en memoria
+    const [accessToken, setAccessToken] = useState<string>('')
+
     const [form, setForm] = useState({
         nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
         hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '',
@@ -192,6 +193,17 @@ export default function CalendarioPage() {
         esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false
     })
     const [formFile, setFormFile] = useState<File | null>(null)
+
+    // --- MANTENER SESIÓN ACTIVA EN BACKGROUND ---
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data }: any) => {
+            if (data.session) setAccessToken(data.session.access_token)
+        })
+        const { data: authListener } = supabase.auth.onAuthStateChange(({ _event, session }: any) => {
+            if (session) setAccessToken(session.access_token)
+        })
+        return () => { authListener.subscription.unsubscribe() }
+    }, [supabase])
 
     // --- LÓGICA SWR ---
     const startIso = startOfWeek(startOfMonth(currentDate)).toISOString()
@@ -234,20 +246,24 @@ export default function CalendarioPage() {
         }
     }, [error])
 
-    const handleCrearRitmo = async (e?: React.FormEvent) => {
+    const handleCrearRitmo = async (e?: React.FormEvent | React.KeyboardEvent) => {
         if (e) e.preventDefault()
         const nombreLimpio = nuevoRitmoNombre.trim()
         if (!nombreLimpio) return
+
         try {
-            const { data: nuevo, error: err } = await supabase.from('ritmos').insert([{ nombre: nombreLimpio }]).select().single()
-            if (err) throw err
-            toast.success(`Ritmo creado`)
-            setForm({ ...form, ritmoId: nuevo.id })
-            setIsCreatingRitmo(false)
-            setNuevoRitmoNombre('')
-            mutate()
-        } catch (err: any) {
-            toast.error(err.message)
+            const { data: nuevoRitmo, error } = await supabase.from('ritmos').insert([{ nombre: nombreLimpio }]).select().single()
+            if (error) { toast.error('Error al guardar ritmo'); return }
+            if (nuevoRitmo) {
+                toast.success(`Ritmo creado`)
+                setForm({ ...form, ritmoId: nuevoRitmo.id })
+                setIsCreatingRitmo(false)
+                setNuevoRitmoNombre('')
+                mutate()
+            }
+        } catch (err: unknown) {
+            const error = err as Error;
+            toast.error(error.message || 'Ocurrió un error inesperado al crear el ritmo');
         }
     }
 
@@ -258,17 +274,35 @@ export default function CalendarioPage() {
 
         setUploading(true)
         try {
+            if (!accessToken) throw new Error("No hay sesión activa. Refrescá la página.")
+
             let publicUrl = null
+
+            // 🛡️ BYPASS DEL CLIENTE PARA SUBIR LA FOTO (Native HTTP Fetch)
             if (formFile) {
-                const fileName = `${Date.now()}-${formFile.name}`
-                const { error: uploadError } = await supabase.storage.from('clases').upload(fileName, formFile)
-                if (uploadError) throw new Error('Error al subir imagen')
-                publicUrl = supabase.storage.from('clases').getPublicUrl(fileName).data.publicUrl
+                const fileExt = formFile.name.split('.').pop()
+                const fileName = `${Date.now()}.${fileExt}`
+                const uploadUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/clases/${fileName}`
+
+                const uploadResponse = await fetch(uploadUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': formFile.type
+                    },
+                    body: formFile
+                })
+
+                if (!uploadResponse.ok) {
+                    const errData = await uploadResponse.json()
+                    throw new Error('Error al subir imagen: ' + (errData?.message || uploadResponse.statusText))
+                }
+
+                publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/clases/${fileName}`
             }
 
-            const { data: { session } } = await supabase.auth.getSession()
-            // 🚀 LLAMADA A LA SERVER ACTION (backend t-800 indestructible)
-            const response = await crearClasesAction(form, publicUrl, session?.access_token)
+            // 🚀 LLAMADA A LA SERVER ACTION PASANDO EL TOKEN
+            const response = await crearClasesAction(form, publicUrl, accessToken)
 
             if (!response.success) throw new Error(response.error)
 
@@ -279,10 +313,10 @@ export default function CalendarioPage() {
                 hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '',
                 profeId: '', profe2Id: '',
                 tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: [] as Date[],
-                esLa_Liga: false, ligaNivel: 1, companiaId: '', esAudicion: false
+                esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false
             } as any)
             setFormFile(null)
-            mutate()
+            await mutate()
         } catch (err: any) {
             toast.error(err.message)
         } finally {
@@ -392,47 +426,70 @@ export default function CalendarioPage() {
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pb-20">
                             {modalMode === 'view' && (
                                 <div className="space-y-4">
-                                    {eventosDelDia.length > 0 ? eventosDelDia.map((evt) => {
-                                        const style = getEventStyle(evt)
-                                        return (
-                                            <div key={evt.id} className={`flex flex-row bg-[#111] border rounded-xl overflow-hidden group transition-all relative ${style.border} border-l-[6px]`}>
-                                                <div className="relative w-24 md:w-32 flex-shrink-0 bg-white/5">
-                                                    {evt.tipo === 'Clase' && evt.clase_data?.imagen_url ? <Image src={evt.clase_data.imagen_url} alt={evt.titulo} fill className="object-cover" /> : <div className="w-full h-full flex flex-col items-center justify-center text-white/10 p-2"><ImageIcon size={24} /></div>}
-                                                    <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{format(new Date(evt.inicio), 'HH:mm')}</span></div>
-                                                </div>
-                                                <div className="flex-1 p-3 flex flex-col justify-center">
-                                                    <div className="flex justify-between items-start mb-1"><h4 className="text-sm font-bold text-white uppercase leading-tight">{evt.titulo}</h4><span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${style.bg}/10 ${style.text}`}>{evt.subtitulo}</span></div>
-                                                    <div className="text-[10px] text-gray-400 font-medium flex items-center gap-2 mb-2 flex-wrap">
-                                                        {evt.tipo === 'Clase' ? (
-                                                            <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded">
-                                                                <Briefcase size={10} /> {evt.clase_data?.profesor_nombre}{evt.clase_data?.profesor_2_nombre ? ` & ${evt.clase_data.profesor_2_nombre}` : ''}
-                                                            </span>
-                                                        ) : <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><User size={10} /> Externo</span>}
+                                    {sedeFiltro !== 'todas' && (
+                                        <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 p-3 rounded-lg flex items-center justify-between">
+                                            <p className="text-[10px] text-[#D4E655] font-black uppercase tracking-widest flex items-center gap-2">
+                                                <Building2 size={12} /> Mostrando solo sede {sedes.find(s => s.id === sedeFiltro)?.nombre}
+                                            </p>
+                                            <button onClick={() => setSedeFiltro('todas')} className="text-[9px] bg-black/40 text-white px-2 py-1 rounded hover:bg-white hover:text-black transition-colors font-bold uppercase">Ver Todas</button>
+                                        </div>
+                                    )}
+
+                                    {eventosDelDia.length > 0 ? (
+                                        eventosDelDia.map((evt) => {
+                                            const style = getEventStyle(evt)
+                                            return (
+                                                <div key={evt.id} className={`flex flex-row bg-[#111] border rounded-xl overflow-hidden group transition-all relative ${style.border} border-l-[6px]`}>
+                                                    <div className="relative w-24 md:w-32 flex-shrink-0 bg-white/5 flex flex-col">
+                                                        {evt.tipo === 'Clase' && evt.clase_data?.imagen_url ? (<Image src={evt.clase_data.imagen_url} alt={evt.titulo} fill className="object-cover" />) : (<div className="w-full h-full flex flex-col items-center justify-center text-white/10 p-2">{evt.tipo === 'Alquiler' ? <Music size={24} className="opacity-50" /> : <ImageIcon size={24} />}<span className="text-[8px] font-bold uppercase mt-1 opacity-50 text-center">{evt.tipo === 'Alquiler' ? 'Externo' : 'Sin Flyer'}</span></div>)}
+                                                        <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{format(new Date(evt.inicio), 'HH:mm')}</span><span className="text-[8px] uppercase font-bold text-gray-400 block">{evt.sala_nombre} ({evt.sala_sede})</span></div>
                                                     </div>
-                                                    <div className="flex items-end justify-between border-t border-white/5 pt-2">
-                                                        {evt.tipo === 'Clase' ? (<><a href={`/clase/${evt.id}`} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase py-2 rounded text-center mr-2">Gestionar</a><button onClick={() => setDeleteTarget({ id: evt.id, serieId: evt.clase_data?.serie_id || null })} className="text-gray-500 hover:text-red-500 p-2"><Trash2 size={14} /></button></>) : <a href="/alquileres" className="text-[10px] text-gray-500 hover:text-white uppercase font-bold">Ver Alquileres</a>}
-                                                    </div>
-                                                </div>
-                                                {deleteTarget?.id === evt.id && (
-                                                    <div className="absolute inset-0 bg-black/95 z-50 flex flex-col items-center justify-center p-4 animate-in fade-in">
-                                                        <AlertCircle className="text-red-500 mb-2" size={32} />
-                                                        <h4 className="text-white font-black uppercase text-sm mb-4">¿Eliminar Clase?</h4>
-                                                        <div className="flex gap-2 w-full">
-                                                            <button onClick={() => setDeleteTarget(null)} className="flex-1 py-2 bg-white/10 rounded font-bold text-[10px] uppercase">Cancelar</button>
-                                                            <button onClick={() => handleConfirmDelete('single')} className="flex-1 py-2 bg-red-500 text-white rounded font-bold text-[10px] uppercase">Esta</button>
-                                                            {deleteTarget.serieId && <button onClick={() => handleConfirmDelete('serie')} className="flex-1 py-2 bg-red-900 text-white rounded font-bold text-[10px] uppercase">Serie</button>}
+                                                    <div className="flex-1 p-3 flex flex-col justify-center relative">
+                                                        <div className="flex justify-between items-start mb-1"><h4 className="text-sm font-bold text-white uppercase leading-tight pr-2">{evt.titulo}</h4><span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${style.bg}/10 ${style.text} border ${style.border}/20`}>{evt.subtitulo}</span></div>
+                                                        <div className="text-[10px] text-gray-400 font-medium flex items-center gap-2 mb-2 flex-wrap">
+                                                            {evt.tipo === 'Clase' ? (
+                                                                <>
+                                                                    <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded">
+                                                                        <Briefcase size={10} />
+                                                                        {evt.clase_data?.profesor_nombre || 'Sin asignar'}
+                                                                        {evt.clase_data?.profesor_2_nombre ? ` & ${evt.clase_data.profesor_2_nombre}` : ''}
+                                                                    </span>
+                                                                    <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><GraduationCap size={10} /> {evt.clase_data?.nivel}</span>
+                                                                    {evt.clase_data?.es_audicion && <span className="flex items-center gap-1 bg-pink-500/10 text-pink-400 border border-pink-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Sparkles size={10} className="text-pink-500" /> Audición</span>}
+                                                                    {evt.clase_data?.es_la_liga && <span className="flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})</span>}
+                                                                    {evt.clase_data?.compania_nombre && <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><UsersRound size={10} className="text-blue-500" /> {evt.clase_data.compania_nombre}</span>}
+                                                                </>
+                                                            ) : (<span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><User size={10} /> Cliente Externo</span>)}
+                                                        </div>
+                                                        <div className="flex items-end justify-between border-t border-white/5 pt-2 mt-auto gap-2">
+                                                            {evt.tipo === 'Clase' ? (<><a href={`/clase/${evt.id}`} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase py-2 rounded hover:bg-white transition-colors text-center shadow-[0_0_10px_rgba(212,230,85,0.2)]">Gestionar / Tomar Lista</a><button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: evt.id, serieId: evt.clase_data?.serie_id || null }) }} className="text-gray-500 hover:text-red-500 p-2 bg-white/5 rounded hover:bg-red-500/10 transition-colors"><Trash2 size={14} /></button></>) : (<div className="flex gap-2 w-full"><div className="flex-1 text-[10px] text-gray-500 italic flex items-center"><Info size={12} className="mr-1" /> Alquiler externo</div><a href="/alquileres" className="px-3 py-2 bg-white/10 text-white rounded text-[10px] font-bold uppercase hover:bg-white/20">Ver Alquileres</a></div>)}
                                                         </div>
                                                     </div>
-                                                )}
-                                            </div>
-                                        )
-                                    }) : <div className="py-10 text-center text-gray-600 uppercase text-xs font-bold">No hay actividades</div>}
-                                    <button onClick={() => setModalMode('create')} className="w-full mt-4 px-6 py-4 font-black text-black bg-[#D4E655] rounded-xl hover:bg-white uppercase text-xs flex items-center justify-center gap-2"><Plus size={16} /> Cargar Clase Nueva</button>
+
+                                                    {deleteTarget?.id === evt.id && (
+                                                        <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-center p-4 text-center animate-in fade-in">
+                                                            <AlertCircle className="text-red-500 mb-2" size={32} />
+                                                            <h4 className="text-white font-black uppercase mb-1">¿Eliminar Clase?</h4>
+                                                            <p className="text-gray-400 text-[10px] mb-4">Esta acción no se puede deshacer.</p>
+                                                            <div className="flex gap-2 w-full">
+                                                                <button onClick={() => setDeleteTarget(null)} className="flex-1 py-2 bg-white/10 rounded font-bold text-[10px] uppercase hover:bg-white/20">Cancelar</button>
+                                                                <button onClick={() => handleConfirmDelete('single')} className="flex-1 py-2 bg-red-500 text-white rounded font-bold text-[10px] uppercase hover:bg-red-600 shadow-[0_0_15px_rgba(239,68,68,0.3)]">Solo esta</button>
+                                                                {deleteTarget.serieId && <button onClick={() => handleConfirmDelete('serie')} className="flex-1 py-2 bg-red-900 border border-red-500 text-white rounded font-bold text-[10px] uppercase hover:bg-red-800">Toda la serie</button>}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )
+                                        })
+                                    ) : (
+                                        <div className="py-10 text-center text-gray-600 opacity-50"><p className="text-xs font-bold uppercase">No hay actividades {sedeFiltro !== 'todas' ? 'en esta sede' : 'programadas'}</p></div>
+                                    )}
+                                    <button onClick={() => setModalMode('create')} className="w-full mt-4 px-6 py-4 font-black text-black transition-all bg-[#D4E655] rounded-xl hover:bg-white uppercase tracking-widest text-xs flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(212,230,85,0.2)]"><Plus size={16} strokeWidth={3} /> Cargar Clase Nueva</button>
                                 </div>
                             )}
 
                             {modalMode === 'create' && (
-                                <form onSubmit={handleCrearClase} className="space-y-6 animate-in slide-in-from-bottom-4">
+                                <form onSubmit={handleCrearClase} className="space-y-6">
 
                                     {/* SECCIÓN 1: FICHA TÉCNICA */}
                                     <div className="space-y-3">
@@ -505,7 +562,7 @@ export default function CalendarioPage() {
                                     </div>
 
                                     <div className="pt-4 flex gap-3">
-                                        <button type="button" onClick={() => setModalMode('view')} className="flex-1 py-4 bg-white/5 rounded-xl font-bold text-gray-400 text-xs uppercase transition-colors">Cancelar</button>
+                                        <button type="button" onClick={() => setModalMode('view')} className="flex-1 py-4 bg-white/5 hover:bg-white/10 rounded-xl font-bold text-gray-400 text-xs uppercase transition-colors">Cancelar</button>
                                         <button type="submit" disabled={uploading} className="flex-[2] bg-white text-black font-black uppercase rounded-xl hover:bg-[#D4E655] transition-all text-xs flex justify-center items-center shadow-lg">
                                             {uploading ? <Loader2 className="animate-spin mr-2" /> : 'Confirmar Clase'}
                                         </button>
