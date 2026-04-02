@@ -1,14 +1,14 @@
-
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
-import { CashProvider } from "@/context/CashContext"; // <--- 1. IMPORTARLO
+import { CashProvider } from "@/context/CashContext";
+import SWRProvider from "@/components/SWRProvider"; // <--- 1. IMPORTAMOS EL NUEVO PROVIDER
 import type { Metadata, Viewport } from 'next'
 
 export const metadata: Metadata = {
   title: 'Piso 2 | La Liga',
   description: 'Gestión y Programa de Formación',
-  manifest: '/manifest.json', // 👈 Esto conecta con el archivo que creamos
+  manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
@@ -21,11 +21,10 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
-  userScalable: false, // 👈 Esto evita que el usuario haga zoom pellizcando la pantalla, dándole sensación de App nativa
+  userScalable: false,
 }
 
 const inter = Inter({ subsets: ["latin"] });
-
 
 export default function RootLayout({
   children,
@@ -36,15 +35,17 @@ export default function RootLayout({
     <html lang="es">
       <body className={`${inter.className} bg-[#050505] text-white min-h-screen antialiased`}>
 
-        {/* 2. EL ABRAZO: El Provider tiene que envolver TODO */}
-        <CashProvider>
+        {/* 2. EL GRAN ABRAZO: El SWRProvider envuelve toda la app para aplicar la config global */}
+        <SWRProvider>
+          <CashProvider>
 
-          {/* Aquí adentro está toda tu app (Sidebar, Páginas, etc) */}
-          {children}
+            {/* Aquí adentro está toda tu app (Sidebar, Páginas, etc) */}
+            {children}
 
-          <Toaster position="top-center" richColors theme="dark" />
+            <Toaster position="top-center" richColors theme="dark" />
 
-        </CashProvider>
+          </CashProvider>
+        </SWRProvider>
 
       </body>
     </html>

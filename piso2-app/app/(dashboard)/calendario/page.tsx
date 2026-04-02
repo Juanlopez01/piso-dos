@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useState, useEffect } from 'react' // 👈 AÑADIDO useEffect
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import {
@@ -19,6 +19,9 @@ import Image from 'next/image'
 import { Toaster, toast } from 'sonner'
 import MultiDatePicker from '@/components/MultiDatePicker'
 import { v4 as uuidv4 } from 'uuid'
+
+// 🚀 IMPORTAMOS LA SERVER ACTION
+import { crearClasesAction } from '@/app/actions/clases'
 
 // --- TIPOS ESTRICTOS ---
 type EventoAgenda = {
@@ -184,13 +187,13 @@ export default function CalendarioPage() {
     const [form, setForm] = useState({
         nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
         hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '',
-        profeId: '',
-        profe2Id: '',
+        profeId: '', profe2Id: '',
         tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: [] as Date[],
         esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false
     })
     const [formFile, setFormFile] = useState<File | null>(null)
 
+    // --- LÓGICA SWR ---
     const startIso = startOfWeek(startOfMonth(currentDate)).toISOString()
     const endIso = endOfWeek(endOfMonth(currentDate)).toISOString()
     const startDateStr = format(startOfWeek(startOfMonth(currentDate)), 'yyyy-MM-dd')
@@ -200,10 +203,22 @@ export default function CalendarioPage() {
         ['agenda', startIso, endIso, startDateStr, endDateStr],
         fetcher,
         {
-            revalidateOnFocus: true,
-            dedupingInterval: 3000
+            revalidateOnFocus: false, // 🛡️ ANTICUELGUE: Evita colapsar al cambiar de pestaña
+            revalidateOnReconnect: true,
+            keepPreviousData: true,
+            dedupingInterval: 5000
         }
     )
+
+    // ⚡ SUPABASE REALTIME: Sincronización instantánea entre computadoras
+    useEffect(() => {
+        const canalAgenda = supabase.channel('cambios-agenda')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'clases' }, () => mutate())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'alquileres' }, () => mutate())
+            .subscribe()
+
+        return () => { supabase.removeChannel(canalAgenda) }
+    }, [supabase, mutate])
 
     const eventos = data?.eventos || []
     const sedes = data?.sedes || []
@@ -211,135 +226,65 @@ export default function CalendarioPage() {
     const ritmos = data?.ritmos || []
     const companias = data?.companias || []
 
-    // 🛑 SOLUCIÓN AL SPAM DE TOASTS
+    // Control de errores de carga
     useEffect(() => {
         if (error) {
-            console.error("🚨 ERROR SUPABASE (F12):", error);
-            toast.error('Error al cargar la agenda. Revisá la consola (F12).');
+            console.error("🚨 Error cargando agenda:", error);
+            toast.error('Problema al conectar con la base de datos.');
         }
     }, [error])
 
-    const handleCrearRitmo = async (e?: React.FormEvent | React.KeyboardEvent) => {
+    const handleCrearRitmo = async (e?: React.FormEvent) => {
         if (e) e.preventDefault()
         const nombreLimpio = nuevoRitmoNombre.trim()
         if (!nombreLimpio) return
-
         try {
-            const { data: nuevoRitmo, error } = await supabase.from('ritmos').insert([{ nombre: nombreLimpio }]).select().single()
-            if (error) { toast.error('Error al guardar ritmo'); return }
-            if (nuevoRitmo) {
-                toast.success(`Ritmo creado`)
-                setForm({ ...form, ritmoId: nuevoRitmo.id })
-                setIsCreatingRitmo(false)
-                setNuevoRitmoNombre('')
-                mutate()
-            }
-        } catch (err: unknown) {
-            const error = err as Error;
-            toast.error(error.message || 'Ocurrió un error inesperado al crear el ritmo');
+            const { data: nuevo, error: err } = await supabase.from('ritmos').insert([{ nombre: nombreLimpio }]).select().single()
+            if (err) throw err
+            toast.success(`Ritmo creado`)
+            setForm({ ...form, ritmoId: nuevo.id })
+            setIsCreatingRitmo(false)
+            setNuevoRitmoNombre('')
+            mutate()
+        } catch (err: any) {
+            toast.error(err.message)
         }
-    }
-
-    const checkConflictos = async (salaId: string, inicio: Date, fin: Date) => {
-        const inicioIso = inicio.toISOString()
-        const finIso = fin.toISOString()
-        const fechaLocalSegura = new Date(inicio.getTime() + Math.abs(inicio.getTimezoneOffset() * 60000))
-        const fechaStr = format(fechaLocalSegura, 'yyyy-MM-dd')
-        const hInicio = format(inicio, 'HH:mm')
-        const hFin = format(fin, 'HH:mm')
-
-        const { data: conflictoClase } = await supabase.from('clases').select('id, nombre').eq('sala_id', salaId).neq('estado', 'cancelada').lt('inicio', finIso).gt('fin', inicioIso).maybeSingle()
-        if (conflictoClase) return `Clase: ${conflictoClase.nombre}`
-
-        const { data: conflictoAlquiler } = await supabase.from('alquileres').select('id, cliente_nombre').eq('sala_id', salaId).eq('fecha', fechaStr).in('estado', ['confirmado', 'pagado', 'pendiente']).lt('hora_inicio', hFin).gt('hora_fin', hInicio).maybeSingle()
-        if (conflictoAlquiler) return `Alquiler: ${conflictoAlquiler.cliente_nombre}`
-
-        return null
     }
 
     const handleCrearClase = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (form.fechas.length === 0) return toast.error('Debe seleccionar al menos una fecha')
+        if (form.fechas.length === 0) return toast.error('Seleccioná al menos una fecha')
         if (!form.salaId || !form.profeId) return toast.error('Faltan datos (Sala o Profe)')
-        if (form.tipo === 'Compañía' && !form.companiaId) return toast.error('Falta seleccionar Compañía')
 
         setUploading(true)
         try {
-            const [horas, minutos] = form.hora.split(':')
             let publicUrl = null
-
             if (formFile) {
-                const fileExt = formFile.name.split('.').pop();
-                const fileName = `${Date.now()}.${fileExt}`
+                const fileName = `${Date.now()}-${formFile.name}`
                 const { error: uploadError } = await supabase.storage.from('clases').upload(fileName, formFile)
-                if (uploadError) throw new Error('No se pudo subir la imagen.')
+                if (uploadError) throw new Error('Error al subir imagen')
                 publicUrl = supabase.storage.from('clases').getPublicUrl(fileName).data.publicUrl
             }
 
-            const serieUUID = form.fechas.length > 1 ? uuidv4() : null;
+            const { data: { session } } = await supabase.auth.getSession()
+            // 🚀 LLAMADA A LA SERVER ACTION (backend t-800 indestructible)
+            const response = await crearClasesAction(form, publicUrl, session?.access_token)
 
-            const fechasCalculadas = form.fechas.map(fecha => {
-                const baseDate = new Date(fecha)
-                baseDate.setHours(parseInt(horas), parseInt(minutos), 0, 0)
-                const endDateTime = new Date(baseDate.getTime() + form.duracion * 60000)
-                return { baseDate, endDateTime }
-            })
+            if (!response.success) throw new Error(response.error)
 
-            const conflictosPromises = fechasCalculadas.map(async ({ baseDate, endDateTime }) => {
-                const conflicto = await checkConflictos(form.salaId, baseDate, endDateTime)
-                if (conflicto) return `Conflicto el ${format(baseDate, 'dd/MM')}: ${conflicto}`
-                return null
-            })
-
-            const resultadosConflictos = await Promise.all(conflictosPromises)
-            const conflictoEncontrado = resultadosConflictos.find(c => c !== null)
-
-            if (conflictoEncontrado) {
-                throw new Error(conflictoEncontrado)
-            }
-
-            const clasesAInsertar = fechasCalculadas.map(({ baseDate, endDateTime }) => ({
-                nombre: form.nombre,
-                descripcion: form.descripcion,
-                tipo_clase: form.tipo,
-                nivel: form.nivel,
-                ritmo_id: form.ritmoId || null,
-                inicio: baseDate.toISOString(),
-                fin: endDateTime.toISOString(),
-                sala_id: form.salaId,
-                profesor_id: form.profeId,
-                profesor_2_id: form.profe2Id || null,
-                tipo_acuerdo: form.tipoAcuerdo,
-                valor_acuerdo: Number(form.valorAcuerdo),
-                imagen_url: publicUrl,
-                cupo_maximo: form.esAudicion ? 9999 : (Number(form.cupoMaximo) || 0),
-                serie_id: serieUUID,
-                estado: 'activa',
-                es_la_liga: form.esLaLiga,
-                liga_nivel: form.esLaLiga ? form.ligaNivel : null,
-                compania_id: form.tipo === 'Compañía' ? form.companiaId : null,
-                es_audicion: form.esAudicion
-            }))
-
-            const { error } = await supabase.from('clases').insert(clasesAInsertar)
-            if (error) throw new Error('Error al guardar en la base de datos.')
-
-            toast.success(`${clasesAInsertar.length} clase(s) creada(s) correctamente`)
+            toast.success(`${response.cantidad} clase(s) creada(s) correctamente`)
             setModalMode('view')
             setForm({
                 nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
                 hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '',
                 profeId: '', profe2Id: '',
                 tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: [] as Date[],
-                esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false
-            })
+                esLa_Liga: false, ligaNivel: 1, companiaId: '', esAudicion: false
+            } as any)
             setFormFile(null)
-
             mutate()
-
-        } catch (err: unknown) {
-            const error = err as Error;
-            toast.error(error.message)
+        } catch (err: any) {
+            toast.error(err.message)
         } finally {
             setUploading(false)
         }
@@ -349,37 +294,35 @@ export default function CalendarioPage() {
         if (!deleteTarget) return
         if (option === 'single') await supabase.from('clases').delete().eq('id', deleteTarget.id)
         else await supabase.from('clases').delete().eq('serie_id', deleteTarget.serieId)
-
         toast.success('Eliminado')
         setDeleteTarget(null)
         mutate()
     }
 
     const getEventStyle = (evt: EventoAgenda) => {
-        if (evt.tipo === 'Alquiler') return { border: 'border-white', text: 'text-white', bg: 'bg-white', glow: 'shadow-white/20' }
-        if (evt.clase_data?.es_audicion) return { border: 'border-pink-500', text: 'text-pink-500', bg: 'bg-pink-500', glow: 'shadow-pink-500/20' }
-        if (evt.clase_data?.es_la_liga) return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500', glow: 'shadow-purple-500/20' }
-
+        if (evt.tipo === 'Alquiler') return { border: 'border-white', text: 'text-white', bg: 'bg-white' }
+        if (evt.clase_data?.es_audicion) return { border: 'border-pink-500', text: 'text-pink-500', bg: 'bg-pink-500' }
+        if (evt.clase_data?.es_la_liga) return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500' }
         switch (evt.subtitulo) {
-            case 'Regular': return { border: 'border-orange-500', text: 'text-orange-500', bg: 'bg-orange-500', glow: 'shadow-orange-500/20' }
-            case 'Seminario': return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500', glow: 'shadow-purple-500/20' }
-            case 'Intensivo': return { border: 'border-gray-500', text: 'text-gray-400', bg: 'bg-black', glow: 'shadow-gray-500/20' }
-            case 'Formación': return { border: 'border-yellow-400', text: 'text-yellow-400', bg: 'bg-yellow-400', glow: 'shadow-yellow-400/20' }
-            case 'Compañía': return { border: 'border-blue-500', text: 'text-blue-500', bg: 'bg-blue-500', glow: 'shadow-blue-500/20' }
-            default: return { border: 'border-[#D4E655]', text: 'text-[#D4E655]', bg: 'bg-[#D4E655]', glow: 'shadow-[#D4E655]/20' }
+            case 'Regular': return { border: 'border-orange-500', text: 'text-orange-500', bg: 'bg-orange-500' }
+            case 'Seminario': return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500' }
+            case 'Intensivo': return { border: 'border-gray-500', text: 'text-gray-400', bg: 'bg-black' }
+            case 'Formación': return { border: 'border-yellow-400', text: 'text-yellow-400', bg: 'bg-yellow-400' }
+            case 'Compañía': return { border: 'border-blue-500', text: 'text-blue-500', bg: 'bg-blue-500' }
+            default: return { border: 'border-[#D4E655]', text: 'text-[#D4E655]', bg: 'bg-[#D4E655]' }
         }
     }
 
     const eventosFiltrados = eventos.filter(e => sedeFiltro === 'todas' || e.sede_id === sedeFiltro)
     const salasDisponibles = sedes.find(s => s.id === form.sedeId)?.salas || []
     const dayStrSelected = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''
-
     const eventosDelDia = dayStrSelected ? eventosFiltrados.filter(e => e.fecha_render === dayStrSelected) : []
 
     return (
         <div className="h-full flex flex-col pb-24 md:pb-10 px-2 pt-2">
             <Toaster position="top-center" richColors theme="dark" />
 
+            {/* HEADER FILTROS */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 md:gap-0">
                 <div className="flex items-center gap-3">
                     <div>
@@ -407,6 +350,7 @@ export default function CalendarioPage() {
                 </div>
             </div>
 
+            {/* GRILLA CALENDARIO */}
             <div className="grid grid-cols-7 mb-2">{['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(d => <div key={d} className="text-center text-gray-500 text-[9px] font-black uppercase tracking-wider">{d}</div>)}</div>
 
             <div className="grid grid-cols-7 gap-1 auto-rows-fr h-full overflow-y-auto">
@@ -414,33 +358,25 @@ export default function CalendarioPage() {
                     const isToday = isSameDay(day, new Date())
                     const isCurrentMonth = isSameMonth(day, currentDate)
                     const dayStr = format(day, 'yyyy-MM-dd')
-
                     const evtsDia = eventosFiltrados.filter(e => e.fecha_render === dayStr)
 
                     let dayClass = "opacity-20 border-transparent"
                     if (isCurrentMonth) {
-                        if (evtsDia.length === 0) dayClass = "bg-white/5 border-white/5"
-                        else {
-                            const hasAlquiler = evtsDia.some(e => e.tipo === 'Alquiler')
-                            dayClass = hasAlquiler ? "bg-gradient-to-br from-white/10 to-transparent border-white/20" : "bg-gradient-to-br from-[#D4E655]/10 to-transparent border-[#D4E655]/20"
-                        }
+                        dayClass = evtsDia.length === 0 ? "bg-white/5 border-white/5" : "bg-gradient-to-br from-[#D4E655]/10 to-transparent border-[#D4E655]/20"
                     }
 
                     return (
                         <div key={day.toString()} onClick={() => { setSelectedDate(day); setForm({ ...form, fechas: [day] }); setModalMode('view'); setIsModalOpen(true) }} className={clsx("min-h-[60px] md:min-h-[100px] border rounded-lg transition-all cursor-pointer relative flex flex-col items-center justify-start pt-1 overflow-hidden", dayClass, isToday && "ring-1 ring-white shadow-xl")}>
                             <span className={clsx("text-xs md:text-sm font-bold z-20 leading-none mb-1", isToday ? "text-white" : "text-white/60")}>{format(day, 'd')}</span>
-                            {evtsDia.length > 0 && (
-                                <div className="flex flex-wrap justify-center gap-1 px-1 w-full z-10">
-                                    {evtsDia.slice(0, 8).map((evt, i) => (
-                                        <div key={i} className={`w-1.5 h-1.5 rounded-full shadow-sm ${getEventStyle(evt).bg}`} />
-                                    ))}
-                                </div>
-                            )}
+                            <div className="flex flex-wrap justify-center gap-1 px-1 w-full z-10">
+                                {evtsDia.slice(0, 8).map((evt, i) => <div key={i} className={`w-1.5 h-1.5 rounded-full shadow-sm ${getEventStyle(evt).bg}`} />)}
+                            </div>
                         </div>
                     )
                 })}
             </div>
 
+            {/* MODAL */}
             {isModalOpen && selectedDate && (
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setIsModalOpen(false)}>
                     <div className="w-full h-[95vh] md:h-auto md:max-h-[90vh] md:max-w-3xl bg-[#09090b] md:border border-white/10 md:rounded-2xl flex flex-col overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -456,205 +392,124 @@ export default function CalendarioPage() {
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pb-20">
                             {modalMode === 'view' && (
                                 <div className="space-y-4">
-                                    {sedeFiltro !== 'todas' && (
-                                        <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 p-3 rounded-lg flex items-center justify-between">
-                                            <p className="text-[10px] text-[#D4E655] font-black uppercase tracking-widest flex items-center gap-2">
-                                                <Building2 size={12} /> Mostrando solo sede {sedes.find(s => s.id === sedeFiltro)?.nombre}
-                                            </p>
-                                            <button onClick={() => setSedeFiltro('todas')} className="text-[9px] bg-black/40 text-white px-2 py-1 rounded hover:bg-white hover:text-black transition-colors font-bold uppercase">Ver Todas</button>
-                                        </div>
-                                    )}
-
-                                    {eventosDelDia.length > 0 ? (
-                                        eventosDelDia.map((evt) => {
-                                            const style = getEventStyle(evt)
-                                            return (
-                                                <div key={evt.id} className={`flex flex-row bg-[#111] border rounded-xl overflow-hidden group transition-all relative ${style.border} border-l-[6px]`}>
-                                                    <div className="relative w-24 md:w-32 flex-shrink-0 bg-white/5 flex flex-col">
-                                                        {evt.tipo === 'Clase' && evt.clase_data?.imagen_url ? (<Image src={evt.clase_data.imagen_url} alt={evt.titulo} fill className="object-cover" />) : (<div className="w-full h-full flex flex-col items-center justify-center text-white/10 p-2">{evt.tipo === 'Alquiler' ? <Music size={24} className="opacity-50" /> : <ImageIcon size={24} />}<span className="text-[8px] font-bold uppercase mt-1 opacity-50 text-center">{evt.tipo === 'Alquiler' ? 'Externo' : 'Sin Flyer'}</span></div>)}
-                                                        <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{format(new Date(evt.inicio), 'HH:mm')}</span><span className="text-[8px] uppercase font-bold text-gray-400 block">{evt.sala_nombre} ({evt.sala_sede})</span></div>
-                                                    </div>
-                                                    <div className="flex-1 p-3 flex flex-col justify-center relative">
-                                                        <div className="flex justify-between items-start mb-1"><h4 className="text-sm font-bold text-white uppercase leading-tight pr-2">{evt.titulo}</h4><span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${style.bg}/10 ${style.text} border ${style.border}/20`}>{evt.subtitulo}</span></div>
-                                                        <div className="text-[10px] text-gray-400 font-medium flex items-center gap-2 mb-2 flex-wrap">
-                                                            {evt.tipo === 'Clase' ? (
-                                                                <>
-                                                                    <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded">
-                                                                        <Briefcase size={10} />
-                                                                        {evt.clase_data?.profesor_nombre || 'Sin asignar'}
-                                                                        {/* 👈 NUEVO: Pintamos el segundo profe si existe */}
-                                                                        {evt.clase_data?.profesor_2_nombre ? ` & ${evt.clase_data.profesor_2_nombre}` : ''}
-                                                                    </span>
-                                                                    <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><GraduationCap size={10} /> {evt.clase_data?.nivel}</span>
-                                                                    {evt.clase_data?.es_audicion && <span className="flex items-center gap-1 bg-pink-500/10 text-pink-400 border border-pink-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Sparkles size={10} className="text-pink-500" /> Audición</span>}
-                                                                    {evt.clase_data?.es_la_liga && <span className="flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})</span>}
-                                                                    {evt.clase_data?.compania_nombre && <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><UsersRound size={10} className="text-blue-500" /> {evt.clase_data.compania_nombre}</span>}
-                                                                </>
-                                                            ) : (<span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><User size={10} /> Cliente Externo</span>)}
-                                                        </div>
-                                                        <div className="flex items-end justify-between border-t border-white/5 pt-2 mt-auto gap-2">
-                                                            {evt.tipo === 'Clase' ? (<><a href={`/clase/${evt.id}`} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase py-2 rounded hover:bg-white transition-colors text-center shadow-[0_0_10px_rgba(212,230,85,0.2)]">Gestionar / Tomar Lista</a><button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: evt.id, serieId: evt.clase_data?.serie_id || null }) }} className="text-gray-500 hover:text-red-500 p-2 bg-white/5 rounded hover:bg-red-500/10 transition-colors"><Trash2 size={14} /></button></>) : (<div className="flex gap-2 w-full"><div className="flex-1 text-[10px] text-gray-500 italic flex items-center"><Info size={12} className="mr-1" /> Alquiler externo</div><a href="/alquileres" className="px-3 py-2 bg-white/10 text-white rounded text-[10px] font-bold uppercase hover:bg-white/20">Ver Alquileres</a></div>)}
-                                                        </div>
-                                                    </div>
-
-                                                    {deleteTarget?.id === evt.id && (
-                                                        <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-center p-4 text-center animate-in fade-in">
-                                                            <AlertCircle className="text-red-500 mb-2" size={32} />
-                                                            <h4 className="text-white font-black uppercase mb-1">¿Eliminar Clase?</h4>
-                                                            <p className="text-gray-400 text-[10px] mb-4">Esta acción no se puede deshacer.</p>
-                                                            <div className="flex gap-2 w-full">
-                                                                <button onClick={() => setDeleteTarget(null)} className="flex-1 py-2 bg-white/10 rounded font-bold text-[10px] uppercase hover:bg-white/20">Cancelar</button>
-                                                                <button onClick={() => handleConfirmDelete('single')} className="flex-1 py-2 bg-red-500 text-white rounded font-bold text-[10px] uppercase hover:bg-red-600 shadow-[0_0_15px_rgba(239,68,68,0.3)]">Solo esta</button>
-                                                                {deleteTarget.serieId && <button onClick={() => handleConfirmDelete('serie')} className="flex-1 py-2 bg-red-900 border border-red-500 text-white rounded font-bold text-[10px] uppercase hover:bg-red-800">Toda la serie</button>}
-                                                            </div>
-                                                        </div>
-                                                    )}
+                                    {eventosDelDia.length > 0 ? eventosDelDia.map((evt) => {
+                                        const style = getEventStyle(evt)
+                                        return (
+                                            <div key={evt.id} className={`flex flex-row bg-[#111] border rounded-xl overflow-hidden group transition-all relative ${style.border} border-l-[6px]`}>
+                                                <div className="relative w-24 md:w-32 flex-shrink-0 bg-white/5">
+                                                    {evt.tipo === 'Clase' && evt.clase_data?.imagen_url ? <Image src={evt.clase_data.imagen_url} alt={evt.titulo} fill className="object-cover" /> : <div className="w-full h-full flex flex-col items-center justify-center text-white/10 p-2"><ImageIcon size={24} /></div>}
+                                                    <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{format(new Date(evt.inicio), 'HH:mm')}</span></div>
                                                 </div>
-                                            )
-                                        })
-                                    ) : (
-                                        <div className="py-10 text-center text-gray-600 opacity-50"><p className="text-xs font-bold uppercase">No hay actividades {sedeFiltro !== 'todas' ? 'en esta sede' : 'programadas'}</p></div>
-                                    )}
-                                    <button onClick={() => setModalMode('create')} className="w-full mt-4 px-6 py-4 font-black text-black transition-all bg-[#D4E655] rounded-xl hover:bg-white uppercase tracking-widest text-xs flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(212,230,85,0.2)]"><Plus size={16} strokeWidth={3} /> Cargar Clase Nueva</button>
+                                                <div className="flex-1 p-3 flex flex-col justify-center">
+                                                    <div className="flex justify-between items-start mb-1"><h4 className="text-sm font-bold text-white uppercase leading-tight">{evt.titulo}</h4><span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${style.bg}/10 ${style.text}`}>{evt.subtitulo}</span></div>
+                                                    <div className="text-[10px] text-gray-400 font-medium flex items-center gap-2 mb-2 flex-wrap">
+                                                        {evt.tipo === 'Clase' ? (
+                                                            <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded">
+                                                                <Briefcase size={10} /> {evt.clase_data?.profesor_nombre}{evt.clase_data?.profesor_2_nombre ? ` & ${evt.clase_data.profesor_2_nombre}` : ''}
+                                                            </span>
+                                                        ) : <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><User size={10} /> Externo</span>}
+                                                    </div>
+                                                    <div className="flex items-end justify-between border-t border-white/5 pt-2">
+                                                        {evt.tipo === 'Clase' ? (<><a href={`/clase/${evt.id}`} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase py-2 rounded text-center mr-2">Gestionar</a><button onClick={() => setDeleteTarget({ id: evt.id, serieId: evt.clase_data?.serie_id || null })} className="text-gray-500 hover:text-red-500 p-2"><Trash2 size={14} /></button></>) : <a href="/alquileres" className="text-[10px] text-gray-500 hover:text-white uppercase font-bold">Ver Alquileres</a>}
+                                                    </div>
+                                                </div>
+                                                {deleteTarget?.id === evt.id && (
+                                                    <div className="absolute inset-0 bg-black/95 z-50 flex flex-col items-center justify-center p-4 animate-in fade-in">
+                                                        <AlertCircle className="text-red-500 mb-2" size={32} />
+                                                        <h4 className="text-white font-black uppercase text-sm mb-4">¿Eliminar Clase?</h4>
+                                                        <div className="flex gap-2 w-full">
+                                                            <button onClick={() => setDeleteTarget(null)} className="flex-1 py-2 bg-white/10 rounded font-bold text-[10px] uppercase">Cancelar</button>
+                                                            <button onClick={() => handleConfirmDelete('single')} className="flex-1 py-2 bg-red-500 text-white rounded font-bold text-[10px] uppercase">Esta</button>
+                                                            {deleteTarget.serieId && <button onClick={() => handleConfirmDelete('serie')} className="flex-1 py-2 bg-red-900 text-white rounded font-bold text-[10px] uppercase">Serie</button>}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )
+                                    }) : <div className="py-10 text-center text-gray-600 uppercase text-xs font-bold">No hay actividades</div>}
+                                    <button onClick={() => setModalMode('create')} className="w-full mt-4 px-6 py-4 font-black text-black bg-[#D4E655] rounded-xl hover:bg-white uppercase text-xs flex items-center justify-center gap-2"><Plus size={16} /> Cargar Clase Nueva</button>
                                 </div>
                             )}
 
                             {modalMode === 'create' && (
-                                <form onSubmit={handleCrearClase} className="space-y-6">
+                                <form onSubmit={handleCrearClase} className="space-y-6 animate-in slide-in-from-bottom-4">
+
+                                    {/* SECCIÓN 1: FICHA TÉCNICA */}
                                     <div className="space-y-3">
                                         <div className="flex items-center gap-2 text-[#D4E655] border-b border-white/10 pb-1"><Info size={14} /><h4 className="text-[10px] font-black uppercase tracking-widest">Ficha Técnica</h4></div>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Nombre de la Clase</label><input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white font-bold text-sm outline-none focus:border-[#D4E655]" required /></div>
-
+                                            <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Nombre</label><input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-sm outline-none focus:border-[#D4E655]" required /></div>
                                             <div className="space-y-1">
-                                                <label className="text-[9px] font-bold text-gray-500 uppercase flex justify-between">
-                                                    <span>Ritmo / Estilo</span>
-                                                    <button type="button" onClick={() => setIsCreatingRitmo(!isCreatingRitmo)} className="text-[#D4E655] hover:text-white transition-colors flex items-center gap-1">
-                                                        {isCreatingRitmo ? 'Cancelar' : <><Plus size={10} /> Nuevo</>}
-                                                    </button>
-                                                </label>
-
+                                                <label className="text-[9px] font-bold text-gray-500 uppercase flex justify-between"><span>Ritmo</span><button type="button" onClick={() => setIsCreatingRitmo(!isCreatingRitmo)} className="text-[#D4E655] text-[8px] uppercase">Nuevo</button></label>
                                                 {isCreatingRitmo ? (
-                                                    <div className="flex gap-2">
-                                                        <input
-                                                            value={nuevoRitmoNombre}
-                                                            onChange={e => setNuevoRitmoNombre(e.target.value)}
-                                                            placeholder="Ej: K-Pop"
-                                                            className="flex-1 bg-[#111] border border-[#D4E655] rounded-lg px-3 text-white text-xs font-bold outline-none"
-                                                        />
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => handleCrearRitmo(e)}
-                                                            className="bg-[#D4E655] text-black font-bold px-3 rounded-lg text-xs uppercase hover:bg-white transition-colors"
-                                                        >
-                                                            Guardar
-                                                        </button>
-                                                    </div>
+                                                    <div className="flex gap-2"><input value={nuevoRitmoNombre} onChange={e => setNuevoRitmoNombre(e.target.value)} className="flex-1 bg-[#111] border border-[#D4E655] rounded-lg px-3 text-white text-xs" /><button type="button" onClick={() => handleCrearRitmo()} className="bg-[#D4E655] text-black font-bold px-3 rounded-lg text-[10px] uppercase">OK</button></div>
                                                 ) : (
-                                                    <select value={form.ritmoId} onChange={e => setForm({ ...form, ritmoId: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]">
-                                                        <option value="">Seleccionar Ritmo...</option>
+                                                    <select value={form.ritmoId} onChange={e => setForm({ ...form, ritmoId: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs outline-none">
+                                                        <option value="">Seleccionar...</option>
                                                         {ritmos.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
                                                     </select>
                                                 )}
                                             </div>
-
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:col-span-2">
-                                                <div className="space-y-1">
-                                                    <label className="text-[9px] font-bold text-gray-500 uppercase">Tipo</label>
-                                                    <select value={form.tipo} onChange={e => {
-                                                        const isCompania = e.target.value === 'Compañía';
-                                                        setForm({ ...form, tipo: e.target.value, cupoMaximo: isCompania ? 20 : form.cupoMaximo })
-                                                    }} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]">
-                                                        <option value="Regular">Regular (Naranja)</option>
-                                                        <option value="Seminario">Especial (Morado)</option>
-                                                        <option value="Intensivo">Intensivo (Negro)</option>
-                                                        <option value="Formación">Formación (Amarillo)</option>
-                                                        <option value="Compañía">Compañías (Azul)</option>
-                                                    </select>
-                                                </div>
-                                                <div className="space-y-1">
-                                                    <label className="text-[9px] font-bold text-gray-500 uppercase">Nivel</label>
-                                                    <select value={form.nivel} onChange={e => setForm({ ...form, nivel: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655]">
-                                                        <option value="Todos">Todos</option>
-                                                        <option value="Principiante">Principiante</option>
-                                                        <option value="Principiante/Intermedio">Principiante/Intermedio</option>
-                                                        <option value="Intermedio">Intermedio</option>
-                                                        <option value="Intermedio/Avanzado">Intermedio/Avanzado</option>
-                                                        <option value="Avanzado">Avanzado</option>
-                                                    </select>
-                                                </div>
-                                                <div className="space-y-1">
-                                                    <label className="text-[9px] font-bold text-[#D4E655] uppercase">Cupo Máx.</label>
-                                                    <input
-                                                        type={form.esAudicion ? "text" : "number"}
-                                                        min="0"
-                                                        disabled={form.esAudicion}
-                                                        value={form.esAudicion ? "Sin límite" : form.cupoMaximo}
-                                                        onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })}
-                                                        className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655] disabled:opacity-50 disabled:text-[#D4E655]"
-                                                        placeholder="Ej: 20"
-                                                    />
-                                                </div>
+                                            <div className="grid grid-cols-3 gap-2 md:col-span-2">
+                                                <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Tipo</label><select value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]"><option value="Regular">Regular</option><option value="Seminario">Seminario</option><option value="Intensivo">Intensivo</option><option value="Compañía">Compañía</option></select></div>
+                                                <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Nivel</label><select value={form.nivel} onChange={e => setForm({ ...form, nivel: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]"><option value="Open">Open</option><option value="Principiante">Principiante</option><option value="Intermedio">Intermedio</option><option value="Avanzado">Avanzado</option></select></div>
+                                                <div className="space-y-1"><label className="text-[9px] font-bold text-[#D4E655] uppercase">Cupo</label><input type="number" value={form.cupoMaximo} onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs" /></div>
                                             </div>
-                                            <div className="md:col-span-5 space-y-1 flex flex-col"><label className="text-[9px] font-bold text-gray-500 uppercase">Flyer / Foto</label><label className="flex-1 w-full bg-[#111] border border-white/10 border-dashed rounded-xl cursor-pointer hover:border-[#D4E655] transition-colors relative overflow-hidden group min-h-[160px] flex flex-col items-center justify-center">{formFile ? (<><img src={URL.createObjectURL(formFile)} className="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:opacity-100 transition-opacity" /><div className="z-10 bg-black/50 px-2 py-1 rounded text-[9px] font-bold uppercase text-white shadow backdrop-blur-sm">Cambiar Imagen</div></>) : (<><div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-gray-500 mb-2 group-hover:text-[#D4E655] group-hover:scale-110 transition-all"><ImageIcon size={24} /></div><span className="text-xs text-gray-400 font-bold uppercase text-center px-4">Arrastrar o Clic aquí</span></>)}<input type="file" className="hidden" accept="image/*" onChange={e => e.target.files && setFormFile(e.target.files[0])} /></label></div>
+                                            <div className="space-y-1 md:col-span-2"><label className="text-[9px] font-bold text-gray-500 uppercase">Descripción</label><textarea value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs h-16 resize-none" /></div>
                                         </div>
                                     </div>
 
+                                    {/* SECCIÓN 2: DÍAS */}
                                     <div className="space-y-3">
                                         <div className="flex items-center gap-2 text-[#D4E655] border-b border-white/10 pb-1"><CalendarDays size={14} /><h4 className="text-[10px] font-black uppercase tracking-widest">Días de la Clase</h4></div>
-                                        <div className="bg-[#111] p-1 rounded-xl border border-white/10">
-                                            <MultiDatePicker
-                                                selectedDates={form.fechas}
-                                                onChange={(dates) => setForm({ ...form, fechas: dates })}
-                                            />
-                                        </div>
+                                        <div className="bg-[#111] p-1 rounded-xl border border-white/10"><MultiDatePicker selectedDates={form.fechas} onChange={(dates) => setForm({ ...form, fechas: dates })} /></div>
                                     </div>
 
+                                    {/* SECCIÓN 3: UBICACIÓN & FLYER (GRILLA CORREGIDA) */}
                                     <div className="space-y-3">
                                         <div className="flex items-center gap-2 text-[#D4E655] border-b border-white/10 pb-1"><MapPin size={14} /><h4 className="text-[10px] font-black uppercase tracking-widest">Ubicación & Staff</h4></div>
                                         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                                            <div className="md:col-span-12 space-y-4">
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Hora de Inicio</label><input type="time" value={form.hora} onChange={e => setForm({ ...form, hora: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white font-bold outline-none focus:border-[#D4E655]" required /></div>
-                                                    <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Duración (Minutos)</label><input type="number" value={form.duracion} onChange={e => setForm({ ...form, duracion: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white font-bold outline-none focus:border-[#D4E655]" /></div>
+                                            <div className="md:col-span-7 space-y-4">
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Hora</label><input type="time" value={form.hora} onChange={e => setForm({ ...form, hora: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs" required /></div>
+                                                    <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Duración</label><input type="number" value={form.duracion} onChange={e => setForm({ ...form, duracion: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs" /></div>
                                                 </div>
-                                                <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Ubicación</label><div className="flex gap-2"><select value={form.sedeId} onChange={e => { setForm({ ...form, sedeId: e.target.value, salaId: '' }) }} className="w-full bg-[#111] text-white font-bold px-3 py-3 rounded-lg outline-none border border-white/10 text-xs"><option value="">Sede...</option>{sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select><select value={form.salaId} onChange={e => setForm({ ...form, salaId: e.target.value })} className="w-full bg-[#111] text-white font-bold px-3 py-3 rounded-lg outline-none border border-white/10 text-xs disabled:opacity-50" disabled={!form.sedeId}><option value="">Sala...</option>{salasDisponibles.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select></div></div>
-
-                                                <div className="space-y-3 mt-4 border-t border-white/5 pt-4">
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                        <div className="space-y-1">
-                                                            <label className="text-[9px] font-bold text-gray-500 uppercase">Docente Titular *</label>
-                                                            <select required value={form.profeId} onChange={e => setForm({ ...form, profeId: e.target.value })} className="w-full bg-[#111] text-white font-bold px-3 py-3 rounded-lg outline-none border border-white/10 text-xs">
-                                                                <option value="">Seleccionar Titular...</option>
-                                                                {profesores.map(p => <option key={p.id} value={p.id}>{p.nombre_completo || p.email}</option>)}
-                                                            </select>
-                                                        </div>
-                                                        <div className="space-y-1">
-                                                            <label className="text-[9px] font-bold text-gray-500 uppercase flex justify-between">
-                                                                <span>Docente Invitado (Dúo)</span>
-                                                                <span className="text-gray-600 font-normal">Opcional</span>
-                                                            </label>
-                                                            <select value={form.profe2Id} onChange={e => setForm({ ...form, profe2Id: e.target.value })} className="w-full bg-[#111] text-white font-bold px-3 py-3 rounded-lg outline-none border border-white/10 text-xs">
-                                                                <option value="">Ninguno...</option>
-                                                                {profesores.filter(p => p.id !== form.profeId).map(p => (
-                                                                    <option key={p.id} value={p.id}>{p.nombre_completo || p.email}</option>
-                                                                ))}
-                                                            </select>
-                                                        </div>
-                                                    </div>
-                                                    {form.profe2Id && (
-                                                        <p className="text-[9px] text-[#D4E655] uppercase font-bold text-center bg-[#D4E655]/10 py-1 rounded">
-                                                            Nota: El pago configurado abajo se liquidará como un pozo compartido entre ambos docentes.
-                                                        </p>
-                                                    )}
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <select value={form.sedeId} onChange={e => setForm({ ...form, sedeId: e.target.value, salaId: '' })} className="bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]"><option value="">Sede...</option>{sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
+                                                    <select value={form.salaId} onChange={e => setForm({ ...form, salaId: e.target.value })} className="bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]"><option value="">Sala...</option>{salasDisponibles.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>
                                                 </div>
+                                                <div className="space-y-3 pt-4 border-t border-white/5">
+                                                    <select required value={form.profeId} onChange={e => setForm({ ...form, profeId: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs"><option value="">Profe Titular...</option>{profesores.map(p => <option key={p.id} value={p.id}>{p.nombre_completo}</option>)}</select>
+                                                    <select value={form.profe2Id} onChange={e => setForm({ ...form, profe2Id: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs"><option value="">Segundo Profe (Opcional)...</option>{profesores.filter(p => p.id !== form.profeId).map(p => <option key={p.id} value={p.id}>{p.nombre_completo}</option>)}</select>
+                                                </div>
+                                            </div>
+                                            {/* FLYER */}
+                                            <div className="md:col-span-5">
+                                                <label className="text-[9px] font-bold text-gray-500 uppercase block mb-1">Flyer / Foto</label>
+                                                <label className="h-44 w-full bg-[#111] border border-dashed border-white/10 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-[#D4E655] transition-colors relative overflow-hidden">
+                                                    {formFile ? <Image src={URL.createObjectURL(formFile)} alt="Preview" fill className="object-cover" /> : <><ImageIcon className="text-gray-600 mb-2" size={24} /><span className="text-[10px] text-gray-500 uppercase font-black">Subir</span></>}
+                                                    <input type="file" className="hidden" accept="image/*" onChange={e => e.target.files && setFormFile(e.target.files[0])} />
+                                                </label>
                                             </div>
                                         </div>
                                     </div>
 
-                                    <div className="space-y-3"><div className="flex items-center gap-2 text-[#D4E655] border-b border-white/10 pb-1"><DollarSign size={14} /><h4 className="text-[10px] font-black uppercase tracking-widest">Pago Docente</h4></div><div className="flex bg-[#111] rounded-lg p-1 border border-white/10 mb-2"><button type="button" onClick={() => setForm({ ...form, tipoAcuerdo: 'porcentaje' })} className={`flex-1 py-2 rounded text-[10px] font-bold uppercase transition-all ${form.tipoAcuerdo === 'porcentaje' ? 'bg-[#D4E655] text-black shadow' : 'text-gray-500'}`}>Porcentaje (%)</button><button type="button" onClick={() => setForm({ ...form, tipoAcuerdo: 'fijo' })} className={`flex-1 py-2 rounded text-[10px] font-bold uppercase transition-all ${form.tipoAcuerdo === 'fijo' ? 'bg-[#D4E655] text-black shadow' : 'text-gray-500'}`}>Monto Fijo ($)</button></div><div className="relative"><span className="absolute left-4 top-3.5 text-gray-500 font-bold">{form.tipoAcuerdo === 'porcentaje' ? '%' : '$'}</span><input type="number" value={form.valorAcuerdo} onChange={e => setForm({ ...form, valorAcuerdo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg pl-8 pr-4 py-3 text-white font-bold outline-none focus:border-[#D4E655]" /></div></div>
+                                    {/* SECCIÓN 4: PAGO */}
+                                    <div className="space-y-3">
+                                        <div className="flex items-center gap-2 text-[#D4E655] border-b border-white/10 pb-1"><DollarSign size={14} /><h4 className="text-[10px] font-black uppercase tracking-widest">Pago Docente</h4></div>
+                                        <div className="flex bg-[#111] rounded-lg p-1 border border-white/10">
+                                            <button type="button" onClick={() => setForm({ ...form, tipoAcuerdo: 'porcentaje' })} className={`flex-1 py-2 rounded text-[10px] font-black uppercase ${form.tipoAcuerdo === 'porcentaje' ? 'bg-[#D4E655] text-black' : 'text-gray-500'}`}>Porcentaje (%)</button>
+                                            <button type="button" onClick={() => setForm({ ...form, tipoAcuerdo: 'fijo' })} className={`flex-1 py-2 rounded text-[10px] font-black uppercase ${form.tipoAcuerdo === 'fijo' ? 'bg-[#D4E655] text-black' : 'text-gray-500'}`}>Fijo ($)</button>
+                                        </div>
+                                        <input type="number" value={form.valorAcuerdo} onChange={e => setForm({ ...form, valorAcuerdo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-sm font-bold outline-none" placeholder="Valor del acuerdo" />
+                                    </div>
 
-                                    <div className="pt-4 flex gap-3 pb-10"><button type="button" onClick={() => setModalMode('view')} className="flex-1 py-4 bg-white/5 rounded-xl font-bold text-gray-400 text-xs uppercase hover:bg-white/10">Cancelar</button><button type="submit" disabled={uploading} className="flex-[2] bg-white text-black font-bold uppercase rounded-xl hover:bg-[#D4E655] transition-all shadow-lg text-xs flex justify-center items-center">{uploading ? <Loader2 className="animate-spin mr-2" /> : 'Confirmar Clase'}</button></div>
+                                    <div className="pt-4 flex gap-3">
+                                        <button type="button" onClick={() => setModalMode('view')} className="flex-1 py-4 bg-white/5 rounded-xl font-bold text-gray-400 text-xs uppercase transition-colors">Cancelar</button>
+                                        <button type="submit" disabled={uploading} className="flex-[2] bg-white text-black font-black uppercase rounded-xl hover:bg-[#D4E655] transition-all text-xs flex justify-center items-center shadow-lg">
+                                            {uploading ? <Loader2 className="animate-spin mr-2" /> : 'Confirmar Clase'}
+                                        </button>
+                                    </div>
                                 </form>
                             )}
                         </div>
