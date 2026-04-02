@@ -1,9 +1,9 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useState, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
-import useSWR from 'swr' // 🚀 LA MAGIA SWR
+import { useState, Suspense, useEffect } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import useSWR from 'swr'
 import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
@@ -13,6 +13,15 @@ import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
+
+// 🚀 IMPORTAMOS LAS SERVER ACTIONS
+import {
+    cambiarRolAction,
+    cambiarLigaAction,
+    guardarPerfilAction,
+    asignarPackAction,
+    cobrarLigaAction
+} from '@/app/actions/usuarios'
 
 // --- TIPOS ESTRICTOS ---
 type Ritmo = { id: string; nombre: string }
@@ -39,7 +48,6 @@ type RPCUsuariosData = {
     productos: Producto[] | null
 }
 
-// 🛡️ ESCUDO ANTI-TIPOS SEGURO
 const getInteresesSeguro = (intereses: any): string[] => {
     if (!intereses) return []
     if (Array.isArray(intereses)) return intereses.map(String)
@@ -78,6 +86,7 @@ const fetcher = async () => {
 function UsuariosContent() {
     const [supabase] = useState(() => createClient())
     const searchParams = useSearchParams()
+    const router = useRouter()
 
     const { userRole, isLoading: loadingContext } = useCash()
 
@@ -105,25 +114,14 @@ function UsuariosContent() {
     const [createForm, setCreateForm] = useState({ nombre: '', email: '', dni: '', telefono: '', rol: 'alumno' })
     const [packForm, setPackForm] = useState({ packId: '', monto: '', metodo: 'efectivo' })
 
-    // 🚀 SWR CON AUTO-RECARGA INTELIGENTE (FAILSAFE)
+    // 🚀 SWR (Limpio, delegando protección al Middleware y SWRProvider global)
     const { data, error, isLoading, mutate } = useSWR('usuarios_completo', fetcher, {
-        revalidateOnFocus: true,
-        dedupingInterval: 5000,
-        onError: (err) => {
-            const yaRecargo = sessionStorage.getItem('swr_failsafe_usuarios')
-            if (!yaRecargo) {
-                console.warn("Fallo detectado por SWR. Auto-recargando por seguridad...")
-                sessionStorage.setItem('swr_failsafe_usuarios', 'true')
-                window.location.reload() // ♻️ Auto-recarga salvadora
-            } else {
-                toast.error('Error persistente de red. Revisá tu conexión.')
-            }
-        },
-        onSuccess: () => {
-            // Si carga bien, reseteamos el seguro para la próxima vez
-            sessionStorage.removeItem('swr_failsafe_usuarios')
-        }
+        revalidateOnFocus: false, // Evita recargar al volver de otra pestaña
     })
+
+    useEffect(() => {
+        if (error) toast.error('Error al cargar directorio. Revisá tu conexión.')
+    }, [error])
 
     const users = data?.usuarios || []
     const ritmosDisponibles = data?.ritmos || []
@@ -161,11 +159,15 @@ function UsuariosContent() {
     const cambiarRol = async (usuarioId: string, nuevoRol: string) => {
         if (userRole !== 'admin') return toast.error('No tienes permisos')
         setCambiandoRolId(usuarioId)
-        const { error } = await supabase.from('profiles').update({ rol: nuevoRol as any }).eq('id', usuarioId)
-        if (!error) {
+
+        const response = await cambiarRolAction(usuarioId, nuevoRol)
+        if (response.success) {
             toast.success('Rol actualizado correctamente')
-            mutate()
-        } else toast.error('Error al cambiar el rol')
+            router.refresh()
+            setTimeout(() => mutate(), 500)
+        } else {
+            toast.error(response.error || 'Error al cambiar el rol')
+        }
         setCambiandoRolId(null)
     }
 
@@ -173,14 +175,19 @@ function UsuariosContent() {
         const canCreate = userRole === 'admin' || userRole === 'recepcion'
         if (!canCreate) return toast.error('No tienes permisos')
         setCambiandoLigaId(usuarioId)
-        const { error } = await supabase.from('profiles').update({ nivel_liga: nuevoNivel }).eq('id', usuarioId)
-        if (!error) {
+
+        const response = await cambiarLigaAction(usuarioId, nuevoNivel)
+        if (response.success) {
             toast.success(nuevoNivel ? `Promovido a La Liga (Nivel ${nuevoNivel})` : 'Removido de La Liga')
-            mutate()
-        } else toast.error('Error al actualizar el nivel')
+            router.refresh()
+            setTimeout(() => mutate(), 500)
+        } else {
+            toast.error(response.error || 'Error al actualizar el nivel')
+        }
         setCambiandoLigaId(null)
     }
 
+    // Alta Manual usa API (no hace falta pasarlo a Action porque usa un fetch que ya hace bypass a Supabase Client)
     const handleCreateUser = async (e: React.FormEvent) => {
         e.preventDefault()
         setCreating(true)
@@ -192,11 +199,18 @@ function UsuariosContent() {
             })
             const dataRes = await res.json()
             if (!res.ok) throw new Error(dataRes.error || 'Error al crear')
+
             toast.success(`${createForm.rol === 'profesor' ? 'Profesor' : 'Alumno'} creado correctamente`)
             setIsCreateOpen(false)
             setCreateForm({ nombre: '', email: '', dni: '', telefono: '', rol: 'alumno' })
-            mutate()
-        } catch (error: any) { toast.error(error.message) } finally { setCreating(false) }
+
+            router.refresh()
+            setTimeout(() => mutate(), 500)
+        } catch (error: any) {
+            toast.error(error.message)
+        } finally {
+            setCreating(false)
+        }
     }
 
     const openEditModal = (user: any) => {
@@ -220,17 +234,15 @@ function UsuariosContent() {
 
     const handleSaveChanges = async () => {
         if (!selectedUser) return
-        const { error } = await supabase.from('profiles').update({
-            staff_observations: editForm.obs,
-            intereses_ritmos: editForm.intereses_ritmos
-        }).eq('id', selectedUser.id)
 
-        if (!error) {
+        const response = await guardarPerfilAction(selectedUser.id, editForm.obs, editForm.intereses_ritmos)
+        if (response.success) {
             toast.success('Cambios guardados')
             setIsEditOpen(false)
-            mutate()
+            router.refresh()
+            setTimeout(() => mutate(), 500)
         } else {
-            toast.error('Error al guardar')
+            toast.error(response.error || 'Error al guardar')
         }
     }
 
@@ -248,28 +260,27 @@ function UsuariosContent() {
     const handleAssignPack = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!packForm.packId || packForm.monto === '') return toast.error('Completá los campos del pack')
-        setAssigningPack(true)
+
         const prod = productos.find(p => p.id === packForm.packId)
         const montoNum = Number(packForm.monto)
-        if (!prod) { setAssigningPack(false); return toast.error('Producto no encontrado') }
+        if (!prod) return toast.error('Producto no encontrado')
+
+        setAssigningPack(true)
 
         try {
-            const { data: { user } } = await supabase.auth.getUser()
-            let turnoActivoId = null
-            if (montoNum > 0 && user) {
-                const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user.id).eq('estado', 'abierta').maybeSingle()
-                if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
-                turnoActivoId = turno.id
-            }
+            const response = await asignarPackAction(selectedUser.id, prod.tipo_clase, prod.creditos, montoNum, packForm.metodo)
 
-            const { data, error } = await supabase.rpc('asignar_pack_manual', { p_user_id: selectedUser.id, p_turno_caja_id: turnoActivoId, p_tipo_clase: prod.tipo_clase, p_cantidad: prod.creditos, p_monto: montoNum, p_metodo_pago: packForm.metodo })
-            if (error) throw new Error('Error de conexión al cargar el pack.')
-            if (!data.success) throw new Error(data.message)
+            if (!response.success) throw new Error(response.error)
 
             toast.success(`Pack asignado correctamente. Créditos actualizados.`)
             setIsPackModalOpen(false)
-            mutate()
-        } catch (error: any) { toast.error(error.message || 'Error al asignar el pack') } finally { setAssigningPack(false) }
+            router.refresh()
+            setTimeout(() => mutate(), 500)
+        } catch (error: any) {
+            toast.error(error.message || 'Error al asignar el pack')
+        } finally {
+            setAssigningPack(false)
+        }
     }
 
     const openCobroLigaModal = (user: any) => {
@@ -281,33 +292,19 @@ function UsuariosContent() {
     const handleCobrarLigaManual = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!cobroLigaForm.monto) return toast.error('Ingresá el monto a cobrar')
+
         setAssigningPack(true)
 
         try {
-            const { data: { user } } = await supabase.auth.getUser()
             const montoNum = Number(cobroLigaForm.monto)
+            const response = await cobrarLigaAction(selectedUser.id, montoNum, cobroLigaForm.metodo)
 
-            const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user?.id).eq('estado', 'abierta').maybeSingle()
-            if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
-
-            const hoy = new Date()
-            const payload = {
-                alumno_id: selectedUser.id,
-                mes: hoy.getMonth() + 1,
-                anio: hoy.getFullYear(),
-                monto: montoNum,
-                metodo_pago: cobroLigaForm.metodo,
-                turno_caja_id: turno.id
-            }
-
-            const { error } = await supabase.from('liga_pagos').insert(payload)
-            if (error) {
-                if (error.code === '23505') throw new Error('Este alumno ya tiene pagada la cuota de este mes.')
-                throw error
-            }
+            if (!response.success) throw new Error(response.error)
 
             toast.success('Cuota de La Liga cobrada exitosamente')
             setIsCobroLigaOpen(false)
+            router.refresh()
+            setTimeout(() => mutate(), 500)
         } catch (error: any) {
             toast.error(error.message || 'Error al cobrar')
         } finally {
@@ -315,8 +312,8 @@ function UsuariosContent() {
         }
     }
 
-
     if ((isLoading && !users.length) || loadingContext) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
+
     const canCreate = userRole === 'admin' || userRole === 'recepcion'
     const isAdmin = userRole === 'admin'
 

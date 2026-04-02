@@ -1,29 +1,21 @@
 // app/actions/clases.ts
 'use server'
 
-import { createClient } from '@supabase/supabase-js' // 👈 Usamos el cliente puro
+// 👇 IMPORTAMOS EL LECTOR DE COOKIES QUE CREASTE EN EL PASO 1
+import { createClient } from '@/utils/supabase/server-helper'
 import { v4 as uuidv4 } from 'uuid'
 import { format } from 'date-fns'
 import { revalidatePath } from 'next/cache'
 
-// Recibimos el token como tercer parámetro
-export async function crearClasesAction(form: any, publicUrl: string | null, token: string | undefined) {
-    if (!token) return { success: false, error: 'No autorizado (Falta Token de Sesión)' }
-
-    // 🛡️ MAGIA: Creamos la conexión inyectando tu token directamente. Cero problemas de cookies.
-    const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-            global: {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            }
-        }
-    )
+// Fijate que ya no le pasamos el token por parámetro, lo lee solo
+export async function crearClasesAction(form: any, publicUrl: string | null) {
+    const supabase = await createClient() // 👈 Llama a Supabase leyendo tus cookies
 
     try {
+        // 1. Validamos que la sesión exista (ahora sí te va a reconocer como admin)
+        const { data: { user }, error: authError } = await supabase.auth.getUser()
+        if (authError || !user) throw new Error('No autorizado (Sesión inválida)')
+
         const [horas, minutos] = form.hora.split(':')
         const serieUUID = form.fechas.length > 1 ? uuidv4() : null;
 
@@ -76,7 +68,9 @@ export async function crearClasesAction(form: any, publicUrl: string | null, tok
         const { error } = await supabase.from('clases').insert(clasesAInsertar)
         if (error) throw new Error(error.message)
 
-        revalidatePath('/calendario')
+        // Refrescamos el calendario
+        revalidatePath('/agenda')
+
         return { success: true, cantidad: clasesAInsertar.length }
 
     } catch (error: any) {

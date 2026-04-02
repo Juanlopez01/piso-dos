@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import {
     DollarSign, Lock, Unlock, TrendingUp, TrendingDown,
@@ -12,6 +13,9 @@ import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
+
+// 🚀 IMPORTAMOS LAS SERVER ACTIONS
+import { abrirCajaAction, cerrarCajaAction, registrarMovimientoAction } from '@/app/actions/caja'
 
 // --- TIPOS Y ESTRUCTURAS ---
 type CajaData = {
@@ -26,13 +30,12 @@ type CajaData = {
     } | null
 }
 
-// 🚀 FETCHER PRINCIPAL (Maneja Admin y Recepción dinámicamente)
+// 🚀 FETCHER PRINCIPAL
 const fetcherCaja = async ([key, role]: [string, string]): Promise<CajaData> => {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
 
     if (role === 'admin') {
-        // 1. Cajas Activas
         const { data: activas } = await supabase.from('caja_turnos')
             .select(`*, sede:sedes(nombre), usuario:profiles(nombre_completo), caja_movimientos(*)`)
             .eq('estado', 'abierta')
@@ -56,7 +59,6 @@ const fetcherCaja = async ([key, role]: [string, string]): Promise<CajaData> => 
             })
         }
 
-        // 2. Historial
         const { data: historial } = await supabase.from('caja_turnos')
             .select(`*, sede:sedes(nombre), usuario:profiles(nombre_completo)`)
             .eq('estado', 'cerrada')
@@ -93,7 +95,6 @@ const fetcherCaja = async ([key, role]: [string, string]): Promise<CajaData> => 
     }
 }
 
-// 🚀 FETCHER SECUNDARIO (Solo para el modal de auditoría del Admin)
 const fetcherDetalle = async ([key, turnoId]: [string, string]) => {
     const supabase = createClient()
     const { data } = await supabase.from('caja_movimientos')
@@ -104,14 +105,17 @@ const fetcherDetalle = async ([key, turnoId]: [string, string]) => {
 }
 
 export default function CajaPage() {
-    const [supabase] = useState(() => createClient())
     const { checkStatus, userRole, isLoading: loadingContext } = useCash()
+    const router = useRouter()
 
-    // 🚀 SWR: Orquestador Principal
+    // 🚀 SWR (Protegido por el Provider Global)
     const { data, isLoading, mutate } = useSWR(
         !loadingContext && userRole ? ['caja-dashboard', userRole] : null,
         fetcherCaja,
-        { refreshInterval: userRole === 'admin' ? 10000 : 0 } // Al admin se le refresca cada 10s para ver lo que pasa en las sedes
+        {
+            refreshInterval: userRole === 'admin' ? 10000 : 0,
+            revalidateOnFocus: false // Refuerzo anti-cuelgue
+        }
     )
 
     // Estados Locales
@@ -122,7 +126,6 @@ export default function CajaPage() {
     const [nuevoMovimiento, setNuevoMovimiento] = useState({ tipo: 'ingreso', concepto: '', monto: '', metodo: 'efectivo' })
     const [cajaDetalle, setCajaDetalle] = useState<any>(null)
 
-    // 🚀 SWR: Fetcher bajo demanda para el modal
     const { data: movimientosDetalle, isLoading: loadingDetalle } = useSWR(
         cajaDetalle ? ['caja-detalle', cajaDetalle.id] : null,
         fetcherDetalle
@@ -152,26 +155,24 @@ export default function CajaPage() {
         saldoDigital = ingresosDig - egresosDig
     }
 
-    // --- ACCIONES DE RECEPCIÓN ---
+    // --- ACCIONES DE RECEPCIÓN (SERVER ACTIONS) ---
     const handleAbrirCaja = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!sedeSeleccionada) return toast.error('Seleccioná una sede')
         setProcesando(true)
 
-        const { data: { user } } = await supabase.auth.getUser()
-        if (user) {
-            const { error } = await supabase.from('caja_turnos').insert({
-                usuario_id: user.id, sede_id: sedeSeleccionada, monto_inicial: Number(montoInicial) || 0, estado: 'abierta', fecha_apertura: new Date().toISOString()
-            })
-            if (!error) {
-                toast.success('Caja Abierta')
-                setRecienCerrada(false)
-                await checkStatus()
-                mutate() // Recarga SWR
-            } else {
-                toast.error('Error al abrir caja')
-            }
+        const response = await abrirCajaAction(sedeSeleccionada, Number(montoInicial) || 0)
+
+        if (response.success) {
+            toast.success('Caja Abierta')
+            setRecienCerrada(false)
+            await checkStatus() // Actualiza el contexto global
+            router.refresh()
+            setTimeout(() => mutate(), 500)
+        } else {
+            toast.error(response.error || 'Error al abrir caja')
         }
+
         setProcesando(false)
     }
 
@@ -181,37 +182,37 @@ export default function CajaPage() {
         if (!confirm(`¿Cerrar caja con saldo TOTAL $${saldoFinalTotal.toLocaleString()}? \n(Efectivo: $${saldoFisico.toLocaleString()} | Digital: $${saldoDigital.toLocaleString()})`)) return
 
         setProcesando(true)
-        try {
-            const { data: res, error } = await supabase.rpc('cerrar_turno_caja', { p_turno_id: turnoActivo.id })
-            if (error || !res.success) throw new Error(res?.message || 'Fallo de red al intentar cerrar caja.')
 
-            toast.success(res.message)
+        const response = await cerrarCajaAction(turnoActivo.id)
+
+        if (response.success) {
+            toast.success(response.message || 'Caja Cerrada Exitosamente')
             setRecienCerrada(true)
-            await checkStatus()
-            mutate() // Limpia la vista
-        } catch (error: any) {
-            toast.error(error.message)
-        } finally {
-            setProcesando(false)
+            await checkStatus() // Avisa al sistema que ya no hay caja
+            router.refresh()
+            setTimeout(() => mutate(), 500)
+        } else {
+            toast.error(response.error || 'Fallo al intentar cerrar caja.')
         }
+
+        setProcesando(false)
     }
 
     const handleMovimiento = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!turnoActivo) return
 
-        // 🚀 MUTACIÓN OPTIMISTA: Lo inyectamos en la UI antes de ir a BD
-        const optimisticMov = {
-            id: 'temp-' + Date.now(),
+        const payload = {
             turno_id: turnoActivo.id,
             tipo: nuevoMovimiento.tipo,
             concepto: nuevoMovimiento.concepto,
             monto: Number(nuevoMovimiento.monto),
             metodo_pago: nuevoMovimiento.metodo,
-            origen_referencia: 'manual',
-            created_at: new Date().toISOString()
+            origen_referencia: 'manual'
         }
 
+        // 🚀 MUTACIÓN OPTIMISTA: Interfaz a 60fps
+        const optimisticMov = { ...payload, id: 'temp-' + Date.now(), created_at: new Date().toISOString() }
         mutate({
             ...data!,
             recepcion: {
@@ -221,23 +222,19 @@ export default function CajaPage() {
         }, false)
 
         setProcesando(true)
-        const { error } = await supabase.from('caja_movimientos').insert({
-            turno_id: turnoActivo.id,
-            tipo: nuevoMovimiento.tipo,
-            concepto: nuevoMovimiento.concepto,
-            monto: Number(nuevoMovimiento.monto),
-            metodo_pago: nuevoMovimiento.metodo,
-            origen_referencia: 'manual'
-        })
 
-        if (!error) {
-            toast.success('Registrado')
+        const response = await registrarMovimientoAction(payload)
+
+        if (response.success) {
+            toast.success('Movimiento Registrado')
             setNuevoMovimiento({ tipo: 'ingreso', concepto: '', monto: '', metodo: 'efectivo' })
-            mutate() // Revalida para tener el ID real
+            router.refresh()
+            setTimeout(() => mutate(), 500)
         } else {
-            toast.error('Error al registrar')
-            mutate() // Revertir en caso de error
+            toast.error(response.error || 'Error al registrar')
+            mutate() // Revertimos la mutación optimista si falla
         }
+
         setProcesando(false)
     }
 
@@ -563,9 +560,13 @@ export default function CajaPage() {
                 </div>
 
                 <div className="flex flex-col justify-center">
-                    <button onClick={handleCerrarCaja} className="h-full w-full bg-red-500/10 border border-red-500/20 hover:bg-red-500 hover:text-white text-red-500 font-bold uppercase rounded-2xl flex flex-col items-center justify-center gap-2 transition-all p-6 group">
-                        <Lock size={24} className="group-hover:scale-110 transition-transform" />
-                        <span>Cerrar Turno</span>
+                    <button onClick={handleCerrarCaja} disabled={procesando} className="h-full w-full bg-red-500/10 border border-red-500/20 hover:bg-red-500 hover:text-white text-red-500 font-bold uppercase rounded-2xl flex flex-col items-center justify-center gap-2 transition-all p-6 group">
+                        {procesando ? <Loader2 className="animate-spin" /> : (
+                            <>
+                                <Lock size={24} className="group-hover:scale-110 transition-transform" />
+                                <span>Cerrar Turno</span>
+                            </>
+                        )}
                     </button>
                 </div>
             </div>

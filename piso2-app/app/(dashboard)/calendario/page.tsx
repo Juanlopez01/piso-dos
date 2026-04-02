@@ -274,39 +274,27 @@ export default function CalendarioPage() {
 
         setUploading(true)
         try {
-            if (!accessToken) throw new Error("No hay sesión activa. Refrescá la página.")
-
             let publicUrl = null
 
-            // 🛡️ BYPASS DEL CLIENTE PARA SUBIR LA FOTO (Native HTTP Fetch)
+            // Subida de imagen súper limpia (usando el cliente normal, que ahora lee cookies)
             if (formFile) {
                 const fileExt = formFile.name.split('.').pop()
                 const fileName = `${Date.now()}.${fileExt}`
-                const uploadUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/clases/${fileName}`
 
-                const uploadResponse = await fetch(uploadUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'Content-Type': formFile.type
-                    },
-                    body: formFile
-                })
+                const { error: uploadError } = await supabase.storage.from('clases').upload(fileName, formFile)
+                if (uploadError) throw new Error('Error al subir imagen')
 
-                if (!uploadResponse.ok) {
-                    const errData = await uploadResponse.json()
-                    throw new Error('Error al subir imagen: ' + (errData?.message || uploadResponse.statusText))
-                }
-
-                publicUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/clases/${fileName}`
+                publicUrl = supabase.storage.from('clases').getPublicUrl(fileName).data.publicUrl
             }
 
-            // 🚀 LLAMADA A LA SERVER ACTION PASANDO EL TOKEN
-            const response = await crearClasesAction(form, publicUrl, accessToken)
+            // 🚀 LLAMADA A LA SERVER ACTION (Solo pasamos form y URL)
+            const response = await crearClasesAction(form, publicUrl)
 
             if (!response.success) throw new Error(response.error)
 
             toast.success(`${response.cantidad} clase(s) creada(s) correctamente`)
+
+            // Limpieza
             setModalMode('view')
             setForm({
                 nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
@@ -316,7 +304,11 @@ export default function CalendarioPage() {
                 esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false
             } as any)
             setFormFile(null)
-            await mutate()
+
+            // Refresh combo
+            router.refresh()
+            setTimeout(() => mutate(), 500)
+
         } catch (err: any) {
             toast.error(err.message)
         } finally {
