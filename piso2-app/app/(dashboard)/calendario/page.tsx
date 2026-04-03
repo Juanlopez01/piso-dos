@@ -182,9 +182,6 @@ export default function CalendarioPage() {
     const [isCreatingRitmo, setIsCreatingRitmo] = useState(false)
     const [nuevoRitmoNombre, setNuevoRitmoNombre] = useState('')
 
-    // 🛡️ TRUCO ANTI-BLOQUEO: Guardamos el token de sesión en memoria
-    const [accessToken, setAccessToken] = useState<string>('')
-
     const [form, setForm] = useState({
         nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
         hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '',
@@ -193,17 +190,6 @@ export default function CalendarioPage() {
         esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false
     })
     const [formFile, setFormFile] = useState<File | null>(null)
-
-    // --- MANTENER SESIÓN ACTIVA EN BACKGROUND ---
-    useEffect(() => {
-        supabase.auth.getSession().then(({ data }: any) => {
-            if (data.session) setAccessToken(data.session.access_token)
-        })
-        const { data: authListener } = supabase.auth.onAuthStateChange(({ _event, session }: any) => {
-            if (session) setAccessToken(session.access_token)
-        })
-        return () => { authListener.subscription.unsubscribe() }
-    }, [supabase])
 
     // --- LÓGICA SWR ---
     const startIso = startOfWeek(startOfMonth(currentDate)).toISOString()
@@ -271,12 +257,13 @@ export default function CalendarioPage() {
         e.preventDefault()
         if (form.fechas.length === 0) return toast.error('Seleccioná al menos una fecha')
         if (!form.salaId || !form.profeId) return toast.error('Faltan datos (Sala o Profe)')
+        if (form.tipo === 'Compañía' && !form.companiaId) return toast.error('Falta seleccionar Compañía')
 
         setUploading(true)
         try {
             let publicUrl = null
 
-            // Subida de imagen súper limpia (usando el cliente normal, que ahora lee cookies)
+            // Subida de imagen
             if (formFile) {
                 const fileExt = formFile.name.split('.').pop()
                 const fileName = `${Date.now()}.${fileExt}`
@@ -287,7 +274,7 @@ export default function CalendarioPage() {
                 publicUrl = supabase.storage.from('clases').getPublicUrl(fileName).data.publicUrl
             }
 
-            // 🚀 LLAMADA A LA SERVER ACTION (Solo pasamos form y URL)
+            // 🚀 LLAMADA A LA SERVER ACTION
             const response = await crearClasesAction(form, publicUrl)
 
             if (!response.success) throw new Error(response.error)
@@ -499,11 +486,89 @@ export default function CalendarioPage() {
                                                     </select>
                                                 )}
                                             </div>
-                                            <div className="grid grid-cols-3 gap-2 md:col-span-2">
-                                                <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Tipo</label><select value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]"><option value="Regular">Regular</option><option value="Seminario">Seminario</option><option value="Intensivo">Intensivo</option><option value="Compañía">Compañía</option></select></div>
-                                                <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Nivel</label><select value={form.nivel} onChange={e => setForm({ ...form, nivel: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]"><option value="Open">Open</option><option value="Principiante">Principiante</option><option value="Intermedio">Intermedio</option><option value="Avanzado">Avanzado</option></select></div>
-                                                <div className="space-y-1"><label className="text-[9px] font-bold text-[#D4E655] uppercase">Cupo</label><input type="number" value={form.cupoMaximo} onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs" /></div>
+
+                                            {/* RESTAURAMOS TODO EL BLOQUE FALTANTE: TIPO, NIVEL, CUPO, LIGA, AUDICIÓN, COMPAÑÍA */}
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 md:col-span-2">
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-bold text-gray-500 uppercase">Tipo</label>
+                                                    <select value={form.tipo} onChange={e => {
+                                                        const isCompania = e.target.value === 'Compañía';
+                                                        setForm({ ...form, tipo: e.target.value, cupoMaximo: isCompania ? 20 : form.cupoMaximo })
+                                                    }} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]">
+                                                        <option value="Regular">Regular</option>
+                                                        <option value="Seminario">Seminario</option>
+                                                        <option value="Intensivo">Intensivo</option>
+                                                        <option value="Compañía">Compañía</option>
+                                                    </select>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-bold text-gray-500 uppercase">Nivel</label>
+                                                    <select value={form.nivel} onChange={e => setForm({ ...form, nivel: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]">
+                                                        <option value="Open">Open</option>
+                                                        <option value="Principiante">Principiante</option>
+                                                        <option value="Intermedio">Intermedio</option>
+                                                        <option value="Avanzado">Avanzado</option>
+                                                    </select>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-bold text-[#D4E655] uppercase">Cupo Máx.</label>
+                                                    <input
+                                                        type={form.esAudicion ? "text" : "number"}
+                                                        min="0"
+                                                        disabled={form.esAudicion}
+                                                        value={form.esAudicion ? "Sin límite" : form.cupoMaximo}
+                                                        onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })}
+                                                        className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs disabled:opacity-50 disabled:text-[#D4E655]"
+                                                    />
+                                                </div>
+
+                                                {form.tipo === 'Compañía' && (
+                                                    <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-blue-500/5 p-3 rounded-xl border-dashed border-blue-500/20 animate-in fade-in">
+                                                        <label className="flex items-center gap-1.5 text-[10px] font-black text-blue-400 uppercase tracking-widest">
+                                                            <UsersRound size={12} className="text-blue-500" /> Vincular a Grupo
+                                                        </label>
+                                                        <select required value={form.companiaId} onChange={e => setForm({ ...form, companiaId: e.target.value })} className="w-full bg-[#111] border border-blue-500/30 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-blue-500">
+                                                            <option value="">Seleccionar compañía...</option>
+                                                            {companias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                                                        </select>
+                                                    </div>
+                                                )}
+
+                                                <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-pink-500/5 p-3 rounded-xl border-dashed border-pink-500/20">
+                                                    <label className="flex items-center gap-3 cursor-pointer">
+                                                        <div className="relative flex items-center">
+                                                            <input type="checkbox" checked={form.esAudicion} onChange={e => setForm({ ...form, esAudicion: e.target.checked })} className="peer sr-only" />
+                                                            <div className="w-10 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-pink-500"></div>
+                                                        </div>
+                                                        <span className="text-[10px] font-black uppercase text-pink-400 flex items-center gap-1"><Sparkles size={12} className="text-pink-500" /> Es una Audición (Sin cupo)</span>
+                                                    </label>
+                                                </div>
+
+                                                <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-purple-500/5 p-3 rounded-xl border-dashed border-purple-500/20">
+                                                    <label className="flex items-center gap-3 cursor-pointer">
+                                                        <div className="relative flex items-center">
+                                                            <input type="checkbox" checked={form.esLaLiga} onChange={e => setForm({ ...form, esLaLiga: e.target.checked })} className="peer sr-only" />
+                                                            <div className="w-10 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
+                                                        </div>
+                                                        <span className="text-[10px] font-black uppercase text-purple-400 flex items-center gap-1"><Star size={12} className="fill-purple-500/50" /> Pertenece a La Liga</span>
+                                                    </label>
+
+                                                    {form.esLaLiga && (
+                                                        <div className="pl-[52px] flex gap-4 mt-2 animate-in fade-in slide-in-from-top-2">
+                                                            <label className="flex items-center gap-2 cursor-pointer group">
+                                                                <input type="radio" name="ligaNivel" value={1} checked={form.ligaNivel === 1} onChange={() => setForm({ ...form, ligaNivel: 1 })} className="w-4 h-4 accent-purple-500" />
+                                                                <span className={`text-xs font-bold uppercase ${form.ligaNivel === 1 ? 'text-white' : 'text-gray-500 group-hover:text-white/80'}`}>Nivel 1</span>
+                                                            </label>
+                                                            <label className="flex items-center gap-2 cursor-pointer group">
+                                                                <input type="radio" name="ligaNivel" value={2} checked={form.ligaNivel === 2} onChange={() => setForm({ ...form, ligaNivel: 2 })} className="w-4 h-4 accent-purple-500" />
+                                                                <span className={`text-xs font-bold uppercase ${form.ligaNivel === 2 ? 'text-white' : 'text-gray-500 group-hover:text-white/80'}`}>Nivel 2</span>
+                                                            </label>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
+                                            {/* FIN RESTAURACIÓN */}
+
                                             <div className="space-y-1 md:col-span-2"><label className="text-[9px] font-bold text-gray-500 uppercase">Descripción</label><textarea value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs h-16 resize-none" /></div>
                                         </div>
                                     </div>
@@ -514,7 +579,7 @@ export default function CalendarioPage() {
                                         <div className="bg-[#111] p-1 rounded-xl border border-white/10"><MultiDatePicker selectedDates={form.fechas} onChange={(dates) => setForm({ ...form, fechas: dates })} /></div>
                                     </div>
 
-                                    {/* SECCIÓN 3: UBICACIÓN & FLYER (GRILLA CORREGIDA) */}
+                                    {/* SECCIÓN 3: UBICACIÓN & FLYER */}
                                     <div className="space-y-3">
                                         <div className="flex items-center gap-2 text-[#D4E655] border-b border-white/10 pb-1"><MapPin size={14} /><h4 className="text-[10px] font-black uppercase tracking-widest">Ubicación & Staff</h4></div>
                                         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
