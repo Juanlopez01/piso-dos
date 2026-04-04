@@ -496,6 +496,7 @@ export default function CalendarioPage() {
                                                         setForm({ ...form, tipo: e.target.value, cupoMaximo: isCompania ? 20 : form.cupoMaximo })
                                                     }} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]">
                                                         <option value="Regular">Regular</option>
+                                                        <option value="Formacion">Formación</option>
                                                         <option value="Seminario">Seminario</option>
                                                         <option value="Intensivo">Intensivo</option>
                                                         <option value="Compañía">Compañía</option>
@@ -504,9 +505,11 @@ export default function CalendarioPage() {
                                                 <div className="space-y-1">
                                                     <label className="text-[9px] font-bold text-gray-500 uppercase">Nivel</label>
                                                     <select value={form.nivel} onChange={e => setForm({ ...form, nivel: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]">
-                                                        <option value="Open">Open</option>
+                                                        <option value="Todos">Todos</option>
                                                         <option value="Principiante">Principiante</option>
+                                                        <option value="Principiante/intermedio">Principiante/Intermedio</option>
                                                         <option value="Intermedio">Intermedio</option>
+                                                        <option value="Intermedio/avanzado">Intermedio/Avanzado</option>
                                                         <option value="Avanzado">Avanzado</option>
                                                     </select>
                                                 </div>

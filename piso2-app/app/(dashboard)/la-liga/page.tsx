@@ -1,9 +1,10 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import useSWR from 'swr'
 import {
     Lock, Loader2, AlertTriangle, FileWarning,
     Megaphone, BookOpen, GraduationCap, ChevronRight,
@@ -14,6 +15,9 @@ import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
+
+// 🚀 IMPORTAMOS LAS SERVER ACTIONS
+import { enviarAvisoAction, eliminarAvisoAction, guardarEvaluacionAction, cambiarNivelLigaAction } from '@/app/actions/liga'
 
 const CRITERIOS_EVALUACION = [
     "Puntualidad", "Asistencia / regularidad", "Compromiso con la clase", "Actitud de trabajo",
@@ -26,336 +30,274 @@ const CRITERIOS_EVALUACION = [
     "Escucha grupal", "Sincronización con compañeros", "Adaptación al trabajo colectivo"
 ]
 
-export default function LaLigaPage() {
-    const [supabase] = useState(() => createClient())
-    const router = useRouter()
+// 🚀 EL FETCHER MAESTRO (SWR)
+const fetcherLiga = async () => {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) throw new Error("No user")
 
+    const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+    if (!profile) throw new Error("No profile")
+
+    const isStaff = ['admin', 'recepcion', 'profesor'].includes(profile.rol)
+    const canManage = ['admin', 'recepcion'].includes(profile.rol)
+    const nivelAlumno = profile.nivel_liga || profile.nivel || 1
+
+    // 1. AVISOS
+    let queryAvisos = supabase.from('liga_avisos').select('*, autor:profiles!liga_avisos_autor_id_fkey(nombre_completo)').order('created_at', { ascending: false }).limit(30)
+    if (profile.rol === 'profesor') {
+        queryAvisos = queryAvisos.or(`autor_id.eq.${user.id},tipo_destino.eq.general`)
+    } else if (!isStaff) {
+        queryAvisos = queryAvisos.or(`tipo_destino.eq.general,and(tipo_destino.eq.nivel,nivel_destino.eq.${nivelAlumno}),and(tipo_destino.eq.individual,alumno_id.eq.${user.id})`)
+    }
+    const { data: avisos } = await queryAvisos
+
+    // 2. MATERIAS / CLASES
+    const hoyIso = new Date().toISOString()
+    const cuatrimestreActual = '2026-1'
+
+    let queryClases = supabase
+        .from('clases')
+        .select('id, nombre, inicio, liga_nivel, profesor_id')
+        .eq('es_la_liga', true)
+        .neq('estado', 'cancelada')
+
+    if (profile.rol === 'profesor') queryClases = queryClases.eq('profesor_id', user.id)
+    else if (!isStaff) queryClases = queryClases.eq('liga_nivel', nivelAlumno)
+
+    // 👉 AGREGAMOS EL ERROR ACÁ
+    const { data: dataClases, error: errorClases } = await queryClases
+
+    // Si hay error, lo gritamos en la consola
+    if (errorClases) {
+        console.error("🚨 ERROR TRAYENDO CLASES:", errorClases.message, errorClases.details)
+    }
+
+
+    // 3. DATOS ALUMNO (Evaluaciones y Pagos)
+    let misEvaluaciones: any[] = []
+    let deudaCuota = false
+
+    if (!isStaff) {
+        const mesActual = new Date().getMonth() + 1
+        const anioActual = new Date().getFullYear()
+        const { data: pagoMes } = await supabase.from('liga_pagos').select('id').eq('alumno_id', user.id).eq('mes', mesActual).eq('anio', anioActual).maybeSingle()
+        deudaCuota = !pagoMes
+
+        const { data: evals } = await supabase.from('liga_evaluaciones').select('*').eq('alumno_id', user.id).eq('cuatrimestre', cuatrimestreActual)
+        if (evals) misEvaluaciones = evals
+    }
+
+    // 4. PROCESAR MATERIAS
+    const disciplinasMap: Record<string, any> = {}
+
+    if (dataClases) {
+        dataClases.forEach((clase: any) => {
+            if (!disciplinasMap[clase.nombre]) {
+                disciplinasMap[clase.nombre] = {
+                    id: clase.id, nombre: clase.nombre, liga_nivel: clase.liga_nivel,
+                    profesor: clase.profesor?.nombre_completo || 'Staff', proxima_clase: null, clases_ids: []
+                }
+            }
+            disciplinasMap[clase.nombre].clases_ids.push(clase.id)
+            if (clase.inicio >= hoyIso) {
+                if (!disciplinasMap[clase.nombre].proxima_clase || clase.inicio < disciplinasMap[clase.nombre].proxima_clase) {
+                    disciplinasMap[clase.nombre].proxima_clase = clase.inicio
+                    disciplinasMap[clase.nombre].profesor = clase.profesor?.nombre_completo || 'Staff'
+                }
+            }
+        })
+    }
+
+    const materias = Object.values(disciplinasMap).map((disciplina: any) => {
+        let evaluacion = null
+        if (!isStaff) evaluacion = misEvaluaciones.find(e => disciplina.clases_ids.includes(e.clase_id))
+        return { ...disciplina, evaluacion: evaluacion || null }
+    }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
+
+    // 5. PADRÓN ALUMNOS (Solo Staff)
+    let allStudents: any[] = []
+    if (isStaff) {
+        const { data: perfiles } = await supabase.from('profiles').select('id, nombre, apellido, email, nivel_liga').eq('rol', 'alumno').not('nivel_liga', 'is', null).order('nombre', { ascending: true })
+        if (perfiles) {
+            allStudents = perfiles.filter((p: { id: string, nombre: string | null, apellido: string | null, email: string, nivel_liga: number | null }) =>
+                p.nombre && p.nombre.trim() !== ''
+            )
+        }
+    }
+
+    const legajoCompleto = isStaff ? true : Boolean(profile.edad && profile.direccion && profile.contacto_emergencia && profile.plan_medico && profile.condiciones_medicas)
+
+    return { profile, isStaff, canManage, legajoCompleto, avisos: avisos || [], materias, deudaCuota, allStudents }
+}
+
+export default function LaLigaPage() {
+    const router = useRouter()
     const { hasLigaAccess, isLoading: loadingContext } = useCash()
 
-    const [loading, setLoading] = useState(true)
-    const [profile, setProfile] = useState<any>(null)
-    const [legajoCompleto, setLegajoCompleto] = useState(false)
-    const [avisos, setAvisos] = useState<any[]>([])
-    const [materias, setMaterias] = useState<any[]>([])
-    const [deudaCuota, setDeudaCuota] = useState(false)
-    const [procesandoPago, setProcesandoPago] = useState(false)
+    // 🚀 SWR (Reemplaza al useEffect gigante)
+    const { data, isLoading: loadingSWR, mutate, error } = useSWR(
+        hasLigaAccess && !loadingContext ? 'liga-data' : null,
+        fetcherLiga,
+        { revalidateOnFocus: false }
+    )
 
-    // --- ESTADOS DOCENTE / ADMIN ---
+    const [procesandoPago, setProcesandoPago] = useState(false)
     const [adminTab, setAdminTab] = useState<'evaluaciones' | 'gestion' | 'comunicados'>('evaluaciones')
     const [selectedMateria, setSelectedMateria] = useState<any>(null)
     const [alumnosList, setAlumnosList] = useState<any[]>([])
     const [loadingAlumnos, setLoadingAlumnos] = useState(false)
-
-    // --- ESTADOS GESTIÓN DE ALUMNOS (ADMIN) ---
-    const [allStudents, setAllStudents] = useState<any[]>([])
     const [searchStudent, setSearchStudent] = useState('')
-    const [loadingGestion, setLoadingGestion] = useState(false)
 
-    // --- ESTADOS COMUNICADOS ---
+    // Forms
     const [avisoForm, setAvisoForm] = useState({ titulo: '', mensaje: '', tipo_destino: 'general', nivel_destino: 1, alumno_id: '' })
     const [enviandoAviso, setEnviandoAviso] = useState(false)
 
-    // Modal Evaluación
+    // Modales
     const [evalModalOpen, setEvalModalOpen] = useState(false)
     const [selectedAlumno, setSelectedAlumno] = useState<any>(null)
     const [notas, setNotas] = useState<Record<string, number>>({})
     const [observaciones, setObservaciones] = useState('')
     const [guardandoEval, setGuardandoEval] = useState(false)
-
-    // Modal Boletín (Alumno)
     const [boletinModalOpen, setBoletinModalOpen] = useState(false)
     const [selectedBoletin, setSelectedBoletin] = useState<any>(null)
 
-    const inicializado = useRef(false)
-
-    useEffect(() => {
-        if (loadingContext) return;
-
-        if (!hasLigaAccess) {
-            toast.error('Acceso denegado. No pertenecés a La Liga.')
-            router.replace('/explorar')
-            return;
-        }
-
-        if (inicializado.current) return
-        inicializado.current = true
-
-        const failsafeTimeout = setTimeout(() => {
-            setLoading(false);
-        }, 5000);
-
-        const fetchLaLigaData = async () => {
-            try {
-                setLoading(true)
-
-                const urlParams = new URLSearchParams(window.location.search)
-                const pagoStatus = urlParams.get('pago')
-                if (pagoStatus) {
-                    if (pagoStatus === 'exito') toast.success('¡Pago aprobado! La cuota de La Liga fue abonada.')
-                    else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
-                    else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
-                    window.history.replaceState(null, '', window.location.pathname)
-                }
-
-                const { data: sessionData } = await Promise.race([
-                    supabase.auth.getSession(),
-                    new Promise((resolve) => setTimeout(() => resolve({ data: { session: null } }), 3000))
-                ]) as any;
-
-                let userId = sessionData?.session?.user?.id
-
-                if (!userId) {
-                    const { data: userData } = await Promise.race([
-                        supabase.auth.getUser(),
-                        new Promise((resolve) => setTimeout(() => resolve({ data: { user: null } }), 3000))
-                    ]) as any;
-                    userId = userData?.user?.id
-                }
-
-                if (!userId) {
-                    window.location.href = '/login';
-                    return;
-                }
-
-                const { data: dataProfile } = await supabase.from('profiles').select('*').eq('id', userId).single()
-
-                if (dataProfile) {
-                    setProfile(dataProfile)
-
-                    // 🌟 SOLUCIÓN: Englobamos a todos los trabajadores como "Staff"
-                    const isStaff = ['admin', 'recepcion', 'profesor'].includes(dataProfile.rol)
-
-                    if (!isStaff) {
-                        const tieneDatos = Boolean(
-                            dataProfile.edad && dataProfile.direccion &&
-                            dataProfile.contacto_emergencia && dataProfile.plan_medico &&
-                            dataProfile.condiciones_medicas
-                        )
-                        setLegajoCompleto(tieneDatos)
-                        if (!tieneDatos) return
-                    } else {
-                        // El staff se saltea el legajo automáticamente
-                        setLegajoCompleto(true)
-                    }
-
-                    const nivelAlumno = dataProfile.nivel_liga || dataProfile.nivel || 1
-
-                    // --- TRAER AVISOS ---
-                    let queryAvisos = supabase
-                        .from('liga_avisos')
-                        .select('*, autor:profiles!liga_avisos_autor_id_fkey(nombre_completo)')
-                        .order('created_at', { ascending: false })
-                        .limit(30)
-
-                    if (['admin', 'recepcion'].includes(dataProfile.rol)) {
-                        // Ven todos los avisos
-                    } else if (dataProfile.rol === 'profesor') {
-                        queryAvisos = queryAvisos.or(`autor_id.eq.${userId},tipo_destino.eq.general`)
-                    } else {
-                        // Alumno
-                        queryAvisos = queryAvisos.or(`tipo_destino.eq.general,and(tipo_destino.eq.nivel,nivel_destino.eq.${nivelAlumno}),and(tipo_destino.eq.individual,alumno_id.eq.${userId})`)
-                    }
-
-                    const { data: dataAvisos } = await queryAvisos
-                    if (dataAvisos) setAvisos(dataAvisos)
-
-                    // --- TRAER MATERIAS ---
-                    const hoyIso = new Date().toISOString()
-                    const cuatrimestreActual = '2026-1'
-
-                    let queryClases = supabase.from('clases').select('id, nombre, inicio, liga_nivel, profesor_id, profesor:profiles(nombre_completo)').eq('es_la_liga', true).neq('estado', 'cancelada')
-
-                    if (dataProfile.rol === 'profesor') {
-                        queryClases = queryClases.eq('profesor_id', userId)
-                    } else if (!isStaff) {
-                        queryClases = queryClases.eq('liga_nivel', nivelAlumno)
-                    }
-                    // Admin y Recepcion cargan TODAS las materias
-
-                    const { data: dataClases } = await queryClases
-
-                    let misEvaluaciones: any[] = []
-                    if (!isStaff) {
-                        const mesActual = new Date().getMonth() + 1
-                        const anioActual = new Date().getFullYear()
-
-                        const { data: pagoMes } = await supabase
-                            .from('liga_pagos')
-                            .select('id')
-                            .eq('alumno_id', userId)
-                            .eq('mes', mesActual)
-                            .eq('anio', anioActual)
-                            .maybeSingle()
-
-                        setDeudaCuota(!pagoMes)
-
-                        const { data: evals } = await supabase
-                            .from('liga_evaluaciones')
-                            .select('*')
-                            .eq('alumno_id', userId)
-                            .eq('cuatrimestre', cuatrimestreActual)
-
-                        if (evals) misEvaluaciones = evals
-                    }
-
-                    if (dataClases) {
-                        const disciplinasMap: Record<string, any> = {}
-
-                        dataClases.forEach((clase: any) => {
-                            if (!disciplinasMap[clase.nombre]) {
-                                disciplinasMap[clase.nombre] = {
-                                    id: clase.id,
-                                    nombre: clase.nombre,
-                                    liga_nivel: clase.liga_nivel,
-                                    profesor: clase.profesor?.nombre_completo || 'Staff',
-                                    proxima_clase: null,
-                                    clases_ids: []
-                                }
-                            }
-
-                            disciplinasMap[clase.nombre].clases_ids.push(clase.id)
-
-                            if (clase.inicio >= hoyIso) {
-                                if (!disciplinasMap[clase.nombre].proxima_clase || clase.inicio < disciplinasMap[clase.nombre].proxima_clase) {
-                                    disciplinasMap[clase.nombre].proxima_clase = clase.inicio
-                                    disciplinasMap[clase.nombre].profesor = clase.profesor?.nombre_completo || 'Staff'
-                                }
-                            }
-                        })
-
-                        const disciplinasUnicas = Object.values(disciplinasMap).map((disciplina: any) => {
-                            let evaluacion = null
-                            if (!isStaff) {
-                                evaluacion = misEvaluaciones.find(e => disciplina.clases_ids.includes(e.clase_id))
-                            }
-                            return { ...disciplina, evaluacion: evaluacion || null }
-                        })
-
-                        disciplinasUnicas.sort((a, b) => a.nombre.localeCompare(b.nombre))
-                        setMaterias(disciplinasUnicas)
-                    }
-
-                    // Cargamos alumnos en background si es staff (para acelerar la vista)
-                    if (isStaff) {
-                        cargarTodosLosAlumnos(false)
-                    }
-                }
-            } catch (error) {
-                console.error("Error cargando La Liga:", error)
-                setProfile(null)
-            } finally {
-                clearTimeout(failsafeTimeout)
-                setLoading(false)
-            }
-        }
-
-        fetchLaLigaData()
-    }, [hasLigaAccess, loadingContext, router])
-
-    const cargarTodosLosAlumnos = async (mostrarLoading = true) => {
-        if (mostrarLoading) setLoadingGestion(true)
-        try {
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('id, nombre, apellido, email, nivel_liga')
-                .eq('rol', 'alumno')
-                .not('nivel_liga', 'is', null)
-                .order('nombre', { ascending: true })
-
-            if (error) throw error
-            if (data) setAllStudents(data.filter((p: { nombre: string | null }) => p.nombre))
-        } catch (error) {
-            console.error("Error al cargar alumnos", error)
-        } finally {
-            if (mostrarLoading) setLoadingGestion(false)
-        }
+    // Redirección si no tiene acceso
+    if (!loadingContext && !hasLigaAccess) {
+        toast.error('Acceso denegado. No pertenecés a La Liga.')
+        router.replace('/explorar')
+        return null
     }
 
-    const cambiarNivelLiga = async (id: string, nuevoNivel: number | null) => {
-        try {
-            const { error } = await supabase.from('profiles').update({ nivel_liga: nuevoNivel }).eq('id', id)
-            if (error) throw error
-
-            if (nuevoNivel === null) {
-                toast.success('Alumno removido de La Liga')
-                setAllStudents(prev => prev.filter(a => a.id !== id))
-            } else {
-                toast.success(`Cambiado a Nivel ${nuevoNivel}`)
-                setAllStudents(prev => prev.map(a => a.id === id ? { ...a, nivel_liga: nuevoNivel } : a))
-            }
-        } catch (error) {
-            toast.error("Error al actualizar el nivel")
-        }
+    if (loadingSWR || loadingContext) {
+        return (
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center">
+                <Loader2 className="animate-spin text-[#D4E655] w-12 h-12 mb-4" />
+                <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">Cargando La Liga...</p>
+            </div>
+        )
     }
 
-    useEffect(() => {
-        if (adminTab === 'gestion' && allStudents.length === 0) {
-            cargarTodosLosAlumnos()
-        }
-    }, [adminTab, allStudents.length])
+    if (error || !data?.profile) {
+        return (
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-6 w-full animate-in fade-in">
+                <AlertTriangle className="text-orange-500 w-16 h-16" />
+                <h2 className="text-white font-black text-2xl uppercase tracking-tighter">Conexión Perdida</h2>
+                <button onClick={() => window.location.reload()} className="bg-white/10 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white hover:text-black transition-colors">Refrescar</button>
+            </div>
+        )
+    }
+
+    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, allStudents } = data
+
+    const faltaAptoFisico = !profile.apto_fisico_url
+    const nivelActual = profile.nivel_liga || profile.nivel || 1
+    const filteredStudents = allStudents.filter(s => (s.nombre + ' ' + s.apellido).toLowerCase().includes(searchStudent.toLowerCase()))
+
+    // --- ACCIONES CON SERVER ACTIONS ---
 
     const enviarAviso = async (e: React.FormEvent) => {
         e.preventDefault()
         setEnviandoAviso(true)
-        try {
-            if (!avisoForm.titulo || !avisoForm.mensaje) throw new Error("Completá título y mensaje")
-            if (avisoForm.tipo_destino === 'individual' && !avisoForm.alumno_id) throw new Error("Seleccioná un alumno")
-
-            const payload = {
-                autor_id: profile.id,
-                titulo: avisoForm.titulo,
-                mensaje: avisoForm.mensaje,
-                tipo_destino: avisoForm.tipo_destino,
-                nivel_destino: avisoForm.tipo_destino === 'nivel' ? avisoForm.nivel_destino : null,
-                alumno_id: avisoForm.tipo_destino === 'individual' ? avisoForm.alumno_id : null
-            }
-
-            const { error } = await supabase.from('liga_avisos').insert(payload)
-            if (error) throw error
-
-            toast.success("Comunicado enviado correctamente")
-            setAvisoForm({ titulo: '', mensaje: '', tipo_destino: 'general', nivel_destino: 1, alumno_id: '' })
-            window.location.reload()
-        } catch (error: any) {
-            toast.error(error.message || "Error al enviar aviso")
-        } finally {
-            setEnviandoAviso(false)
+        if (!avisoForm.titulo || !avisoForm.mensaje) {
+            setEnviandoAviso(false); return toast.error("Completá título y mensaje")
         }
+        if (avisoForm.tipo_destino === 'individual' && !avisoForm.alumno_id) {
+            setEnviandoAviso(false); return toast.error("Seleccioná un alumno")
+        }
+
+        const payload = {
+            titulo: avisoForm.titulo,
+            mensaje: avisoForm.mensaje,
+            tipo_destino: avisoForm.tipo_destino,
+            nivel_destino: avisoForm.tipo_destino === 'nivel' ? avisoForm.nivel_destino : null,
+            alumno_id: avisoForm.tipo_destino === 'individual' ? avisoForm.alumno_id : null
+        }
+
+        const response = await enviarAvisoAction(payload)
+        if (response.success) {
+            toast.success("Comunicado publicado")
+            setAvisoForm({ titulo: '', mensaje: '', tipo_destino: 'general', nivel_destino: 1, alumno_id: '' })
+            router.refresh()
+            setTimeout(() => mutate(), 500)
+        } else {
+            toast.error(response.error || "Error al enviar aviso")
+        }
+        setEnviandoAviso(false)
     }
 
     const eliminarAviso = async (id: string) => {
         if (!confirm("¿Seguro que querés borrar este aviso?")) return
-        try {
-            const { error } = await supabase.from('liga_avisos').delete().eq('id', id)
-            if (error) throw error
+        const response = await eliminarAvisoAction(id)
+        if (response.success) {
             toast.success("Aviso eliminado")
-            setAvisos(prev => prev.filter(a => a.id !== id))
-        } catch (error) {
-            toast.error("Error al eliminar")
+            router.refresh()
+            setTimeout(() => mutate(), 500)
+        } else {
+            toast.error(response.error || "Error al eliminar")
         }
     }
 
+    const cambiarNivelLiga = async (id: string, nuevoNivel: number | null) => {
+        const response = await cambiarNivelLigaAction(id, nuevoNivel)
+        if (response.success) {
+            toast.success(nuevoNivel === null ? 'Alumno removido' : `Cambiado a Nivel ${nuevoNivel}`)
+            router.refresh()
+            setTimeout(() => mutate(), 500)
+        } else {
+            toast.error(response.error || "Error al actualizar")
+        }
+    }
+
+    const guardarEvaluacion = async () => {
+        setGuardandoEval(true)
+        const notasFaltantes = Object.values(notas).some(v => v === 0 || isNaN(v))
+        if (notasFaltantes) {
+            toast.error('Por favor, calificá todos los criterios del 1 al 10 antes de guardar.')
+            setGuardandoEval(false); return
+        }
+
+        const notaFinal = parseFloat(calcularPromedio() as string)
+        const aprobado = notaFinal >= 6
+        const cuatrimestreActual = '2026-1'
+
+        const payload = {
+            alumno_id: selectedAlumno.id,
+            clase_id: selectedMateria.id,
+            cuatrimestre: cuatrimestreActual,
+            anio: new Date().getFullYear(),
+            criterios_notas: notas,
+            observaciones_docente: observaciones,
+            nota_final: notaFinal,
+            aprobado: aprobado,
+            requiere_recuperatorio: !aprobado
+        }
+
+        const response = await guardarEvaluacionAction(payload)
+        if (response.success) {
+            toast.success('Evaluación guardada correctamente')
+            setEvalModalOpen(false)
+            cargarAlumnos(selectedMateria) // Recarga silenciosa de la lista de alumnos
+        } else {
+            toast.error(response.error || 'Error al guardar')
+        }
+        setGuardandoEval(false)
+    }
+
+    // Funciones locales
     const cargarAlumnos = async (materia: any) => {
         setSelectedMateria(materia)
         setLoadingAlumnos(true)
         try {
-            const { data: perfiles, error: errorPerfiles } = await supabase
-                .from('profiles')
-                .select('id, nombre, apellido, email, rol, nivel_liga')
-                .eq('rol', 'alumno')
-                .eq('nivel_liga', materia.liga_nivel)
+            const supabaseClient = createClient()
+            const { data: perfiles } = await supabaseClient.from('profiles').select('id, nombre, apellido, email, rol, nivel_liga').eq('rol', 'alumno').eq('nivel_liga', materia.liga_nivel)
 
-            if (errorPerfiles) throw errorPerfiles
-            const alumnosReales = perfiles ? perfiles.filter((p: { nombre: string | null }) => p.nombre && p.nombre.trim() !== '') : []
+            const alumnosReales = perfiles ? perfiles.filter((p: any) => p.nombre && p.nombre.trim() !== '') : []
             const cuatrimestreActual = '2026-1'
-            const { data: evaluaciones } = await supabase
-                .from('liga_evaluaciones')
-                .select('alumno_id, nota_final, aprobado')
-                .eq('clase_id', materia.id)
-                .eq('cuatrimestre', cuatrimestreActual)
+            const { data: evaluaciones } = await supabaseClient.from('liga_evaluaciones').select('alumno_id, nota_final, aprobado').eq('clase_id', materia.id).eq('cuatrimestre', cuatrimestreActual)
 
-            const alumnosMapeados = alumnosReales.map((perfil: { id: string, nombre: string }) => {
-                const evalExistente = evaluaciones?.find((e: { alumno_id: string }) => e.alumno_id === perfil.id)
+            const alumnosMapeados = alumnosReales.map((perfil: any) => {
+                const evalExistente = evaluaciones?.find((e: any) => e.alumno_id === perfil.id)
                 return { ...perfil, evaluacion: evalExistente || null }
             })
 
@@ -373,7 +315,8 @@ export default function LaLigaPage() {
         const notasIniciales: Record<string, number> = {}
 
         if (alumno.evaluacion) {
-            const { data: evalCompleta } = await supabase.from('liga_evaluaciones').select('criterios_notas, observaciones_docente').eq('alumno_id', alumno.id).eq('clase_id', selectedMateria.id).single()
+            const supabaseClient = createClient()
+            const { data: evalCompleta } = await supabaseClient.from('liga_evaluaciones').select('criterios_notas, observaciones_docente').eq('alumno_id', alumno.id).eq('clase_id', selectedMateria.id).single()
             if (evalCompleta) {
                 setNotas(evalCompleta.criterios_notas || {})
                 setObservaciones(evalCompleta.observaciones_docente || '')
@@ -394,98 +337,12 @@ export default function LaLigaPage() {
         return (suma / valores.length).toFixed(2)
     }
 
-    const guardarEvaluacion = async () => {
-        setGuardandoEval(true)
-        try {
-            const notasFaltantes = Object.values(notas).some(v => v === 0 || isNaN(v))
-            if (notasFaltantes) {
-                toast.error('Por favor, calificá todos los criterios del 1 al 10 antes de guardar.')
-                setGuardandoEval(false); return
-            }
-
-            const notaFinal = parseFloat(calcularPromedio() as string)
-            const aprobado = notaFinal >= 6
-            const cuatrimestreActual = '2026-1'
-
-            const payload = {
-                alumno_id: selectedAlumno.id,
-                clase_id: selectedMateria.id,
-                profesor_id: profile.id,
-                cuatrimestre: cuatrimestreActual,
-                anio: new Date().getFullYear(),
-                criterios_notas: notas,
-                observaciones_docente: observaciones,
-                nota_final: notaFinal,
-                aprobado: aprobado,
-                requiere_recuperatorio: !aprobado
-            }
-
-            const { error } = await supabase.from('liga_evaluaciones').upsert(payload, { onConflict: 'alumno_id,clase_id,cuatrimestre' })
-            if (error) throw error
-
-            toast.success('Evaluación guardada correctamente')
-            setEvalModalOpen(false)
-            cargarAlumnos(selectedMateria)
-        } catch (error: any) {
-            toast.error('Error al guardar: ' + error.message)
-        } finally {
-            setGuardandoEval(false)
-        }
-    }
-
-    if (loading || loadingContext) {
-        return (
-            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center">
-                <Loader2 className="animate-spin text-[#D4E655] w-12 h-12 mb-4" />
-                <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">Cargando La Liga...</p>
-            </div>
-        )
-    }
-
-    if (!profile) {
-        return (
-            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-6 w-full animate-in fade-in">
-                <AlertTriangle className="text-orange-500 w-16 h-16" />
-                <h2 className="text-white font-black text-2xl uppercase tracking-tighter">Conexión Perdida</h2>
-                <div className="flex gap-4">
-                    <button onClick={() => window.location.reload()} className="bg-white/10 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white hover:text-black transition-colors">Refrescar</button>
-                    <button onClick={async () => { try { await supabase.auth.signOut() } catch (e) { } finally { window.location.href = '/login' } }} className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors">Iniciar sesión</button>
-                </div>
-            </div>
-        )
-    }
-
-    // 🌟 ROLES Y PERMISOS ACTUALIZADOS 🌟
-    const isStaff = ['admin', 'recepcion', 'profesor'].includes(profile?.rol)
-    const canManage = ['admin', 'recepcion'].includes(profile?.rol)
-
-    const nivelActual = profile?.nivel_liga || profile?.nivel || 1
-    const faltaAptoFisico = !profile?.apto_fisico_url
-
-    if (!isStaff && !legajoCompleto) {
-        return (
-            <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8 flex flex-col items-center justify-center relative overflow-hidden">
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#D4E655]/5 rounded-full blur-[100px] pointer-events-none" />
-                <div className="max-w-md w-full bg-[#09090b] border border-[#D4E655]/20 rounded-3xl p-8 text-center relative z-10 animate-in zoom-in-95 duration-500 shadow-2xl shadow-[#D4E655]/5">
-                    <div className="w-20 h-20 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-yellow-500/20"><Lock className="text-yellow-500 w-10 h-10" /></div>
-                    <h1 className="text-2xl font-black uppercase tracking-tighter text-white mb-3">Legajo Incompleto</h1>
-                    <p className="text-gray-400 text-sm mb-8 leading-relaxed">Para acceder a <span className="text-[#D4E655] font-bold">La Liga</span>, primero completá tu ficha médica.</p>
-                    <Link href="/perfil" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg">Ir a completar mi Perfil <ChevronRight size={16} /></Link>
-                </div>
-            </div>
-        )
-    }
-
-    const filteredStudents = allStudents.filter(s =>
-        (s.nombre + ' ' + s.apellido).toLowerCase().includes(searchStudent.toLowerCase())
-    )
-
     const generarLinkPagoLiga = async () => {
         setProcesandoPago(true)
         try {
             const mesActual = new Date().getMonth() + 1
             const anioActual = new Date().getFullYear()
-            const precioCuota = 15000 // <-- CAMBIÁ ESTE VALOR POR EL PRECIO REAL DE TU CUOTA
+            const precioCuota = 15000 // <-- CAMBIÁ ESTE VALOR POR EL PRECIO REAL
 
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
@@ -501,16 +358,27 @@ export default function LaLigaPage() {
             })
 
             const data = await res.json()
-            if (data.url) {
-                window.location.href = data.url
-            } else {
-                throw new Error('No se pudo generar el link')
-            }
+            if (data.url) window.location.href = data.url
+            else throw new Error('No se pudo generar el link')
         } catch (error) {
             toast.error('Error al conectar con Mercado Pago.')
         } finally {
             setProcesandoPago(false)
         }
+    }
+
+    if (!isStaff && !legajoCompleto) {
+        return (
+            <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8 flex flex-col items-center justify-center relative overflow-hidden">
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#D4E655]/5 rounded-full blur-[100px] pointer-events-none" />
+                <div className="max-w-md w-full bg-[#09090b] border border-[#D4E655]/20 rounded-3xl p-8 text-center relative z-10 animate-in zoom-in-95 duration-500 shadow-2xl shadow-[#D4E655]/5">
+                    <div className="w-20 h-20 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-yellow-500/20"><Lock className="text-yellow-500 w-10 h-10" /></div>
+                    <h1 className="text-2xl font-black uppercase tracking-tighter text-white mb-3">Legajo Incompleto</h1>
+                    <p className="text-gray-400 text-sm mb-8 leading-relaxed">Para acceder a <span className="text-[#D4E655] font-bold">La Liga</span>, primero completá tu ficha médica.</p>
+                    <Link href="/perfil" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg">Ir a completar mi Perfil <ChevronRight size={16} /></Link>
+                </div>
+            </div>
+        )
     }
 
     return (
@@ -543,24 +411,14 @@ export default function LaLigaPage() {
                     {/* TABS PARA ADMIN / RECEPCIÓN / PROFESOR */}
                     {isStaff && (
                         <div className="flex gap-6 border-b border-white/10 relative z-10 mt-2 overflow-x-auto custom-scrollbar">
-                            <button
-                                onClick={() => setAdminTab('evaluaciones')}
-                                className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'evaluaciones' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}
-                            >
+                            <button onClick={() => setAdminTab('evaluaciones')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'evaluaciones' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                 <ClipboardEdit size={14} className="inline mr-2 -mt-1" /> Evaluaciones
                             </button>
-                            <button
-                                onClick={() => setAdminTab('comunicados')}
-                                className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'comunicados' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}
-                            >
+                            <button onClick={() => setAdminTab('comunicados')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'comunicados' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                 <Megaphone size={14} className="inline mr-2 -mt-1" /> Comunicados
                             </button>
-                            {/* Recepción y Admin ven el padrón para gestionar niveles */}
                             {canManage && (
-                                <button
-                                    onClick={() => setAdminTab('gestion')}
-                                    className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'gestion' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}
-                                >
+                                <button onClick={() => setAdminTab('gestion')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'gestion' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                     <UserCog size={14} className="inline mr-2 -mt-1" /> Padrón de Alumnos
                                 </button>
                             )}
@@ -597,11 +455,7 @@ export default function LaLigaPage() {
                                         <p className="text-gray-400 text-[10px] sm:text-xs leading-relaxed">Tenés pendiente la cuota de La Liga de este mes. Abonala para destrabar tu boletín.</p>
                                     </div>
                                 </div>
-                                <button
-                                    onClick={generarLinkPagoLiga}
-                                    disabled={procesandoPago}
-                                    className="shrink-0 bg-red-500/20 hover:bg-red-500/30 text-red-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2"
-                                >
+                                <button onClick={generarLinkPagoLiga} disabled={procesandoPago} className="shrink-0 bg-red-500/20 hover:bg-red-500/30 text-red-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2">
                                     {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : 'Pagar Online con MP'}
                                 </button>
                             </div>
@@ -621,101 +475,74 @@ export default function LaLigaPage() {
                                 </h3>
                                 <p className="text-xs text-gray-500 uppercase font-bold mt-1">Asigná o remové alumnos de los niveles de La Liga.</p>
                             </div>
-
                             <div className="relative w-full md:w-72">
                                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                                <input
-                                    type="text"
-                                    placeholder="Buscar alumno..."
-                                    value={searchStudent}
-                                    onChange={(e) => setSearchStudent(e.target.value)}
-                                    className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white text-xs font-bold outline-none focus:border-[#D4E655]"
-                                />
+                                <input type="text" placeholder="Buscar alumno..." value={searchStudent} onChange={(e) => setSearchStudent(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white text-xs font-bold outline-none focus:border-[#D4E655]" />
                             </div>
                         </div>
 
-                        {loadingGestion ? (
-                            <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-10 h-10" /></div>
-                        ) : (
-                            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {filteredStudents.map(alumno => (
-                                        <div key={alumno.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex flex-col justify-between gap-4 group hover:border-white/20 transition-all">
-                                            <div>
-                                                <h4 className="font-black text-white text-sm capitalize truncate">{alumno.nombre} {alumno.apellido}</h4>
-                                                {alumno.nivel_liga ? (
-                                                    <span className="mt-1 inline-flex items-center gap-1 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                                        <Star size={10} className="fill-[#D4E655]/50" /> Nivel {alumno.nivel_liga}
-                                                    </span>
-                                                ) : (
-                                                    <span className="mt-1 inline-block text-[9px] font-bold text-gray-500 uppercase tracking-widest">Sin asignar</span>
-                                                )}
-                                            </div>
-
-                                            <div className="flex items-center gap-2 border-t border-white/5 pt-3">
-                                                {!alumno.nivel_liga ? (
-                                                    <>
-                                                        <button onClick={() => cambiarNivelLiga(alumno.id, 1)} className="flex-1 bg-white/5 hover:bg-purple-500/20 hover:text-purple-400 text-gray-400 py-2 rounded-lg text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1">Nivel 1</button>
-                                                        <button onClick={() => cambiarNivelLiga(alumno.id, 2)} className="flex-1 bg-white/5 hover:bg-purple-500/20 hover:text-purple-400 text-gray-400 py-2 rounded-lg text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1">Nivel 2</button>
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <button
-                                                            onClick={() => cambiarNivelLiga(alumno.id, alumno.nivel_liga === 1 ? 2 : 1)}
-                                                            className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-[10px] font-black uppercase transition-colors"
-                                                        >
-                                                            Pasar a Nivel {alumno.nivel_liga === 1 ? 2 : 1}
-                                                        </button>
-                                                        <button
-                                                            onClick={() => cambiarNivelLiga(alumno.id, null)}
-                                                            className="shrink-0 bg-red-500/10 hover:bg-red-500/20 text-red-500 px-3 py-2 rounded-lg text-[10px] font-black transition-colors"
-                                                            title="Remover de La Liga"
-                                                        >
-                                                            <UserMinus size={14} />
-                                                        </button>
-                                                    </>
-                                                )}
-                                            </div>
+                        <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {filteredStudents.map(alumno => (
+                                    <div key={alumno.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex flex-col justify-between gap-4 group hover:border-white/20 transition-all">
+                                        <div>
+                                            <h4 className="font-black text-white text-sm capitalize truncate">{alumno.nombre} {alumno.apellido}</h4>
+                                            {alumno.nivel_liga ? (
+                                                <span className="mt-1 inline-flex items-center gap-1 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                    <Star size={10} className="fill-[#D4E655]/50" /> Nivel {alumno.nivel_liga}
+                                                </span>
+                                            ) : (
+                                                <span className="mt-1 inline-block text-[9px] font-bold text-gray-500 uppercase tracking-widest">Sin asignar</span>
+                                            )}
                                         </div>
-                                    ))}
-                                    {filteredStudents.length === 0 && (
-                                        <div className="col-span-full py-12 text-center text-gray-500">
-                                            <Search size={32} className="mx-auto mb-3 opacity-30" />
-                                            <p className="text-xs font-bold uppercase tracking-widest">No se encontraron alumnos</p>
+                                        <div className="flex items-center gap-2 border-t border-white/5 pt-3">
+                                            {!alumno.nivel_liga ? (
+                                                <>
+                                                    <button onClick={() => cambiarNivelLiga(alumno.id, 1)} className="flex-1 bg-white/5 hover:bg-purple-500/20 hover:text-purple-400 text-gray-400 py-2 rounded-lg text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1">Nivel 1</button>
+                                                    <button onClick={() => cambiarNivelLiga(alumno.id, 2)} className="flex-1 bg-white/5 hover:bg-purple-500/20 hover:text-purple-400 text-gray-400 py-2 rounded-lg text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1">Nivel 2</button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <button onClick={() => cambiarNivelLiga(alumno.id, alumno.nivel_liga === 1 ? 2 : 1)} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-[10px] font-black uppercase transition-colors">
+                                                        Pasar a Nivel {alumno.nivel_liga === 1 ? 2 : 1}
+                                                    </button>
+                                                    <button onClick={() => cambiarNivelLiga(alumno.id, null)} className="shrink-0 bg-red-500/10 hover:bg-red-500/20 text-red-500 px-3 py-2 rounded-lg text-[10px] font-black transition-colors" title="Remover de La Liga">
+                                                        <UserMinus size={14} />
+                                                    </button>
+                                                </>
+                                            )}
                                         </div>
-                                    )}
-                                </div>
+                                    </div>
+                                ))}
+                                {filteredStudents.length === 0 && (
+                                    <div className="col-span-full py-12 text-center text-gray-500">
+                                        <Search size={32} className="mx-auto mb-3 opacity-30" />
+                                        <p className="text-xs font-bold uppercase tracking-widest">No se encontraron alumnos</p>
+                                    </div>
+                                )}
                             </div>
-                        )}
+                        </div>
                     </div>
                 )}
-
 
                 {/* =========================================
                     VISTA COMUNICADOS (PESTAÑA STAFF)
                 ========================================= */}
                 {isStaff && adminTab === 'comunicados' && (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
-                        {/* Redactar Aviso */}
                         <div className="lg:col-span-5 bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl">
                             <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6 border-b border-white/5 pb-4">
                                 <Send size={20} className="text-[#D4E655]" /> Redactar Aviso
                             </h3>
-
                             <form onSubmit={enviarAviso} className="space-y-4">
                                 <div>
                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Destinatarios</label>
-                                    <select
-                                        value={avisoForm.tipo_destino}
-                                        onChange={e => setAvisoForm({ ...avisoForm, tipo_destino: e.target.value })}
-                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]"
-                                    >
+                                    <select value={avisoForm.tipo_destino} onChange={e => setAvisoForm({ ...avisoForm, tipo_destino: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]">
                                         <option value="general">Toda La Liga (General)</option>
                                         <option value="nivel">Un Nivel Específico</option>
                                         <option value="individual">Un Alumno Específico</option>
                                     </select>
                                 </div>
-
                                 {avisoForm.tipo_destino === 'nivel' && (
                                     <div className="animate-in fade-in zoom-in-95">
                                         <label className="text-[10px] font-bold text-[#D4E655] uppercase tracking-widest mb-2 block">Seleccionar Nivel</label>
@@ -725,65 +552,42 @@ export default function LaLigaPage() {
                                         </div>
                                     </div>
                                 )}
-
                                 {avisoForm.tipo_destino === 'individual' && (
                                     <div className="animate-in fade-in zoom-in-95">
                                         <label className="text-[10px] font-bold text-[#D4E655] uppercase tracking-widest mb-2 block">Seleccionar Alumno</label>
-                                        <select
-                                            value={avisoForm.alumno_id}
-                                            onChange={e => setAvisoForm({ ...avisoForm, alumno_id: e.target.value })}
-                                            className="w-full bg-[#111] border border-[#D4E655]/50 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]"
-                                        >
+                                        <select value={avisoForm.alumno_id} onChange={e => setAvisoForm({ ...avisoForm, alumno_id: e.target.value })} className="w-full bg-[#111] border border-[#D4E655]/50 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]">
                                             <option value="">Elegí un alumno...</option>
-                                            {allStudents.map(a => (
-                                                <option key={a.id} value={a.id}>{a.nombre} {a.apellido} (Nivel {a.nivel_liga})</option>
-                                            ))}
+                                            {allStudents.map(a => <option key={a.id} value={a.id}>{a.nombre} {a.apellido} (Nivel {a.nivel_liga})</option>)}
                                         </select>
                                     </div>
                                 )}
-
                                 <div className="pt-2">
                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Título del Aviso</label>
-                                    <input
-                                        type="text" required placeholder="Ej: Cambio de horario..."
-                                        value={avisoForm.titulo} onChange={e => setAvisoForm({ ...avisoForm, titulo: e.target.value })}
-                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]"
-                                    />
+                                    <input type="text" required placeholder="Ej: Cambio de horario..." value={avisoForm.titulo} onChange={e => setAvisoForm({ ...avisoForm, titulo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" />
                                 </div>
-
                                 <div>
                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Mensaje</label>
-                                    <textarea
-                                        required placeholder="Escribí el comunicado acá..."
-                                        value={avisoForm.mensaje} onChange={e => setAvisoForm({ ...avisoForm, mensaje: e.target.value })}
-                                        className="w-full h-32 bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655] resize-none"
-                                    />
+                                    <textarea required placeholder="Escribí el comunicado acá..." value={avisoForm.mensaje} onChange={e => setAvisoForm({ ...avisoForm, mensaje: e.target.value })} className="w-full h-32 bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655] resize-none" />
                                 </div>
-
                                 <button disabled={enviandoAviso} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-4 shadow-lg">
                                     {enviandoAviso ? <Loader2 size={16} className="animate-spin" /> : <><Send size={16} /> Publicar Aviso</>}
                                 </button>
                             </form>
                         </div>
 
-                        {/* Historial de Avisos (Vista Staff) */}
+                        {/* Historial de Avisos */}
                         <div className="lg:col-span-7 bg-[#111] border border-white/5 rounded-3xl p-6">
                             <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6 border-b border-white/5 pb-4">
                                 <Megaphone size={20} className="text-[#D4E655]" /> Cartelera Activa
                             </h3>
                             <div className="space-y-4 max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
-                                {avisos.length > 0 ? avisos.map(aviso => (
+                                {avisos.length > 0 ? avisos.map((aviso: any) => (
                                     <div key={aviso.id} className="bg-[#09090b] border-l-2 border-[#D4E655] p-5 rounded-r-xl border-y border-r border-white/5 relative group">
-                                        {/* Botón Borrar (Para admins o el que escribió el aviso) */}
                                         {(canManage || aviso.autor_id === profile.id) && (
-                                            <button
-                                                onClick={() => eliminarAviso(aviso.id)}
-                                                className="absolute top-4 right-4 text-gray-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                                            >
+                                            <button onClick={() => eliminarAviso(aviso.id)} className="absolute top-4 right-4 text-gray-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
                                                 <Trash2 size={14} />
                                             </button>
                                         )}
-
                                         <div className="flex items-center gap-2 mb-2">
                                             <span className="text-[9px] font-black bg-white/10 text-white px-2 py-0.5 rounded uppercase">
                                                 {aviso.tipo_destino === 'general' ? 'General' : aviso.tipo_destino === 'nivel' ? `Nivel ${aviso.nivel_destino}` : 'Individual'}
@@ -792,9 +596,7 @@ export default function LaLigaPage() {
                                         </div>
                                         <h4 className="font-bold text-white text-sm uppercase mb-1 pr-6">{aviso.titulo}</h4>
                                         <p className="text-xs text-gray-400 leading-relaxed mb-3">{aviso.mensaje}</p>
-                                        <div className="text-[9px] text-gray-600 font-bold uppercase tracking-widest border-t border-white/5 pt-2">
-                                            Por: {aviso?.autor?.nombre_completo || 'Staff'}
-                                        </div>
+                                        <div className="text-[9px] text-gray-600 font-bold uppercase tracking-widest border-t border-white/5 pt-2">Por: {aviso?.autor?.nombre_completo || 'Staff'}</div>
                                     </div>
                                 )) : (
                                     <div className="text-center py-12">
@@ -807,7 +609,6 @@ export default function LaLigaPage() {
                     </div>
                 )}
 
-
                 {/* =========================================
                     VISTA DOCENTE / STAFF (EVALUACIONES)
                 ========================================= */}
@@ -815,14 +616,10 @@ export default function LaLigaPage() {
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
                         <div className="lg:col-span-4 space-y-4">
                             <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/10 pb-2">
-                                <BookOpen size={16} className="text-[#D4E655]" /> Mis Disciplinas
+                                <BookOpen size={16} className="text-[#D4E655]" /> Clases registradas
                             </h3>
-                            {materias.length > 0 ? materias.map(mat => (
-                                <div
-                                    key={mat.id}
-                                    onClick={() => cargarAlumnos(mat)}
-                                    className={`bg-[#111] border rounded-xl p-4 cursor-pointer transition-all ${selectedMateria?.id === mat.id ? 'border-[#D4E655] shadow-[0_0_15px_rgba(212,230,85,0.1)]' : 'border-white/5 hover:border-white/20'}`}
-                                >
+                            {materias.length > 0 ? materias.map((mat: any) => (
+                                <div key={mat.id} onClick={() => cargarAlumnos(mat)} className={`bg-[#111] border rounded-xl p-4 cursor-pointer transition-all ${selectedMateria?.id === mat.id ? 'border-[#D4E655] shadow-[0_0_15px_rgba(212,230,85,0.1)]' : 'border-white/5 hover:border-white/20'}`}>
                                     <div className="flex items-start justify-between mb-1">
                                         <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block">Nivel {mat.liga_nivel}</span>
                                         {mat.proxima_clase && (
@@ -834,7 +631,7 @@ export default function LaLigaPage() {
                                     <h4 className="font-black text-white uppercase text-sm truncate">{mat.nombre}</h4>
                                 </div>
                             )) : (
-                                <p className="text-xs text-gray-500 italic">No tenés materias asignadas en La Liga.</p>
+                                <p className="text-xs text-gray-500 italic">No tenés materias registradas en La Liga.</p>
                             )}
                         </div>
 
@@ -849,7 +646,6 @@ export default function LaLigaPage() {
                                             <p className="text-xs text-gray-500 font-bold uppercase mt-1">{selectedMateria.nombre} • Nivel {selectedMateria.liga_nivel}</p>
                                         </div>
                                     </div>
-
                                     {loadingAlumnos ? (
                                         <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin text-gray-500" /></div>
                                     ) : alumnosList.length > 0 ? (
@@ -860,8 +656,7 @@ export default function LaLigaPage() {
                                                         <h4 className="font-bold text-white text-sm capitalize">{alumno.nombre} {alumno.apellido}</h4>
                                                         {alumno.evaluacion ? (
                                                             <div className={`mt-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest ${alumno.evaluacion.aprobado ? 'text-green-500' : 'text-red-500'}`}>
-                                                                {alumno.evaluacion.aprobado ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
-                                                                Nota: {alumno.evaluacion.nota_final}
+                                                                {alumno.evaluacion.aprobado ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />} Nota: {alumno.evaluacion.nota_final}
                                                             </div>
                                                         ) : (
                                                             <span className="mt-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Pendiente de evaluación</span>
@@ -896,7 +691,6 @@ export default function LaLigaPage() {
                 ========================================= */}
                 {!isStaff && (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
-                        {/* Materias del alumno */}
                         <div className="lg:col-span-2 space-y-6">
                             <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[400px]">
                                 <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6 border-b border-white/5 pb-4">
@@ -904,60 +698,32 @@ export default function LaLigaPage() {
                                 </h3>
                                 {materias.length > 0 ? (
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        {materias.map((materia) => (
-                                            <div
-                                                key={materia.id}
-                                                onClick={() => {
-                                                    if (deudaCuota) {
-                                                        return toast.error('¡Bloqueado! Tenés que abonar la cuota del mes para ver tu boletín.')
-                                                    }
-                                                    if (materia.evaluacion) {
-                                                        setSelectedBoletin(materia)
-                                                        setBoletinModalOpen(true)
-                                                    } else {
-                                                        toast.info('Todavía no tenés notas cargadas en esta disciplina.')
-                                                    }
-                                                }}
-                                                className={`bg-[#111] border ${materia.evaluacion ? 'border-[#D4E655]/30 cursor-pointer hover:border-[#D4E655]' : 'border-white/5'} rounded-2xl p-5 transition-all group relative overflow-hidden flex flex-col`}
-                                            >
+                                        {materias.map((materia: any) => (
+                                            <div key={materia.id} onClick={() => {
+                                                if (deudaCuota) return toast.error('¡Bloqueado! Tenés que abonar la cuota del mes para ver tu boletín.')
+                                                if (materia.evaluacion) { setSelectedBoletin(materia); setBoletinModalOpen(true) }
+                                                else toast.info('Todavía no tenés notas cargadas en esta disciplina.')
+                                            }} className={`bg-[#111] border ${materia.evaluacion ? 'border-[#D4E655]/30 cursor-pointer hover:border-[#D4E655]' : 'border-white/5'} rounded-2xl p-5 transition-all group relative overflow-hidden flex flex-col`}>
                                                 <div className="absolute top-0 right-0 w-24 h-24 bg-[#D4E655]/5 rounded-full blur-2xl -mr-8 -mt-8 transition-all group-hover:bg-[#D4E655]/10"></div>
-
                                                 <div className="flex justify-between items-start mb-4 relative z-10">
                                                     <span className="bg-white/5 text-gray-400 text-[9px] font-bold uppercase px-2 py-1 rounded">Materia Obligatoria</span>
                                                     <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div>
                                                 </div>
-
-                                                <h4 className="font-black text-xl uppercase tracking-tighter text-white mb-1 group-hover:text-[#D4E655] transition-colors truncate relative z-10">
-                                                    {materia.nombre}
-                                                </h4>
-                                                <p className="text-[10px] text-gray-400 mb-5 uppercase font-bold tracking-widest relative z-10">
-                                                    Prof: {materia.profesor}
-                                                </p>
-
+                                                <h4 className="font-black text-xl uppercase tracking-tighter text-white mb-1 group-hover:text-[#D4E655] transition-colors truncate relative z-10">{materia.nombre}</h4>
+                                                <p className="text-[10px] text-gray-400 mb-5 uppercase font-bold tracking-widest relative z-10">Prof: {materia.profesor}</p>
                                                 <div className="mb-5 relative z-10">
-                                                    <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block mb-1 flex items-center gap-1">
-                                                        <Clock size={10} /> Próxima Clase
-                                                    </span>
+                                                    <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block mb-1 flex items-center gap-1"><Clock size={10} /> Próxima Clase</span>
                                                     {materia.proxima_clase ? (
-                                                        <span className="text-xs font-black text-white bg-white/5 px-2 py-1.5 rounded-md border border-white/10 block w-max">
-                                                            {format(new Date(materia.proxima_clase), "EEE d MMM • HH:mm", { locale: es })}
-                                                        </span>
+                                                        <span className="text-xs font-black text-white bg-white/5 px-2 py-1.5 rounded-md border border-white/10 block w-max">{format(new Date(materia.proxima_clase), "EEE d MMM • HH:mm", { locale: es })}</span>
                                                     ) : (
-                                                        <span className="text-[10px] font-bold text-gray-600 bg-white/5 px-2 py-1.5 rounded-md border border-white/5 block w-max italic">
-                                                            A confirmar
-                                                        </span>
+                                                        <span className="text-[10px] font-bold text-gray-600 bg-white/5 px-2 py-1.5 rounded-md border border-white/5 block w-max italic">A confirmar</span>
                                                     )}
                                                 </div>
-
                                                 <div className="pt-4 border-t border-white/5 mt-auto relative z-10 flex items-center justify-between">
                                                     {materia.evaluacion ? (
-                                                        <span className="bg-[#D4E655] text-black text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-lg flex items-center gap-2 shadow-[0_0_10px_rgba(212,230,85,0.2)] w-full justify-center">
-                                                            <FileText size={14} /> Ver Boletín
-                                                        </span>
+                                                        <span className="bg-[#D4E655] text-black text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-lg flex items-center gap-2 shadow-[0_0_10px_rgba(212,230,85,0.2)] w-full justify-center"><FileText size={14} /> Ver Boletín</span>
                                                     ) : (
-                                                        <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest text-center w-full py-2 bg-white/5 rounded-lg border border-white/5">
-                                                            Evaluación Pendiente
-                                                        </span>
+                                                        <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest text-center w-full py-2 bg-white/5 rounded-lg border border-white/5">Evaluación Pendiente</span>
                                                     )}
                                                 </div>
                                             </div>
@@ -967,19 +733,17 @@ export default function LaLigaPage() {
                                     <div className="flex flex-col items-center justify-center h-full py-12 text-center">
                                         <CalendarX size={48} className="text-gray-700 mb-4" />
                                         <h4 className="font-bold text-gray-400 uppercase text-sm mb-1">Sin disciplinas asignadas</h4>
+                                        <p className="text-xs text-gray-600">Asegurate de que las clases estén bien configuradas en el calendario.</p>
                                     </div>
                                 )}
                             </div>
                         </div>
 
-                        {/* Cartelera ALUMNO */}
                         <div className="lg:col-span-1">
                             <div className="bg-[#111] border border-white/5 rounded-3xl p-6 relative lg:sticky lg:top-24">
-                                <h3 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-6 text-white border-b border-white/5 pb-4">
-                                    <Megaphone size={18} className="text-[#D4E655]" /> Cartelera y Avisos
-                                </h3>
+                                <h3 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-6 text-white border-b border-white/5 pb-4"><Megaphone size={18} className="text-[#D4E655]" /> Cartelera y Avisos</h3>
                                 <div className="space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
-                                    {avisos.length > 0 ? avisos.map(aviso => (
+                                    {avisos.length > 0 ? avisos.map((aviso: any) => (
                                         <div key={aviso.id} className="bg-black/40 border-l-2 border-[#D4E655] p-4 rounded-r-lg group hover:bg-white/5 transition-colors">
                                             <div className="flex items-center justify-between mb-1">
                                                 <span className="text-[9px] font-bold text-gray-500 uppercase">{format(new Date(aviso.created_at), 'dd MMM yyyy', { locale: es })}</span>
@@ -1001,9 +765,7 @@ export default function LaLigaPage() {
                 )}
             </div>
 
-            {/* =========================================
-                MODALES
-            ========================================= */}
+            {/* MODALES */}
 
             {/* MODAL DE EVALUACIÓN (Solo Docentes / Staff) */}
             {isStaff && evalModalOpen && selectedAlumno && (
@@ -1014,11 +776,9 @@ export default function LaLigaPage() {
                                 <h3 className="text-2xl font-black uppercase text-white tracking-tighter">Evaluación Cuatrimestral</h3>
                                 <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest mt-1">{selectedAlumno.nombre} {selectedAlumno.apellido} • {selectedMateria?.nombre}</p>
                             </div>
-                            <div className="flex items-center gap-4">
-                                <div className="text-right">
-                                    <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block">Promedio Final</span>
-                                    <span className={`text-3xl font-black leading-none ${parseFloat(calcularPromedio() as string) >= 6 ? 'text-green-500' : 'text-red-500'}`}>{calcularPromedio()}</span>
-                                </div>
+                            <div className="text-right">
+                                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block">Promedio Final</span>
+                                <span className={`text-3xl font-black leading-none ${parseFloat(calcularPromedio() as string) >= 6 ? 'text-green-500' : 'text-red-500'}`}>{calcularPromedio()}</span>
                             </div>
                         </div>
 
@@ -1118,7 +878,6 @@ export default function LaLigaPage() {
                     </div>
                 </div>
             )}
-
         </div>
     )
 }
