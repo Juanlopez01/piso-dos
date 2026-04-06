@@ -162,7 +162,7 @@ function PerfilContent() {
 
             if (pagoStatus === 'exito') {
                 toast.success('¡Pago aprobado! Tus clases se acreditarán.', { duration: 6000 });
-                mutate(); // Refrescamos los créditos
+                // 🛑 ¡BORRAMOS EL MUTATE ACÁ! SWR ya lo está trayendo solito.
             }
             else if (pagoStatus === 'error') {
                 toast.error('El pago no se procesó o fue cancelado.');
@@ -171,7 +171,7 @@ function PerfilContent() {
                 toast.info('Tu pago está pendiente de confirmación.');
             }
         }
-    }, [mutate]);
+    }, []); // 🛑 También borramos el mutate de los corchetes
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const inputElement = e.target;
