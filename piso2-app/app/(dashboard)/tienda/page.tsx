@@ -68,7 +68,7 @@ function TiendaContent() {
         'tienda-datos',
         fetcherTienda,
         {
-            revalidateOnFocus: true, // Clave para cuando vuelven de MercadoPago
+            revalidateOnFocus: false, // Clave para cuando vuelven de MercadoPago
             dedupingInterval: 5000 // Evita doble fetch rápido
         }
     )
