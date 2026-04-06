@@ -33,7 +33,7 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
     const supabase = createClient()
 
     // 1. Limpieza silenciosa sin romper todo (Sintaxis correcta para RPC)
-    supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => {
+    supabase.rpc('limpiar_creditos_vencidos').then(({ error }: any) => {
         if (error) console.error("Error silencioso limpiando créditos:", error)
     })
 
