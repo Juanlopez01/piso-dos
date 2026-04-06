@@ -170,6 +170,12 @@ function TiendaContent() {
         if (!userId) return toast.error('Debes iniciar sesión')
         if (!selectedPack) return
 
+        // 🚀 TRUCO ANTI-BLOQUEO: Abrimos la pestaña en el milisegundo del clic (vacía por ahora)
+        const nuevaPestana = window.open('about:blank', '_blank')
+        if (nuevaPestana) {
+            nuevaPestana.document.write('<h2 style="font-family:sans-serif;text-align:center;margin-top:50px;">Conectando con Mercado Pago...</h2>')
+        }
+
         setGenerandoPago(true)
         try {
             const res = await fetch('/api/mercadopago/preference', {
@@ -186,22 +192,32 @@ function TiendaContent() {
             const responseData = await res.json()
 
             if (!res.ok || responseData.error) {
-                console.error("Error del backend:", responseData.error);
-                alert("Hubo un error al generar el pago: " + responseData.error);
-                setGenerandoPago(false);
-                return;
+                if (nuevaPestana) nuevaPestana.close() // Cerramos la pestaña si algo falla
+                toast.error("Hubo un error al generar el pago: " + responseData.error)
+                setGenerandoPago(false)
+                return
             }
 
             if (responseData.url) {
-                window.location.href = responseData.url;
+                // 🚀 Le inyectamos la URL de Mercado Pago a la pestaña que ya abrimos
+                if (nuevaPestana) {
+                    nuevaPestana.location.href = responseData.url
+                } else {
+                    // Failsafe extremo por si el navegador bloqueó hasta la pestaña vacía
+                    window.location.href = responseData.url
+                }
+
+                toast.success('Pestaña de pago abierta. ¡Volvé cuando termines!', { duration: 5000 })
+                setIsCheckoutOpen(false) // Cerramos el modal de tu web
             }
 
         } catch (error: any) {
+            if (nuevaPestana) nuevaPestana.close()
             toast.error(error.message)
+        } finally {
             setGenerandoPago(false)
         }
     }
-
     const precioBase = selectedPack?.precio || 0
     const descuentoDinero = cuponAplicado ? (precioBase * (cuponAplicado.porcentaje / 100)) : 0
     const precioFinal = precioBase - descuentoDinero
