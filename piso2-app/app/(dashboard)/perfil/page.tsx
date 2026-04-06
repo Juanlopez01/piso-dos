@@ -28,19 +28,23 @@ type PerfilData = {
     proximoVencimiento: PackVencimiento | null
 }
 
-// 🚀 FETCHER UNIFICADO DE SWR (Blindado contra cuelgues)
+// 🚀 FETCHER UNIFICADO DE SWR (Paz total entre Cliente y Servidor)
 const fetcherPerfil = async (): Promise<PerfilData> => {
     const supabase = createClient()
 
-    // 1. PRIMERO validamos la sesión de forma segura y esperamos a que termine (Acomoda el token)
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-
-    if (authError || !user) throw new Error("NO_AUTH")
-
-    // 2. DESPUÉS disparamos la limpieza silenciosa (Ahora que el token ya está asegurado y libre)
+    // 1. Limpieza silenciosa (Abajo del todo para que no estorbe)
     supabase.rpc('limpiar_creditos_vencidos').then(({ error }: any) => {
-        if (error) console.error("Error silencioso limpiando créditos:", error)
+        if (error) console.error("Error silencioso:", error)
     })
+
+    // 2. 🛑 EL CAMBIO MAGISTRAL: Usamos getSession() en vez de getUser()
+    // getSession() lee la cookie local sin viajar al servidor de Auth, 
+    // evitando el choque (Lock) con el Middleware.
+    const { data: { session }, error: authError } = await supabase.auth.getSession()
+
+    if (authError || !session?.user) throw new Error("NO_AUTH")
+
+    const user = session.user
 
     // 3. Cargar Perfil
     const { data: dataProfile, error: profileError } = await supabase
