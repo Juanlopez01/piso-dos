@@ -31,7 +31,7 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
     const supabase = createClient()
 
     // 1. Limpieza en background protegida contra errores
-    supabase.rpc('limpiar_creditos_vencidos').catch(e => console.error("Error silencioso limpiando créditos:", e))
+    supabase.rpc('limpiar_creditos_vencidos').catch((e: any) => console.error("Error silencioso limpiando créditos:", e))
 
     // 2. Doble validación de sesión (Rápida + Segura)
     const { data: { session } } = await supabase.auth.getSession()
