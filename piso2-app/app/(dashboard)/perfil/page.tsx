@@ -32,14 +32,15 @@ type PerfilData = {
 const fetcherPerfil = async (): Promise<PerfilData> => {
     const supabase = createClient()
 
-    // 1. Limpieza silenciosa sin romper todo
+    // 1. PRIMERO validamos la sesión de forma segura y esperamos a que termine (Acomoda el token)
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    if (authError || !user) throw new Error("NO_AUTH")
+
+    // 2. DESPUÉS disparamos la limpieza silenciosa (Ahora que el token ya está asegurado y libre)
     supabase.rpc('limpiar_creditos_vencidos').then(({ error }: any) => {
         if (error) console.error("Error silencioso limpiando créditos:", error)
     })
-
-    // 2. UNA SOLA LLAMADA SEGURA (Evita el error del Lock)
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) throw new Error("NO_AUTH")
 
     // 3. Cargar Perfil
     const { data: dataProfile, error: profileError } = await supabase
