@@ -2,7 +2,7 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState, Suspense, useRef } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useRouter } from 'next/navigation' // 🚀 Chau useSearchParams
 import useSWR from 'swr'
 import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
@@ -13,8 +13,10 @@ import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 
+// 🚀 IMPORTAMOS LA SERVER ACTION
 import { actualizarPerfilAction } from '@/app/actions/perfil'
 
+// --- TIPOS ---
 type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; inicio: string; tipo_clase: string; profesor: { nombre_completo: string } } }
 type PackVencimiento = { fecha_vencimiento: string; creditos_restantes: number; tipo_clase: string }
 
@@ -26,13 +28,13 @@ type PerfilData = {
     proximoVencimiento: PackVencimiento | null
 }
 
-// 🚀 FETCHER BLINDADO AL 100%
+// 🚀 FETCHER UNIFICADO DE SWR (Blindado contra cuelgues)
 const fetcherPerfil = async (): Promise<PerfilData> => {
     const supabase = createClient()
 
-    // 1. Limpieza en background protegida contra errores
-    supabase.rpc('limpiar_creditos_vencidos').then(({ error }: any) => {
-        if (error) console.error("Error limpiando créditos:", error)
+    // 1. Limpieza silenciosa sin romper todo (Sintaxis correcta para RPC)
+    supabase.rpc('limpiar_creditos_vencidos').then(({ error }) => {
+        if (error) console.error("Error silencioso limpiando créditos:", error)
     })
 
     // 2. Doble validación de sesión (Rápida + Segura)
@@ -52,9 +54,7 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
         .eq('id', user.id)
         .single()
 
-    if (profileError || !dataProfile) {
-        throw new Error(`DB_ERROR: ${profileError?.message || 'Perfil no encontrado'}`)
-    }
+    if (profileError || !dataProfile) throw new Error("PERFIL_NOT_FOUND")
 
     let historial: HistorialClase[] = []
     let avisosData: any[] = []
@@ -65,6 +65,7 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
         const { data: dataAvisos } = await supabase.from('comunicados').select('*').order('created_at', { ascending: false })
         avisosData = dataAvisos || []
     } else {
+        // Alumnos / Users
         const { data: dataHistorial } = await supabase
             .from('inscripciones')
             .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))')
@@ -98,17 +99,18 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
 }
 
 function PerfilContent() {
-    const searchParams = useSearchParams()
+    const [supabase] = useState(() => createClient())
     const router = useRouter()
+
+    // 🛡️ Escudo Anti-Bucles para Mercado Pago
     const pagoProcesado = useRef(false)
 
-    // 🚀 SWR
     // 🚀 SWR AL MANDO
     const { data, error, isLoading, mutate } = useSWR<PerfilData>(
         'mi-perfil',
         fetcherPerfil,
         {
-            revalidateOnFocus: false, // 🛑 APAGAMOS ESTO: Evita que se pelee por el token al volver de MP
+            revalidateOnFocus: false, // 🛑 Vital para evitar el robo de tokens al volver a la pestaña
             shouldRetryOnError: false
         }
     )
@@ -151,24 +153,31 @@ function PerfilContent() {
         }
     }, [profile, userEmail])
 
-    // 🚀 Manejo de Pagos MP
+    // 🚀 Manejo de Pagos MP (Bypass de Next.js para evitar spinners infinitos)
     useEffect(() => {
-        const pagoStatus = searchParams.get('pago')
+        if (typeof window === 'undefined') return;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const pagoStatus = urlParams.get('pago');
 
         if (pagoStatus && !pagoProcesado.current) {
-            pagoProcesado.current = true
+            pagoProcesado.current = true;
 
-            // Limpiamos la URL sin alertar a Next.js
-            window.history.replaceState(null, '', window.location.pathname)
+            // Limpiamos la URL silenciosamente sin que Next.js colapse
+            window.history.replaceState(null, '', window.location.pathname);
 
             if (pagoStatus === 'exito') {
-                toast.success('¡Pago aprobado! Tus clases se acreditarán.', { duration: 6000 })
-                mutate()
+                toast.success('¡Pago aprobado! Tus clases se acreditarán.', { duration: 6000 });
+                mutate(); // Refrescamos los créditos
             }
-            else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
-            else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
+            else if (pagoStatus === 'error') {
+                toast.error('El pago no se procesó o fue cancelado.');
+            }
+            else if (pagoStatus === 'pendiente') {
+                toast.info('Tu pago está pendiente de confirmación.');
+            }
         }
-    }, [searchParams, mutate])
+    }, [mutate]);
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const inputElement = e.target;
@@ -179,7 +188,6 @@ function PerfilContent() {
             const fileExt = file.name.split('.').pop();
             const filePath = `${profile.id}-${Date.now()}.${fileExt}`;
 
-            const supabase = createClient()
             const { error: uploadError } = await supabase.storage.from('apto_fisico').upload(filePath, file, { upsert: true });
             if (uploadError) throw uploadError;
 
@@ -197,6 +205,7 @@ function PerfilContent() {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!profile) return;
+
         setSaving(true);
 
         if (profile.rol === 'profesor' && (!formData.nombre_remplazo || !formData.contacto_remplazo)) {
@@ -206,8 +215,10 @@ function PerfilContent() {
         }
 
         const updatePayload: any = {
-            telefono: formData.telefono, alias_cbu: formData.alias_cbu,
-            nombre_remplazo: formData.nombre_remplazo, contacto_remplazo: formData.contacto_remplazo,
+            telefono: formData.telefono,
+            alias_cbu: formData.alias_cbu,
+            nombre_remplazo: formData.nombre_remplazo,
+            contacto_remplazo: formData.contacto_remplazo,
             nombre_completo: `${formData.nombre} ${formData.apellido}`
         };
 
@@ -220,14 +231,17 @@ function PerfilContent() {
             updatePayload.apto_fisico_url = formData.apto_fisico_url;
         }
 
+        // 🚀 SERVER ACTION AL RESCATE
         const response = await actualizarPerfilAction(updatePayload)
 
         if (response.success) {
             toast.success('Perfil actualizado correctamente');
-            mutate()
+            router.refresh()
+            setTimeout(() => mutate(), 500)
         } else {
             toast.error(response.error || 'Error al guardar el perfil');
         }
+
         setSaving(false);
     }
 
@@ -238,7 +252,6 @@ function PerfilContent() {
 
         setChangingPassword(true)
         try {
-            const supabase = createClient()
             const { error } = await supabase.auth.updateUser({ password: newPassword })
             if (error) throw error
 
@@ -254,14 +267,20 @@ function PerfilContent() {
     }
 
     const handleLogout = async () => {
-        const supabase = createClient()
         try { await supabase.auth.signOut() } finally { window.location.href = '/' }
     }
 
     // ==========================================
     // ESCUDOS DE CARGA / ERROR
     // ==========================================
-    if (error?.message === "NO_AUTH") return null;
+
+    if (error?.message === "NO_AUTH") {
+        return (
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center w-full">
+                <p className="text-gray-500 text-xs font-bold uppercase tracking-widest animate-pulse">Redirigiendo al inicio de sesión...</p>
+            </div>
+        )
+    }
 
     if (isLoading) {
         return (
@@ -280,17 +299,17 @@ function PerfilContent() {
                 <AlertTriangle className="text-orange-500 w-16 h-16" />
                 <h2 className="text-white font-black text-2xl uppercase tracking-tighter">Conexión Perdida</h2>
 
-                {/* 🚀 ACÁ VEMOS EL ERROR REAL SI FALLA */}
+                {/* Imprimimos el error real por las dudas */}
                 <p className="text-red-400 bg-red-500/10 border border-red-500/20 p-3 rounded-xl font-mono text-xs text-center max-w-md px-4">
                     {error?.message || "Error desconocido al procesar datos."}
                 </p>
 
                 <div className="flex gap-4">
-                    <button onClick={() => mutate()} className="bg-white/10 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white hover:text-black transition-colors">
-                        Reintentar
+                    <button onClick={() => window.location.reload()} className="bg-white/10 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white hover:text-black transition-colors">
+                        Refrescar
                     </button>
                     <button onClick={handleLogout} className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors">
-                        Cerrar Sesión
+                        Iniciar sesión
                     </button>
                 </div>
             </div>
