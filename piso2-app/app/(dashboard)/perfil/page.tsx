@@ -9,7 +9,7 @@ import {
     AlertTriangle, Mail, Calendar, LogOut, CheckCircle2, History,
     BookOpen, Star, Clock, AlertCircle, HeartPulse, FileUp, X, Lock
 } from 'lucide-react'
-import { toast, Toaster } from 'sonner'
+import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 
@@ -144,7 +144,7 @@ function PerfilContent() {
         }
     }, [profile, userEmail])
 
-    // Manejo de Avisos de Pago
+    // Manejo de Avisos de Pago con router.replace seguro
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
         if (pagoStatus) {
@@ -155,9 +155,10 @@ function PerfilContent() {
             else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
             else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
 
-            window.history.replaceState(null, '', window.location.pathname)
+            // 🚀 Limpieza segura de Next.js
+            router.replace('/perfil', { scroll: false })
         }
-    }, [searchParams, mutate])
+    }, [searchParams, mutate, router])
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const inputElement = e.target;
@@ -253,7 +254,16 @@ function PerfilContent() {
     // ==========================================
     // ESCUDOS DE CARGA / ERROR
     // ==========================================
-    if (isLoading || (error?.message === "NO_AUTH")) {
+
+    if (error?.message === "NO_AUTH") {
+        return (
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center w-full">
+                <p className="text-gray-500 text-xs font-bold uppercase tracking-widest animate-pulse">Redirigiendo al inicio de sesión...</p>
+            </div>
+        )
+    }
+
+    if (isLoading) {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center w-full gap-4">
                 <Loader2 className="animate-spin text-[#D4E655] w-12 h-12" />
