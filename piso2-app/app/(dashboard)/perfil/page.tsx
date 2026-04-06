@@ -31,35 +31,37 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
     const supabase = createClient()
     let user = null;
 
-    try {
-        // 🛑 EL ESCUDO: Envolvemos en try/catch porque Supabase tira el Lock como una "excepción" fatal
-        const { data } = await supabase.auth.getSession()
-        user = data?.session?.user || null
+    // 🛡️ BUCLE DE RESCATE: Intentamos hasta 4 veces si hay choque de tokens
+    for (let intento = 1; intento <= 4; intento++) {
+        try {
+            const { data } = await supabase.auth.getSession()
+            user = data?.session?.user || null
 
-        // Si no hay sesión en caché, forzamos buscar el usuario
-        if (!user) {
-            const userRes = await supabase.auth.getUser()
-            user = userRes.data?.user || null
+            if (!user) {
+                const userRes = await supabase.auth.getUser()
+                user = userRes.data?.user || null
+            }
+
+            if (user) {
+                // ¡Éxito! Tenemos al usuario, rompemos el bucle y avanzamos
+                break;
+            }
+        } catch (err: any) {
+            console.warn(`⏳ [Lock atajado - Intento ${intento}/4] El token está ocupado. Esperando 1 segundo...`);
+            // Esperamos 1000ms (1 segundo) antes de volver a intentar
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
-    } catch (err: any) {
-        // 🛡️ Si chocó con el CashProvider o el Middleware, caemos acá suavemente sin romper la app.
-        console.warn("⏳ [Lock atajado] Esperando que otro componente libere el token...");
-        await new Promise(resolve => setTimeout(resolve, 800)); // Esperamos casi 1 segundo
-
-        // Reintentamos una vez más de forma segura
-        const retry = await supabase.auth.getUser();
-        user = retry.data?.user || null;
     }
 
-    // Si después de todo no hay usuario, mandamos al login
+    // Si después de 4 intentos (4 segundos) seguimos sin usuario, mandamos al login
     if (!user) throw new Error("NO_AUTH")
 
-    // 2. Limpieza silenciosa con doble blindaje (then + catch)
+    // Limpieza silenciosa (Aislada para que no trabe nada)
     supabase.rpc('limpiar_creditos_vencidos')
         .then(({ error }: any) => { if (error) console.error("Error silencioso:", error) })
         .catch(() => { })
 
-    // 3. Cargar Perfil
+    // Cargar Perfil
     const { data: dataProfile, error: profileError } = await supabase
         .from('profiles')
         .select('*, creditos_regulares, creditos_seminarios')
@@ -72,12 +74,11 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
     let avisosData: any[] = []
     let proximoVencimiento: PackVencimiento | null = null
 
-    // 4. Cargar dependencias según ROL
+    // Cargar dependencias según ROL
     if (dataProfile.rol === 'profesor') {
         const { data: dataAvisos } = await supabase.from('comunicados').select('*').order('created_at', { ascending: false })
         avisosData = dataAvisos || []
     } else {
-        // Alumnos / Users
         const { data: dataHistorial } = await supabase
             .from('inscripciones')
             .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))')
