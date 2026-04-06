@@ -13,7 +13,7 @@ import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 
-import { actualizarPerfilAction } from '@/app/actions/perfil'
+import { actualizarPerfilAction, obtenerDatosPerfilAction } from '@/app/actions/perfil'
 
 type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; inicio: string; tipo_clase: string; profesor: { nombre_completo: string } } }
 type PackVencimiento = { fecha_vencimiento: string; creditos_restantes: number; tipo_clase: string }
@@ -28,86 +28,12 @@ type PerfilData = {
 
 // 🚀 FETCHER LIMPIO Y DIRECTO
 const fetcherPerfil = async (): Promise<PerfilData> => {
-    const supabase = createClient()
-    let user = null;
-
-    // 🛡️ BUCLE DE RESCATE: Intentamos hasta 4 veces si hay choque de tokens
-    for (let intento = 1; intento <= 4; intento++) {
-        try {
-            const { data } = await supabase.auth.getSession()
-            user = data?.session?.user || null
-
-            if (!user) {
-                const userRes = await supabase.auth.getUser()
-                user = userRes.data?.user || null
-            }
-
-            if (user) {
-                // ¡Éxito! Tenemos al usuario, rompemos el bucle y avanzamos
-                break;
-            }
-        } catch (err: any) {
-            console.warn(`⏳ [Lock atajado - Intento ${intento}/4] El token está ocupado. Esperando 1 segundo...`);
-            // Esperamos 1000ms (1 segundo) antes de volver a intentar
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-    }
-
-    // Si después de 4 intentos (4 segundos) seguimos sin usuario, mandamos al login
-    if (!user) throw new Error("NO_AUTH")
-
-    // Limpieza silenciosa (Aislada para que no trabe nada)
-    supabase.rpc('limpiar_creditos_vencidos')
-        .then(({ error }: any) => { if (error) console.error("Error silencioso:", error) })
-        .catch(() => { })
-
-    // Cargar Perfil
-    const { data: dataProfile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*, creditos_regulares, creditos_seminarios')
-        .eq('id', user.id)
-        .single()
-
-    if (profileError || !dataProfile) throw new Error("PERFIL_NOT_FOUND")
-
-    let historial: HistorialClase[] = []
-    let avisosData: any[] = []
-    let proximoVencimiento: PackVencimiento | null = null
-
-    // Cargar dependencias según ROL
-    if (dataProfile.rol === 'profesor') {
-        const { data: dataAvisos } = await supabase.from('comunicados').select('*').order('created_at', { ascending: false })
-        avisosData = dataAvisos || []
-    } else {
-        const { data: dataHistorial } = await supabase
-            .from('inscripciones')
-            .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))')
-            .eq('user_id', user.id)
-            .order('created_at', { ascending: false })
-            .limit(20)
-
-        historial = (dataHistorial?.filter((h: any) => h.clase !== null) || []) as unknown as HistorialClase[]
-
-        const hoyIso = new Date().toISOString()
-        const { data: dataPacks } = await supabase
-            .from('alumno_packs')
-            .select('fecha_vencimiento, creditos_restantes, tipo_clase')
-            .eq('user_id', user.id)
-            .eq('estado', 'activo')
-            .gt('creditos_restantes', 0)
-            .gt('fecha_vencimiento', hoyIso)
-            .order('fecha_vencimiento', { ascending: true })
-            .limit(1)
-
-        if (dataPacks && dataPacks.length > 0) proximoVencimiento = dataPacks[0]
-    }
-
-    return {
-        profile: dataProfile,
-        email: user.email,
-        historialClases: historial,
-        avisos: avisosData,
-        proximoVencimiento
+    try {
+        const data = await obtenerDatosPerfilAction();
+        return data as PerfilData;
+    } catch (error: any) {
+        // Si el servidor lanza el error NO_AUTH, lo respetamos para redirigir
+        throw new Error(error.message || "Error al cargar perfil");
     }
 }
 

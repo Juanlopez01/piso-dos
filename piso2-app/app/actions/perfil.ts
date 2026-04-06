@@ -19,3 +19,68 @@ export async function actualizarPerfilAction(payload: any) {
         return { success: false, error: error.message }
     }
 }
+
+// 🚀 NUEVA ACCIÓN NUCLEAR: Buscamos los datos desde el servidor para esquivar el Lock del navegador
+export async function obtenerDatosPerfilAction() {
+    const supabase = await createClient()
+
+    // 1. Limpieza silenciosa sin trabar nada
+    supabase.rpc('limpiar_creditos_vencidos').then(({ error }: any) => {
+        if (error) console.error("Error limpiando créditos:", error)
+    })
+
+    // 2. Buscamos el usuario leyendo la cookie directamente
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    if (authError || !user) throw new Error("NO_AUTH")
+
+    // 3. Cargamos el perfil
+    const { data: dataProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*, creditos_regulares, creditos_seminarios')
+        .eq('id', user.id)
+        .single()
+
+    if (profileError || !dataProfile) throw new Error("PERFIL_NOT_FOUND")
+
+    let historial: any[] = []
+    let avisosData: any[] = []
+    let proximoVencimiento = null
+
+    // 4. Cargar dependencias según ROL
+    if (dataProfile.rol === 'profesor') {
+        const { data: dataAvisos } = await supabase.from('comunicados').select('*').order('created_at', { ascending: false })
+        avisosData = dataAvisos || []
+    } else {
+        const { data: dataHistorial } = await supabase
+            .from('inscripciones')
+            .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(20)
+
+        historial = dataHistorial?.filter((h: any) => h.clase !== null) || []
+
+        const hoyIso = new Date().toISOString()
+        const { data: dataPacks } = await supabase
+            .from('alumno_packs')
+            .select('fecha_vencimiento, creditos_restantes, tipo_clase')
+            .eq('user_id', user.id)
+            .eq('estado', 'activo')
+            .gt('creditos_restantes', 0)
+            .gt('fecha_vencimiento', hoyIso)
+            .order('fecha_vencimiento', { ascending: true })
+            .limit(1)
+
+        if (dataPacks && dataPacks.length > 0) proximoVencimiento = dataPacks[0]
+    }
+
+    // Devolvemos el paquete armado
+    return {
+        profile: dataProfile,
+        email: user.email,
+        historialClases: historial,
+        avisos: avisosData,
+        proximoVencimiento
+    }
+}
