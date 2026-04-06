@@ -103,12 +103,13 @@ function PerfilContent() {
     const pagoProcesado = useRef(false)
 
     // 🚀 SWR
+    // 🚀 SWR AL MANDO
     const { data, error, isLoading, mutate } = useSWR<PerfilData>(
         'mi-perfil',
         fetcherPerfil,
         {
-            revalidateOnFocus: true,
-            errorRetryCount: 3 // Permitimos que reintente si falla
+            revalidateOnFocus: false, // 🛑 APAGAMOS ESTO: Evita que se pelee por el token al volver de MP
+            shouldRetryOnError: false
         }
     )
 
