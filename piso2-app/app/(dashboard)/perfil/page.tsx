@@ -145,20 +145,24 @@ function PerfilContent() {
     }, [profile, userEmail])
 
     // Manejo de Avisos de Pago con router.replace seguro
+    // Manejo de Avisos de Pago
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
         if (pagoStatus) {
-            if (pagoStatus === 'exito') {
-                toast.success('¡Pago aprobado! Tus clases se acreditarán.', { duration: 5000 })
-                mutate() // Refrescamos los créditos
-            }
-            else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
-            else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
+            // Usamos un micro-retraso para asegurar que la UI principal ya pintó
+            setTimeout(() => {
+                if (pagoStatus === 'exito') {
+                    toast.success('¡Pago aprobado! Tus clases se acreditarán.', { duration: 5000 })
+                    mutate() // Refrescamos los créditos mágicamente
+                }
+                else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
+                else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
 
-            // 🚀 Limpieza segura de Next.js
-            router.replace('/perfil', { scroll: false })
+                // 🚀 Limpieza nativa: Chrome limpia la URL pero Next.js no se "reinicia"
+                window.history.replaceState(null, '', window.location.pathname)
+            }, 100)
         }
-    }, [searchParams, mutate, router])
+    }, [searchParams, mutate])
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const inputElement = e.target;
