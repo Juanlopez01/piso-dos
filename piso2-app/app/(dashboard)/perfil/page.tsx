@@ -106,6 +106,8 @@ function PerfilContent() {
         fetcherPerfil,
         {
             revalidateOnFocus: false, // 🛑 Vital para evitar el robo de tokens al volver a la pestaña
+            revalidateOnReconnect: false, // 🛑 Evita que intente reconectar al recuperar la red/pestaña
+            dedupingInterval: 10000, // ⏱️ Si alguien pide los mismos datos en menos de 10s, usa la caché
             shouldRetryOnError: false
         }
     )
