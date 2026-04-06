@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useState, Suspense, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import {
@@ -28,16 +28,12 @@ type PerfilData = {
     proximoVencimiento: PackVencimiento | null
 }
 
-// 🚀 FETCHER UNIFICADO DE SWR (Blindado contra cuelgues)
+// 🚀 FETCHER UNIFICADO DE SWR (Optimizado antibloqueos)
 const fetcherPerfil = async (): Promise<PerfilData> => {
     const supabase = createClient()
 
-    // Limpieza silenciosa
-    supabase.rpc('limpiar_creditos_vencidos').then()
-
     const { data: { user }, error: authError } = await supabase.auth.getUser()
 
-    // Si no hay usuario, lanzamos error controlado para que SWR lo atrape (sin clavar el navegador)
     if (authError || !user) throw new Error("NO_AUTH")
 
     // 1. Cargar Perfil
@@ -96,22 +92,25 @@ function PerfilContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
 
+    // 🛡️ Escudo Anti-Bucles para Mercado Pago
+    const pagoProcesado = useRef(false)
+
     // 🚀 SWR AL MANDO
     const { data, error, isLoading, mutate } = useSWR<PerfilData>(
         'mi-perfil',
         fetcherPerfil,
         {
-            revalidateOnFocus: true, // Se actualiza solo al volver de MP
-            shouldRetryOnError: false // Evita bucles si la sesión expiró de verdad
+            revalidateOnFocus: true,
+            shouldRetryOnError: false
         }
     )
 
     // Redirección segura si expiró la sesión
     useEffect(() => {
         if (error?.message === "NO_AUTH") {
-            router.replace('/login')
+            window.location.href = '/login'
         }
-    }, [error, router])
+    }, [error])
 
     const profile = data?.profile || null
     const historialClases = data?.historialClases || []
@@ -144,21 +143,23 @@ function PerfilContent() {
         }
     }, [profile, userEmail])
 
-    // Manejo de Avisos de Pago con router.replace seguro
-    // Manejo de Avisos de Pago
+    // 🚀 Manejo de Avisos de Pago BLINDADO
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
-        if (pagoStatus) {
-            // Usamos un micro-retraso para asegurar que la UI principal ya pintó
+
+        if (pagoStatus && !pagoProcesado.current) {
+            pagoProcesado.current = true // Bajamos la palanca para no repetir
+
+            // Damos un micro-retraso para asegurar que la app no colapse
             setTimeout(() => {
                 if (pagoStatus === 'exito') {
-                    toast.success('¡Pago aprobado! Tus clases se acreditarán.', { duration: 5000 })
+                    toast.success('¡Pago aprobado! Tus clases se acreditarán.', { duration: 6000 })
                     mutate() // Refrescamos los créditos mágicamente
                 }
                 else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
                 else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
 
-                // 🚀 Limpieza nativa: Chrome limpia la URL pero Next.js no se "reinicia"
+                // Borramos la URL de forma "nativa" para que Next.js no se trabe
                 window.history.replaceState(null, '', window.location.pathname)
             }, 100)
         }
@@ -216,13 +217,11 @@ function PerfilContent() {
             updatePayload.apto_fisico_url = formData.apto_fisico_url;
         }
 
-        // 🚀 SERVER ACTION AL RESCATE
         const response = await actualizarPerfilAction(updatePayload)
 
         if (response.success) {
             toast.success('Perfil actualizado correctamente');
-            router.refresh()
-            setTimeout(() => mutate(), 500)
+            mutate()
         } else {
             toast.error(response.error || 'Error al guardar el perfil');
         }
@@ -258,15 +257,6 @@ function PerfilContent() {
     // ==========================================
     // ESCUDOS DE CARGA / ERROR
     // ==========================================
-
-    if (error?.message === "NO_AUTH") {
-        return (
-            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center w-full">
-                <p className="text-gray-500 text-xs font-bold uppercase tracking-widest animate-pulse">Redirigiendo al inicio de sesión...</p>
-            </div>
-        )
-    }
-
     if (isLoading) {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center w-full gap-4">
@@ -279,12 +269,15 @@ function PerfilContent() {
     }
 
     if (error || !profile) {
+        // Evitamos mostrar el error si en realidad se está yendo al login
+        if (error?.message === "NO_AUTH") return null;
+
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-6 w-full animate-in fade-in">
                 <AlertTriangle className="text-orange-500 w-16 h-16" />
                 <h2 className="text-white font-black text-2xl uppercase tracking-tighter">Conexión Perdida</h2>
                 <p className="text-gray-400 font-bold uppercase tracking-widest text-xs text-center max-w-sm px-4">
-                    Tuvimos un problema al cargar tus datos desde el servidor. Por favor, refrescá la página.
+                    Tuvimos un problema al cargar tus datos. Refrescá la página.
                 </p>
                 <div className="flex gap-4">
                     <button onClick={() => window.location.reload()} className="bg-white/10 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white hover:text-black transition-colors">
