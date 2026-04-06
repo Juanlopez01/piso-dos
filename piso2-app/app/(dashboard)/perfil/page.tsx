@@ -28,23 +28,28 @@ type PerfilData = {
     proximoVencimiento: PackVencimiento | null
 }
 
-// 🚀 FETCHER UNIFICADO DE SWR (Paz total entre Cliente y Servidor)
+// 🚀 FETCHER UNIFICADO DE SWR (Blindado contra la pelea de Tokens)
 const fetcherPerfil = async (): Promise<PerfilData> => {
     const supabase = createClient()
 
-    // 1. Limpieza silenciosa (Abajo del todo para que no estorbe)
+    // 1. Pedimos el usuario. Si choca con el Middleware, atajamos el error.
+    let { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    // 🛡️ EL ESCUDO MÁGICO: Si Supabase dice "Lock", esperamos 1 segundo y reintentamos.
+    if (authError && (authError.message.includes('Lock') || authError.message.includes('stole'))) {
+        console.warn("⏳ Choque de tokens detectado. Esperando al Middleware...")
+        await new Promise(resolve => setTimeout(resolve, 1000)) // Esperamos 1 segundo
+        const retry = await supabase.auth.getUser() // Reintentamos pacíficamente
+        user = retry.data.user
+        authError = retry.error
+    }
+
+    if (authError || !user) throw new Error("NO_AUTH")
+
+    // 2. Limpieza silenciosa DESPUÉS de tener el usuario asegurado
     supabase.rpc('limpiar_creditos_vencidos').then(({ error }: any) => {
-        if (error) console.error("Error silencioso:", error)
+        if (error) console.error("Error silencioso limpiando créditos:", error)
     })
-
-    // 2. 🛑 EL CAMBIO MAGISTRAL: Usamos getSession() en vez de getUser()
-    // getSession() lee la cookie local sin viajar al servidor de Auth, 
-    // evitando el choque (Lock) con el Middleware.
-    const { data: { session }, error: authError } = await supabase.auth.getSession()
-
-    if (authError || !session?.user) throw new Error("NO_AUTH")
-
-    const user = session.user
 
     // 3. Cargar Perfil
     const { data: dataProfile, error: profileError } = await supabase
@@ -96,7 +101,6 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
         proximoVencimiento
     }
 }
-
 function PerfilContent() {
     const [supabase] = useState(() => createClient())
     const router = useRouter()
