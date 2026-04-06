@@ -29,11 +29,37 @@ type PerfilData = {
 // 🚀 FETCHER LIMPIO Y DIRECTO
 const fetcherPerfil = async (): Promise<PerfilData> => {
     const supabase = createClient()
+    let user = null;
 
-    // Sacamos la limpieza de créditos de acá para evitar que trabe la base de datos
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) throw new Error("NO_AUTH")
+    try {
+        // 🛑 EL ESCUDO: Envolvemos en try/catch porque Supabase tira el Lock como una "excepción" fatal
+        const { data } = await supabase.auth.getSession()
+        user = data?.session?.user || null
 
+        // Si no hay sesión en caché, forzamos buscar el usuario
+        if (!user) {
+            const userRes = await supabase.auth.getUser()
+            user = userRes.data?.user || null
+        }
+    } catch (err: any) {
+        // 🛡️ Si chocó con el CashProvider o el Middleware, caemos acá suavemente sin romper la app.
+        console.warn("⏳ [Lock atajado] Esperando que otro componente libere el token...");
+        await new Promise(resolve => setTimeout(resolve, 800)); // Esperamos casi 1 segundo
+
+        // Reintentamos una vez más de forma segura
+        const retry = await supabase.auth.getUser();
+        user = retry.data?.user || null;
+    }
+
+    // Si después de todo no hay usuario, mandamos al login
+    if (!user) throw new Error("NO_AUTH")
+
+    // 2. Limpieza silenciosa con doble blindaje (then + catch)
+    supabase.rpc('limpiar_creditos_vencidos')
+        .then(({ error }: any) => { if (error) console.error("Error silencioso:", error) })
+        .catch(() => { })
+
+    // 3. Cargar Perfil
     const { data: dataProfile, error: profileError } = await supabase
         .from('profiles')
         .select('*, creditos_regulares, creditos_seminarios')
@@ -46,10 +72,12 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
     let avisosData: any[] = []
     let proximoVencimiento: PackVencimiento | null = null
 
+    // 4. Cargar dependencias según ROL
     if (dataProfile.rol === 'profesor') {
         const { data: dataAvisos } = await supabase.from('comunicados').select('*').order('created_at', { ascending: false })
         avisosData = dataAvisos || []
     } else {
+        // Alumnos / Users
         const { data: dataHistorial } = await supabase
             .from('inscripciones')
             .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))')
