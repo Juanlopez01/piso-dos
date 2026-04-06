@@ -2,16 +2,19 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
     AlertTriangle, Mail, Calendar, LogOut, CheckCircle2, History,
     BookOpen, Star, Clock, AlertCircle, HeartPulse, FileUp, X, Lock
 } from 'lucide-react'
-import { Toaster, toast } from 'sonner'
+import { toast, Toaster } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
+
+// 🚀 IMPORTAMOS LA SERVER ACTION
+import { actualizarPerfilAction } from '@/app/actions/perfil'
 
 // --- TIPOS ---
 type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; inicio: string; tipo_clase: string; profesor: { nombre_completo: string } } }
@@ -25,34 +28,26 @@ type PerfilData = {
     proximoVencimiento: PackVencimiento | null
 }
 
-// 🚀 FETCHER UNIFICADO DE SWR
+// 🚀 FETCHER UNIFICADO DE SWR (Blindado contra cuelgues)
 const fetcherPerfil = async (): Promise<PerfilData> => {
     const supabase = createClient()
 
-    // Ejecutamos limpieza de créditos en background (fire and forget)
+    // Limpieza silenciosa
     supabase.rpc('limpiar_creditos_vencidos').then()
 
-    const { data: { session } } = await supabase.auth.getSession()
-    let userId = session?.user?.id
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
 
-    if (!userId) {
-        const { data: { user } } = await supabase.auth.getUser()
-        userId = user?.id
-    }
-
-    if (!userId) {
-        window.location.href = '/login'
-        throw new Error("No auth")
-    }
+    // Si no hay usuario, lanzamos error controlado para que SWR lo atrape (sin clavar el navegador)
+    if (authError || !user) throw new Error("NO_AUTH")
 
     // 1. Cargar Perfil
     const { data: dataProfile, error: profileError } = await supabase
         .from('profiles')
         .select('*, creditos_regulares, creditos_seminarios')
-        .eq('id', userId)
+        .eq('id', user.id)
         .single()
 
-    if (profileError || !dataProfile) throw new Error("Perfil no encontrado")
+    if (profileError || !dataProfile) throw new Error("PERFIL_NOT_FOUND")
 
     let historial: HistorialClase[] = []
     let avisosData: any[] = []
@@ -67,7 +62,7 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
         const { data: dataHistorial } = await supabase
             .from('inscripciones')
             .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))')
-            .eq('user_id', userId)
+            .eq('user_id', user.id)
             .order('created_at', { ascending: false })
             .limit(20)
 
@@ -77,7 +72,7 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
         const { data: dataPacks } = await supabase
             .from('alumno_packs')
             .select('fecha_vencimiento, creditos_restantes, tipo_clase')
-            .eq('user_id', userId)
+            .eq('user_id', user.id)
             .eq('estado', 'activo')
             .gt('creditos_restantes', 0)
             .gt('fecha_vencimiento', hoyIso)
@@ -89,7 +84,7 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
 
     return {
         profile: dataProfile,
-        email: session?.user?.email,
+        email: user.email,
         historialClases: historial,
         avisos: avisosData,
         proximoVencimiento
@@ -99,43 +94,43 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
 function PerfilContent() {
     const [supabase] = useState(() => createClient())
     const searchParams = useSearchParams()
+    const router = useRouter()
 
     // 🚀 SWR AL MANDO
     const { data, error, isLoading, mutate } = useSWR<PerfilData>(
         'mi-perfil',
         fetcherPerfil,
         {
-            revalidateOnFocus: true,
-            onError: (err) => {
-                console.error("Error en SWR:", err)
-            }
+            revalidateOnFocus: true, // Se actualiza solo al volver de MP
+            shouldRetryOnError: false // Evita bucles si la sesión expiró de verdad
         }
     )
 
-    // Desestructuramos datos seguros
+    // Redirección segura si expiró la sesión
+    useEffect(() => {
+        if (error?.message === "NO_AUTH") {
+            router.replace('/login')
+        }
+    }, [error, router])
+
     const profile = data?.profile || null
     const historialClases = data?.historialClases || []
     const avisos = data?.avisos || []
     const proximoVencimiento = data?.proximoVencimiento || null
     const userEmail = data?.email || ''
 
-    // Estados de UI
     const [saving, setSaving] = useState(false)
     const [uploadingFile, setUploadingFile] = useState(false)
-
-    // Estados Contraseña
     const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
     const [newPassword, setNewPassword] = useState('')
     const [confirmNewPassword, setConfirmNewPassword] = useState('')
     const [changingPassword, setChangingPassword] = useState(false)
 
-    // Formulario (Se sincroniza cuando `profile` cambia)
     const [formData, setFormData] = useState({
         nombre: '', apellido: '', email: '', telefono: '', alias_cbu: '', nombre_remplazo: '', contacto_remplazo: '',
         edad: '', direccion: '', contacto_emergencia: '', plan_medico: '', condiciones_medicas: '', apto_fisico_url: ''
     })
 
-    // Sincronizar form cuando carga SWR
     useEffect(() => {
         if (profile) {
             setFormData({
@@ -153,13 +148,16 @@ function PerfilContent() {
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
         if (pagoStatus) {
-            if (pagoStatus === 'exito') toast.success('¡Pago aprobado! Tus clases se acreditarán.')
+            if (pagoStatus === 'exito') {
+                toast.success('¡Pago aprobado! Tus clases se acreditarán.', { duration: 5000 })
+                mutate() // Refrescamos los créditos
+            }
             else if (pagoStatus === 'error') toast.error('El pago no se procesó o fue cancelado.')
             else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
 
             window.history.replaceState(null, '', window.location.pathname)
         }
-    }, [searchParams])
+    }, [searchParams, mutate])
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const inputElement = e.target;
@@ -175,7 +173,7 @@ function PerfilContent() {
 
             const { data: { publicUrl } } = supabase.storage.from('apto_fisico').getPublicUrl(filePath);
             setFormData(prev => ({ ...prev, apto_fisico_url: publicUrl }));
-            toast.success('Archivo subido correctamente. ¡No olvides guardar tu perfil!');
+            toast.success('Archivo subido correctamente. ¡Hacé clic en Guardar Perfil para confirmar!');
         } catch (error: any) {
             toast.error('Error al subir el archivo: ' + (error?.message || 'Error desconocido'));
         } finally {
@@ -189,37 +187,42 @@ function PerfilContent() {
         if (!profile) return;
 
         setSaving(true);
-        try {
-            if (profile.rol === 'profesor' && (!formData.nombre_remplazo || !formData.contacto_remplazo)) {
-                toast.error('Los datos de reemplazo son obligatorios para docentes');
-                return;
-            }
 
-            const updatePayload: any = {
-                telefono: formData.telefono, alias_cbu: formData.alias_cbu,
-                nombre_remplazo: formData.nombre_remplazo, contacto_remplazo: formData.contacto_remplazo,
-                nombre_completo: `${formData.nombre} ${formData.apellido}`
-            };
-
-            if (profile.rol === 'alumno' || profile.rol === 'user') {
-                updatePayload.edad = formData.edad ? parseInt(formData.edad) : null;
-                updatePayload.direccion = formData.direccion;
-                updatePayload.contacto_emergencia = formData.contacto_emergencia;
-                updatePayload.plan_medico = formData.plan_medico;
-                updatePayload.condiciones_medicas = formData.condiciones_medicas;
-                updatePayload.apto_fisico_url = formData.apto_fisico_url;
-            }
-
-            const { error } = await supabase.from('profiles').update(updatePayload).eq('id', profile.id);
-            if (error) throw error;
-
-            toast.success('Perfil actualizado correctamente');
-            mutate() // 🚀 SWR actualiza sin recargar página
-        } catch (error: any) {
-            toast.error('Error al guardar el perfil');
-        } finally {
+        if (profile.rol === 'profesor' && (!formData.nombre_remplazo || !formData.contacto_remplazo)) {
+            toast.error('Los datos de reemplazo son obligatorios para docentes');
             setSaving(false);
+            return;
         }
+
+        const updatePayload: any = {
+            telefono: formData.telefono,
+            alias_cbu: formData.alias_cbu,
+            nombre_remplazo: formData.nombre_remplazo,
+            contacto_remplazo: formData.contacto_remplazo,
+            nombre_completo: `${formData.nombre} ${formData.apellido}`
+        };
+
+        if (profile.rol === 'alumno' || profile.rol === 'user') {
+            updatePayload.edad = formData.edad ? parseInt(formData.edad) : null;
+            updatePayload.direccion = formData.direccion;
+            updatePayload.contacto_emergencia = formData.contacto_emergencia;
+            updatePayload.plan_medico = formData.plan_medico;
+            updatePayload.condiciones_medicas = formData.condiciones_medicas;
+            updatePayload.apto_fisico_url = formData.apto_fisico_url;
+        }
+
+        // 🚀 SERVER ACTION AL RESCATE
+        const response = await actualizarPerfilAction(updatePayload)
+
+        if (response.success) {
+            toast.success('Perfil actualizado correctamente');
+            router.refresh()
+            setTimeout(() => mutate(), 500)
+        } else {
+            toast.error(response.error || 'Error al guardar el perfil');
+        }
+
+        setSaving(false);
     }
 
     const handlePasswordChange = async (e: React.FormEvent) => {
@@ -248,9 +251,9 @@ function PerfilContent() {
     }
 
     // ==========================================
-    // ESCUDOS DE CARGA / ERROR DE SWR
+    // ESCUDOS DE CARGA / ERROR
     // ==========================================
-    if (isLoading) {
+    if (isLoading || (error?.message === "NO_AUTH")) {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center w-full gap-4">
                 <Loader2 className="animate-spin text-[#D4E655] w-12 h-12" />
@@ -281,9 +284,6 @@ function PerfilContent() {
         )
     }
 
-    // ==========================================
-    // INTERFAZ DE USUARIO
-    // ==========================================
     const isProfe = profile?.rol === 'profesor'
     const isAlumno = profile?.rol === 'alumno' || profile?.rol === 'user'
     const datosIncompletos = isProfe && (!formData.nombre_remplazo || !formData.contacto_remplazo || !formData.alias_cbu)
@@ -304,7 +304,6 @@ function PerfilContent() {
         <div className="pb-24 min-h-screen bg-[#050505] text-white selection:bg-[#D4E655] selection:text-black">
             <Toaster position="top-center" richColors theme="dark" />
 
-            {/* HEADER PERFIL */}
             <div className="px-4 py-8 md:px-8 border-b border-white/10 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
                 <div className="flex items-center gap-4">
                     <div className="w-16 h-16 shrink-0 rounded-full bg-[#D4E655] text-black flex items-center justify-center font-black text-2xl shadow-[0_0_20px_rgba(212,230,85,0.4)]">
@@ -324,10 +323,7 @@ function PerfilContent() {
                 </button>
             </div>
 
-            {/* CONTENEDOR PRINCIPAL */}
             <div className="px-4 py-8 md:px-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-                {/* COLUMNA 1: FORMULARIO */}
                 <div className={`space-y-6 ${isAlumno ? 'lg:col-span-1' : 'lg:col-span-2'}`}>
                     {isProfe && datosIncompletos && (
                         <div className="bg-orange-500/10 border border-orange-500/30 p-4 rounded-xl flex items-start gap-3 animate-pulse">
@@ -352,16 +348,11 @@ function PerfilContent() {
                             </div>
                         </div>
 
-                        {/* SECCIÓN SEGURIDAD */}
                         <div className="space-y-4 pt-2 border-t border-white/5 mt-2">
                             <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 pb-2">
                                 <Lock size={16} className="text-[#D4E655]" /> Seguridad
                             </h3>
-                            <button
-                                type="button"
-                                onClick={() => setIsPasswordModalOpen(true)}
-                                className="w-full sm:w-auto bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-5 py-3 text-xs font-black uppercase tracking-widest text-white transition-colors flex items-center justify-center gap-2"
-                            >
+                            <button type="button" onClick={() => setIsPasswordModalOpen(true)} className="w-full sm:w-auto bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-5 py-3 text-xs font-black uppercase tracking-widest text-white transition-colors flex items-center justify-center gap-2">
                                 <Lock size={14} /> Cambiar Contraseña
                             </button>
                         </div>
@@ -425,7 +416,6 @@ function PerfilContent() {
                     </form>
                 </div>
 
-                {/* COLUMNA 2 Y 3: PANELES ALUMNO */}
                 {isAlumno && (
                     <div className="lg:col-span-2 space-y-6">
                         <div className="bg-[#09090b] border border-white/10 rounded-2xl p-5 sm:p-6 shadow-xl">
@@ -452,7 +442,7 @@ function PerfilContent() {
                                             <p className="text-[9px] sm:text-[10px] opacity-80 leading-relaxed">Tenés {proximoVencimiento.creditos_restantes} clase(s) {proximoVencimiento.tipo_clase} que vencen el <strong>{format(new Date(proximoVencimiento.fecha_vencimiento), "d 'de' MMMM", { locale: es })}</strong>.</p>
                                         </div>
                                     </div>
-                                    <button onClick={() => window.location.href = '/explorar'} className="w-full sm:w-auto shrink-0 bg-black/20 hover:bg-black/40 text-current px-4 py-2 sm:py-3 rounded-lg text-[10px] font-black uppercase transition-colors">
+                                    <button onClick={() => router.push('/explorar')} className="w-full sm:w-auto shrink-0 bg-black/20 hover:bg-black/40 text-current px-4 py-2 sm:py-3 rounded-lg text-[10px] font-black uppercase transition-colors">
                                         Usar Ahora
                                     </button>
                                 </div>
@@ -494,7 +484,6 @@ function PerfilContent() {
                     </div>
                 )}
 
-                {/* COLUMNA DER: CARTELERA PROFES */}
                 {isProfe && (
                     <div className="lg:col-span-1 h-max lg:sticky lg:top-8 mt-8 lg:mt-0">
                         <div className="bg-[#111] border border-white/10 rounded-2xl p-5 sm:p-6 relative overflow-hidden">
@@ -530,31 +519,13 @@ function PerfilContent() {
                         <form onSubmit={handlePasswordChange} className="space-y-5">
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nueva Contraseña</label>
-                                <input
-                                    type="password"
-                                    required
-                                    value={newPassword}
-                                    onChange={(e) => setNewPassword(e.target.value)}
-                                    placeholder="••••••••"
-                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest"
-                                />
+                                <input type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="••••••••" className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest" />
                             </div>
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Confirmar Contraseña</label>
-                                <input
-                                    type="password"
-                                    required
-                                    value={confirmNewPassword}
-                                    onChange={(e) => setConfirmNewPassword(e.target.value)}
-                                    placeholder="••••••••"
-                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest"
-                                />
+                                <input type="password" required value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} placeholder="••••••••" className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest" />
                             </div>
-                            <button
-                                type="submit"
-                                disabled={changingPassword}
-                                className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-4 shadow-lg"
-                            >
+                            <button type="submit" disabled={changingPassword} className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-4 shadow-lg">
                                 {changingPassword ? <Loader2 size={16} className="animate-spin" /> : 'Actualizar Contraseña'}
                             </button>
                         </form>
