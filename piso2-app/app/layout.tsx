@@ -2,8 +2,12 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { CashProvider } from "@/context/CashContext";
-import SWRProvider from "@/components/SWRProvider"; // <--- 1. IMPORTAMOS EL NUEVO PROVIDER
+import SWRProvider from "@/components/SWRProvider";
 import type { Metadata, Viewport } from 'next'
+
+// 🚀 1. IMPORTÁ TU SIDEBAR ACÁ (Cambiá la ruta si está en otra carpeta)
+import Sidebar from "@/components/Sidebar";
+import MobileNav from "@/components/MobileNav";
 
 export const metadata: Metadata = {
   title: 'Piso 2 | La Liga',
@@ -33,14 +37,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
-      <body className={`${inter.className} bg-[#050505] text-white min-h-screen antialiased`}>
+      {/* 🚀 2. Le agregamos "flex" al body para poner el sidebar al lado del contenido */}
+      <body className={`${inter.className} bg-[#050505] text-white min-h-screen antialiased flex`}>
 
-        {/* 2. EL GRAN ABRAZO: El SWRProvider envuelve toda la app para aplicar la config global */}
         <SWRProvider>
           <CashProvider>
 
-            {/* Aquí adentro está toda tu app (Sidebar, Páginas, etc) */}
-            {children}
+
+            {/* 4. Envolvemos a children en un main que ocupe el resto del espacio */}
+            <main className="flex-1 min-w-0">
+              {children}
+            </main>
 
             <Toaster position="top-center" richColors theme="dark" />
 

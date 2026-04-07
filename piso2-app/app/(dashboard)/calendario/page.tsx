@@ -128,7 +128,9 @@ const fetcher = async ([key, startIso, endIso, startDateStr, endDateStr]: string
             if (c.estado === 'cancelada') return;
             agenda.push({
                 id: c.id, tipo: 'Clase', titulo: c.nombre, subtitulo: c.tipo_clase,
-                inicio: c.inicio, fin: c.fin, fecha_render: format(new Date(c.inicio), 'yyyy-MM-dd'),
+                inicio: c.inicio, fin: c.fin,
+                // 🚀 ARREGLO ZONA HORARIA 1: Forzamos la fecha ignorando Javascript
+                fecha_render: c.inicio.split('T')[0],
                 sala_nombre: c.sala_nombre, sala_sede: c.sala_sede, sede_id: c.sede_id,
                 clase_data: {
                     profesor_nombre: c.profesor_nombre || 'Sin Asignar',
@@ -421,7 +423,8 @@ export default function CalendarioPage() {
                                                 <div key={evt.id} className={`flex flex-row bg-[#111] border rounded-xl overflow-hidden group transition-all relative ${style.border} border-l-[6px]`}>
                                                     <div className="relative w-24 md:w-32 flex-shrink-0 bg-white/5 flex flex-col">
                                                         {evt.tipo === 'Clase' && evt.clase_data?.imagen_url ? (<Image src={evt.clase_data.imagen_url} alt={evt.titulo} fill className="object-cover" />) : (<div className="w-full h-full flex flex-col items-center justify-center text-white/10 p-2">{evt.tipo === 'Alquiler' ? <Music size={24} className="opacity-50" /> : <ImageIcon size={24} />}<span className="text-[8px] font-bold uppercase mt-1 opacity-50 text-center">{evt.tipo === 'Alquiler' ? 'Externo' : 'Sin Flyer'}</span></div>)}
-                                                        <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{format(new Date(evt.inicio), 'HH:mm')}</span><span className="text-[8px] uppercase font-bold text-gray-400 block">{evt.sala_nombre} ({evt.sala_sede})</span></div>
+                                                        {/* 🚀 ARREGLO ZONA HORARIA 2: Forzamos la hora literal cortando la T */}
+                                                        <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{evt.inicio.split('T')[1].substring(0, 5)}</span><span className="text-[8px] uppercase font-bold text-gray-400 block">{evt.sala_nombre} ({evt.sala_sede})</span></div>
                                                     </div>
                                                     <div className="flex-1 p-3 flex flex-col justify-center relative">
                                                         <div className="flex justify-between items-start mb-1"><h4 className="text-sm font-bold text-white uppercase leading-tight pr-2">{evt.titulo}</h4><span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${style.bg}/10 ${style.text} border ${style.border}/20`}>{evt.subtitulo}</span></div>
@@ -444,19 +447,6 @@ export default function CalendarioPage() {
                                                             {evt.tipo === 'Clase' ? (<><a href={`/clase/${evt.id}`} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase py-2 rounded hover:bg-white transition-colors text-center shadow-[0_0_10px_rgba(212,230,85,0.2)]">Gestionar / Tomar Lista</a><button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: evt.id, serieId: evt.clase_data?.serie_id || null }) }} className="text-gray-500 hover:text-red-500 p-2 bg-white/5 rounded hover:bg-red-500/10 transition-colors"><Trash2 size={14} /></button></>) : (<div className="flex gap-2 w-full"><div className="flex-1 text-[10px] text-gray-500 italic flex items-center"><Info size={12} className="mr-1" /> Alquiler externo</div><a href="/alquileres" className="px-3 py-2 bg-white/10 text-white rounded text-[10px] font-bold uppercase hover:bg-white/20">Ver Alquileres</a></div>)}
                                                         </div>
                                                     </div>
-
-                                                    {deleteTarget?.id === evt.id && (
-                                                        <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-center p-4 text-center animate-in fade-in">
-                                                            <AlertCircle className="text-red-500 mb-2" size={32} />
-                                                            <h4 className="text-white font-black uppercase mb-1">¿Eliminar Clase?</h4>
-                                                            <p className="text-gray-400 text-[10px] mb-4">Esta acción no se puede deshacer.</p>
-                                                            <div className="flex gap-2 w-full">
-                                                                <button onClick={() => setDeleteTarget(null)} className="flex-1 py-2 bg-white/10 rounded font-bold text-[10px] uppercase hover:bg-white/20">Cancelar</button>
-                                                                <button onClick={() => handleConfirmDelete('single')} className="flex-1 py-2 bg-red-500 text-white rounded font-bold text-[10px] uppercase hover:bg-red-600 shadow-[0_0_15px_rgba(239,68,68,0.3)]">Solo esta</button>
-                                                                {deleteTarget.serieId && <button onClick={() => handleConfirmDelete('serie')} className="flex-1 py-2 bg-red-900 border border-red-500 text-white rounded font-bold text-[10px] uppercase hover:bg-red-800">Toda la serie</button>}
-                                                            </div>
-                                                        </div>
-                                                    )}
                                                 </div>
                                             )
                                         })
