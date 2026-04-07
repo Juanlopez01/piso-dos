@@ -37,12 +37,10 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     const [hasCompaniaAccess, setHasCompaniaAccess] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
 
-    // 🌟 OPTIMIZACIÓN: Ref para saber quién fue el último usuario chequeado y no recargar de más
     const lastCheckedUser = useRef<string | null>(null)
     const isFetching = useRef(false)
 
     const fetchProfileAndBox = useCallback(async (userId: string, isMounted: boolean = true, force: boolean = false) => {
-        // 🌟 OPTIMIZACIÓN: Si ya estamos trayendo datos o si es el mismo usuario y no forzamos, cortamos.
         if (isFetching.current) return;
         if (!force && lastCheckedUser.current === userId) return;
 
@@ -111,7 +109,7 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                 }
             }
 
-            lastCheckedUser.current = userId; // Marcamos como último chequeado exitoso
+            lastCheckedUser.current = userId;
         } catch (err) {
             console.error("Error fetching details:", err)
         } finally {
@@ -126,9 +124,11 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
             try {
                 if (isMounted) setIsLoading(true);
 
-                const { data: { session }, error } = await supabase.auth.getSession();
+                // 🛑 EL CAMBIO CRUCIAL: Solo leemos el token en caché, no hacemos peticiones de red
+                // Esto evita el choque letal con el Middleware.
+                const { data: { session } } = await supabase.auth.getSession();
 
-                if (error || !session?.user) {
+                if (!session?.user) {
                     if (isMounted) {
                         setUserRole('visitante')
                         setUserName(null)
@@ -141,7 +141,7 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                     return;
                 }
 
-                await fetchProfileAndBox(session.user.id, isMounted, true) // Forzamos en la primera carga
+                await fetchProfileAndBox(session.user.id, isMounted, true)
 
             } catch (error) {
                 console.error("Error inicializando sesión global:", error)
@@ -152,21 +152,8 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
         initSession()
 
-        // 👇 EL DESPERTADOR CON FRENO 👇
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible') {
-                supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
-                    if (session?.user && isMounted) {
-                        // Solo recarga si cambió de usuario de fondo
-                        if (session.user.id !== lastCheckedUser.current) {
-                            fetchProfileAndBox(session.user.id, isMounted, true);
-                        }
-                    }
-                });
-            }
-        };
-
-        document.addEventListener('visibilitychange', handleVisibilityChange);
+        // 🛑 ELIMINAMOS el 'handleVisibilityChange' porque causaba llamadas repetidas innecesarias
+        // que estresaban la base de datos y causaban bloqueos. Ahora confiamos en el SessionProvider y el Middleware.
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
             if (event === 'SIGNED_OUT') {
@@ -182,24 +169,25 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                     setIsLoading(false)
                     lastCheckedUser.current = null;
                 }
-            } else if (event === 'SIGNED_IN') { // Sacamos el TOKEN_REFRESHED para no spamear la base de datos
+            } else if (event === 'SIGNED_IN') {
                 if (session?.user) {
                     await fetchProfileAndBox(session.user.id, isMounted, true)
                     if (isMounted) setIsLoading(false)
                 }
             }
+            // Ignoramos pacíficamente el TOKEN_REFRESHED para no spamear Supabase.
         })
 
         return () => {
             isMounted = false;
             subscription.unsubscribe();
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
         }
     }, [fetchProfileAndBox, supabase])
 
     const checkStatus = useCallback(async () => {
+        // Al requerir status manualmente, usamos la caché para evitar choques
         const { data: { session } } = await supabase.auth.getSession()
-        if (session?.user) await fetchProfileAndBox(session.user.id, true, true) // Check manual fuerza la recarga
+        if (session?.user) await fetchProfileAndBox(session.user.id, true, true)
     }, [fetchProfileAndBox, supabase])
 
     const contextValue = useMemo(() => ({

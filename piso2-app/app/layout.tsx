@@ -3,11 +3,13 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { CashProvider } from "@/context/CashContext";
 import SWRProvider from "@/components/SWRProvider";
-import type { Metadata, Viewport } from 'next'
 
-// 🚀 1. IMPORTÁ TU SIDEBAR ACÁ (Cambiá la ruta si está en otra carpeta)
+// 🚀 1. TUS IMPORTACIONES DE NAVEGACIÓN Y EL NUEVO PROVIDER
 import Sidebar from "@/components/Sidebar";
 import MobileNav from "@/components/MobileNav";
+import SessionProvider from "@/components/SessionProvider"; // <--- NUEVO
+
+import type { Metadata, Viewport } from 'next'
 
 export const metadata: Metadata = {
   title: 'Piso 2 | La Liga',
@@ -37,22 +39,26 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
-      {/* 🚀 2. Le agregamos "flex" al body para poner el sidebar al lado del contenido */}
-      <body className={`${inter.className} bg-[#050505] text-white min-h-screen antialiased flex`}>
+      {/* Agregamos flex-col para mobile y md:flex-row para desktop para que el menú no rompa nada */}
+      <body className={`${inter.className} bg-[#050505] text-white min-h-screen antialiased flex flex-col md:flex-row`}>
 
-        <SWRProvider>
-          <CashProvider>
+        {/* 🚀 2. EL GUARDIÁN SILENCIOSO ENVUELVE TODA LA APP */}
+        <SessionProvider>
+          <SWRProvider>
+            <CashProvider>
 
 
-            {/* 4. Envolvemos a children en un main que ocupe el resto del espacio */}
-            <main className="flex-1 min-w-0">
-              {children}
-            </main>
 
-            <Toaster position="top-center" richColors theme="dark" />
+              {/* 4. Envolvemos a children en un main que ocupe el resto del espacio */}
+              <main className="flex-1 min-w-0 pb-16 md:pb-0">
+                {children}
+              </main>
 
-          </CashProvider>
-        </SWRProvider>
+              <Toaster position="top-center" richColors theme="dark" />
+
+            </CashProvider>
+          </SWRProvider>
+        </SessionProvider>
 
       </body>
     </html>
