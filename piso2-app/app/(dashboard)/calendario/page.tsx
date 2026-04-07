@@ -7,7 +7,8 @@ import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import {
     format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
-    eachDayOfInterval, isSameDay, addMonths, subMonths, isSameMonth
+    eachDayOfInterval, isSameDay, addMonths, subMonths, isSameMonth,
+    differenceInMinutes, addMinutes // 🚀 IMPORTAMOS FUNCIONES MATEMÁTICAS DE TIEMPO
 } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
@@ -19,7 +20,6 @@ import { clsx } from 'clsx'
 import Image from 'next/image'
 import { Toaster, toast } from 'sonner'
 import MultiDatePicker from '@/components/MultiDatePicker'
-import { v4 as uuidv4 } from 'uuid'
 
 // --- TIPOS ESTRICTOS ---
 type EventoAgenda = {
@@ -39,7 +39,6 @@ type EventoAgenda = {
         sala_id?: string
         compania_id?: string | null
         cupo_maximo?: number
-        duracion_minutos?: number
         descripcion?: string | null
         profesor_nombre: string
         profesor_2_nombre: string | null
@@ -81,7 +80,6 @@ type RPCClase = {
     sala_id?: string
     compania_id?: string | null
     cupo_maximo?: number
-    duracion_minutos?: number
     descripcion?: string | null
     profesor_nombre: string
     profesor_2_nombre: string | null
@@ -151,7 +149,6 @@ const fetcher = async ([key, startIso, endIso, startDateStr, endDateStr]: string
                     sala_id: c.sala_id,
                     compania_id: c.compania_id,
                     cupo_maximo: c.cupo_maximo,
-                    duracion_minutos: c.duracion_minutos,
                     descripcion: c.descripcion,
                     profesor_nombre: c.profesor_nombre || 'Sin Asignar',
                     profesor_2_nombre: c.profesor_2_nombre || null,
@@ -214,7 +211,6 @@ export default function CalendarioPage() {
     })
     const [formFile, setFormFile] = useState<File | null>(null)
 
-    // --- LÓGICA SWR RESTAURADA (Estaba rota en la versión anterior) ---
     const startIso = startOfWeek(startOfMonth(currentDate)).toISOString()
     const endIso = endOfWeek(endOfMonth(currentDate)).toISOString()
     const startDateStr = format(startOfWeek(startOfMonth(currentDate)), 'yyyy-MM-dd')
@@ -274,10 +270,13 @@ export default function CalendarioPage() {
         }
     }
 
-    // 🚀 LÓGICA PARA PREPARAR LA EDICIÓN
+    // 🚀 LÓGICA PARA PREPARAR LA EDICIÓN (Calculando la duración dinámicamente)
     const prepararEdicion = (evt: EventoAgenda) => {
         if (!evt.clase_data) return;
         setEditingId(evt.id);
+
+        // Calculamos la duración real restando inicio y fin
+        const duracionReal = differenceInMinutes(new Date(evt.fin), new Date(evt.inicio));
 
         setForm({
             nombre: evt.titulo,
@@ -286,7 +285,7 @@ export default function CalendarioPage() {
             nivel: evt.clase_data.nivel,
             ritmoId: evt.clase_data.ritmo_id || '',
             hora: evt.inicio.split('T')[1].substring(0, 5),
-            duracion: evt.clase_data.duracion_minutos || 60,
+            duracion: duracionReal > 0 ? duracionReal : 60, // Fallback por las dudas
             cupoMaximo: evt.clase_data.cupo_maximo || 20,
             sedeId: evt.sede_id,
             salaId: evt.clase_data.sala_id || '',
@@ -294,7 +293,6 @@ export default function CalendarioPage() {
             profe2Id: evt.clase_data.profesor_2_id || '',
             tipoAcuerdo: evt.clase_data.tipo_acuerdo,
             valorAcuerdo: evt.clase_data.valor_acuerdo?.toString() || '',
-            // Forzamos la hora local al mediodía para que no te salte de día por el timezone
             fechas: [new Date(evt.fecha_render + 'T12:00:00')],
             esLaLiga: evt.clase_data.es_la_liga,
             ligaNivel: evt.clase_data.liga_nivel || 1,
@@ -326,15 +324,19 @@ export default function CalendarioPage() {
             }
 
             if (modalMode === 'edit' && editingId) {
-                // MODO EDICIÓN DIRECTA
+                // 🚀 MODO EDICIÓN: Calculamos "fin" en base al "inicio" + "duracion"
+                const inicioStr = `${format(form.fechas[0], 'yyyy-MM-dd')}T${form.hora}:00`;
+                const inicioDate = new Date(inicioStr);
+                const finDate = addMinutes(inicioDate, form.duracion);
+
                 const updatePayload: any = {
                     nombre: form.nombre,
                     descripcion: form.descripcion || null,
                     tipo_clase: form.tipo,
                     nivel: form.nivel,
                     ritmo_id: form.ritmoId || null,
-                    inicio: `${format(form.fechas[0], 'yyyy-MM-dd')}T${form.hora}:00`,
-                    duracion_minutos: form.duracion,
+                    inicio: inicioStr,
+                    fin: format(finDate, "yyyy-MM-dd'T'HH:mm:ss"), // Enviamos el FIN calculado
                     cupo_maximo: form.esAudicion ? 9999 : form.cupoMaximo,
                     sala_id: form.salaId,
                     profesor_id: form.profeId,
@@ -379,7 +381,6 @@ export default function CalendarioPage() {
         }
     }
 
-    // 🚀 LÓGICA DE BORRADO MEJORADA (Soft Delete seguro para TypeScript)
     const handleConfirmDelete = async (option: 'single' | 'serie') => {
         if (!deleteTarget) return
         const toastId = toast.loading('Eliminando...')
@@ -538,7 +539,6 @@ export default function CalendarioPage() {
                                                         <div className="flex items-end justify-between border-t border-white/5 pt-2 mt-auto gap-2">
                                                             {evt.tipo === 'Clase' ? (
                                                                 <>
-                                                                    {/* 🚀 BOTÓN DE EDITAR NUEVO */}
                                                                     <button onClick={(e) => { e.stopPropagation(); prepararEdicion(evt) }} className="text-gray-500 hover:text-blue-400 p-2 bg-white/5 rounded hover:bg-blue-400/10 transition-colors ml-1"><Pencil size={14} /></button>
                                                                     <a href={`/clase/${evt.id}`} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase py-2 rounded hover:bg-white transition-colors text-center shadow-[0_0_10px_rgba(212,230,85,0.2)]">Gestionar / Lista</a>
                                                                     <button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: evt.id, serieId: evt.clase_data?.serie_id || null }) }} className="text-gray-500 hover:text-red-500 p-2 bg-white/5 rounded hover:bg-red-500/10 transition-colors ml-1"><Trash2 size={14} /></button>
