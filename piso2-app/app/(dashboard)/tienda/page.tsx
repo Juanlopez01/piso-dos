@@ -34,7 +34,7 @@ type TiendaData = {
 // 🚀 FETCHER UNIFICADO DE SWR
 const fetcherTienda = async (): Promise<TiendaData> => {
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getSession()
 
     let userProfile = null
     if (user) {

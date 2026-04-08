@@ -7,10 +7,11 @@ import { revalidatePath } from 'next/cache'
 export async function actualizarPerfilAction(payload: any) {
     const supabase = await createClient()
     try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) throw new Error('No autorizado')
+        // 🚀 BLINDAJE: getSession en lugar de getUser
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
 
-        const { error } = await supabase.from('profiles').update(payload).eq('id', user.id)
+        const { error } = await supabase.from('profiles').update(payload).eq('id', session.user.id)
         if (error) throw new Error(error.message)
 
         revalidatePath('/perfil')
@@ -20,7 +21,7 @@ export async function actualizarPerfilAction(payload: any) {
     }
 }
 
-// 🚀 NUEVA ACCIÓN NUCLEAR: Buscamos los datos desde el servidor para esquivar el Lock del navegador
+// 🚀 ACCIÓN NUCLEAR: Buscamos los datos desde el servidor para esquivar el Lock del navegador
 export async function obtenerDatosPerfilAction() {
     const supabase = await createClient()
 
@@ -29,10 +30,12 @@ export async function obtenerDatosPerfilAction() {
         if (error) console.error("Error limpiando créditos:", error)
     })
 
-    // 2. Buscamos el usuario leyendo la cookie directamente
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    // 2. Buscamos el usuario leyendo la cookie directamente (getSession es más rápido y seguro aquí)
+    const { data: { session }, error: authError } = await supabase.auth.getSession()
 
-    if (authError || !user) throw new Error("NO_AUTH")
+    if (authError || !session?.user) throw new Error("NO_AUTH")
+
+    const user = session.user
 
     // 3. Cargamos el perfil
     const { data: dataProfile, error: profileError } = await supabase
@@ -54,7 +57,8 @@ export async function obtenerDatosPerfilAction() {
     } else {
         const { data: dataHistorial } = await supabase
             .from('inscripciones')
-            .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))')
+            // Especificamos la relación !user_id por si hay conflictos
+            .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles!profesor_id(nombre_completo))')
             .eq('user_id', user.id)
             .order('created_at', { ascending: false })
             .limit(20)

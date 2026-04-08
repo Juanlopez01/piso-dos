@@ -48,7 +48,7 @@ type CarteleraData = {
 // 🚀 FETCHER
 const fetcherCartelera = async (): Promise<CarteleraData> => {
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getSession()
     if (!user) throw new Error('No user')
 
     // Limpieza de vencidos silenciosa

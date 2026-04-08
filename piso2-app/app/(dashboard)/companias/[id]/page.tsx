@@ -61,7 +61,10 @@ export default function CompaniaDetallePage() {
 
     const verificarAccesoYCargar = async () => {
         setLoading(true)
-        const { data: { user } } = await supabase.auth.getUser()
+
+        // 🚀 BLINDAJE: getSession en lugar de getUser
+        const { data: { session } } = await supabase.auth.getSession()
+        const user = session?.user
 
         if (!user) {
             router.replace('/login')
@@ -134,20 +137,15 @@ export default function CompaniaDetallePage() {
             .order('inicio', { ascending: true })
 
         if (dataClases) {
-            // 🧠 AGRUPADOR MÁGICO: Como ya vienen ordenadas por fecha, 
-            // solo nos guardamos la PRIMERA que aparezca de cada "materia".
             const clasesUnicas: ClaseCompania[] = []
             const materiasVistas = new Set<string>()
 
             dataClases.forEach((c: any) => {
-                // Limpiamos los tipos por las dudas (el error de TS que me pasaste)
                 const profNombre = Array.isArray(c.profesor) ? c.profesor[0]?.nombre_completo : c.profesor?.nombre_completo
                 const salaData = Array.isArray(c.sala) ? c.sala[0] : c.sala
 
-                // Creamos una "llave" única combinando nombre de la clase y profesor
                 const keyMateria = `${c.nombre}-${profNombre}`
 
-                // Si nunca vimos esta materia en el bucle, es la más próxima! La guardamos.
                 if (!materiasVistas.has(keyMateria)) {
                     materiasVistas.add(keyMateria)
                     clasesUnicas.push({
@@ -259,7 +257,11 @@ export default function CompaniaDetallePage() {
                         {clases.length > 0 ? (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {clases.map((clase) => {
-                                    const esHoy = isToday(new Date(clase.inicio))
+                                    // 🚀 BLINDAJE DE ZONA HORARIA
+                                    const inicioDate = new Date(clase.inicio.replace('+00', '').replace(' ', 'T'))
+                                    const finDate = new Date(clase.fin.replace('+00', '').replace(' ', 'T'))
+                                    const esHoy = isToday(inicioDate)
+
                                     return (
                                         <div key={clase.id} className="bg-[#111] border border-white/5 rounded-2xl overflow-hidden hover:border-blue-500/30 transition-all group flex flex-col">
                                             {/* Imagen */}
@@ -282,11 +284,11 @@ export default function CompaniaDetallePage() {
                                                     <p className="text-[10px] uppercase font-bold text-gray-500">Próximo Ensayo:</p>
                                                     <div className="flex items-center gap-3 text-xs text-gray-300 font-bold">
                                                         <Calendar size={14} className="text-blue-400" />
-                                                        <span className="capitalize">{format(new Date(clase.inicio), "EEEE d MMMM", { locale: es })}</span>
+                                                        <span className="capitalize">{format(inicioDate, "EEEE d MMMM", { locale: es })}</span>
                                                     </div>
                                                     <div className="flex items-center gap-3 text-xs text-gray-400">
                                                         <Clock size={14} className="text-white/30" />
-                                                        <span>{format(new Date(clase.inicio), "HH:mm")} a {format(new Date(clase.fin), "HH:mm")} hs</span>
+                                                        <span>{format(inicioDate, "HH:mm")} a {format(finDate, "HH:mm")} hs</span>
                                                     </div>
                                                     <div className="flex items-center gap-3 text-xs text-gray-400">
                                                         <MapPin size={14} className="text-white/30" />

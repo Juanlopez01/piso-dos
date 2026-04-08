@@ -8,9 +8,11 @@ export async function inscribirAlumnoAction(claseId: string, tipoClaseBD: string
     const supabase = await createClient()
 
     try {
-        // 1. Validar sesión
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) throw new Error('Sesión expirada. Por favor, reingresá.')
+        // 🚀 BLINDAJE: getSession en lugar de getUser
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('Sesión expirada. Por favor, reingresá.')
+
+        const user = session.user
 
         // 2. Ejecutar la inscripción vía RPC (La base de datos maneja la lógica FIFO y los créditos)
         const { data: res, error: rpcError } = await supabase.rpc('inscribir_alumno_fifo', {
@@ -38,7 +40,7 @@ export async function inscribirAlumnoAction(claseId: string, tipoClaseBD: string
         // 4. Refrescar la caché de Next.js
         revalidatePath('/explorar')
 
-        return { success: true, message: res.message }
+        return { success: true, message: res?.message || 'Inscripción exitosa' }
 
     } catch (error: any) {
         return { success: false, error: error.message }

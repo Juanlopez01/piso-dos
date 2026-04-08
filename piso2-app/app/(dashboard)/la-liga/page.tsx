@@ -33,8 +33,11 @@ const CRITERIOS_EVALUACION = [
 // 🚀 EL FETCHER MAESTRO (SWR)
 const fetcherLiga = async () => {
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) throw new Error("No user")
+    // ✅ Rápido y seguro leyendo la cookie local
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) throw new Error("No user")
+
+    const user = session.user;
 
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
     if (!profile) throw new Error("No profile")

@@ -18,7 +18,10 @@ export default function CajaApertura() {
 
     const checkPermisosYTurno = async () => {
         try {
-            const { data: { user } } = await supabase.auth.getUser()
+            // 🚀 BLINDAJE: getSession en vez de getUser
+            const { data: { session } } = await supabase.auth.getSession()
+            const user = session?.user
+
             if (!user) return
 
             // 1. CHEQUEAR ROL
@@ -28,8 +31,7 @@ export default function CajaApertura() {
                 .eq('id', user.id)
                 .single()
 
-            // CORRECCIÓN: Si NO es recepcion, no molestamos. 
-            // El Admin entra libre, los Profes y Alumnos también.
+            // Si NO es recepcion, no molestamos. 
             if (profile?.rol !== 'recepcion') {
                 setChecking(false)
                 return
@@ -59,23 +61,31 @@ export default function CajaApertura() {
         if (!selectedSede) return toast.error('Seleccioná una sede')
         setLoading(true)
 
-        const { data: { user } } = await supabase.auth.getUser()
+        try {
+            // 🚀 BLINDAJE: getSession de nuevo por seguridad
+            const { data: { session } } = await supabase.auth.getSession()
+            const user = session?.user
 
-        const { error } = await supabase.from('caja_turnos').insert({
-            usuario_id: user?.id,
-            sede_id: selectedSede,
-            estado: 'abierta',
-            saldo_inicial: 0
-        })
+            if (!user) throw new Error("Sesión inválida")
 
-        if (error) {
-            toast.error('Error al abrir caja')
-        } else {
+            const { error } = await supabase.from('caja_turnos').insert({
+                usuario_id: user.id,
+                sede_id: selectedSede,
+                estado: 'abierta',
+                saldo_inicial: 0
+            })
+
+            if (error) throw error
+
             toast.success('¡Turno iniciado correctamente!')
             setIsOpen(false)
             window.location.reload()
+
+        } catch (err: any) {
+            toast.error(err.message || 'Error al abrir caja')
+        } finally {
+            setLoading(false)
         }
-        setLoading(false)
     }
 
     if (checking || !isOpen) return null

@@ -29,7 +29,10 @@ function MobileNavContent() {
     useEffect(() => {
         if (!isLoading && userRole && userRole !== 'visitante') {
             const fetchNotifs = async () => {
-                const { data: { user } } = await supabase.auth.getUser()
+                // 🚀 BLINDAJE: getSession() en lugar de getUser()
+                const { data: { session } } = await supabase.auth.getSession()
+                const user = session?.user
+
                 if (user) {
                     const { count } = await supabase.from('notificaciones').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id).eq('leido', false)
                     setUnreadNotifs(count || 0)

@@ -33,7 +33,7 @@ type CajaData = {
 // 🚀 FETCHER PRINCIPAL
 const fetcherCaja = async ([key, role]: [string, string]): Promise<CajaData> => {
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getSession()
 
     if (role === 'admin') {
         const { data: activas } = await supabase.from('caja_turnos')

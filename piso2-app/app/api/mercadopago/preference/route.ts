@@ -1,8 +1,8 @@
+// app/api/mercadopago/preference/route.ts
 import { MercadoPagoConfig, Preference } from 'mercadopago'
 import { NextResponse } from 'next/server'
-import { createClient } from '@/utils/supabase/server-helper' // 🚀 El cliente que lee Cookies automáticamente
+import { createClient } from '@/utils/supabase/server-helper'
 
-// 1. Inicializamos el cliente de Mercado Pago
 const client = new MercadoPagoConfig({
     accessToken: process.env.MP_ACCESS_TOKEN || ''
 })
@@ -10,20 +10,19 @@ const client = new MercadoPagoConfig({
 export async function POST(request: Request) {
     try {
         const body = await request.json()
-
-        // Extraemos los datos del fetch del frontend
         const { userId, productoId, cuponId, tipo_pago, mes, anio } = body
 
         if (!userId) {
             return NextResponse.json({ error: "Falta el ID del alumno" }, { status: 400 })
         }
 
-        // 🚀 Inicializamos Supabase de forma segura leyendo la sesión actual
         const supabase = await createClient()
 
-        // (Opcional pero recomendado) Verificamos que quien pide pagar sea el mismo que está logueado
-        const { data: { user }, error: authError } = await supabase.auth.getUser()
-        if (authError || !user || user.id !== userId) {
+        // 🚀 BLINDAJE: getSession en lugar de getUser
+        const { data: { session } } = await supabase.auth.getSession()
+        const user = session?.user
+
+        if (!user || user.id !== userId) {
             console.error("❌ Intento de pago sin sesión válida o cruzada")
             return NextResponse.json({ error: "Sesión inválida" }, { status: 401 })
         }
@@ -43,7 +42,6 @@ export async function POST(request: Request) {
             metadataCustom.mes = mes
             metadataCustom.anio = anio
         } else {
-            // Buscamos el pack específico en la tabla de Supabase
             const { data: pack, error } = await supabase
                 .from('productos')
                 .select('nombre, precio, creditos, tipo_clase')
@@ -55,7 +53,6 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: "El producto no existe o fue eliminado" }, { status: 400 })
             }
 
-            // Asignamos los datos reales sacados de la base de datos
             tituloFinal = pack.nombre
             precioFinal = pack.precio
 
@@ -95,7 +92,7 @@ export async function POST(request: Request) {
                     pending: `${baseUrl}${rutaDestino}?pago=pendiente`
                 },
                 auto_return: 'approved',
-                // notification_url: `${baseUrl}/api/mercadopago/webhook` // Descomentalo cuando subas a producción
+                // notification_url: `${baseUrl}/api/mercadopago/webhook` // 👈 Descomentar para producción
             }
         })
 

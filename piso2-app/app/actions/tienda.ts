@@ -9,8 +9,9 @@ import { revalidatePath } from 'next/cache'
 export async function guardarProductoAction(payload: any, id?: string) {
     const supabase = await createClient()
     try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) throw new Error('No autorizado')
+        // 🚀 BLINDAJE: getSession en lugar de getUser
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
 
         if (id) {
             const { error } = await supabase.from('productos').update(payload).eq('id', id)
@@ -30,13 +31,13 @@ export async function guardarProductoAction(payload: any, id?: string) {
 export async function toggleProductoAction(id: string, currentStatus: boolean) {
     const supabase = await createClient()
     try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) throw new Error('No autorizado')
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
 
         const { error } = await supabase.from('productos').update({ activo: !currentStatus }).eq('id', id)
         if (error) throw new Error(error.message)
 
-        revalidatePath('/productos') // 👈 Cambiá esto si tu ruta es diferente
+        revalidatePath('/productos')
         return { success: true }
     } catch (error: any) {
         return { success: false, error: error.message }
@@ -48,8 +49,8 @@ export async function toggleProductoAction(id: string, currentStatus: boolean) {
 export async function guardarCuponAction(codigo: string, porcentaje: number) {
     const supabase = await createClient()
     try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) throw new Error('No autorizado')
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
 
         const { error } = await supabase.from('cupones').insert({
             codigo,
@@ -62,7 +63,7 @@ export async function guardarCuponAction(codigo: string, porcentaje: number) {
             throw new Error(error.message)
         }
 
-        revalidatePath('/productos') // 👈 Cambiá esto si tu ruta es diferente
+        revalidatePath('/productos')
         return { success: true }
     } catch (error: any) {
         return { success: false, error: error.message }
@@ -72,13 +73,13 @@ export async function guardarCuponAction(codigo: string, porcentaje: number) {
 export async function toggleCuponAction(id: string, currentStatus: boolean) {
     const supabase = await createClient()
     try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) throw new Error('No autorizado')
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
 
         const { error } = await supabase.from('cupones').update({ activo: !currentStatus }).eq('id', id)
         if (error) throw new Error(error.message)
 
-        revalidatePath('/productos') // 👈 Cambiá esto si tu ruta es diferente
+        revalidatePath('/productos')
         return { success: true }
     } catch (error: any) {
         return { success: false, error: error.message }
@@ -88,13 +89,13 @@ export async function toggleCuponAction(id: string, currentStatus: boolean) {
 export async function eliminarCuponAction(id: string) {
     const supabase = await createClient()
     try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) throw new Error('No autorizado')
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
 
         const { error } = await supabase.from('cupones').delete().eq('id', id)
         if (error) throw new Error(error.message)
 
-        revalidatePath('/productos') // 👈 Cambiá esto si tu ruta es diferente
+        revalidatePath('/productos')
         return { success: true }
     } catch (error: any) {
         return { success: false, error: error.message }

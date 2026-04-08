@@ -14,6 +14,14 @@ import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { Toaster, toast } from 'sonner'
 
+// 🚀 IMPORTAMOS LAS ACTIONS
+import {
+    toggleAsistenciaAction,
+    eliminarInscripcionAction,
+    procesarInscripcionAction,
+    enviarNotificacionClaseAction
+} from '@/app/actions/inscripciones'
+
 // --- TIPOS ---
 type Inscripcion = {
     id: string
@@ -49,33 +57,40 @@ type ProductoPack = {
     tipo_clase: string
 }
 
-// 🚀 FETCHER UNIFICADO
+// 🚀 FETCHER BLINDADO CONTRA CONFLICTOS DE RELACIÓN
 const fetcher = async ([key, id]: [string, string]) => {
     const supabase = createClient()
 
-    // 1. Obtener rol del usuario
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
+
     let role = 'profesor'
     if (user) {
         const { data: profile } = await supabase.from('profiles').select('rol').eq('id', user.id).single()
         if (profile) role = profile.rol
     }
 
-    // 2. Obtener detalle de la clase
-    const { data: dataClase } = await supabase
+    // ✅ ACÁ ESTÁ LA MAGIA: Le aclaramos a Supabase qué llave foránea usar (!profesor_id y !sala_id)
+    const { data: dataClase, error: errorClase } = await supabase
         .from('clases')
-        .select(`*, profesor:profiles(id, nombre_completo, email), sala:salas(nombre, sede:sedes(nombre))`)
+        .select(`
+            *, 
+            profesor:profiles!profesor_id(id, nombre_completo, email), 
+            sala:salas!sala_id(nombre, sede:sedes(nombre))
+        `)
         .eq('id', id)
         .single()
 
-    // 3. Obtener inscripciones
+    if (errorClase) {
+        console.error("🚨 Error al cargar la clase:", errorClase.message)
+    }
+
     const { data: dataInsc } = await supabase
         .from('inscripciones')
-        .select(`*, user:profiles(nombre, apellido, nombre_completo, email)`)
+        .select(`*, user:profiles!user_id(nombre, apellido, nombre_completo, email)`)
         .eq('clase_id', id)
         .order('created_at', { ascending: true })
 
-    // 4. Obtener packs si la clase existe
     let packs: ProductoPack[] = []
     if (dataClase) {
         const tipoPack = dataClase.tipo_clase === 'Especial' ? 'seminario' : 'regular'
@@ -101,7 +116,6 @@ export default function ClaseDetallePage() {
     const router = useRouter()
     const [supabase] = useState(() => createClient())
 
-    // 🚀 SWR: Motor de datos
     const { data, error, isLoading, mutate } = useSWR(
         params.id ? ['clase-detalle', params.id as string] : null,
         fetcher,
@@ -135,7 +149,7 @@ export default function ClaseDetallePage() {
         Especial: { efectivo: 16000, transferencia: 18000 }
     }
 
-    // --- CÁLCULOS DERIVADOS (Memoizados) ---
+    // --- CÁLCULOS DERIVADOS ---
     const financialData = useMemo(() => {
         if (!clase) return { totalRecaudado: 0, pagoDocente: 0 }
         const total = inscripciones.reduce((acc, curr) => acc + (Number(curr.valor_credito) || 0), 0)
@@ -145,45 +159,38 @@ export default function ClaseDetallePage() {
         return { totalRecaudado: total, pagoDocente: pago }
     }, [inscripciones, clase])
 
-    // --- FUNCIONES ---
+    // 🚀 UTILIDADES DE FECHA PARA IGNORAR LA ZONA HORARIA
+    const inicioNormalizado = clase?.inicio?.replace(' ', 'T');
+    const fechaText = inicioNormalizado ? format(new Date(inicioNormalizado.split('T')[0] + 'T12:00:00'), "EEE d MMM", { locale: es }) : '';
+    const horaText = inicioNormalizado ? inicioNormalizado.split('T')[1].substring(0, 5) : '';
 
+    // --- FUNCIONES ---
     const toggleAsistencia = async (insc: Inscripcion) => {
         const newVal = !insc.presente
-
-        // 🚀 MUTACIÓN OPTIMISTA: Actualizamos la UI antes de que responda Supabase
-        const optimisticInscripciones = inscripciones.map(i =>
-            i.id === insc.id ? { ...i, presente: newVal } : i
-        )
-
+        const optimisticInscripciones = inscripciones.map(i => i.id === insc.id ? { ...i, presente: newVal } : i)
         mutate({ ...data!, inscripciones: optimisticInscripciones }, false)
 
-        try {
-            const { error } = await supabase.from('inscripciones').update({ presente: newVal }).eq('id', insc.id)
-            if (error) throw error
-            if (newVal) toast.success('Asistencia marcada')
-        } catch (err) {
-            toast.error('Error al actualizar asistencia')
-            mutate() // Revertimos a la data del servidor
+        const res = await toggleAsistenciaAction(insc.id, newVal)
+        if (!res.success) {
+            toast.error(res.error)
+            mutate()
+        } else if (newVal) {
+            toast.success('Asistencia marcada')
         }
     }
 
     const handleDeleteInscripcion = async (insc: Inscripcion) => {
         if (!confirm('¿Dar de baja a este alumno?')) return
 
-        try {
-            const { data: res, error } = await supabase.rpc('reembolsar_inscripcion', {
-                p_inscripcion_id: insc.id
-            })
-            if (error || !res.success) throw new Error(res?.message || 'Error al procesar baja')
-
+        const res = await eliminarInscripcionAction(insc.id)
+        if (res.success) {
             toast.success('Alumno eliminado y crédito devuelto si correspondía')
             mutate()
-        } catch (err: any) {
-            toast.error(err.message)
+        } else {
+            toast.error(res.error)
         }
     }
 
-    // Buscador de alumnos (Debounced manual)
     useEffect(() => {
         const buscar = async () => {
             if (busquedaAlumno.length < 3) return setResultadosBusqueda([])
@@ -198,7 +205,7 @@ export default function ClaseDetallePage() {
         }
         const t = setTimeout(buscar, 300)
         return () => clearTimeout(t)
-    }, [busquedaAlumno])
+    }, [busquedaAlumno, supabase])
 
     const handleAddGuest = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -206,11 +213,7 @@ export default function ClaseDetallePage() {
         setProcessing(true)
 
         try {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) throw new Error("Sesión expirada")
-
             let monto = 0
-            let turnoId = null
             let alumnoIdFinal = alumnoSeleccionado?.id || null
             let nombreInvitadoStr = null
 
@@ -225,18 +228,12 @@ export default function ClaseDetallePage() {
                     monto = packsDisponibles.find(p => p.id === guestForm.packSeleccionadoId)?.precio || 0
                 }
 
-                if (monto > 0) {
-                    const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user.id).eq('estado', 'abierta').maybeSingle()
-                    if (turno) turnoId = turno.id
-                    else if (guestForm.pago === 'efectivo') throw new Error('Debes abrir caja para cobrar en efectivo')
-                }
-
                 if (!alumnoIdFinal) {
                     nombreInvitadoStr = `${guestForm.nombre} ${guestForm.apellido}`.trim()
                 }
             }
 
-            const { data: res, error: rpcError } = await supabase.rpc('procesar_inscripcion_recepcion', {
+            const rpcPayload = {
                 p_clase_id: clase.id,
                 p_user_id: alumnoIdFinal,
                 p_nombre_invitado: nombreInvitadoStr,
@@ -244,12 +241,13 @@ export default function ClaseDetallePage() {
                 p_tipo_clase: clase.tipo_clase === 'Especial' ? 'seminario' : 'regular',
                 p_monto_caja: monto,
                 p_metodo_pago: guestForm.pago,
-                p_turno_caja_id: turnoId,
                 p_producto_id: guestForm.packSeleccionadoId || null,
                 p_email_comprador: guestForm.email || null
-            })
+            }
 
-            if (rpcError || !res.success) throw new Error(res?.message || 'Error en la transacción')
+            const response = await procesarInscripcionAction(rpcPayload)
+
+            if (!response.success) throw new Error(response.error)
 
             toast.success('Inscripción exitosa')
             mutate()
@@ -266,26 +264,29 @@ export default function ClaseDetallePage() {
     const handleSendNotif = async (e: React.FormEvent) => {
         e.preventDefault()
         setSendingNotif(true)
-        try {
-            const uids = Array.from(new Set(inscripciones.map(i => i.user_id).filter(Boolean)))
-            if (uids.length === 0) throw new Error("No hay alumnos con cuenta para notificar")
 
-            const notifs = uids.map(uid => ({
-                usuario_id: uid,
-                titulo: `Aviso: ${clase?.nombre}`,
-                mensaje: notifMessage,
-                link: `/mis-clases`
-            }))
+        const uids = Array.from(new Set(inscripciones.map(i => i.user_id).filter(Boolean)))
+        if (uids.length === 0) {
+            setSendingNotif(false)
+            return toast.error("No hay alumnos con cuenta para notificar")
+        }
 
-            await supabase.from('notificaciones').insert(notifs)
+        const notifs = uids.map(uid => ({
+            usuario_id: uid,
+            titulo: `Aviso: ${clase?.nombre}`,
+            mensaje: notifMessage,
+            link: `/mis-clases`
+        }))
+
+        const res = await enviarNotificacionClaseAction(notifs)
+        if (res.success) {
             toast.success("Aviso enviado")
             setIsNotifModalOpen(false)
             setNotifMessage('')
-        } catch (err: any) {
-            toast.error(err.message)
-        } finally {
-            setSendingNotif(false)
+        } else {
+            toast.error(res.error)
         }
+        setSendingNotif(false)
     }
 
     if (isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-[#D4E655]"><Loader2 className="animate-spin" /></div>
@@ -307,14 +308,14 @@ export default function ClaseDetallePage() {
                             <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${clase?.estado === 'cancelada' ? 'bg-red-500' : 'bg-[#D4E655] text-black'}`}>
                                 {clase?.estado === 'cancelada' ? 'Cancelada' : 'Activa'}
                             </span>
-                            <span className="text-gray-500 text-[10px] font-bold uppercase">{clase?.tipo_clase} • {clase?.sala?.nombre}</span>
+                            <span className="text-gray-500 text-[10px] font-bold uppercase">{clase?.tipo_clase || 'Clase'} • {clase?.sala?.nombre || 'Sala'}</span>
                             {clase?.es_audicion && <span className="bg-pink-500/20 text-pink-400 border border-pink-500/30 px-2 py-0.5 rounded text-[9px] font-black uppercase flex items-center gap-1"><Sparkles size={10} /> Audición</span>}
                         </div>
-                        <h1 className="text-2xl md:text-5xl font-black uppercase tracking-tighter text-white leading-none">{clase?.nombre}</h1>
+                        <h1 className="text-2xl md:text-5xl font-black uppercase tracking-tighter text-white leading-none">{clase?.nombre || 'Cargando...'}</h1>
                         <div className="flex gap-3 text-xs text-gray-400 font-medium mt-2">
-                            <span className="flex items-center gap-1"><Calendar size={12} className="text-[#D4E655]" /> {clase && format(new Date(clase.inicio), "EEE d", { locale: es })}</span>
-                            <span className="flex items-center gap-1"><Clock size={12} className="text-[#D4E655]" /> {clase && format(new Date(clase.inicio), "HH:mm")}</span>
-                            <span className="flex items-center gap-1"><User size={12} className="text-[#D4E655]" /> {clase?.profesor?.nombre_completo}</span>
+                            <span className="flex items-center gap-1"><Calendar size={12} className="text-[#D4E655]" /> {fechaText}</span>
+                            <span className="flex items-center gap-1"><Clock size={12} className="text-[#D4E655]" /> {horaText}</span>
+                            <span className="flex items-center gap-1"><User size={12} className="text-[#D4E655]" /> {clase?.profesor?.nombre_completo || 'Staff'}</span>
                         </div>
                     </div>
                     <div className="flex gap-2 w-full md:w-auto">
@@ -384,7 +385,7 @@ export default function ClaseDetallePage() {
                                     ) : (
                                         <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 p-4 rounded-xl flex items-center justify-between">
                                             <div><p className="text-xs font-bold text-white uppercase">{alumnoSeleccionado.nombre_completo}</p><p className="text-[9px] text-gray-500">Saldo: {alumnoSeleccionado.creditos_regulares} Reg / {alumnoSeleccionado.creditos_seminarios} Sem</p></div>
-                                            <button onClick={() => setAlumnoSeleccionado(null)}><X size={16} /></button>
+                                            <button type="button" onClick={() => setAlumnoSeleccionado(null)}><X size={16} /></button>
                                         </div>
                                     )}
                                     <div className="grid grid-cols-4 gap-2">
@@ -408,6 +409,21 @@ export default function ClaseDetallePage() {
                             )}
                             <button disabled={processing} type="submit" className={`w-full py-5 rounded-2xl font-black uppercase text-sm tracking-widest transition-all ${clase?.es_audicion ? 'bg-pink-500' : 'bg-[#D4E655] text-black'}`}>
                                 {processing ? <Loader2 className="animate-spin mx-auto" /> : 'Confirmar Registro'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL NOTIFICACIÓN */}
+            {isNotifModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4" onClick={() => setIsNotifModalOpen(false)}>
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-lg rounded-3xl p-6" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between mb-6"><h3 className="text-xl font-black uppercase text-white flex items-center gap-2"><BellRing size={20} className="text-[#D4E655]" /> Enviar Aviso</h3><button onClick={() => setIsNotifModalOpen(false)}><X size={24} /></button></div>
+                        <form onSubmit={handleSendNotif} className="space-y-4">
+                            <textarea required value={notifMessage} onChange={e => setNotifMessage(e.target.value)} placeholder="Mensaje para todos los inscriptos..." className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-[#D4E655] min-h-[120px] resize-none" />
+                            <button disabled={sendingNotif} type="submit" className="w-full py-4 bg-[#D4E655] text-black rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2">
+                                {sendingNotif ? <Loader2 className="animate-spin" /> : <><Send size={16} /> Enviar a {inscripciones.length} Alumnos</>}
                             </button>
                         </form>
                     </div>

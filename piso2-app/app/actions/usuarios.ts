@@ -7,6 +7,10 @@ import { revalidatePath } from 'next/cache'
 export async function cambiarRolAction(usuarioId: string, nuevoRol: string) {
     const supabase = await createClient()
     try {
+        // 🔒 SEGURIDAD: Chequeamos sesión
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
         const { error } = await supabase.from('profiles').update({ rol: nuevoRol as any }).eq('id', usuarioId)
         if (error) throw new Error(error.message)
         revalidatePath('/usuarios')
@@ -19,6 +23,10 @@ export async function cambiarRolAction(usuarioId: string, nuevoRol: string) {
 export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | null) {
     const supabase = await createClient()
     try {
+        // 🔒 SEGURIDAD
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
         const { error } = await supabase.from('profiles').update({ nivel_liga: nuevoNivel }).eq('id', usuarioId)
         if (error) throw new Error(error.message)
         revalidatePath('/usuarios')
@@ -31,6 +39,10 @@ export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | 
 export async function guardarPerfilAction(usuarioId: string, obs: string, intereses: string[]) {
     const supabase = await createClient()
     try {
+        // 🔒 SEGURIDAD
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
         const { error } = await supabase.from('profiles').update({
             staff_observations: obs,
             intereses_ritmos: intereses
@@ -46,8 +58,11 @@ export async function guardarPerfilAction(usuarioId: string, obs: string, intere
 export async function asignarPackAction(usuarioId: string, tipoClase: string, creditos: number, monto: number, metodoPago: string) {
     const supabase = await createClient()
     try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) throw new Error('No autorizado')
+        // 🚀 BLINDAJE: getSession() en lugar de getUser()
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        const user = session.user
 
         let turnoActivoId = null
         if (monto > 0) {
@@ -78,8 +93,11 @@ export async function asignarPackAction(usuarioId: string, tipoClase: string, cr
 export async function cobrarLigaAction(usuarioId: string, monto: number, metodoPago: string) {
     const supabase = await createClient()
     try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) throw new Error('No autorizado')
+        // 🚀 BLINDAJE: getSession() en lugar de getUser()
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        const user = session.user
 
         const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user.id).eq('estado', 'abierta').maybeSingle()
         if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')

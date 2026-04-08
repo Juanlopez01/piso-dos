@@ -41,7 +41,7 @@ export default function NotificacionesPage() {
 
     const fetchNotificaciones = async () => {
         setLoading(true)
-        const { data: { user } } = await supabase.auth.getUser()
+        const { data: { user } } = await supabase.auth.getSession()
         if (!user) return
         setUserId(user.id)
 

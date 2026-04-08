@@ -16,6 +16,9 @@ import { v4 as uuidv4 } from 'uuid'
 import MultiDatePicker from '@/components/MultiDatePicker'
 import { useCash } from '@/context/CashContext'
 
+// 🚀 IMPORTAMOS LAS ACTIONS BLINDADAS
+import { crearAlquileresAction, cobrarAlquilerAction, eliminarReservaAction, actualizarTarifaAction } from '@/app/actions/alquileres'
+
 // --- TIPOS ---
 type ReservaGroup = {
     group_id: string
@@ -40,11 +43,13 @@ type AlquileresData = {
 const fetcher = async (): Promise<AlquileresData> => {
     const supabase = createClient()
 
-    // 1. Obtener salas
+    // Validamos sesión silenciosamente
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) throw new Error("No autorizado")
+
     const { data: s } = await supabase.from('salas').select('*').order('nombre')
     const salas = s || []
 
-    // 2. Obtener alquileres
     const { data: rawData } = await supabase
         .from('alquileres')
         .select(`*, sala:salas(nombre)`)
@@ -99,14 +104,10 @@ export default function AlquileresPage() {
     const [supabase] = useState(() => createClient())
     const { isBoxOpen, currentTurnoId } = useCash()
 
-    // 🚀 SWR INTEGRACIÓN
     const { data, error, isLoading, mutate } = useSWR<AlquileresData>(
         'alquileres',
         fetcher,
-        {
-            revalidateOnFocus: true,
-            dedupingInterval: 3000
-        }
+        { revalidateOnFocus: true, dedupingInterval: 3000 }
     )
 
     const grupos = data?.grupos || []
@@ -205,17 +206,15 @@ export default function AlquileresPage() {
 
     const handleTarifaChange = (salaId: string, field: string, value: string) => {
         const numValue = value === '' ? 0 : Number(value)
-
-        // Optimistic UI Update para Tarifas
         const optimisticSalas = salas.map(s => s.id === salaId ? { ...s, [field]: numValue } : s)
         mutate({ grupos, salas: optimisticSalas }, false)
     }
 
     const handleTarifaBlur = async (salaId: string, field: string, value: number) => {
-        const { error } = await supabase.from('salas').update({ [field]: value }).eq('id', salaId)
-        if (error) {
-            toast.error('Error al guardar precio')
-            mutate() // Revert on error
+        const res = await actualizarTarifaAction(salaId, field, value)
+        if (!res.success) {
+            toast.error(res.error || 'Error al guardar precio')
+            mutate()
         } else {
             toast.success('Precio actualizado')
         }
@@ -254,7 +253,6 @@ export default function AlquileresPage() {
         const sala = salas.find(s => s.id === form.sala_id)
 
         try {
-            // 🚀 OPTIMIZACIÓN: Promise.all para check de conflictos
             const conflictosPromises = form.fechas.map(async (date) => {
                 const conflicto = await checkConflictos(form.sala_id, date, form.hora_inicio, form.hora_fin)
                 if (conflicto) return `Conflicto el ${format(date, 'dd/MM')}: ya existe un/a ${conflicto}`
@@ -306,13 +304,13 @@ export default function AlquileresPage() {
                 estado: 'pendiente'
             }))
 
-            const { error } = await supabase.from('alquileres').insert(inserts)
-            if (error) throw new Error('Error al guardar en la base de datos.')
+            const res = await crearAlquileresAction(inserts)
+            if (!res.success) throw new Error(res.error || 'Error al guardar en la base de datos.')
 
             toast.success('Reserva creada con éxito')
             setIsModalOpen(false)
             setForm({ ...form, cliente_nombre: '', fechas: [], descuento: 0 })
-            mutate() // 🚀 SWR actualiza data
+            mutate()
         } catch (err: any) {
             toast.error(err.message, { duration: 5000 })
         } finally {
@@ -355,6 +353,7 @@ export default function AlquileresPage() {
             let montoACobrar = 0
             let labelCobro = ''
 
+            // Preparamos los datos para la Server Action
             const updates = selectedGroup.items.map(item => {
                 let nuevoMontoPagado = Number(item.monto_pagado || 0)
                 let nuevoEstadoPago = item.estado_pago || 'pendiente'
@@ -383,32 +382,32 @@ export default function AlquileresPage() {
 
                 montoACobrar += addAmount
 
-                return supabase.from('alquileres').update({
+                return {
+                    id: item.id,
                     monto_pagado: nuevoMontoPagado,
                     estado_pago: nuevoEstadoPago,
                     estado: nuevoEstado,
                     metodo_pago: paymentMethod
-                }).eq('id', item.id)
+                }
             })
 
-            await Promise.all(updates)
-
-            const { error: errorMov } = await supabase.from('caja_movimientos').insert({
+            const movimientoCaja = {
                 turno_id: currentTurnoId,
                 tipo: 'ingreso',
                 concepto: `Alquiler ${selectedGroup.sala_nombre}: ${selectedGroup.cliente_nombre} - ${labelCobro}`,
                 monto: montoACobrar,
                 metodo_pago: paymentMethod,
                 origen_referencia: 'alquileres'
-            })
+            }
 
-            if (errorMov) throw new Error('Error al registrar en caja')
+            const res = await cobrarAlquilerAction(updates, movimientoCaja)
+            if (!res.success) throw new Error(res.error || 'Error al procesar el pago')
 
             toast.success(`¡${labelCobro} cobrado con éxito! ($${montoACobrar.toLocaleString()})`)
             setIsPaymentModalOpen(false)
-            mutate() // 🚀 SWR refetch data
-        } catch (error) {
-            toast.error('Hubo un error al procesar el pago.')
+            mutate()
+        } catch (error: any) {
+            toast.error(error.message || 'Hubo un error al procesar el pago.')
         } finally {
             setProcessingPayment(false)
         }
@@ -417,16 +416,15 @@ export default function AlquileresPage() {
     const handleDeleteGroup = async (group: ReservaGroup) => {
         if (!confirm('¿Eliminar reserva completa?')) return
 
-        // Optimistic Delete
         const filteredGroups = grupos.filter(g => g.group_id !== group.group_id)
         mutate({ salas, grupos: filteredGroups }, false)
 
-        try {
-            const { error } = await supabase.from('alquileres').delete().in('id', group.items.map(i => i.id))
-            if (error) throw error
+        const res = await eliminarReservaAction(group.items.map(i => i.id))
+
+        if (res.success) {
             toast.success('Reserva eliminada')
-        } catch (err) {
-            toast.error("Error al eliminar")
+        } else {
+            toast.error(res.error || "Error al eliminar")
             mutate()
         }
     }
@@ -538,7 +536,6 @@ export default function AlquileresPage() {
                 </div>
             )}
 
-
             {/* MODAL COBRO INTELIGENTE */}
             {isPaymentModalOpen && selectedGroup && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
@@ -561,7 +558,6 @@ export default function AlquileresPage() {
                         <div className="space-y-3 mb-6">
                             <label className="text-[10px] font-bold text-gray-500 uppercase">1. ¿Qué vas a cobrar?</label>
                             <div className="grid grid-cols-1 gap-2">
-                                {/* Mostrar opción de Seña solo si no pagó nada */}
                                 {selectedGroup.estado_pago === 'pendiente' && (
                                     <button
                                         onClick={() => setPaymentType('seña')}
@@ -571,7 +567,6 @@ export default function AlquileresPage() {
                                         <span className="font-black text-lg">${(selectedGroup.total_grupo / 2).toLocaleString()}</span>
                                     </button>
                                 )}
-                                {/* Mostrar opción de Total solo si no pagó nada */}
                                 {selectedGroup.estado_pago === 'pendiente' && (
                                     <button
                                         onClick={() => setPaymentType('total')}
@@ -581,7 +576,6 @@ export default function AlquileresPage() {
                                         <span className="font-black text-lg">${selectedGroup.total_grupo.toLocaleString()}</span>
                                     </button>
                                 )}
-                                {/* Mostrar opción de Saldo solo si ya pagó la seña */}
                                 {selectedGroup.estado_pago === 'seña_pagada' && (
                                     <button
                                         onClick={() => setPaymentType('resto')}

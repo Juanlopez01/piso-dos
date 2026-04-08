@@ -47,13 +47,15 @@ export default function MisPagosPage() {
 
     const fetchLiquidaciones = async () => {
         setLoading(true)
-        const { data: { user } } = await supabase.auth.getUser()
+        // 🚀 BLINDAJE: getSession en vez de getUser
+        const { data: { session } } = await supabase.auth.getSession()
+        const user = session?.user
 
         if (!user) return
 
         // 1. Nombre del profe
         const { data: profile } = await supabase.from('profiles').select('nombre').eq('id', user.id).single()
-        if (profile) setUserName(profile.nombre)
+        if (profile) setUserName(profile.nombre || '')
 
         // 2. Traer todas las clases de este profe (que no estén canceladas) junto con sus inscripciones
         const { data: clasesData } = await supabase
@@ -79,7 +81,9 @@ export default function MisPagosPage() {
             ]
 
             clasesData.forEach((clase: any) => {
-                const fechaClase = new Date(clase.inicio)
+                // 🚀 ZONA HORARIA BLINDADA: Evitamos saltos de mes a la noche.
+                const fechaLimpia = clase.inicio.replace('+00', '').replace(' ', 'T')
+                const fechaClase = new Date(fechaLimpia.split('T')[0] + 'T12:00:00') // Forzamos el mediodía
                 const mesKey = format(fechaClase, 'yyyy-MM')
 
                 // Si el mes de la clase no está en nuestra ventana permitida, lo ignoramos
@@ -100,11 +104,8 @@ export default function MisPagosPage() {
 
                 // Calcular totales de esta clase específica
                 const cant_alumnos = clase.inscripciones?.filter((i: any) => i.presente).length || 0
-
-                // Sumamos el valor prorrateado de todos los alumnos presentes y ausentes (si corresponde)
                 const total_clase = clase.inscripciones?.reduce((acc: number, insc: any) => acc + (Number(insc.valor_credito) || 0), 0) || 0
 
-                // Calculamos cuánto le toca al profe
                 let pago_profe = 0
                 if (clase.tipo_acuerdo === 'fijo') {
                     pago_profe = Number(clase.valor_acuerdo) || 0
@@ -115,6 +116,7 @@ export default function MisPagosPage() {
 
                 const claseProcesada: ClaseLiquidacion = {
                     ...clase,
+                    inicio: fechaLimpia, // Guardamos la fecha limpia para mostrarla después
                     total_clase,
                     pago_profe,
                     cant_alumnos
@@ -129,7 +131,6 @@ export default function MisPagosPage() {
             const listaMeses = Object.values(agrupados).sort((a, b) => b.mesKey.localeCompare(a.mesKey))
             setMeses(listaMeses)
 
-            // Expandir por defecto el primer mes de la lista
             if (listaMeses.length > 0) {
                 setExpandedGroup(listaMeses[0].mesKey)
             }
@@ -219,55 +220,61 @@ export default function MisPagosPage() {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-white/5 text-sm">
-                                                    {mes.clases.map((clase) => (
-                                                        <tr key={clase.id} className="hover:bg-white/5 transition-colors group">
-                                                            <td className="py-4 pl-2 text-gray-400 font-medium">
-                                                                {format(new Date(clase.inicio), "dd/MM")} <span className="text-xs ml-1 opacity-50">{format(new Date(clase.inicio), "HH:mm")}</span>
-                                                            </td>
-                                                            <td className="py-4 font-bold text-white uppercase">{clase.nombre}</td>
-                                                            <td className="py-4 text-center text-xs text-gray-500 uppercase font-bold">
-                                                                {clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `Fijo: $${clase.valor_acuerdo}`}
-                                                            </td>
-                                                            <td className="py-4 text-center">
-                                                                <span className="bg-white/10 px-2 py-1 rounded text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto">
-                                                                    <Users size={12} /> {clase.cant_alumnos}
-                                                                </span>
-                                                            </td>
-                                                            <td className="py-4 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
-                                                        </tr>
-                                                    ))}
+                                                    {mes.clases.map((clase) => {
+                                                        const dateObj = new Date(clase.inicio);
+                                                        return (
+                                                            <tr key={clase.id} className="hover:bg-white/5 transition-colors group">
+                                                                <td className="py-4 pl-2 text-gray-400 font-medium">
+                                                                    {format(dateObj, "dd/MM")} <span className="text-xs ml-1 opacity-50">{format(dateObj, "HH:mm")}</span>
+                                                                </td>
+                                                                <td className="py-4 font-bold text-white uppercase">{clase.nombre}</td>
+                                                                <td className="py-4 text-center text-xs text-gray-500 uppercase font-bold">
+                                                                    {clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `Fijo: $${clase.valor_acuerdo}`}
+                                                                </td>
+                                                                <td className="py-4 text-center">
+                                                                    <span className="bg-white/10 px-2 py-1 rounded text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto">
+                                                                        <Users size={12} /> {clase.cant_alumnos}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="py-4 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
+                                                            </tr>
+                                                        )
+                                                    })}
                                                 </tbody>
                                             </table>
                                         </div>
 
                                         {/* VERSIÓN MOBILE (Tarjetas Listadas) */}
                                         <div className="md:hidden space-y-3">
-                                            {mes.clases.map((clase) => (
-                                                <div key={clase.id} className="bg-[#111] p-4 rounded-xl border border-white/5">
-                                                    <div className="flex justify-between items-start mb-2">
-                                                        <div>
-                                                            <h4 className="font-bold text-white uppercase leading-tight">{clase.nombre}</h4>
-                                                            <p className="text-[10px] text-gray-400 flex items-center gap-1 mt-1">
-                                                                <Calendar size={10} /> {format(new Date(clase.inicio), "dd/MM - HH:mm")} hs
-                                                            </p>
+                                            {mes.clases.map((clase) => {
+                                                const dateObj = new Date(clase.inicio);
+                                                return (
+                                                    <div key={clase.id} className="bg-[#111] p-4 rounded-xl border border-white/5">
+                                                        <div className="flex justify-between items-start mb-2">
+                                                            <div>
+                                                                <h4 className="font-bold text-white uppercase leading-tight">{clase.nombre}</h4>
+                                                                <p className="text-[10px] text-gray-400 flex items-center gap-1 mt-1">
+                                                                    <Calendar size={10} /> {format(dateObj, "dd/MM - HH:mm")} hs
+                                                                </p>
+                                                            </div>
+                                                            <span className="bg-white/10 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
+                                                                <Users size={10} /> {clase.cant_alumnos}
+                                                            </span>
                                                         </div>
-                                                        <span className="bg-white/10 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
-                                                            <Users size={10} /> {clase.cant_alumnos}
-                                                        </span>
-                                                    </div>
 
-                                                    <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-white/5">
-                                                        <div>
-                                                            <p className="text-[9px] text-gray-500 uppercase font-bold">Acuerdo</p>
-                                                            <p className="text-xs text-gray-300">{clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : 'Monto Fijo'}</p>
-                                                        </div>
-                                                        <div className="text-right">
-                                                            <p className="text-[9px] text-gray-500 uppercase font-bold">Mi Pago</p>
-                                                            <p className="text-sm font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</p>
+                                                        <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-white/5">
+                                                            <div>
+                                                                <p className="text-[9px] text-gray-500 uppercase font-bold">Acuerdo</p>
+                                                                <p className="text-xs text-gray-300">{clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : 'Monto Fijo'}</p>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <p className="text-[9px] text-gray-500 uppercase font-bold">Mi Pago</p>
+                                                                <p className="text-sm font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</p>
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                            ))}
+                                                )
+                                            })}
                                         </div>
 
                                     </div>

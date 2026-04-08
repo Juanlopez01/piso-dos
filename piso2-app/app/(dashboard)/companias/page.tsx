@@ -9,6 +9,9 @@ import {
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
 
+// 🚀 IMPORTAMOS LAS ACTIONS BLINDADAS
+import { crearCompaniaAction, toggleMiembroCompaniaAction } from '@/app/actions/companias'
+
 type Compania = {
     id: string
     nombre: string
@@ -51,7 +54,11 @@ export default function CompaniasPage() {
 
     const fetchData = async () => {
         setLoading(true)
-        const { data: { user } } = await supabase.auth.getUser()
+
+        // 🚀 BLINDAJE: Usamos getSession para no congelar
+        const { data: { session } } = await supabase.auth.getSession()
+        const user = session?.user
+
         if (!user) return
         setUserId(user.id)
 
@@ -70,7 +77,7 @@ export default function CompaniasPage() {
                 const ids = misCompanias.map((mc: { compania_id: string }) => mc.compania_id)
                 queryCompanias = queryCompanias.in('id', ids)
             } else {
-                queryCompanias = queryCompanias.eq('id', '00000000-0000-0000-0000-000000000000')
+                queryCompanias = queryCompanias.eq('id', '00000000-0000-0000-0000-000000000000') // Truco para que venga vacío
             }
         }
 
@@ -103,25 +110,26 @@ export default function CompaniasPage() {
     const handleCrearCompania = async (e: React.FormEvent) => {
         e.preventDefault()
         setProcesando(true)
-        try {
-            const payload = {
-                nombre: form.nombre,
-                descripcion: form.descripcion,
-                coordinador_id: form.coordinador_id || userId
-            }
-            const { error } = await supabase.from('companias').insert([payload])
-            if (error) throw error
 
+        const payload = {
+            nombre: form.nombre,
+            descripcion: form.descripcion,
+            coordinador_id: form.coordinador_id || userId
+        }
+
+        const response = await crearCompaniaAction(payload)
+
+        if (response.success) {
             toast.success('Compañía creada con éxito')
             setIsCreateModalOpen(false)
             setForm({ nombre: '', descripcion: '', coordinador_id: '' })
             setSearchCoord('')
-            fetchData()
-        } catch (error: any) {
-            toast.error(error.message || 'Error al crear la compañía')
-        } finally {
-            setProcesando(false)
+            fetchData() // Recargamos para ver la nueva
+        } else {
+            toast.error(response.error || 'Error al crear la compañía')
         }
+
+        setProcesando(false)
     }
 
     const abrirGestionMiembros = async (compania: Compania) => {
@@ -135,19 +143,25 @@ export default function CompaniasPage() {
         if (!selectedCompania) return
 
         const esMiembro = miembrosActuales.includes(alumnoId)
-        try {
-            if (esMiembro) {
-                await supabase.from('perfiles_companias').delete().match({ perfil_id: alumnoId, compania_id: selectedCompania.id })
-                setMiembrosActuales(prev => prev.filter(id => id !== alumnoId))
-                toast.success('Alumno removido del grupo')
-            } else {
-                await supabase.from('perfiles_companias').insert([{ perfil_id: alumnoId, compania_id: selectedCompania.id }])
-                setMiembrosActuales(prev => [...prev, alumnoId])
-                toast.success('Alumno agregado al grupo')
-            }
+        const accion = esMiembro ? 'remover' : 'agregar'
+
+        // 🚀 MUTACIÓN OPTIMISTA: Cambiamos la UI al instante
+        if (esMiembro) {
+            setMiembrosActuales(prev => prev.filter(id => id !== alumnoId))
+            setCompanias(prev => prev.map(c => c.id === selectedCompania.id ? { ...c, miembros_count: (c.miembros_count || 1) - 1 } : c))
+        } else {
+            setMiembrosActuales(prev => [...prev, alumnoId])
+            setCompanias(prev => prev.map(c => c.id === selectedCompania.id ? { ...c, miembros_count: (c.miembros_count || 0) + 1 } : c))
+        }
+
+        const response = await toggleMiembroCompaniaAction(selectedCompania.id, alumnoId, accion)
+
+        if (response.success) {
+            toast.success(accion === 'agregar' ? 'Alumno agregado al grupo' : 'Alumno removido del grupo')
+        } else {
+            toast.error(response.error || 'Error al modificar miembros')
+            // Si falla, revertimos recargando (opcional, pero seguro)
             fetchData()
-        } catch (error) {
-            toast.error('Error al modificar miembros')
         }
     }
 
@@ -218,7 +232,6 @@ export default function CompaniasPage() {
                                 </div>
                             </div>
 
-                            {/* 👈 ACÁ ESTÁ EL PUENTE A LA NUEVA PÁGINA */}
                             <div className="p-5 bg-[#111] border-t border-white/5 flex flex-col gap-3">
                                 <Link
                                     href={`/companias/${compania.id}`}
