@@ -3,10 +3,6 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { CashProvider } from "@/context/CashContext";
 import SWRProvider from "@/components/SWRProvider";
-
-// 🚀 1. TUS IMPORTACIONES DE NAVEGACIÓN Y EL NUEVO PROVIDER
-import Sidebar from "@/components/Sidebar";
-import MobileNav from "@/components/MobileNav";
 import SessionProvider from "@/components/SessionProvider"; // <--- NUEVO
 
 import type { Metadata, Viewport } from 'next'

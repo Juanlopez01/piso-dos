@@ -52,7 +52,7 @@ export default function LandingPage() {
     return {
       container: `group cursor-pointer flex flex-col items-center gap-4 transition-all duration-500 relative py-4 px-6 select-none`,
       glow: `absolute top-0 left-1/2 -translate-x-1/2 w-20 h-20 bg-[${COLOR_HEX}]/30 blur-[40px] rounded-full transition-opacity duration-500 ${isActive ? 'opacity-100' : 'opacity-0'}`,
-      head: `relative z-10 flex items-center gap-2 text-5xl md:text-6xl tracking-tighter transition-all duration-300 ${isActive ? `text-[${COLOR_HEX}] drop-shadow-[0_0_15px_rgba(212,230,85,0.3)]` : `text-[${COLOR_HEX}]/40`}`,
+      head: `relative w-16 md:w-26 z-10 flex items-center gap-2 text-5xl md:text-6xl tracking-tighter transition-all duration-300 ${isActive ? `text-[${COLOR_HEX}] drop-shadow-[0_0_15px_rgba(212,230,85,0.3)]` : `text-[${COLOR_HEX}]/40`}`,
       strokeWidth: isActive ? 3 : 2,
       labelContainer: `relative z-10 overflow-hidden mt-2`,
       labelSweep: `absolute inset-0 bg-[${COLOR_HEX}] transition-transform duration-500 ease-in-out ${isActive ? 'origin-left scale-x-100' : 'origin-right scale-x-0'}`,
@@ -86,9 +86,7 @@ export default function LandingPage() {
       {/* --- NAVBAR --- */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-black/80 backdrop-blur-md border-b border-white/5 h-20">
         <div className="max-w-7xl mx-auto px-6 h-full flex justify-between items-center">
-          <div className="font-black text-2xl tracking-tighter flex items-center gap-1 z-50 relative cursor-pointer" onClick={() => window.scrollTo(0, 0)}>
-            PISO<span className="text-[#D4E655]">2</span>
-          </div>
+          <img src='/2-verde.png' className="font-black text-2xl tracking-tighter flex items-center gap-1 z-50 relative cursor-pointer w-8 md:w-8" onClick={() => window.scrollTo(0, 0)} />
 
           <div className="hidden md:flex items-center gap-8 text-[10px] font-bold tracking-[0.2em] text-gray-400 uppercase">
             <button onClick={() => window.scrollTo(0, 0)} className="hover:text-white transition-colors">Inicio</button>
@@ -134,8 +132,8 @@ export default function LandingPage() {
 
         {/* Imagen de fondo 3D (Asegurate de tener este archivo en la carpeta public) */}
         <img
-          src="https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273062/DSC07437_ymmrtd.jpg"
-          alt="Piso 2 Render"
+          src="/banner-piso.png"
+          alt="Piso 2"
           className="absolute inset-0 w-full h-full object-cover opacity-70 z-0"
         />
 
@@ -143,12 +141,7 @@ export default function LandingPage() {
         <div className="absolute inset-0 z-0 bg-gradient-to-b from-[#050505]/90 via-[#050505]/40 to-[#050505] mix-blend-multiply" />
 
         <div className="relative z-10 w-full max-w-7xl mx-auto flex flex-col items-center text-center">
-          <h1 className="text-[12vw] md:text-[8rem] font-black uppercase tracking-tighter leading-[0.85] mb-4 md:mb-4 text-white">
-            PISO 2
-          </h1>
-          <h2 className="text-[#D4E655] text-sm md:text-4xl font-bold tracking-[0.4em] uppercase mb-4 md:mb-24 drop-shadow-lg">
-            MULTIESPACIO
-          </h2>
+          <img src='/nombre-completo-verde.png' className="text-[12vw] md:text-[8rem] mb-4 md:mb-8 font-black uppercase tracking-tighter leading-[0.85] text-white" />
           <h3 className="text-[#D4E655] text-xs md:text-sm font-bold tracking-[0.4em] uppercase mb-12 md:mb-36 max-w-3xl leading-relaxed">
             SOMOS UN CENTRO CREATIVO QUE UNE EL MOVIMIENTO, LA TECNOLOGÍA Y LA ESCENA
           </h3>
@@ -157,19 +150,19 @@ export default function LandingPage() {
           <div id="ecosistema" className="flex flex-col md:flex-row justify-center items-center gap-12 md:gap-24">
             <div className={getStyles('2m').container} onMouseEnter={() => setActiveSection('2m')} onClick={() => setActiveSection('2m')}>
               <div className={getStyles('2m').glow} />
-              <div className={getStyles('2m').head}><ArrowUpRight size={44} strokeWidth={getStyles('2m').strokeWidth} /><span className="font-black">2M</span></div>
+              <img src='/2M-verde.png' className={getStyles('2m').head} />
               <div className={getStyles('2m').labelContainer}><span className={getStyles('2m').labelSweep}></span><span className={getStyles('2m').labelText}>Movimiento</span></div>
             </div>
 
             <div className={getStyles('2e').container} onMouseEnter={() => setActiveSection('2e')} onClick={() => setActiveSection('2e')}>
               <div className={getStyles('2e').glow} />
-              <div className={getStyles('2e').head}><Triangle size={34} strokeWidth={getStyles('2e').strokeWidth} className="-mt-1" /><span className="font-black">2E</span></div>
+              <img src='/2E-verde.png' className={getStyles('2e').head} />
               <div className={getStyles('2e').labelContainer}><span className={getStyles('2e').labelSweep}></span><span className={getStyles('2e').labelText}>Escena</span></div>
             </div>
 
             <div className={getStyles('2s').container} onMouseEnter={() => setActiveSection('2s')} onClick={() => setActiveSection('2s')}>
               <div className={getStyles('2s').glow} />
-              <div className={getStyles('2s').head}><Play size={34} strokeWidth={getStyles('2s').strokeWidth} className="fill-transparent ml-1" /><span className="font-black">2S</span></div>
+              <img src='/2S-verde.png' className={getStyles('2s').head} />
               <div className={getStyles('2s').labelContainer}><span className={getStyles('2s').labelSweep}></span><span className={getStyles('2s').labelText}>Streaming</span></div>
             </div>
           </div>
