@@ -153,7 +153,7 @@ export default function LoginPage() {
             {/* --- FONDO --- */}
             <div className="absolute inset-0 z-0">
                 {/* Usamos una imagen de stock de danza en blanco y negro temporalmente */}
-                <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?q=80&w=2069&auto=format&fit=crop')] bg-cover bg-center grayscale opacity-40"></div>
+                <div className="absolute inset-0 bg-[url('/banner-piso.png')] bg-cover bg-center grayscale opacity-40"></div>
                 {/* Filtro oscuro para mejorar legibilidad */}
                 <div className="absolute inset-0 bg-gradient-to-b from-black/90 via-black/50 to-black/95"></div>
             </div>
@@ -177,14 +177,10 @@ export default function LoginPage() {
             <main className="flex-1 relative z-10 flex flex-col items-center justify-center px-4 py-12">
 
                 {/* LOGO 2M GIGANTE */}
-                <div className="flex flex-col items-center text-center mb-8 select-none">
+                <div className="flex flex-col items-center justify-center text-center mb-8 select-none">
                     <div className="flex items-center gap-2 text-6xl md:text-[5.5rem] font-black text-[#D4E655] tracking-tighter leading-none">
-                        <ArrowUpRight size={64} strokeWidth={2.5} className="-mt-2" />
-                        2M
+                        <img src='/2M-verde.png' className="w-16 md:w-26 text-[#D4E655] text-sm md:text-xl font-bold tracking-[0.4em] uppercase mt-2" />
                     </div>
-                    <h2 className="text-[#D4E655] text-sm md:text-xl font-bold tracking-[0.4em] uppercase mt-2">
-                        Movimiento
-                    </h2>
                 </div>
 
                 {/* --- CAJA DE LOGIN / REGISTRO --- */}
