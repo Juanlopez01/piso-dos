@@ -92,7 +92,7 @@ export async function POST(request: Request) {
                     pending: `${baseUrl}${rutaDestino}?pago=pendiente`
                 },
                 auto_return: 'approved',
-                // notification_url: `${baseUrl}/api/mercadopago/webhook` // 👈 Descomentar para producción
+                notification_url: `${baseUrl}/api/mercadopago/webhook` // 👈 Descomentar para producción
             }
         })
 
