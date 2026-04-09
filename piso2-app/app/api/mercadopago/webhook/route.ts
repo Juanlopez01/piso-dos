@@ -17,20 +17,21 @@ export async function POST(request: Request) {
         let id = url.searchParams.get('data.id') || url.searchParams.get('id');
         let type = url.searchParams.get('type') || url.searchParams.get('topic');
 
-        if (!id || !type) {
-            try {
-                const body = await request.json();
-                id = id || body?.data?.id || body?.id;
-                type = type || body?.type || body?.topic || body?.action;
-            } catch (e) {
-                console.log("No hay body o no se pudo parsear");
-            }
+        let body: any = {};
+        try {
+            body = await request.json();
+            id = id || body?.data?.id || body?.id;
+            type = type || body?.type || body?.topic || body?.action;
+        } catch (e) {
+            console.log("No hay body o no se pudo parsear");
         }
 
-        console.log(`[WEBHOOK] Tipo: ${type} | ID: ${id}`);
+        console.log(`[WEBHOOK] RAW DATA -> Tipo detectado: ${type} | ID detectado: ${id}`);
+        console.log(`[WEBHOOK] JSON Completo recibido:`, JSON.stringify(body));
 
-        if (!id || (type !== 'payment' && type !== 'payment.created' && type !== 'payment.updated')) {
-            console.log("❌ [WEBHOOK] Evento ignorado (No es pago o falta ID).");
+        // 🚀 BLINDAJE AMPLIADO: Aceptamos cualquier variación de la palabra "payment"
+        if (!id || !type || !type.includes('payment')) {
+            console.log("❌ [WEBHOOK] Evento ignorado (No es pago o es un aviso secundario).");
             return NextResponse.json({ message: 'Evento ignorado' }, { status: 200 });
         }
 
