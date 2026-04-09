@@ -5,6 +5,7 @@ import { createClient } from '@/utils/supabase/client'
 import { AuthChangeEvent, Session } from '@supabase/supabase-js'
 
 type CashContextType = {
+    userId: string | null // 👈 NUEVO: Lo guardamos acá para no pedirlo mil veces
     isBoxOpen: boolean
     currentTurnoId: string | null
     currentSedeId: string | null
@@ -18,7 +19,7 @@ type CashContextType = {
 }
 
 const CashContext = createContext<CashContextType>({
-    isBoxOpen: false, currentTurnoId: null, currentSedeId: null, userRole: null, userName: null, nivelLiga: null, hasLigaAccess: false, hasCompaniaAccess: false, checkStatus: async () => { }, isLoading: true
+    userId: null, isBoxOpen: false, currentTurnoId: null, currentSedeId: null, userRole: null, userName: null, nivelLiga: null, hasLigaAccess: false, hasCompaniaAccess: false, checkStatus: async () => { }, isLoading: true
 })
 
 export const useCash = () => useContext(CashContext)
@@ -26,13 +27,13 @@ export const useCash = () => useContext(CashContext)
 export function CashProvider({ children }: { children: React.ReactNode }) {
     const [supabase] = useState(() => createClient())
 
+    const [userId, setUserId] = useState<string | null>(null) // 👈 NUEVO
     const [isBoxOpen, setIsBoxOpen] = useState(false)
     const [currentTurnoId, setCurrentTurnoId] = useState<string | null>(null)
     const [currentSedeId, setCurrentSedeId] = useState<string | null>(null)
     const [userRole, setUserRole] = useState<string | null>(null)
     const [userName, setUserName] = useState<string | null>(null)
     const [nivelLiga, setNivelLiga] = useState<number | null>(null)
-
     const [hasLigaAccess, setHasLigaAccess] = useState(false)
     const [hasCompaniaAccess, setHasCompaniaAccess] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
@@ -40,47 +41,36 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     const lastCheckedUser = useRef<string | null>(null)
     const isFetching = useRef(false)
 
-    const fetchProfileAndBox = useCallback(async (userId: string, isMounted: boolean = true, force: boolean = false) => {
+    const fetchProfileAndBox = useCallback(async (uid: string, isMounted: boolean = true, force: boolean = false) => {
         if (isFetching.current) return;
-        if (!force && lastCheckedUser.current === userId) return;
+        if (!force && lastCheckedUser.current === uid) return;
 
         isFetching.current = true;
 
         try {
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('rol, nombre_completo, nivel_liga')
-                .eq('id', userId)
-                .single(); // Cambiado a single para asegurar respuesta limpia
-
+            const { data: profile } = await supabase.from('profiles').select('rol, nombre_completo, nivel_liga').eq('id', uid).single();
             const rolReal = profile?.rol || 'alumno'
 
-            let ligaAccess = false;
-            let compAccess = false;
+            let ligaAccess = false, compAccess = false;
 
             if (['admin', 'recepcion'].includes(rolReal)) {
-                ligaAccess = true;
-                compAccess = true;
+                ligaAccess = true; compAccess = true;
             } else {
                 if (rolReal === 'alumno') {
                     ligaAccess = !!profile?.nivel_liga;
-                    const { data: comp } = await supabase.from('perfiles_companias').select('compania_id').eq('perfil_id', userId).limit(1);
+                    const { data: comp } = await supabase.from('perfiles_companias').select('compania_id').eq('perfil_id', uid).limit(1);
                     compAccess = !!comp?.length;
                 } else if (rolReal === 'profesor') {
                     const [resLiga, resComp] = await Promise.all([
-                        supabase.from('clases').select('id').eq('profesor_id', userId).eq('es_la_liga', true).limit(1),
-                        supabase.from('clases').select('id').eq('profesor_id', userId).not('compania_id', 'is', null).limit(1)
+                        supabase.from('clases').select('id').eq('profesor_id', uid).eq('es_la_liga', true).limit(1),
+                        supabase.from('clases').select('id').eq('profesor_id', uid).not('compania_id', 'is', null).limit(1)
                     ]);
-                    ligaAccess = !!resLiga.data?.length;
-                    compAccess = !!resComp.data?.length;
-                } else if (rolReal === 'coordinador') {
-                    ligaAccess = true;
-                    const { data: comp } = await supabase.from('companias').select('id').eq('coordinador_id', userId).limit(1);
-                    compAccess = !!comp?.length;
+                    ligaAccess = !!resLiga.data?.length; compAccess = !!resComp.data?.length;
                 }
             }
 
             if (isMounted) {
+                setUserId(uid) // 👈 Guardamos el ID
                 setUserRole(rolReal)
                 setUserName(profile?.nombre_completo || 'Usuario')
                 setNivelLiga(profile?.nivel_liga || null)
@@ -89,27 +79,12 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
             }
 
             if (['admin', 'recepcion'].includes(rolReal)) {
-                const { data: turno } = await supabase
-                    .from('caja_turnos')
-                    .select('id, sede_id')
-                    .eq('usuario_id', userId)
-                    .eq('estado', 'abierta')
-                    .maybeSingle();
-
+                const { data: turno } = await supabase.from('caja_turnos').select('id, sede_id').eq('usuario_id', uid).eq('estado', 'abierta').maybeSingle();
                 if (isMounted) {
-                    if (turno) {
-                        setIsBoxOpen(true)
-                        setCurrentTurnoId(turno.id)
-                        setCurrentSedeId(turno.sede_id)
-                    } else {
-                        setIsBoxOpen(false)
-                        setCurrentTurnoId(null)
-                        setCurrentSedeId(null)
-                    }
+                    setIsBoxOpen(!!turno); setCurrentTurnoId(turno?.id || null); setCurrentSedeId(turno?.sede_id || null);
                 }
             }
-
-            lastCheckedUser.current = userId;
+            lastCheckedUser.current = uid;
         } catch (err) {
             console.error("Error fetching details:", err)
         } finally {
@@ -119,64 +94,37 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         let isMounted = true;
-
         const initSession = async () => {
             try {
                 if (isMounted) setIsLoading(true);
-
-                // 🚀 BLINDAJE: Solo getSession()
                 const { data: { session } } = await supabase.auth.getSession();
 
                 if (!session?.user) {
                     if (isMounted) {
-                        setUserRole('visitante')
-                        setUserName(null)
-                        setNivelLiga(null)
-                        setIsBoxOpen(false)
-                        setHasLigaAccess(false)
-                        setHasCompaniaAccess(false)
-                        lastCheckedUser.current = null;
+                        setUserId(null); setUserRole('visitante'); setUserName(null); setNivelLiga(null); setIsBoxOpen(false); setHasLigaAccess(false); setHasCompaniaAccess(false); lastCheckedUser.current = null;
                     }
                     return;
                 }
-
                 await fetchProfileAndBox(session.user.id, isMounted, true)
-
             } catch (error) {
-                console.error("Error inicializando sesión global:", error)
+                console.error("Error inicializando sesión:", error)
             } finally {
                 if (isMounted) setIsLoading(false)
             }
         }
-
         initSession()
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
             if (event === 'SIGNED_OUT') {
                 if (isMounted) {
-                    setUserRole('visitante')
-                    setUserName(null)
-                    setNivelLiga(null)
-                    setIsBoxOpen(false)
-                    setCurrentTurnoId(null)
-                    setCurrentSedeId(null)
-                    setHasLigaAccess(false)
-                    setHasCompaniaAccess(false)
-                    setIsLoading(false)
-                    lastCheckedUser.current = null;
+                    setUserId(null); setUserRole('visitante'); setUserName(null); setNivelLiga(null); setIsBoxOpen(false); setCurrentTurnoId(null); setCurrentSedeId(null); setHasLigaAccess(false); setHasCompaniaAccess(false); setIsLoading(false); lastCheckedUser.current = null;
                 }
-            } else if (event === 'SIGNED_IN') {
-                if (session?.user) {
-                    await fetchProfileAndBox(session.user.id, isMounted, true)
-                    if (isMounted) setIsLoading(false)
-                }
+            } else if (event === 'SIGNED_IN' && session?.user) {
+                await fetchProfileAndBox(session.user.id, isMounted, true)
+                if (isMounted) setIsLoading(false)
             }
         })
-
-        return () => {
-            isMounted = false;
-            subscription.unsubscribe();
-        }
+        return () => { isMounted = false; subscription.unsubscribe(); }
     }, [fetchProfileAndBox, supabase])
 
     const checkStatus = useCallback(async () => {
@@ -185,12 +133,8 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     }, [fetchProfileAndBox, supabase])
 
     const contextValue = useMemo(() => ({
-        isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, checkStatus, isLoading
-    }), [isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, checkStatus, isLoading])
+        userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, checkStatus, isLoading
+    }), [userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, checkStatus, isLoading])
 
-    return (
-        <CashContext.Provider value={contextValue}>
-            {children}
-        </CashContext.Provider>
-    )
+    return <CashContext.Provider value={contextValue}>{children}</CashContext.Provider>
 }

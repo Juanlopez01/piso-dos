@@ -20,27 +20,26 @@ function MobileNavContent() {
     // 🛡️ ESCUDO: Congela la conexión a la base de datos
     const [supabase] = useState(() => createClient())
 
-    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, isLoading } = useCash()
+    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, isLoading, userId } = useCash()
 
     useEffect(() => {
         setIsOpen(false) // Cierra el menú al cambiar de ruta
     }, [pathname, searchParams])
 
     useEffect(() => {
-        if (!isLoading && userRole && userRole !== 'visitante') {
+        // Solo buscamos notificaciones si ya cargó el usuario y tenemos el ID listo
+        if (!isLoading && userId && userRole && userRole !== 'visitante') {
             const fetchNotifs = async () => {
-                // 🚀 BLINDAJE: getSession() en lugar de getUser()
-                const { data: { session } } = await supabase.auth.getSession()
-                const user = session?.user
-
-                if (user) {
-                    const { count } = await supabase.from('notificaciones').select('*', { count: 'exact', head: true }).eq('usuario_id', user.id).eq('leido', false)
-                    setUnreadNotifs(count || 0)
-                }
+                const { count } = await supabase
+                    .from('notificaciones')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('usuario_id', userId) // 👈 Usamos el ID directo del contexto
+                    .eq('leido', false)
+                setUnreadNotifs(count || 0)
             }
             fetchNotifs()
         }
-    }, [pathname, isLoading, userRole, supabase])
+    }, [pathname, isLoading, userId, userRole, supabase])
 
     const visibleItems = menuItems.filter(item => {
         if (item.name === 'La Liga' && !hasLigaAccess) return false;
