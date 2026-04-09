@@ -34,7 +34,10 @@ type TiendaData = {
 // 🚀 FETCHER UNIFICADO DE SWR
 const fetcherTienda = async (): Promise<TiendaData> => {
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getSession()
+
+    // 🚀 LA CORRECCIÓN: Extraemos la 'session' primero
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
 
     let userProfile = null
     if (user) {
@@ -68,8 +71,8 @@ function TiendaContent() {
         'tienda-datos',
         fetcherTienda,
         {
-            revalidateOnFocus: false, // Clave para cuando vuelven de MercadoPago
-            dedupingInterval: 5000 // Evita doble fetch rápido
+            revalidateOnFocus: false,
+            dedupingInterval: 5000
         }
     )
 
@@ -96,14 +99,13 @@ function TiendaContent() {
         if (pagoStatus) {
             if (pagoStatus === 'exito') {
                 toast.success('¡Pago aprobado! Tus clases se acreditarán en breves instantes.', { duration: 8000 })
-                mutate() // Forzamos actualización de créditos si el pago fue un éxito
+                mutate()
             } else if (pagoStatus === 'error') {
                 toast.error('El pago no se pudo procesar o fue cancelado.')
             } else if (pagoStatus === 'pendiente') {
                 toast.info('Tu pago está pendiente de confirmación.')
             }
 
-            // Limpiamos la URL de forma silenciosa
             window.history.replaceState(null, '', window.location.pathname)
         }
     }, [searchParams, mutate])
@@ -170,7 +172,6 @@ function TiendaContent() {
         if (!userId) return toast.error('Debes iniciar sesión')
         if (!selectedPack) return
 
-        // 🚀 TRUCO ANTI-BLOQUEO: Abrimos la pestaña en el milisegundo del clic (vacía por ahora)
         const nuevaPestana = window.open('about:blank', '_blank')
         if (nuevaPestana) {
             nuevaPestana.document.write('<h2 style="font-family:sans-serif;text-align:center;margin-top:50px;">Conectando con Mercado Pago...</h2>')
@@ -192,23 +193,21 @@ function TiendaContent() {
             const responseData = await res.json()
 
             if (!res.ok || responseData.error) {
-                if (nuevaPestana) nuevaPestana.close() // Cerramos la pestaña si algo falla
+                if (nuevaPestana) nuevaPestana.close()
                 toast.error("Hubo un error al generar el pago: " + responseData.error)
                 setGenerandoPago(false)
                 return
             }
 
             if (responseData.url) {
-                // 🚀 Le inyectamos la URL de Mercado Pago a la pestaña que ya abrimos
                 if (nuevaPestana) {
                     nuevaPestana.location.href = responseData.url
                 } else {
-                    // Failsafe extremo por si el navegador bloqueó hasta la pestaña vacía
                     window.location.href = responseData.url
                 }
 
                 toast.success('Pestaña de pago abierta. ¡Volvé cuando termines!', { duration: 5000 })
-                setIsCheckoutOpen(false) // Cerramos el modal de tu web
+                setIsCheckoutOpen(false)
             }
 
         } catch (error: any) {
