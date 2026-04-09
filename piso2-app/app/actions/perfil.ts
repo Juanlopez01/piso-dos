@@ -7,7 +7,6 @@ import { revalidatePath } from 'next/cache'
 export async function actualizarPerfilAction(payload: any) {
     const supabase = await createClient()
     try {
-        // 🚀 BLINDAJE: getSession en lugar de getUser
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
@@ -21,16 +20,14 @@ export async function actualizarPerfilAction(payload: any) {
     }
 }
 
-// 🚀 ACCIÓN NUCLEAR: Buscamos los datos desde el servidor para esquivar el Lock del navegador
 export async function obtenerDatosPerfilAction() {
     const supabase = await createClient()
 
-    // 1. Limpieza silenciosa sin trabar nada
-    supabase.rpc('limpiar_creditos_vencidos').then(({ error }: any) => {
-        if (error) console.error("Error limpiando créditos:", error)
-    })
+    // 1. Limpieza con AWAIT para que Next.js no congele el proceso
+    const { error: rpcError } = await supabase.rpc('limpiar_creditos_vencidos')
+    if (rpcError) console.error("Error limpiando créditos:", rpcError)
 
-    // 2. Buscamos el usuario leyendo la cookie directamente (getSession es más rápido y seguro aquí)
+    // 2. Buscamos el usuario
     const { data: { session }, error: authError } = await supabase.auth.getSession()
 
     if (authError || !session?.user) throw new Error("NO_AUTH")
@@ -57,8 +54,8 @@ export async function obtenerDatosPerfilAction() {
     } else {
         const { data: dataHistorial } = await supabase
             .from('inscripciones')
-            // Especificamos la relación !user_id por si hay conflictos
-            .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles!profesor_id(nombre_completo))')
+            // CORRECCIÓN: Usamos la misma foreign key exacta que en la cartelera
+            .select('id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles!clases_profesor_id_fkey(nombre_completo))')
             .eq('user_id', user.id)
             .order('created_at', { ascending: false })
             .limit(20)

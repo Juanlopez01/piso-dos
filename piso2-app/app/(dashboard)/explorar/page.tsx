@@ -18,6 +18,16 @@ import Image from 'next/image'
 // 🚀 IMPORTAMOS LA ACCIÓN
 import { inscribirAlumnoAction } from '@/app/actions/cartelera'
 
+// --- FUNCIÓN ESCUDO PARA FECHAS ---
+const parseSafeDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return new Date()
+    // Limpiamos cualquier formato de zona horaria (+00:00, +00, Z) para forzar la hora local sin romper el string
+    const cleanStr = dateStr.replace('+00:00', '').replace('+00', '').replace('Z', '').replace(' ', 'T')
+    const parsed = new Date(cleanStr)
+    // Si la fecha es inválida, devolvemos la fecha actual para que la app no explote
+    return isNaN(parsed.getTime()) ? new Date() : parsed
+}
+
 // --- TIPOS ---
 type ClaseInstancia = {
     id: string
@@ -48,17 +58,25 @@ type CarteleraData = {
 // 🚀 FETCHER
 const fetcherCartelera = async (): Promise<CarteleraData> => {
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getSession()
-    if (!user) throw new Error('No user')
 
-    // Limpieza de vencidos silenciosa
-    supabase.rpc('limpiar_creditos_vencidos').then()
+    // Extraemos session correctamente
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
 
-    const { data: profile } = await supabase
-        .from('profiles')
-        .select('id, creditos_regulares, creditos_seminarios')
-        .eq('id', user.id)
-        .single()
+    let profile = null
+
+    if (user) {
+        // Limpieza de vencidos silenciosa
+        supabase.rpc('limpiar_creditos_vencidos').then()
+
+        const { data: userProfile } = await supabase
+            .from('profiles')
+            .select('id, creditos_regulares, creditos_seminarios')
+            .eq('id', user.id)
+            .single()
+
+        profile = userProfile
+    }
 
     const hoy = new Date().toISOString()
     const { data: clasesData } = await supabase
@@ -71,20 +89,21 @@ const fetcherCartelera = async (): Promise<CarteleraData> => {
         `)
         .gte('inicio', hoy)
         .neq('estado', 'cancelada')
-        .neq('tipo_clase', 'Formación')
+        .neq('tipo_clase', 'Formación') // Solo ignoramos Formación
         .order('inicio', { ascending: true })
 
     const agrupador: Record<string, ClaseAgrupada> = {}
     if (clasesData) {
         clasesData.forEach((c: any) => {
-            const nombreProfe = c.profesor?.nombre_completo || 'Staff'
+            const nombreProfe = Array.isArray(c.profesor) ? c.profesor[0]?.nombre_completo : c.profesor?.nombre_completo || 'Staff'
             const key = `${c.nombre}-${nombreProfe}-${c.tipo_clase}`
             const inscritos = c.inscripciones || []
             const instancia: ClaseInstancia = {
                 id: c.id, inicio: c.inicio, fin: c.fin, cupo_maximo: c.cupo_maximo,
                 inscritos_count: inscritos.length,
-                ya_inscrito: inscritos.some((i: any) => i.user_id === user.id),
-                estado: c.estado, sala: c.sala
+                ya_inscrito: user ? inscritos.some((i: any) => i.user_id === user.id) : false,
+                estado: c.estado,
+                sala: Array.isArray(c.sala) ? c.sala[0] : c.sala
             }
             if (!agrupador[key]) {
                 agrupador[key] = {
@@ -120,7 +139,10 @@ export default function ExplorarClasesPage() {
     const [filtroTipo, setFiltroTipo] = useState<'Todos' | 'Regular' | 'Especial'>('Todos')
 
     const handleInscribirse = async (instancia: ClaseInstancia, grupo: ClaseAgrupada) => {
-        if (!perfil) return
+        if (!perfil) {
+            toast.error("Debes iniciar sesión para anotarte.")
+            return router.push('/login')
+        }
 
         const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(grupo.tipo_clase)
         const tipoClaseBD = esEspecial ? 'seminario' : 'regular'
@@ -149,7 +171,6 @@ export default function ExplorarClasesPage() {
 
         if (response.success) {
             toast.success(response.message)
-            router.refresh()
             setTimeout(() => mutate(), 500)
         } else {
             toast.error(response.error || 'Error al procesar reserva')
@@ -191,7 +212,7 @@ export default function ExplorarClasesPage() {
                         </div>
                     </div>
                     <div className="flex-1 md:flex-none bg-purple-500/10 border border-purple-500/30 rounded-2xl p-3 flex items-center gap-3">
-                        <div className="bg-purple-500 text-white p-2 rounded-xl"><Star size={20} /></div>
+                        <div className="bg-purple-50 text-white p-2 rounded-xl"><Star size={20} /></div>
                         <div>
                             <p className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Especiales</p>
                             <p className="text-xl font-black leading-none">{perfil?.creditos_seminarios || 0}</p>
@@ -224,7 +245,7 @@ export default function ExplorarClasesPage() {
                 {gruposFiltrados.map((grupo) => {
                     const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(grupo.tipo_clase)
                     const proximaClase = grupo.instancias[0]
-                    const esHoy = isToday(new Date(proximaClase.inicio))
+                    const esHoy = isToday(parseSafeDate(proximaClase.inicio))
 
                     return (
                         <div key={grupo.key_grupo} className={`bg-[#09090b] rounded-3xl overflow-hidden flex flex-col transition-all group shadow-xl border-2 ${esHoy ? (esEspecial ? 'border-purple-500/50' : 'border-[#D4E655]/50') : 'border-white/10'}`}>
@@ -260,7 +281,7 @@ export default function ExplorarClasesPage() {
                 })}
             </div>
 
-            {/* MODAL FECHAS (Simplificado para mejor legibilidad) */}
+            {/* MODAL FECHAS */}
             {selectedGrupo && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setSelectedGrupo(null)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-xl rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
@@ -278,15 +299,19 @@ export default function ExplorarClasesPage() {
                                 const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(selectedGrupo.tipo_clase)
                                 const creditosDisponibles = perfil ? (esEspecial ? perfil.creditos_seminarios : perfil.creditos_regulares) : 0
 
+                                // 🚀 BLINDAJE DE ZONA HORARIA
+                                const inicioDate = parseSafeDate(inst.inicio)
+                                const finDate = parseSafeDate(inst.fin)
+
                                 return (
                                     <div key={inst.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between hover:border-white/20 transition-all">
                                         <div className="flex-1 w-full">
                                             <div className="flex items-center gap-2 mb-1">
                                                 <Calendar size={14} className={esEspecial ? 'text-purple-400' : 'text-[#D4E655]'} />
-                                                <span className="font-bold text-white capitalize text-sm">{format(new Date(inst.inicio), "EEEE d 'de' MMMM", { locale: es })}</span>
+                                                <span className="font-bold text-white capitalize text-sm">{format(inicioDate, "EEEE d 'de' MMMM", { locale: es })}</span>
                                             </div>
                                             <div className="flex items-center gap-4 text-[10px] text-gray-400 font-medium pl-5 mt-1">
-                                                <span><Clock size={12} className="inline mr-1" /> {format(new Date(inst.inicio), "HH:mm")} a {format(new Date(inst.fin), "HH:mm")}</span>
+                                                <span><Clock size={12} className="inline mr-1" /> {format(inicioDate, "HH:mm")} a {format(finDate, "HH:mm")}</span>
                                                 <span><MapPin size={12} className="inline mr-1" /> {inst.sala.nombre}</span>
                                             </div>
                                         </div>

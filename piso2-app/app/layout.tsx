@@ -8,7 +8,7 @@ import SessionProvider from "@/components/SessionProvider"; // <--- NUEVO
 import type { Metadata, Viewport } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Piso 2 | La Liga',
+  title: 'Piso 2',
   description: 'Gestión y Programa de Formación',
   manifest: '/manifest.json',
   appleWebApp: {
