@@ -51,7 +51,7 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                 .from('profiles')
                 .select('rol, nombre_completo, nivel_liga')
                 .eq('id', userId)
-                .maybeSingle();
+                .single(); // Cambiado a single para asegurar respuesta limpia
 
             const rolReal = profile?.rol || 'alumno'
 
@@ -124,8 +124,7 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
             try {
                 if (isMounted) setIsLoading(true);
 
-                // 🛑 EL CAMBIO CRUCIAL: Solo leemos el token en caché, no hacemos peticiones de red
-                // Esto evita el choque letal con el Middleware.
+                // 🚀 BLINDAJE: Solo getSession()
                 const { data: { session } } = await supabase.auth.getSession();
 
                 if (!session?.user) {
@@ -152,9 +151,6 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
 
         initSession()
 
-        // 🛑 ELIMINAMOS el 'handleVisibilityChange' porque causaba llamadas repetidas innecesarias
-        // que estresaban la base de datos y causaban bloqueos. Ahora confiamos en el SessionProvider y el Middleware.
-
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
             if (event === 'SIGNED_OUT') {
                 if (isMounted) {
@@ -175,7 +171,6 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
                     if (isMounted) setIsLoading(false)
                 }
             }
-            // Ignoramos pacíficamente el TOKEN_REFRESHED para no spamear Supabase.
         })
 
         return () => {
@@ -185,7 +180,6 @@ export function CashProvider({ children }: { children: React.ReactNode }) {
     }, [fetchProfileAndBox, supabase])
 
     const checkStatus = useCallback(async () => {
-        // Al requerir status manualmente, usamos la caché para evitar choques
         const { data: { session } } = await supabase.auth.getSession()
         if (session?.user) await fetchProfileAndBox(session.user.id, true, true)
     }, [fetchProfileAndBox, supabase])
