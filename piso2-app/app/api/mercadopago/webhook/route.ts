@@ -1,6 +1,9 @@
+// app/api/mercadopago/webhook/route.ts
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+// Inicializamos el cliente en modo ADMIN para saltarnos las reglas de sesión (RLS)
+// ya que Mercado Pago no tiene las cookies del usuario.
 const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -10,12 +13,10 @@ export async function POST(request: Request) {
     try {
         console.log("🔔 [WEBHOOK] Recibiendo notificación de Mercado Pago...");
 
-        // 1. Buscamos el ID y el TYPE. Soportamos tanto URL (IPN) como Body JSON (Webhooks)
         const url = new URL(request.url);
         let id = url.searchParams.get('data.id') || url.searchParams.get('id');
         let type = url.searchParams.get('type') || url.searchParams.get('topic');
 
-        // Si no vinieron por URL, los sacamos del Body
         if (!id || !type) {
             try {
                 const body = await request.json();
@@ -28,13 +29,12 @@ export async function POST(request: Request) {
 
         console.log(`[WEBHOOK] Tipo: ${type} | ID: ${id}`);
 
-        // Si no hay ID o no es un evento de pago, le decimos a MP que todo OK pero no hacemos nada
         if (!id || (type !== 'payment' && type !== 'payment.created' && type !== 'payment.updated')) {
             console.log("❌ [WEBHOOK] Evento ignorado (No es pago o falta ID).");
             return NextResponse.json({ message: 'Evento ignorado' }, { status: 200 });
         }
 
-        // 2. Buscar los detalles reales del pago en la API de Mercado Pago (Seguridad)
+        // 2. Buscar los detalles reales del pago en la API de Mercado Pago
         const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${id}`, {
             headers: { Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` }
         });
@@ -64,7 +64,6 @@ export async function POST(request: Request) {
                 const montoAbonado = payment.transaction_amount;
                 console.log(`[WEBHOOK LIGA] Cobrando La Liga para Usuario: ${usuario_id}, Mes: ${mes}/${anio}`);
 
-                // Verificar que no haya pagado ya este mes (por las dudas)
                 const { data: pagoExistenteLiga } = await supabase
                     .from('liga_pagos')
                     .select('id')
@@ -78,14 +77,13 @@ export async function POST(request: Request) {
                     return NextResponse.json({ message: 'Cuota ya pagada' }, { status: 200 });
                 }
 
-                // Registrar el pago en la base de datos
                 const { error: errLiga } = await supabase.from('liga_pagos').insert({
                     alumno_id: usuario_id,
                     mes: Number(mes),
                     anio: Number(anio),
                     monto: montoAbonado,
-                    metodo_pago: 'mercadopago', // Etiqueta automática
-                    turno_caja_id: null // Los pagos online no van a la caja física
+                    metodo_pago: 'mercadopago',
+                    turno_caja_id: null
                 });
 
                 if (errLiga) throw errLiga;
@@ -95,14 +93,13 @@ export async function POST(request: Request) {
             }
 
             // ==========================================
-            // DESVÍO B: COMPRA DE PACK NORMAL (TU CÓDIGO ORIGINAL)
+            // DESVÍO B: COMPRA DE PACK NORMAL
             // ==========================================
             const { user_id, producto_id, cupon_id, tipo_clase, creditos } = metadata;
             const montoAbonado = payment.transaction_amount;
 
             console.log(`[WEBHOOK] Procesando carga para Usuario: ${user_id}, Pack: ${producto_id}`);
 
-            // 4. Verificamos que no hayamos procesado este pago antes
             const { data: pagoExistente } = await supabase
                 .from('alumno_packs')
                 .select('id')
@@ -114,10 +111,11 @@ export async function POST(request: Request) {
                 return NextResponse.json({ message: 'Pago ya procesado' }, { status: 200 });
             }
 
-            // 5. Calculamos vencimiento (Hoy + 30 días)
-            const fechaVencimiento = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+            // Calculamos exactamente 30 días a partir de ahora
+            const fechaActual = new Date();
+            fechaActual.setDate(fechaActual.getDate() + 30);
+            const fechaVencimiento = fechaActual.toISOString();
 
-            // 6. Creamos la "Bolsita"
             const { error: errPack } = await supabase.from('alumno_packs').insert({
                 user_id: user_id,
                 producto_id: producto_id,
@@ -132,9 +130,9 @@ export async function POST(request: Request) {
 
             if (errPack) throw errPack;
 
-            // 7. Sumamos los créditos al perfil
             const fieldToUpdate = tipo_clase === 'regular' ? 'creditos_regulares' : 'creditos_seminarios';
 
+            // Leemos el saldo actual y le sumamos los créditos nuevos
             const { data: profile } = await supabase.from('profiles').select(fieldToUpdate).eq('id', user_id).single();
             const currentCreds = (profile as any)?.[fieldToUpdate] || 0;
 
@@ -142,7 +140,7 @@ export async function POST(request: Request) {
                 [fieldToUpdate]: currentCreds + Number(creditos)
             }).eq('id', user_id);
 
-            // 8. Quemamos el cupón (si usó)
+            // Quemamos el cupón (si usó)
             if (cupon_id) {
                 await supabase.from('cupones_usados').insert({ cupon_id: cupon_id, user_id: user_id });
             }
