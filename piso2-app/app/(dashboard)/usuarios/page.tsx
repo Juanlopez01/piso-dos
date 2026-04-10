@@ -547,6 +547,7 @@ function UsuariosContent() {
                                     <select value={createForm.rol} onChange={e => setCreateForm({ ...createForm, rol: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]">
                                         <option value="alumno">Alumno</option>
                                         <option value="profesor">Profesor</option>
+                                        <option value="coordinador">Coordinador</option>
                                         {isAdmin && <option value="recepcion">Recepción</option>}
                                     </select>
                                 </div>
