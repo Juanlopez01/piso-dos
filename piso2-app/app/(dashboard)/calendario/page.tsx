@@ -2,7 +2,7 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useState, useEffect } from 'react'
-import { crearClasesAction } from '@/app/actions/clases'
+import { crearClasesAction, duplicarMesAction } from '@/app/actions/clases'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import {
@@ -14,11 +14,13 @@ import { es } from 'date-fns/locale'
 import {
     ChevronLeft, ChevronRight, X, Plus, MapPin, Trash2, Loader2,
     Info, DollarSign, Image as ImageIcon, Briefcase, GraduationCap,
-    Music, User, AlertCircle, CalendarDays, Star, UsersRound, Building2, Sparkles, Pencil
+    Music, User, AlertCircle, CalendarDays, Star, UsersRound, Building2, Sparkles, Pencil,
+    CopyPlus
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Image from 'next/image'
 import { Toaster, toast } from 'sonner'
+import { useCash } from '@/context/CashContext'
 import MultiDatePicker from '@/components/MultiDatePicker'
 
 // --- TIPOS ESTRICTOS ---
@@ -201,6 +203,7 @@ export default function CalendarioPage() {
     const [uploading, setUploading] = useState(false)
     const [isCreatingRitmo, setIsCreatingRitmo] = useState(false)
     const [nuevoRitmoNombre, setNuevoRitmoNombre] = useState('')
+    const [duplicando, setDuplicando] = useState(false)
 
     const [form, setForm] = useState({
         nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
@@ -216,6 +219,8 @@ export default function CalendarioPage() {
     const startDateStr = format(startOfWeek(startOfMonth(currentDate)), 'yyyy-MM-dd')
     const endDateStr = format(endOfWeek(endOfMonth(currentDate)), 'yyyy-MM-dd')
 
+    const { userRole } = useCash()
+
     const { data, error, isLoading, mutate } = useSWR(
         ['agenda', startIso, endIso, startDateStr, endDateStr],
         fetcher,
@@ -226,6 +231,28 @@ export default function CalendarioPage() {
             dedupingInterval: 5000
         }
     )
+
+    const handleDuplicarMes = async () => {
+        // Ejemplo: Duplicar el mes actual
+        const mesActualStr = format(new Date(), "yyyy-MM")
+        const nombreMesSiguiente = format(addMonths(new Date(), 1), "MMMM", { locale: es })
+
+        const confirmar = window.confirm(
+            `¿Querés copiar todas las clases de este mes a ${nombreMesSiguiente}? \n\nSe respetarán los días de la semana y horarios.`
+        )
+        if (!confirmar) return
+
+        setDuplicando(true)
+        const res = await duplicarMesAction(mesActualStr)
+
+        if (res.success) {
+            toast.success(`¡Listo! Se crearon ${res.count} clases en ${nombreMesSiguiente}.`)
+            // router.refresh() o mutate() si usás SWR
+        } else {
+            toast.error(res.error)
+        }
+        setDuplicando(false)
+    }
 
     useEffect(() => {
         const canalAgenda = supabase.channel('cambios-agenda')
@@ -450,6 +477,16 @@ export default function CalendarioPage() {
                             </button>
                         ))}
                     </div>
+                    {userRole === 'admin' || userRole === 'recepcion' ? (
+                        <button
+                            onClick={handleDuplicarMes}
+                            disabled={duplicando}
+                            className="flex items-center gap-2 bg-blue-600/20 text-blue-400 border border-blue-600/30 px-4 py-2 rounded-xl font-bold text-xs uppercase hover:bg-blue-600 hover:text-white transition-all disabled:opacity-50"
+                        >
+                            {duplicando ? <Loader2 className="animate-spin" size={14} /> : <CopyPlus size={14} />}
+                            Duplicar Mes a {format(addMonths(new Date(), 1), "MMMM", { locale: es })}
+                        </button>
+                    ) : null}
                     <div className="flex gap-2 w-full sm:w-auto justify-end">
                         <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-[#D4E655] hover:text-[#D4E655] transition-all rounded-full"><ChevronLeft size={18} /></button>
                         <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-2 bg-black border border-white/10 hover:border-[#D4E655] hover:text-[#D4E655] transition-all rounded-full"><ChevronRight size={18} /></button>

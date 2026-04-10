@@ -4,7 +4,18 @@
 // 👇 IMPORTAMOS EL LECTOR DE COOKIES
 import { createClient } from '@/utils/supabase/server-helper'
 import { v4 as uuidv4 } from 'uuid'
-import { format } from 'date-fns'
+import {
+    startOfMonth,
+    endOfMonth,
+    eachWeekOfInterval,
+    format,
+    addMonths,
+    setHours,
+    setMinutes,
+    getDay,
+    addDays,
+    startOfDay
+} from 'date-fns'
 import { revalidatePath } from 'next/cache'
 
 type EditarClaseInput = {
@@ -152,6 +163,84 @@ export async function crearClasesAction(form: any, publicUrl: string | null) {
 
     } catch (error: any) {
         console.error("🚨 Error en el Servidor:", error.message)
+        return { success: false, error: error.message }
+    }
+}
+
+export async function duplicarMesAction(mesOrigen: string) { // mesOrigen formato "YYYY-MM"
+    const supabase = await createClient()
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        // 1. Configurar fechas de origen y destino
+        const fechaBaseOrigen = new Date(mesOrigen + "-02") // Forzamos día 2 para evitar líos de zona horaria
+        const inicioOrigen = startOfMonth(fechaBaseOrigen)
+        const finOrigen = endOfMonth(fechaBaseOrigen)
+
+        const inicioDestino = startOfMonth(addMonths(inicioOrigen, 1))
+
+        // 2. Traer todas las clases del mes de origen
+        const { data: clases, error: errFetch } = await supabase
+            .from('clases')
+            .select('*')
+            .gte('inicio', inicioOrigen.toISOString())
+            .lte('inicio', finOrigen.toISOString())
+
+        if (errFetch) throw errFetch
+        if (!clases || clases.length === 0) throw new Error('No hay clases en el mes seleccionado para duplicar.')
+
+        // 3. Agrupación por series para mantener la integridad
+        // Si una clase tiene el mismo serie_id original, en el nuevo mes deben compartir un nuevo serie_id
+        const mapaSeries = new Map()
+
+        const nuevasClases = clases.map((clase) => {
+            const fechaOriginal = new Date(clase.inicio)
+
+            // Calculamos en qué semana del mes estaba (0, 1, 2, 3, 4)
+            const diaSemana = getDay(fechaOriginal)
+            const diaMes = fechaOriginal.getDate()
+            const semanaDelMes = Math.floor((diaMes - 1) / 7)
+
+            // Buscamos el mismo día de la semana en la misma semana del mes de destino
+            let nuevaFecha = addDays(inicioDestino, (semanaDelMes * 7))
+            while (getDay(nuevaFecha) !== diaSemana) {
+                nuevaFecha = addDays(nuevaFecha, 1)
+            }
+
+            // Ajustamos la hora exacta de la clase original
+            nuevaFecha = setHours(nuevaFecha, fechaOriginal.getHours())
+            nuevaFecha = setMinutes(nuevaFecha, fechaOriginal.getMinutes())
+
+            // Lógica de Series: si era una serie, generamos un ID nuevo por cada grupo
+            let nuevoSerieId = null
+            if (clase.serie_id) {
+                if (!mapaSeries.has(clase.serie_id)) {
+                    mapaSeries.set(clase.serie_id, crypto.randomUUID())
+                }
+                nuevoSerieId = mapaSeries.get(clase.serie_id)
+            }
+
+            // Retornamos el nuevo objeto (quitando IDs viejos)
+            const { id, created_at, ...datosClase } = clase
+            return {
+                ...datosClase,
+                inicio: nuevaFecha.toISOString(),
+                serie_id: nuevoSerieId,
+                // Si tenés columna de fin, calculala igual o sumale la duración
+                fin: clase.fin ? addDays(new Date(clase.fin), 28).toISOString() : null
+            }
+        })
+
+        // 4. Inserción masiva
+        const { error: errInsert } = await supabase.from('clases').insert(nuevasClases)
+        if (errInsert) throw errInsert
+
+        revalidatePath('/calendario')
+        return { success: true, count: nuevasClases.length }
+
+    } catch (error: any) {
+        console.error("Error duplicando mes:", error)
         return { success: false, error: error.message }
     }
 }
