@@ -56,3 +56,22 @@ export async function toggleMiembroCompaniaAction(companiaId: string, alumnoId: 
         return { success: false, error: error.message }
     }
 }
+
+export async function eliminarCompaniaAction(companiaId: string) {
+    const supabase = await createClient()
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        const { data: profile } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+        if (!profile || profile.rol !== 'admin') throw new Error('Solo un Admin puede eliminar compañías')
+
+        const { error } = await supabase.from('companias').delete().eq('id', companiaId)
+        if (error) throw new Error(error.message)
+
+        revalidatePath('/companias')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}

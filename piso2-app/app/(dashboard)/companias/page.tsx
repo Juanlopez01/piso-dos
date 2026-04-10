@@ -10,7 +10,11 @@ import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
 
 // 🚀 IMPORTAMOS LAS ACTIONS BLINDADAS
-import { crearCompaniaAction, toggleMiembroCompaniaAction } from '@/app/actions/companias'
+import {
+    crearCompaniaAction,
+    toggleMiembroCompaniaAction,
+    eliminarCompaniaAction // 👈 Agregamos esta
+} from '@/app/actions/companias'
 
 type Compania = {
     id: string
@@ -131,7 +135,20 @@ export default function CompaniasPage() {
 
         setProcesando(false)
     }
+    const handleEliminarCompania = async (companiaId: string, nombre: string) => {
+        if (!window.confirm(`¿Estás seguro de que querés eliminar la compañía "${nombre}"? Toda su información se perderá.`)) return
 
+        setProcesando(true)
+        const response = await eliminarCompaniaAction(companiaId)
+
+        if (response.success) {
+            toast.success('Compañía eliminada correctamente')
+            fetchData() // Recargamos la grilla para que desaparezca
+        } else {
+            toast.error(response.error || 'Error al eliminar')
+        }
+        setProcesando(false)
+    }
     const abrirGestionMiembros = async (compania: Compania) => {
         setSelectedCompania(compania)
         setSearchAlumno('')
@@ -215,7 +232,22 @@ export default function CompaniasPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {companias.map((compania) => (
                         <div key={compania.id} className="bg-[#09090b] border border-white/5 rounded-3xl overflow-hidden flex flex-col transition-all group hover:border-blue-500/30 hover:shadow-[0_0_30px_rgba(37,99,235,0.1)] relative">
-
+                            {/* BOTÓN DE ELIMINAR (SOLO ADMIN) */}
+                            {userRole === 'admin' && (
+                                <div className="absolute top-4 right-4 z-20">
+                                    <button
+                                        onClick={(e) => {
+                                            e.preventDefault() // Evita que se disparen otras acciones
+                                            handleEliminarCompania(compania.id, compania.nombre)
+                                        }}
+                                        disabled={procesando}
+                                        className="p-2 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-full transition-colors border border-red-500/20 shadow-lg"
+                                        title="Eliminar Compañía"
+                                    >
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
+                            )}
                             <div className="p-6 border-b border-white/5 relative bg-gradient-to-br from-blue-500/10 to-transparent">
                                 <span className="inline-block bg-blue-500 text-white text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded mb-3">Compañía</span>
                                 <h3 className="text-2xl font-black text-white uppercase leading-tight mb-1">{compania.nombre}</h3>

@@ -7,7 +7,7 @@ import useSWR from 'swr'
 import {
     DollarSign, Lock, Unlock, TrendingUp, TrendingDown,
     Loader2, History, MapPin, Wallet, CreditCard, LayoutDashboard,
-    User, X, Info
+    User, X, Info, AlertOctagon
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
@@ -15,7 +15,7 @@ import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 
 // 🚀 IMPORTAMOS LAS SERVER ACTIONS
-import { abrirCajaAction, cerrarCajaAction, registrarMovimientoAction } from '@/app/actions/caja'
+import { abrirCajaAction, cerrarCajaAction, registrarMovimientoAction, cerrarTodasLasCajasAction } from '@/app/actions/caja'
 
 // --- TIPOS Y ESTRUCTURAS ---
 type CajaData = {
@@ -30,12 +30,12 @@ type CajaData = {
     } | null
 }
 
-// 🚀 FETCHER PRINCIPAL
-const fetcherCaja = async ([key, role]: [string, string]): Promise<CajaData> => {
+// 🚀 FETCHER PRINCIPAL CORREGIDO
+const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<CajaData> => {
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getSession()
 
     if (role === 'admin') {
+        // RECUPERAMOS LA LÓGICA DEL ADMIN QUE SE HABÍA BORRADO
         const { data: activas } = await supabase.from('caja_turnos')
             .select(`*, sede:sedes(nombre), usuario:profiles(nombre_completo), caja_movimientos(*)`)
             .eq('estado', 'abierta')
@@ -71,14 +71,16 @@ const fetcherCaja = async ([key, role]: [string, string]): Promise<CajaData> => 
         }))
 
         return { admin: { cajasActivas: activasCalculadas, historialCajas: historialCalculado }, recepcion: null }
-    } else {
-        if (!user) throw new Error("No user")
+
+    } else if (role === 'recepcion') {
+        // LÓGICA RECEPCIÓN CON EL UID INYECTADO
+        if (!uid) throw new Error("No user ID")
 
         const { data: sedes } = await supabase.from('sedes').select('*').order('nombre')
 
         const { data: turnoActivo } = await supabase.from('caja_turnos')
             .select(`*, sede:sedes(nombre), usuario:profiles(nombre_completo)`)
-            .eq('usuario_id', user.id)
+            .eq('usuario_id', uid)
             .eq('estado', 'abierta')
             .maybeSingle()
 
@@ -93,7 +95,11 @@ const fetcherCaja = async ([key, role]: [string, string]): Promise<CajaData> => 
 
         return { admin: null, recepcion: { sedes: sedes || [], turnoActivo, movimientos } }
     }
+
+    // RETORNO POR DEFECTO PARA QUE TYPESCRIPT NO LLORE
+    return { admin: null, recepcion: null }
 }
+
 
 const fetcherDetalle = async ([key, turnoId]: [string, string]) => {
     const supabase = createClient()
@@ -105,16 +111,16 @@ const fetcherDetalle = async ([key, turnoId]: [string, string]) => {
 }
 
 export default function CajaPage() {
-    const { checkStatus, userRole, isLoading: loadingContext } = useCash()
+    const { checkStatus, userRole, userId, isLoading: loadingContext } = useCash()
     const router = useRouter()
 
     // 🚀 SWR (Protegido por el Provider Global)
-    const { data, isLoading, mutate } = useSWR(
-        !loadingContext && userRole ? ['caja-dashboard', userRole] : null,
+    const { data, isLoading, mutate, error } = useSWR(
+        !loadingContext && userRole && userId ? ['caja-dashboard', userRole, userId] : null,
         fetcherCaja,
         {
             refreshInterval: userRole === 'admin' ? 10000 : 0,
-            revalidateOnFocus: false // Refuerzo anti-cuelgue
+            revalidateOnFocus: userRole === 'recepcion' // 👈 Dejamos esto activado
         }
     )
 
@@ -125,6 +131,7 @@ export default function CajaPage() {
     const [recienCerrada, setRecienCerrada] = useState(false)
     const [nuevoMovimiento, setNuevoMovimiento] = useState({ tipo: 'ingreso', concepto: '', monto: '', metodo: 'efectivo' })
     const [cajaDetalle, setCajaDetalle] = useState<any>(null)
+    const [cerrandoCajas, setCerrandoCajas] = useState(false)
 
     const { data: movimientosDetalle, isLoading: loadingDetalle } = useSWR(
         cajaDetalle ? ['caja-detalle', cajaDetalle.id] : null,
@@ -174,6 +181,25 @@ export default function CajaPage() {
         }
 
         setProcesando(false)
+    }
+
+    const handleCierreGlobal = async () => {
+        const confirmacion1 = window.confirm('⚠️ ADVERTENCIA: Estás por cerrar TODOS los turnos de caja activos de todos los usuarios.')
+        if (!confirmacion1) return
+
+        const confirmacion2 = window.confirm('¿Estás absolutamente seguro? Los usuarios tendrán que abrir un nuevo turno mañana.')
+        if (!confirmacion2) return
+
+        setCerrandoCajas(true)
+        const response = await cerrarTodasLasCajasAction()
+
+        if (response.success) {
+            toast.success('Todas las cajas han sido cerradas forzosamente.')
+            mutate() // Refresca las cajas activas
+        } else {
+            toast.error(response.error || 'Hubo un error al cerrar las cajas.')
+        }
+        setCerrandoCajas(false)
     }
 
     const handleCerrarCaja = async () => {
@@ -242,6 +268,12 @@ export default function CajaPage() {
     if (isLoading || loadingContext) return (
         <div className="min-h-screen bg-[#050505] flex items-center justify-center">
             <Loader2 className="animate-spin text-[#D4E655] w-10 h-10" />
+        </div>
+    )
+    if (error) return (
+        <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center text-red-500">
+            <AlertOctagon size={40} className="mb-4" />
+            <p className="font-bold uppercase tracking-widest text-xs">Error de conexión: {error.message}</p>
         </div>
     )
 
@@ -360,7 +392,21 @@ export default function CajaPage() {
                         <p className="text-3xl font-black text-white">{cajasActivas.length}</p>
                     </div>
                 </div>
-
+                {userRole === 'admin' && (
+                    <button
+                        onClick={handleCierreGlobal}
+                        disabled={cerrandoCajas}
+                        className="bg-red-600/20 text-red-500 border border-red-600/30 px-6 py-3 mb-3 md:mb-6 rounded-xl font-black uppercase text-xs hover:bg-red-600 hover:text-white transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(220,38,38,0.2)]"
+                    >
+                        {cerrandoCajas ? (
+                            <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                            <>
+                                <AlertOctagon size={16} /> Forzar Cierre Global
+                            </>
+                        )}
+                    </button>
+                )}
                 <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2">
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" /> En Vivo
                 </h2>

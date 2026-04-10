@@ -61,3 +61,42 @@ export async function registrarMovimientoAction(payload: any) {
         return { success: false, error: error.message }
     }
 }
+export async function cerrarTodasLasCajasAction() {
+    const supabase = await createClient()
+    try {
+        // 🔒 BLINDAJE: Verificamos sesión segura
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        // 🔒 VERIFICACIÓN DE ROL: Solo el Admin puede apretar el botón de pánico
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('rol')
+            .eq('id', session.user.id)
+            .single()
+
+        if (!profile || profile.rol !== 'admin') {
+            throw new Error('Solo un Administrador puede forzar el cierre global.')
+        }
+
+        // 🕒 Calculamos la fecha y hora actual para el registro
+        const fechaCierre = new Date().toISOString()
+
+        // 🚀 ACCIÓN: Actualizamos todas las cajas abiertas a cerradas
+        const { error } = await supabase
+            .from('caja_turnos')
+            .update({
+                estado: 'cerrada',
+                fecha_cierre: fechaCierre
+            })
+            .eq('estado', 'abierta')
+
+        if (error) throw new Error(error.message)
+
+        // Refrescamos la vista (cambiá '/finanzas' por la ruta donde esté tu panel de cajas)
+        revalidatePath('/finanzas')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
