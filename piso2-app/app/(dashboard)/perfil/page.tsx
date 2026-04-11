@@ -84,38 +84,27 @@ function PerfilContent() {
     // 🚀 MANEJO DE PAGO (RADAR ANTI-CUELGUES)
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
-        let radarInterval: NodeJS.Timeout
 
         if (pagoStatus && !pagoNotificado.current) {
-            pagoNotificado.current = true
+            pagoNotificado.current = true // Lo marcamos para que no se repita nunca más
 
             if (pagoStatus === 'exito') {
-                toast.success('¡Pago aprobado! Sincronizando tus créditos...', { duration: 5000 })
+                toast.success('¡Pago procesado! Sincronizando tus créditos...', { duration: 5000 })
 
-                // RADAR: Busca datos nuevos 5 veces (cada 2 seg)
-                let intentos = 0
-                radarInterval = setInterval(async () => {
-                    intentos++
-                    console.log(`📡 Buscando créditos nuevos... (Intento ${intentos}/5)`)
-                    await mutate()
-                    if (intentos >= 5) clearInterval(radarInterval)
-                }, 2000)
+                // En vez de un bucle, le pedimos a SWR que actualice suavemente en 2 momentos clave
+                setTimeout(() => mutate(), 2500) // Primer intento
+                setTimeout(() => mutate(), 5000) // Segundo intento por si MP tarda
 
             } else if (pagoStatus === 'error') {
-                toast.error('El pago no se procesó o fue rechazado.')
+                toast.error('El pago no se pudo procesar o fue rechazado.')
             } else if (pagoStatus === 'pendiente') {
-                toast.info('Pago pendiente. Se sumará cuando MP lo apruebe.')
+                toast.info('Tu pago está pendiente. Los créditos se sumarán al aprobarse.')
             }
 
-            // 🚀 EL FIX: Usamos el router de Next.js para limpiar la URL, NUNCA window.history
-            router.replace('/perfil', { scroll: false })
+            // ❌ ACÁ ESTABA EL ERROR: Borramos completamente las instrucciones router.replace()
+            // Dejar el ?pago=exito en la barra de direcciones es seguro y evita que Next.js se tilde.
         }
-
-        // LIMPIEZA: Si el alumno cambia de página, apagamos el radar para liberar memoria
-        return () => {
-            if (radarInterval) clearInterval(radarInterval)
-        }
-    }, [searchParams, router, mutate])
+    }, [searchParams, mutate])
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const inputElement = e.target;
