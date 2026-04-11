@@ -93,15 +93,32 @@ function PerfilContent() {
             pagoNotificado.current = true
 
             if (pagoStatus === 'exito') {
-                toast.success('¡Pago procesado! Actualizando créditos...', { duration: 4000 })
-                // Le damos 2 segundos al Webhook de MP para que impacte la base de datos
-                setTimeout(() => mutate(), 2000)
-            }
-            else if (pagoStatus === 'error') toast.error('El pago no se procesó.')
-            else if (pagoStatus === 'pendiente') toast.info('Tu pago está pendiente de confirmación.')
+                toast.success('¡Pago aprobado! Sincronizando tus créditos...', { duration: 5000 })
 
-            // Limpiamos la URL al estilo Next.js
-            router.replace('/perfil', { scroll: false })
+                // Limpiamos la URL para que no quede el ?pago=exito molestando
+                router.replace('/perfil', { scroll: false })
+
+                // 📡 EL RADAR: Le obligamos a SWR a buscar datos frescos cada 2 segundos
+                let intentos = 0
+                const radarInterval = setInterval(async () => {
+                    intentos++
+                    console.log(`📡 Buscando créditos nuevos... (Intento ${intentos}/5)`)
+
+                    await mutate() // SWR va a la BD y actualiza la pantalla al instante
+
+                    // A los 10 segundos (5 intentos) apagamos el radar
+                    if (intentos >= 5) {
+                        clearInterval(radarInterval)
+                    }
+                }, 2000)
+
+            } else if (pagoStatus === 'error') {
+                toast.error('El pago no se pudo procesar o fue rechazado.')
+                router.replace('/perfil', { scroll: false })
+            } else if (pagoStatus === 'pendiente') {
+                toast.info('Tu pago está pendiente. Los créditos se sumarán al aprobarse.')
+                router.replace('/perfil', { scroll: false })
+            }
         }
     }, [searchParams, router, mutate])
 
