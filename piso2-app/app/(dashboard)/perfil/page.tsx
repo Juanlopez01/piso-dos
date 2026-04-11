@@ -32,7 +32,7 @@ const fetcherPerfil = async (): Promise<PerfilData> => {
         const data = await obtenerDatosPerfilAction();
         return data as PerfilData;
     } catch (error: any) {
-        // Si el servidor lanza el error NO_AUTH, lo respetamos para redirigir
+        // Si el servidor lanza el error NO_AUTH, lo respetamos para mostrar la pantalla de error
         throw new Error(error.message || "Error al cargar perfil");
     }
 }
@@ -49,10 +49,6 @@ function PerfilContent() {
         fetcherPerfil,
         { revalidateOnFocus: true }
     )
-
-    useEffect(() => {
-        if (error?.message === "NO_AUTH") router.push('/login')
-    }, [error, router])
 
     const profile = data?.profile || null
     const historialClases = data?.historialClases || []
@@ -85,42 +81,35 @@ function PerfilContent() {
         }
     }, [profile, userEmail])
 
-    // 🚀 MANEJO DE PAGO SEGURO Y ESTÁNDAR
+    // 🚀 MANEJO DE PAGO (RADAR ANTI-CUELGUES)
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
 
         if (pagoStatus && !pagoNotificado.current) {
             pagoNotificado.current = true
 
+            // Limpiamos la URL de forma nativa (NO dispara re-renders agresivos en Next.js)
+            window.history.replaceState(null, '', '/perfil')
+
             if (pagoStatus === 'exito') {
                 toast.success('¡Pago aprobado! Sincronizando tus créditos...', { duration: 5000 })
 
-                // Limpiamos la URL para que no quede el ?pago=exito molestando
-                router.replace('/perfil', { scroll: false })
-
-                // 📡 EL RADAR: Le obligamos a SWR a buscar datos frescos cada 2 segundos
+                // RADAR: Busca datos nuevos 5 veces (cada 2 seg), sin trabar la pantalla
                 let intentos = 0
                 const radarInterval = setInterval(async () => {
                     intentos++
                     console.log(`📡 Buscando créditos nuevos... (Intento ${intentos}/5)`)
-
-                    await mutate() // SWR va a la BD y actualiza la pantalla al instante
-
-                    // A los 10 segundos (5 intentos) apagamos el radar
-                    if (intentos >= 5) {
-                        clearInterval(radarInterval)
-                    }
+                    await mutate()
+                    if (intentos >= 5) clearInterval(radarInterval)
                 }, 2000)
 
             } else if (pagoStatus === 'error') {
-                toast.error('El pago no se pudo procesar o fue rechazado.')
-                router.replace('/perfil', { scroll: false })
+                toast.error('El pago no se procesó o fue rechazado.')
             } else if (pagoStatus === 'pendiente') {
-                toast.info('Tu pago está pendiente. Los créditos se sumarán al aprobarse.')
-                router.replace('/perfil', { scroll: false })
+                toast.info('Pago pendiente. Se sumará cuando MP lo apruebe.')
             }
         }
-    }, [searchParams, router, mutate])
+    }, [searchParams, mutate])
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const inputElement = e.target;
@@ -216,13 +205,12 @@ function PerfilContent() {
     }
 
     if (error || !profile) {
-        if (error?.message === "NO_AUTH") return null;
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-4">
                 <AlertTriangle className="text-orange-500 w-16 h-16" />
-                <h2 className="text-white font-black text-2xl">Error de Conexión</h2>
-                <p className="text-red-400 text-xs">{error?.message}</p>
-                <button onClick={() => window.location.reload()} className="bg-white/10 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white hover:text-black">Refrescar</button>
+                <h2 className="text-white font-black text-2xl">Sesión Expirada o Error</h2>
+                <p className="text-red-400 text-xs text-center max-w-xs">{error?.message || 'No se pudo cargar el perfil.'}</p>
+                <button onClick={() => window.location.href = '/login'} className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors">Volver a Ingresar</button>
             </div>
         )
     }
