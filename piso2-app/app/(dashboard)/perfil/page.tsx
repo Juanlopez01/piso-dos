@@ -84,19 +84,17 @@ function PerfilContent() {
     // 🚀 MANEJO DE PAGO (RADAR ANTI-CUELGUES)
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
+        let radarInterval: NodeJS.Timeout
 
         if (pagoStatus && !pagoNotificado.current) {
             pagoNotificado.current = true
 
-            // Limpiamos la URL de forma nativa (NO dispara re-renders agresivos en Next.js)
-            window.history.replaceState(null, '', '/perfil')
-
             if (pagoStatus === 'exito') {
                 toast.success('¡Pago aprobado! Sincronizando tus créditos...', { duration: 5000 })
 
-                // RADAR: Busca datos nuevos 5 veces (cada 2 seg), sin trabar la pantalla
+                // RADAR: Busca datos nuevos 5 veces (cada 2 seg)
                 let intentos = 0
-                const radarInterval = setInterval(async () => {
+                radarInterval = setInterval(async () => {
                     intentos++
                     console.log(`📡 Buscando créditos nuevos... (Intento ${intentos}/5)`)
                     await mutate()
@@ -108,6 +106,11 @@ function PerfilContent() {
             } else if (pagoStatus === 'pendiente') {
                 toast.info('Pago pendiente. Se sumará cuando MP lo apruebe.')
             }
+        }
+
+        // LIMPIEZA: Si el alumno toca un botón y cambia de página, apagamos el radar para que no trabe nada
+        return () => {
+            if (radarInterval) clearInterval(radarInterval)
         }
     }, [searchParams, mutate])
 
