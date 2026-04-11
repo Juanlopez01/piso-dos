@@ -172,12 +172,7 @@ function TiendaContent() {
         if (!userId) return toast.error('Debes iniciar sesión')
         if (!selectedPack) return
 
-        const nuevaPestana = window.open('about:blank', '_blank')
-        if (nuevaPestana) {
-            nuevaPestana.document.write('<h2 style="font-family:sans-serif;text-align:center;margin-top:50px;">Conectando con Mercado Pago...</h2>')
-        }
-
-        setGenerandoPago(true)
+        setGenerandoPago(true) // Ponemos el botón a girar
         try {
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
@@ -193,27 +188,18 @@ function TiendaContent() {
             const responseData = await res.json()
 
             if (!res.ok || responseData.error) {
-                if (nuevaPestana) nuevaPestana.close()
                 toast.error("Hubo un error al generar el pago: " + responseData.error)
                 setGenerandoPago(false)
                 return
             }
 
             if (responseData.url) {
-                if (nuevaPestana) {
-                    nuevaPestana.location.href = responseData.url
-                } else {
-                    window.location.href = responseData.url
-                }
-
-                toast.success('Pestaña de pago abierta. ¡Volvé cuando termines!', { duration: 5000 })
-                setIsCheckoutOpen(false)
+                // 🚀 LA MAGIA: Navegamos en la misma pestaña exactamente
+                window.location.href = responseData.url
             }
 
         } catch (error: any) {
-            if (nuevaPestana) nuevaPestana.close()
             toast.error(error.message)
-        } finally {
             setGenerandoPago(false)
         }
     }
