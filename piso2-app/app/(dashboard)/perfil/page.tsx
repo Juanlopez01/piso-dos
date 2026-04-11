@@ -106,13 +106,16 @@ function PerfilContent() {
             } else if (pagoStatus === 'pendiente') {
                 toast.info('Pago pendiente. Se sumará cuando MP lo apruebe.')
             }
+
+            // 🚀 EL FIX: Usamos el router de Next.js para limpiar la URL, NUNCA window.history
+            router.replace('/perfil', { scroll: false })
         }
 
-        // LIMPIEZA: Si el alumno toca un botón y cambia de página, apagamos el radar para que no trabe nada
+        // LIMPIEZA: Si el alumno cambia de página, apagamos el radar para liberar memoria
         return () => {
             if (radarInterval) clearInterval(radarInterval)
         }
-    }, [searchParams, mutate])
+    }, [searchParams, router, mutate])
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const inputElement = e.target;
