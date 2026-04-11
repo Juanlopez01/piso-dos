@@ -26,24 +26,22 @@ type PerfilData = {
     proximoVencimiento: PackVencimiento | null
 }
 
-// 🚀 FETCHER LIMPIO Y DIRECTO
 const fetcherPerfil = async (): Promise<PerfilData> => {
     try {
         const data = await obtenerDatosPerfilAction();
         return data as PerfilData;
     } catch (error: any) {
-        // Si el servidor lanza el error NO_AUTH, lo respetamos para mostrar la pantalla de error
         throw new Error(error.message || "Error al cargar perfil");
     }
 }
 
 function PerfilContent() {
-    const supabase = createClient()
+    // 🚀 EL SEGUNDO FIX MÁGICO
+    const [supabase] = useState(() => createClient())
     const searchParams = useSearchParams()
     const router = useRouter()
     const pagoNotificado = useRef(false)
 
-    // 🚀 SWR Estándar
     const { data, error, isLoading, mutate } = useSWR<PerfilData>(
         'mi-perfil',
         fetcherPerfil,
@@ -69,7 +67,7 @@ function PerfilContent() {
     })
 
     useEffect(() => {
-        if (profile) {
+        if (profile && !formData.telefono) {
             setFormData({
                 nombre: profile.nombre || '', apellido: profile.apellido || '', email: userEmail,
                 telefono: profile.telefono || '', alias_cbu: profile.alias_cbu || '',
@@ -79,32 +77,42 @@ function PerfilContent() {
                 condiciones_medicas: profile.condiciones_medicas || '', apto_fisico_url: profile.apto_fisico_url || ''
             })
         }
-    }, [profile, userEmail])
+    }, [profile, userEmail, formData.telefono])
 
-    // 🚀 MANEJO DE PAGO (RADAR ANTI-CUELGUES)
+    // 🚀 EL RADAR FLUIDO (Ahora sí funciona porque no hay bucles bloqueando la pantalla)
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
+        let radarInterval: NodeJS.Timeout
 
         if (pagoStatus && !pagoNotificado.current) {
-            pagoNotificado.current = true // Lo marcamos para que no se repita nunca más
+            pagoNotificado.current = true
 
             if (pagoStatus === 'exito') {
-                toast.success('¡Pago procesado! Sincronizando tus créditos...', { duration: 5000 })
+                toast.success('¡Pago aprobado! Sincronizando tus créditos...', { duration: 5000 })
 
-                // En vez de un bucle, le pedimos a SWR que actualice suavemente en 2 momentos clave
-                setTimeout(() => mutate(), 2500) // Primer intento
-                setTimeout(() => mutate(), 5000) // Segundo intento por si MP tarda
+                // Limpiamos la URL sin miedo
+                router.replace('/perfil', { scroll: false })
+
+                let intentos = 0
+                radarInterval = setInterval(async () => {
+                    intentos++
+                    await mutate()
+                    if (intentos >= 5) clearInterval(radarInterval)
+                }, 2000)
 
             } else if (pagoStatus === 'error') {
-                toast.error('El pago no se pudo procesar o fue rechazado.')
+                toast.error('El pago no se procesó o fue rechazado.')
+                router.replace('/perfil', { scroll: false })
             } else if (pagoStatus === 'pendiente') {
-                toast.info('Tu pago está pendiente. Los créditos se sumarán al aprobarse.')
+                toast.info('Pago pendiente. Se sumará cuando MP lo apruebe.')
+                router.replace('/perfil', { scroll: false })
             }
-
-            // ❌ ACÁ ESTABA EL ERROR: Borramos completamente las instrucciones router.replace()
-            // Dejar el ?pago=exito en la barra de direcciones es seguro y evita que Next.js se tilde.
         }
-    }, [searchParams, mutate])
+
+        return () => {
+            if (radarInterval) clearInterval(radarInterval)
+        }
+    }, [searchParams, router, mutate])
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const inputElement = e.target;
@@ -203,7 +211,7 @@ function PerfilContent() {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-4">
                 <AlertTriangle className="text-orange-500 w-16 h-16" />
-                <h2 className="text-white font-black text-2xl">Sesión Expirada o Error</h2>
+                <h2 className="text-white font-black text-2xl">Error de Sesión</h2>
                 <p className="text-red-400 text-xs text-center max-w-xs">{error?.message || 'No se pudo cargar el perfil.'}</p>
                 <button onClick={() => window.location.href = '/login'} className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors">Volver a Ingresar</button>
             </div>
