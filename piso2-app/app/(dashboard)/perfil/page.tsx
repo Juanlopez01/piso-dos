@@ -13,37 +13,51 @@ import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 
-import { actualizarPerfilAction, obtenerDatosPerfilAction } from '@/app/actions/perfil'
+import { actualizarPerfilAction } from '@/app/actions/perfil'
+import { useCash } from '@/context/CashContext'
 
 type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; inicio: string; tipo_clase: string; profesor: { nombre_completo: string } } }
 type PackVencimiento = { fecha_vencimiento: string; creditos_restantes: number; tipo_clase: string }
 
 type PerfilData = {
     profile: any
-    email: string | undefined
     historialClases: HistorialClase[]
     avisos: any[]
     proximoVencimiento: PackVencimiento | null
 }
 
-const fetcherPerfil = async (): Promise<PerfilData> => {
-    try {
-        const data = await obtenerDatosPerfilAction();
-        return data as PerfilData;
-    } catch (error: any) {
-        throw new Error(error.message || "Error al cargar perfil");
+// 🚀 FETCHER BLINDADO
+const fetcherPerfil = async ([key, uid]: [string, string]): Promise<PerfilData> => {
+    const supabase = createClient()
+
+    const [profileReq, historialReq, avisosReq, packsReq] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', uid).single(),
+        supabase.from('clase_alumnos').select(`id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))`).eq('alumno_id', uid).order('created_at', { ascending: false }),
+        supabase.from('avisos').select('*').order('created_at', { ascending: false }),
+        supabase.from('alumno_packs').select('*').eq('user_id', uid).eq('estado', 'activo').order('fecha_vencimiento', { ascending: true }).limit(1)
+    ])
+
+    return {
+        profile: profileReq.data,
+        historialClases: historialReq.data || [],
+        avisos: avisosReq.data || [],
+        proximoVencimiento: packsReq.data?.[0] || null
     }
 }
 
 function PerfilContent() {
-    // 🚀 EL SEGUNDO FIX MÁGICO
     const [supabase] = useState(() => createClient())
     const searchParams = useSearchParams()
     const router = useRouter()
+
+    // 🛡️ REFS PARA FRENAR BUCLES
     const pagoNotificado = useRef(false)
+    const formInicializado = useRef(false)
+
+    const { userId, isLoading: contextLoading } = useCash()
 
     const { data, error, isLoading, mutate } = useSWR<PerfilData>(
-        'mi-perfil',
+        !contextLoading && userId ? ['mi-perfil', userId] : null,
         fetcherPerfil,
         { revalidateOnFocus: true }
     )
@@ -52,7 +66,7 @@ function PerfilContent() {
     const historialClases = data?.historialClases || []
     const avisos = data?.avisos || []
     const proximoVencimiento = data?.proximoVencimiento || null
-    const userEmail = data?.email || ''
+    const userEmail = profile?.email || ''
 
     const [saving, setSaving] = useState(false)
     const [uploadingFile, setUploadingFile] = useState(false)
@@ -66,8 +80,9 @@ function PerfilContent() {
         edad: '', direccion: '', contacto_emergencia: '', plan_medico: '', condiciones_medicas: '', apto_fisico_url: ''
     })
 
+    // 🚀 INICIALIZACIÓN DE FORMULARIO DE FORMA SEGURA (UNA SOLA VEZ)
     useEffect(() => {
-        if (profile && !formData.telefono) {
+        if (profile && !formInicializado.current) {
             setFormData({
                 nombre: profile.nombre || '', apellido: profile.apellido || '', email: userEmail,
                 telefono: profile.telefono || '', alias_cbu: profile.alias_cbu || '',
@@ -76,10 +91,11 @@ function PerfilContent() {
                 contacto_emergencia: profile.contacto_emergencia || '', plan_medico: profile.plan_medico || '',
                 condiciones_medicas: profile.condiciones_medicas || '', apto_fisico_url: profile.apto_fisico_url || ''
             })
+            formInicializado.current = true // Apaga el bucle
         }
-    }, [profile, userEmail, formData.telefono])
+    }, [profile, userEmail])
 
-    // 🚀 EL RADAR FLUIDO (Ahora sí funciona porque no hay bucles bloqueando la pantalla)
+    // 🚀 RADAR FLUIDO (SEGURO CONTRA CONGELAMIENTOS)
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
         let radarInterval: NodeJS.Timeout
@@ -90,7 +106,6 @@ function PerfilContent() {
             if (pagoStatus === 'exito') {
                 toast.success('¡Pago aprobado! Sincronizando tus créditos...', { duration: 5000 })
 
-                // Limpiamos la URL sin miedo
                 router.replace('/perfil', { scroll: false })
 
                 let intentos = 0
@@ -199,7 +214,7 @@ function PerfilContent() {
         try { await supabase.auth.signOut() } finally { window.location.href = '/' }
     }
 
-    if (isLoading) {
+    if (isLoading || contextLoading) {
         return (
             <div className="min-h-screen bg-[#050505] flex items-center justify-center">
                 <Loader2 className="animate-spin text-[#D4E655] w-12 h-12" />
@@ -207,13 +222,13 @@ function PerfilContent() {
         )
     }
 
-    if (error || !profile) {
+    if (error || (!profile && !contextLoading)) {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-4">
                 <AlertTriangle className="text-orange-500 w-16 h-16" />
-                <h2 className="text-white font-black text-2xl">Error de Sesión</h2>
+                <h2 className="text-white font-black text-2xl">Error de Conexión</h2>
                 <p className="text-red-400 text-xs text-center max-w-xs">{error?.message || 'No se pudo cargar el perfil.'}</p>
-                <button onClick={() => window.location.href = '/login'} className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors">Volver a Ingresar</button>
+                <button onClick={() => window.location.reload()} className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors">Refrescar</button>
             </div>
         )
     }
