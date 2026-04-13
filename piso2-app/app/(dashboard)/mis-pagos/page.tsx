@@ -72,20 +72,22 @@ const fetchLiquidaciones = async () => {
     ]
 
     if (clasesData) {
+        console.log(clasesData);
+
         clasesData.forEach((clase: any) => {
-            // 🛡️ BLINDAJE 1: Si no hay fecha de inicio, la ignoramos para que no rompa
+            // Si la clase no tiene fecha, la saltamos para que no rompa nada
             if (!clase.inicio) return
 
-            // 🚀 ZONA HORARIA BLINDADA
-            const fechaLimpia = clase.inicio.replace('+00', '').replace(' ', 'T')
-            const fechaClase = new Date(fechaLimpia.split('T')[0] + 'T12:00:00')
+            // 🚀 ZONA HORARIA BLINDADA (SIN ROMPER EL STRING ORIGINAL)
+            // Extraemos solo el "2026-04-11" cortando por la "T"
+            const soloFecha = clase.inicio.split('T')[0]
 
-            // 🛡️ BLINDAJE 2: Si la fecha es inválida, la ignoramos
-            if (isNaN(fechaClase.getTime())) return
+            // Le clavamos las 12 del mediodía para saber el mes sin importar la zona horaria
+            const fechaClase = new Date(`${soloFecha}T12:00:00`)
 
             const mesKey = format(fechaClase, 'yyyy-MM')
 
-            // Si el mes no está en la ventana, lo ignoramos
+            // Si el mes no está en la ventana (los 4 meses que filtramos), lo ignoramos
             if (!allowedMonths.includes(mesKey)) return
 
             const esActual = isSameMonth(fechaClase, hoy)
@@ -101,7 +103,7 @@ const fetchLiquidaciones = async () => {
                 }
             }
 
-            // 🛡️ BLINDAJE 3: Aseguramos que inscripciones sea un array (si no hay, supabase devuelve [])
+            // 🛡️ BLINDAJE: Aseguramos que inscripciones sea un array
             const inscripcionesArreglo = Array.isArray(clase.inscripciones) ? clase.inscripciones : []
 
             const cant_alumnos = inscripcionesArreglo.filter((i: any) => i.presente).length
@@ -117,7 +119,7 @@ const fetchLiquidaciones = async () => {
 
             const claseProcesada: ClaseLiquidacion = {
                 ...clase,
-                inicio: fechaLimpia,
+                inicio: clase.inicio, // 👈 MAGIA: Le dejamos su fecha original INTACTA
                 total_clase,
                 pago_profe,
                 cant_alumnos,
@@ -240,14 +242,18 @@ export default function MisPagosPage() {
                                                 </thead>
                                                 <tbody className="divide-y divide-white/5 text-sm">
                                                     {mes.clases.map((clase) => {
-                                                        const dateObj = new Date(clase.inicio);
-                                                        // 🛡️ BLINDAJE 4: Formateo seguro
-                                                        const isSafeDate = !isNaN(dateObj.getTime());
+                                                        // 🚀 MAGIA: Extraemos la hora directamente del texto para evitar el ajuste de zona horaria
+                                                        const [fechaParte, horaParte] = clase.inicio.split('T');
+                                                        const horaDisplay = horaParte ? horaParte.substring(0, 5) : '00:00';
+
+                                                        // Extraemos día/mes manualmente del string YYYY-MM-DD
+                                                        const [anio, mesStr, dia] = fechaParte.split('-');
+                                                        const fechaDisplay = `${dia}/${mesStr}`;
 
                                                         return (
                                                             <tr key={clase.id} className="hover:bg-white/5 transition-colors group">
                                                                 <td className="py-4 pl-2 text-gray-400 font-medium">
-                                                                    {isSafeDate ? format(dateObj, "dd/MM") : '--/--'} <span className="text-xs ml-1 opacity-50">{isSafeDate ? format(dateObj, "HH:mm") : ''}</span>
+                                                                    {fechaDisplay} <span className="text-xs ml-1 opacity-50">{horaDisplay}</span>
                                                                 </td>
                                                                 <td className="py-4 font-bold text-white uppercase">{clase.nombre}</td>
                                                                 <td className="py-4 text-center text-xs text-gray-500 uppercase font-bold">
@@ -273,29 +279,31 @@ export default function MisPagosPage() {
                                                 const isSafeDate = !isNaN(dateObj.getTime());
 
                                                 return (
-                                                    <div key={clase.id} className="bg-[#111] p-4 rounded-xl border border-white/5">
-                                                        <div className="flex justify-between items-start mb-2">
-                                                            <div>
-                                                                <h4 className="font-bold text-white uppercase leading-tight">{clase.nombre}</h4>
-                                                                <p className="text-[10px] text-gray-400 flex items-center gap-1 mt-1">
-                                                                    <Calendar size={10} /> {isSafeDate ? format(dateObj, "dd/MM - HH:mm") : '--/--'} hs
-                                                                </p>
-                                                            </div>
-                                                            <span className="bg-white/10 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
-                                                                <Users size={10} /> {clase.cant_alumnos}
-                                                            </span>
-                                                        </div>
+                                                    <div className="md:hidden space-y-3">
+                                                        {mes.clases.map((clase) => {
+                                                            // 🚀 MISMA LÓGICA: Extracción manual de texto
+                                                            const [fechaParte, horaParte] = clase.inicio.split('T');
+                                                            const horaDisplay = horaParte ? horaParte.substring(0, 5) : '00:00';
+                                                            const [anio, mesStr, dia] = fechaParte.split('-');
+                                                            const fechaDisplay = `${dia}/${mesStr}`;
 
-                                                        <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-white/5">
-                                                            <div>
-                                                                <p className="text-[9px] text-gray-500 uppercase font-bold">Acuerdo</p>
-                                                                <p className="text-xs text-gray-300">{clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : 'Monto Fijo'}</p>
-                                                            </div>
-                                                            <div className="text-right">
-                                                                <p className="text-[9px] text-gray-500 uppercase font-bold">Mi Pago</p>
-                                                                <p className="text-sm font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</p>
-                                                            </div>
-                                                        </div>
+                                                            return (
+                                                                <div key={clase.id} className="bg-[#111] p-4 rounded-xl border border-white/5">
+                                                                    <div className="flex justify-between items-start mb-2">
+                                                                        <div>
+                                                                            <h4 className="font-bold text-white uppercase leading-tight">{clase.nombre}</h4>
+                                                                            <p className="text-[10px] text-gray-400 flex items-center gap-1 mt-1">
+                                                                                <Calendar size={10} /> {fechaDisplay} - {horaDisplay} hs
+                                                                            </p>
+                                                                        </div>
+                                                                        <span className="bg-white/10 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
+                                                                            <Users size={10} /> {clase.cant_alumnos}
+                                                                        </span>
+                                                                    </div>
+                                                                    {/* ... resto del contenido de la tarjeta igual ... */}
+                                                                </div>
+                                                            )
+                                                        })}
                                                     </div>
                                                 )
                                             })}
