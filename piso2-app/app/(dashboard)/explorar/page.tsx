@@ -3,7 +3,7 @@
 import { createClient } from '@/utils/supabase/client'
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import useSWR from 'swr'
+import useSWR, { useSWRConfig } from 'swr' // 👈 FIX N°1: Importamos el mutador global
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
@@ -15,66 +15,33 @@ import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
 import Image from 'next/image'
 
-// 🚀 IMPORTAMOS LA ACCIÓN
 import { inscribirAlumnoAction } from '@/app/actions/cartelera'
 
-// --- FUNCIÓN ESCUDO PARA FECHAS ---
 const parseSafeDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return new Date()
-    // Limpiamos cualquier formato de zona horaria (+00:00, +00, Z) para forzar la hora local sin romper el string
     const cleanStr = dateStr.replace('+00:00', '').replace('+00', '').replace('Z', '').replace(' ', 'T')
     const parsed = new Date(cleanStr)
-    // Si la fecha es inválida, devolvemos la fecha actual para que la app no explote
     return isNaN(parsed.getTime()) ? new Date() : parsed
 }
 
-// --- TIPOS ---
-type ClaseInstancia = {
-    id: string
-    inicio: string
-    fin: string
-    cupo_maximo: number
-    inscritos_count: number
-    ya_inscrito: boolean
-    estado: string
-    sala: { nombre: string; sede: { nombre: string } }
-}
+type ClaseInstancia = { id: string; inicio: string; fin: string; cupo_maximo: number; inscritos_count: number; ya_inscrito: boolean; estado: string; sala: { nombre: string; sede: { nombre: string } } }
+type ClaseAgrupada = { key_grupo: string; nombre: string; tipo_clase: string; imagen_url?: string | null; ritmo_id?: string | null; profesor: { nombre_completo: string }; instancias: ClaseInstancia[] }
+type CarteleraData = { perfil: { id: string, creditos_regulares: number, creditos_seminarios: number } | null; clasesAgrupadas: ClaseAgrupada[] }
 
-type ClaseAgrupada = {
-    key_grupo: string
-    nombre: string
-    tipo_clase: string
-    imagen_url?: string | null
-    ritmo_id?: string | null
-    profesor: { nombre_completo: string }
-    instancias: ClaseInstancia[]
-}
-
-type CarteleraData = {
-    perfil: { id: string, creditos_regulares: number, creditos_seminarios: number } | null
-    clasesAgrupadas: ClaseAgrupada[]
-}
-
-// 🚀 FETCHER
-const fetcherCartelera = async (): Promise<CarteleraData> => {
-    const supabase = createClient()
-
-    // Extraemos session correctamente
+// 🚀 FIX N°2: Pasamos Supabase como parámetro para no crear 100 clientes
+const fetcherCartelera = async (supabase: any): Promise<CarteleraData> => {
     const { data: { session } } = await supabase.auth.getSession()
     const user = session?.user
 
     let profile = null
 
     if (user) {
-        // Limpieza de vencidos silenciosa
         supabase.rpc('limpiar_creditos_vencidos').then()
-
         const { data: userProfile } = await supabase
             .from('profiles')
             .select('id, creditos_regulares, creditos_seminarios')
             .eq('id', user.id)
             .single()
-
         profile = userProfile
     }
 
@@ -89,7 +56,7 @@ const fetcherCartelera = async (): Promise<CarteleraData> => {
         `)
         .gte('inicio', hoy)
         .neq('estado', 'cancelada')
-        .neq('tipo_clase', 'Formación') // Solo ignoramos Formación
+        .neq('tipo_clase', 'Formación')
         .order('inicio', { ascending: true })
 
     const agrupador: Record<string, ClaseAgrupada> = {}
@@ -125,10 +92,21 @@ const fetcherCartelera = async (): Promise<CarteleraData> => {
 
 export default function ExplorarClasesPage() {
     const router = useRouter()
-    const { data, isLoading, mutate } = useSWR<CarteleraData>('cartelera', fetcherCartelera, {
-        revalidateOnFocus: false, // 🛡️ Sincronizado por middleware
-        dedupingInterval: 3000
-    })
+
+    // Creamos el cliente UNA SOLA VEZ para toda la página
+    const [supabase] = useState(() => createClient())
+
+    // Traemos el mutador global que SÍ tiene permisos para tocar el Perfil
+    const { mutate: globalMutate } = useSWRConfig()
+
+    const { data, isLoading, mutate: mutateCartelera } = useSWR<CarteleraData>(
+        'cartelera',
+        () => fetcherCartelera(supabase), // Le inyectamos el cliente sano
+        {
+            revalidateOnFocus: false,
+            dedupingInterval: 3000
+        }
+    )
 
     const clasesAgrupadas = data?.clasesAgrupadas || []
     const perfil = data?.perfil || null
@@ -153,7 +131,7 @@ export default function ExplorarClasesPage() {
 
         setProcesandoId(instancia.id)
 
-        // 🚀 MUTACIÓN OPTIMISTA
+        // 🚀 MUTACIÓN OPTIMISTA AL INSTANTE
         const optimisticAgrupadas = clasesAgrupadas.map(g => {
             if (g.key_grupo === grupo.key_grupo) {
                 return {
@@ -164,25 +142,27 @@ export default function ExplorarClasesPage() {
             return g
         })
         const optimisticPerfil = { ...perfil, [columnaUpdate]: creditosActuales - 1 }
-        mutate({ perfil: optimisticPerfil, clasesAgrupadas: optimisticAgrupadas }, false)
 
-        // Llamada al servidor
+        await mutateCartelera({ perfil: optimisticPerfil, clasesAgrupadas: optimisticAgrupadas }, false)
+
         const response = await inscribirAlumnoAction(instancia.id, tipoClaseBD, grupo.ritmo_id)
 
         if (response.success) {
             toast.success(response.message)
-            setTimeout(() => mutate(), 500)
+            // Forzamos la actualización local
+            mutateCartelera()
+            // 🚀 FIX N°3: Le gritamos al Perfil que actualice sus datos usando el comando global
+            globalMutate('mi-perfil')
         } else {
             toast.error(response.error || 'Error al procesar reserva')
-            mutate() // Revertir optimismo
+            mutateCartelera() // Revertir optimismo si falla
         }
         setProcesandoId(null)
     }
 
     const gruposFiltrados = useMemo(() => {
         return clasesAgrupadas.filter(g => {
-            const coincideTexto = g.nombre.toLowerCase().includes(filtroTexto.toLowerCase()) ||
-                g.profesor.nombre_completo.toLowerCase().includes(filtroTexto.toLowerCase())
+            const coincideTexto = g.nombre.toLowerCase().includes(filtroTexto.toLowerCase()) || g.profesor.nombre_completo.toLowerCase().includes(filtroTexto.toLowerCase())
             const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(g.tipo_clase)
             let coincideTipo = filtroTipo === 'Todos' || (filtroTipo === 'Especial' ? esEspecial : !esEspecial)
             return coincideTexto && coincideTipo
@@ -281,7 +261,6 @@ export default function ExplorarClasesPage() {
                 })}
             </div>
 
-            {/* MODAL FECHAS */}
             {selectedGrupo && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setSelectedGrupo(null)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-xl rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
@@ -299,7 +278,6 @@ export default function ExplorarClasesPage() {
                                 const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(selectedGrupo.tipo_clase)
                                 const creditosDisponibles = perfil ? (esEspecial ? perfil.creditos_seminarios : perfil.creditos_regulares) : 0
 
-                                // 🚀 BLINDAJE DE ZONA HORARIA
                                 const inicioDate = parseSafeDate(inst.inicio)
                                 const finDate = parseSafeDate(inst.fin)
 

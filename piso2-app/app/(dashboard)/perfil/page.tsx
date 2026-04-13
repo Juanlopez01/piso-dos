@@ -111,10 +111,12 @@ function PerfilContent() {
 
             } else if (pagoStatus === 'error') {
                 toast.error('El pago no se procesó o fue rechazado.')
-                router.replace('/perfil', { scroll: false })
+                // Reemplazá los router.replace por esto:
+                window.history.replaceState(null, '', window.location.pathname)
             } else if (pagoStatus === 'pendiente') {
                 toast.info('Pago pendiente. Se sumará cuando MP lo apruebe.')
-                router.replace('/perfil', { scroll: false })
+                // Reemplazá los router.replace por esto:
+                window.history.replaceState(null, '', window.location.pathname)
             }
         }
 
