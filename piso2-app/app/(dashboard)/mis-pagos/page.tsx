@@ -275,8 +275,11 @@ export default function MisPagosPage() {
                                         {/* VERSIÓN MOBILE (Tarjetas Listadas) */}
                                         <div className="md:hidden space-y-3">
                                             {mes.clases.map((clase) => {
-                                                const dateObj = new Date(clase.inicio);
-                                                const isSafeDate = !isNaN(dateObj.getTime());
+                                                // 🚀 MISMA LÓGICA: Extracción manual de texto
+                                                const [fechaParte, horaParte] = clase.inicio.split('T');
+                                                const horaDisplay = horaParte ? horaParte.substring(0, 5) : '00:00';
+                                                const [anio, mesStr, dia] = fechaParte.split('-');
+                                                const fechaDisplay = `${dia}/${mesStr}`;
 
                                                 return (
                                                     <div key={clase.id} className="bg-[#111] p-4 rounded-xl border border-white/5">
@@ -284,7 +287,7 @@ export default function MisPagosPage() {
                                                             <div>
                                                                 <h4 className="font-bold text-white uppercase leading-tight">{clase.nombre}</h4>
                                                                 <p className="text-[10px] text-gray-400 flex items-center gap-1 mt-1">
-                                                                    <Calendar size={10} /> {isSafeDate ? format(dateObj, "dd/MM - HH:mm") : '--/--'} hs
+                                                                    <Calendar size={10} /> {fechaDisplay} - {horaDisplay} hs
                                                                 </p>
                                                             </div>
                                                             <span className="bg-white/10 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
