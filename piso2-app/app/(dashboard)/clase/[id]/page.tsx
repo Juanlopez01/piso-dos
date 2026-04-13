@@ -445,77 +445,101 @@ export default function ClaseDetallePage() {
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-lg rounded-3xl p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
                         <div className="flex justify-between mb-6"><h3 className={`text-2xl font-black uppercase ${clase?.es_audicion ? 'text-pink-500' : 'text-white'}`}>{clase?.es_audicion ? 'Nueva Audición' : 'Inscripción'}</h3><button onClick={() => setIsGuestOpen(false)}><X size={24} /></button></div>
                         <form onSubmit={handleAddGuest} className="space-y-5">
-                            {!clase?.es_audicion && (
+
+                            {/* 🚀 SI ES AUDICIÓN (Todos ven lo mismo) */}
+                            {clase?.es_audicion && (
                                 <>
-                                    {!alumnoSeleccionado ? (
-                                        <div className="relative">
-                                            <label className="text-[10px] font-bold text-[#D4E655] uppercase ml-1">Buscar Alumno</label>
-                                            <input placeholder="Nombre o email..." value={busquedaAlumno} onChange={e => setBusquedaAlumno(e.target.value)} className="w-full bg-[#111] border border-[#D4E655]/30 rounded-xl p-4 text-white outline-none focus:border-[#D4E655]" />
-                                            {resultadosBusqueda.length > 0 && (
-                                                <div className="absolute z-10 w-full mt-2 bg-[#1a1a1c] border border-white/10 rounded-xl overflow-hidden">
-                                                    {resultadosBusqueda.map(alum => (
-                                                        <div key={alum.id} onClick={() => { setAlumnoSeleccionado(alum); setBusquedaAlumno(''); setResultadosBusqueda([]); setGuestForm({ ...guestForm, tipo: alum.creditos_regulares > 0 ? 'usar_credito' : 'suelta' }) }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
-                                                            <div><p className="text-xs font-bold text-white uppercase">{alum.nombre_completo || alum.nombre}</p><p className="text-[10px] text-gray-500">{alum.email}</p></div>
-                                                            <span className="text-[9px] font-black bg-[#D4E655] text-black px-2 py-1 rounded">{alum.creditos_regulares} Cr</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 p-4 rounded-xl flex items-center justify-between">
-                                            <div><p className="text-xs font-bold text-white uppercase">{alumnoSeleccionado.nombre_completo}</p><p className="text-[9px] text-gray-500">Saldo: {alumnoSeleccionado.creditos_regulares} Reg / {alumnoSeleccionado.creditos_seminarios} Sem</p></div>
+                                    <div className="relative mb-4 pb-4 border-b border-white/10">
+                                        <label className="text-[10px] font-bold text-pink-500 uppercase ml-1">Buscar si ya es alumno (Opcional)</label>
+                                        <input placeholder="Nombre o email..." value={busquedaAlumno} onChange={e => setBusquedaAlumno(e.target.value)} className="w-full bg-[#111] border border-pink-500/30 rounded-xl p-4 text-white outline-none focus:border-pink-500" />
+                                        {resultadosBusqueda.length > 0 && (
+                                            <div className="absolute z-10 w-full mt-2 bg-[#1a1a1c] border border-white/10 rounded-xl overflow-hidden">
+                                                {resultadosBusqueda.map(alum => (
+                                                    <div key={alum.id} onClick={() => { setAlumnoSeleccionado(alum); setBusquedaAlumno(''); setResultadosBusqueda([]); }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
+                                                        <div><p className="text-xs font-bold text-white uppercase">{alum.nombre_completo || alum.nombre}</p><p className="text-[10px] text-gray-500">{alum.email}</p></div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {alumnoSeleccionado && (
+                                        <div className="bg-pink-500/10 border border-pink-500/30 p-4 rounded-xl flex items-center justify-between mb-4">
+                                            <div><p className="text-xs font-bold text-white uppercase">{alumnoSeleccionado.nombre_completo}</p><p className="text-[9px] text-pink-400">Alumno Registrado</p></div>
                                             <button type="button" onClick={() => setAlumnoSeleccionado(null)}><X size={16} /></button>
                                         </div>
                                     )}
-                                    <div className="grid grid-cols-4 gap-2">
-                                        {['usar_credito', 'suelta', 'pack', 'invitado'].map(t => (
-                                            <button key={t} type="button" onClick={() => setGuestForm({ ...guestForm, tipo: t as any })} className={`p-3 rounded-2xl border text-[8px] font-black uppercase ${guestForm.tipo === t ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-500'}`}>{t.replace('_', ' ')}</button>
-                                        ))}
-                                    </div>
+                                    {!alumnoSeleccionado && (
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <input required placeholder="Nombre" value={guestForm.nombre} onChange={e => setGuestForm({ ...guestForm, nombre: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+                                            <input required placeholder="Apellido" value={guestForm.apellido} onChange={e => setGuestForm({ ...guestForm, apellido: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+                                        </div>
+                                    )}
+                                    <input required={!alumnoSeleccionado} placeholder="Teléfono de contacto" type="tel" value={guestForm.telefono} onChange={e => setGuestForm({ ...guestForm, telefono: e.target.value })} className="w-full bg-[#111] border border-pink-500/30 rounded-xl p-4 text-sm outline-none focus:border-pink-500 mt-2" />
                                 </>
                             )}
 
-                            {/* BÚSQUEDA OPCIONAL PARA AUDICIONES */}
-                            {clase?.es_audicion && !alumnoSeleccionado && (
-                                <div className="relative mb-4 pb-4 border-b border-white/10">
-                                    <label className="text-[10px] font-bold text-pink-500 uppercase ml-1">Buscar si ya es alumno (Opcional)</label>
-                                    <input placeholder="Nombre o email..." value={busquedaAlumno} onChange={e => setBusquedaAlumno(e.target.value)} className="w-full bg-[#111] border border-pink-500/30 rounded-xl p-4 text-white outline-none focus:border-pink-500" />
-                                    {resultadosBusqueda.length > 0 && (
-                                        <div className="absolute z-10 w-full mt-2 bg-[#1a1a1c] border border-white/10 rounded-xl overflow-hidden">
-                                            {resultadosBusqueda.map(alum => (
-                                                <div key={alum.id} onClick={() => { setAlumnoSeleccionado(alum); setBusquedaAlumno(''); setResultadosBusqueda([]); }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
-                                                    <div><p className="text-xs font-bold text-white uppercase">{alum.nombre_completo || alum.nombre}</p><p className="text-[10px] text-gray-500">{alum.email}</p></div>
+                            {/* 🚀 SI ES CLASE NORMAL */}
+                            {!clase?.es_audicion && (
+                                <>
+                                    {/* VISTA: ADMIN O RECEPCIÓN (Tienen acceso a la caja) */}
+                                    {['admin', 'recepcion', 'coordinador'].includes(userRole || '') ? (
+                                        <>
+                                            {!alumnoSeleccionado ? (
+                                                <div className="relative">
+                                                    <label className="text-[10px] font-bold text-[#D4E655] uppercase ml-1">Buscar Alumno</label>
+                                                    <input placeholder="Nombre o email..." value={busquedaAlumno} onChange={e => setBusquedaAlumno(e.target.value)} className="w-full bg-[#111] border border-[#D4E655]/30 rounded-xl p-4 text-white outline-none focus:border-[#D4E655]" />
+                                                    {resultadosBusqueda.length > 0 && (
+                                                        <div className="absolute z-10 w-full mt-2 bg-[#1a1a1c] border border-white/10 rounded-xl overflow-hidden">
+                                                            {resultadosBusqueda.map(alum => (
+                                                                <div key={alum.id} onClick={() => { setAlumnoSeleccionado(alum); setBusquedaAlumno(''); setResultadosBusqueda([]); setGuestForm({ ...guestForm, tipo: alum.creditos_regulares > 0 ? 'usar_credito' : 'suelta' }) }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
+                                                                    <div><p className="text-xs font-bold text-white uppercase">{alum.nombre_completo || alum.nombre}</p><p className="text-[10px] text-gray-500">{alum.email}</p></div>
+                                                                    <span className="text-[9px] font-black bg-[#D4E655] text-black px-2 py-1 rounded">{alum.creditos_regulares} Cr</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            ))}
+                                            ) : (
+                                                <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 p-4 rounded-xl flex items-center justify-between">
+                                                    <div><p className="text-xs font-bold text-white uppercase">{alumnoSeleccionado.nombre_completo}</p><p className="text-[9px] text-gray-500">Saldo: {alumnoSeleccionado.creditos_regulares} Reg / {alumnoSeleccionado.creditos_seminarios} Sem</p></div>
+                                                    <button type="button" onClick={() => setAlumnoSeleccionado(null)}><X size={16} /></button>
+                                                </div>
+                                            )}
+                                            <div className="grid grid-cols-4 gap-2">
+                                                {['usar_credito', 'suelta', 'pack', 'invitado'].map(t => (
+                                                    <button key={t} type="button" onClick={() => setGuestForm({ ...guestForm, tipo: t as any })} className={`p-3 rounded-2xl border text-[8px] font-black uppercase ${guestForm.tipo === t ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-500'}`}>{t.replace('_', ' ')}</button>
+                                                ))}
+                                            </div>
+                                            {guestForm.tipo === 'pack' && (
+                                                <select required value={guestForm.packSeleccionadoId} onChange={e => setGuestForm({ ...guestForm, packSeleccionadoId: e.target.value })} className="w-full bg-[#111] border border-[#D4E655]/30 rounded-xl p-4 text-white font-bold outline-none">
+                                                    <option value="">Seleccionar Pack...</option>
+                                                    {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} - ${p.precio.toLocaleString()}</option>)}
+                                                </select>
+                                            )}
+                                            {!alumnoSeleccionado && (
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <input required placeholder="Nombre" value={guestForm.nombre} onChange={e => setGuestForm({ ...guestForm, nombre: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+                                                    <input required placeholder="Apellido" value={guestForm.apellido} onChange={e => setGuestForm({ ...guestForm, apellido: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+                                                </div>
+                                            )}
+                                        </>
+                                    ) : (
+                                        // VISTA: PROFESORES (Solo pueden anotar invitados)
+                                        <div className="space-y-4">
+                                            <div className="bg-[#D4E655]/10 border border-[#D4E655]/20 p-4 rounded-xl mb-4">
+                                                <p className="text-xs text-[#D4E655] font-bold uppercase tracking-widest">Anotar Invitado</p>
+                                                <p className="text-[10px] text-gray-400 mt-1">Ingresá los datos de la persona que asiste como invitada a tu clase.</p>
+                                            </div>
+                                            {/* Forzamos el tipo "invitado" de fondo */}
+                                            <input type="hidden" value="invitado" />
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <input required placeholder="Nombre" value={guestForm.nombre} onChange={e => setGuestForm({ ...guestForm, nombre: e.target.value, tipo: 'invitado' })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+                                                <input required placeholder="Apellido" value={guestForm.apellido} onChange={e => setGuestForm({ ...guestForm, apellido: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+                                            </div>
+                                            <input placeholder="Teléfono de contacto (Opcional)" type="tel" value={guestForm.telefono} onChange={e => setGuestForm({ ...guestForm, telefono: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                         </div>
                                     )}
-                                </div>
-                            )}
-                            {clase?.es_audicion && alumnoSeleccionado && (
-                                <div className="bg-pink-500/10 border border-pink-500/30 p-4 rounded-xl flex items-center justify-between mb-4">
-                                    <div><p className="text-xs font-bold text-white uppercase">{alumnoSeleccionado.nombre_completo}</p><p className="text-[9px] text-pink-400">Alumno Registrado</p></div>
-                                    <button type="button" onClick={() => setAlumnoSeleccionado(null)}><X size={16} /></button>
-                                </div>
-                            )}
-
-                            {guestForm.tipo === 'pack' && !clase?.es_audicion && (
-                                <select required value={guestForm.packSeleccionadoId} onChange={e => setGuestForm({ ...guestForm, packSeleccionadoId: e.target.value })} className="w-full bg-[#111] border border-[#D4E655]/30 rounded-xl p-4 text-white font-bold outline-none">
-                                    <option value="">Seleccionar Pack...</option>
-                                    {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} - ${p.precio.toLocaleString()}</option>)}
-                                </select>
-                            )}
-
-                            {!alumnoSeleccionado && (
-                                <div className="grid grid-cols-2 gap-4">
-                                    <input required placeholder="Nombre" value={guestForm.nombre} onChange={e => setGuestForm({ ...guestForm, nombre: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
-                                    <input required placeholder="Apellido" value={guestForm.apellido} onChange={e => setGuestForm({ ...guestForm, apellido: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
-                                </div>
-                            )}
-
-                            {/* 🚀 INPUT DE TELÉFONO PARA AUDICIONES */}
-                            {clase?.es_audicion && (
-                                <input required={!alumnoSeleccionado} placeholder="Teléfono de contacto" type="tel" value={guestForm.telefono} onChange={e => setGuestForm({ ...guestForm, telefono: e.target.value })} className="w-full bg-[#111] border border-pink-500/30 rounded-xl p-4 text-sm outline-none focus:border-pink-500 mt-2" />
+                                </>
                             )}
 
                             <button disabled={processing} type="submit" className={`w-full py-5 rounded-2xl font-black uppercase text-sm tracking-widest transition-all mt-4 ${clase?.es_audicion ? 'bg-pink-500 hover:bg-pink-400 text-white' : 'bg-[#D4E655] hover:bg-white text-black'}`}>

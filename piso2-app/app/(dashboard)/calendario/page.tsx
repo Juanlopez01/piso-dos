@@ -579,7 +579,7 @@ export default function CalendarioPage() {
                                     {sedeFiltro !== 'todas' && (
                                         <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 p-3 rounded-lg flex items-center justify-between">
                                             <p className="text-[10px] text-[#D4E655] font-black uppercase tracking-widest flex items-center gap-2">
-                                                <Building2 size={12} /> Mostrando solo sede {sedes.find(s => s.id === sedeFiltro)?.nombre}
+                                                <Building2 size={12} /> Mostrando solo {sedes.find(s => s.id === sedeFiltro)?.nombre}
                                             </p>
                                             <button onClick={() => setSedeFiltro('todas')} className="text-[9px] bg-black/40 text-white px-2 py-1 rounded hover:bg-white hover:text-black transition-colors font-bold uppercase">Ver Todas</button>
                                         </div>

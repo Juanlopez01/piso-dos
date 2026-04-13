@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
+import useSWR from 'swr'
 import { format, isSameMonth, subMonths, addMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { Wallet, Calendar, Loader2, ChevronDown, ChevronUp, CheckCircle, Clock, Users } from 'lucide-react'
@@ -34,112 +35,130 @@ type MesAgrupado = {
     total_profe_mes: number
 }
 
-export default function MisPagosPage() {
-    const [supabase] = useState(() => createClient())
-    const [meses, setMeses] = useState<MesAgrupado[]>([])
-    const [loading, setLoading] = useState(true)
-    const [expandedMonth, setExpandedGroup] = useState<string | null>(null)
-    const [userName, setUserName] = useState('')
+// 🚀 FETCHER EXTERNO CON SWR Y BLINDAJE
+const fetchLiquidaciones = async () => {
+    const supabase = createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    const user = session?.user
 
-    useEffect(() => {
-        fetchLiquidaciones()
-    }, [])
+    if (!user) throw new Error("No autenticado")
 
-    const fetchLiquidaciones = async () => {
-        setLoading(true)
-        // 🚀 BLINDAJE: getSession en vez de getUser
-        const { data: { session } } = await supabase.auth.getSession()
-        const user = session?.user
+    // 1. Nombre del profe
+    const { data: profile } = await supabase.from('profiles').select('nombre').eq('id', user.id).single()
+    const userName = profile?.nombre || ''
 
-        if (!user) return
+    // 2. Traer todas las clases
+    const { data: clasesData, error } = await supabase
+        .from('clases')
+        .select(`
+            id, nombre, inicio, tipo_acuerdo, valor_acuerdo, estado,
+            inscripciones ( valor_credito, presente )
+        `)
+        .eq('profesor_id', user.id)
+        .neq('estado', 'cancelada')
+        .order('inicio', { ascending: false })
 
-        // 1. Nombre del profe
-        const { data: profile } = await supabase.from('profiles').select('nombre').eq('id', user.id).single()
-        if (profile) setUserName(profile.nombre || '')
+    if (error) throw error
 
-        // 2. Traer todas las clases de este profe (que no estén canceladas) junto con sus inscripciones
-        const { data: clasesData } = await supabase
-            .from('clases')
-            .select(`
-                id, nombre, inicio, tipo_acuerdo, valor_acuerdo, estado,
-                inscripciones ( valor_credito, presente )
-            `)
-            .eq('profesor_id', user.id)
-            .neq('estado', 'cancelada')
-            .order('inicio', { ascending: false })
+    const agrupados: Record<string, MesAgrupado> = {}
+    const hoy = new Date()
 
-        if (clasesData) {
-            const agrupados: Record<string, MesAgrupado> = {}
-            const hoy = new Date()
+    // Filtro de meses permitidos: 2 pasados, el actual, y 1 futuro
+    const allowedMonths = [
+        format(subMonths(hoy, 2), 'yyyy-MM'),
+        format(subMonths(hoy, 1), 'yyyy-MM'),
+        format(hoy, 'yyyy-MM'),
+        format(addMonths(hoy, 1), 'yyyy-MM')
+    ]
 
-            // Filtro de meses permitidos: 2 pasados, el actual, y 1 futuro
-            const allowedMonths = [
-                format(subMonths(hoy, 2), 'yyyy-MM'),
-                format(subMonths(hoy, 1), 'yyyy-MM'),
-                format(hoy, 'yyyy-MM'),
-                format(addMonths(hoy, 1), 'yyyy-MM')
-            ]
+    if (clasesData) {
+        clasesData.forEach((clase: any) => {
+            // 🛡️ BLINDAJE 1: Si no hay fecha de inicio, la ignoramos para que no rompa
+            if (!clase.inicio) return
 
-            clasesData.forEach((clase: any) => {
-                // 🚀 ZONA HORARIA BLINDADA: Evitamos saltos de mes a la noche.
-                const fechaLimpia = clase.inicio.replace('+00', '').replace(' ', 'T')
-                const fechaClase = new Date(fechaLimpia.split('T')[0] + 'T12:00:00') // Forzamos el mediodía
-                const mesKey = format(fechaClase, 'yyyy-MM')
+            // 🚀 ZONA HORARIA BLINDADA
+            const fechaLimpia = clase.inicio.replace('+00', '').replace(' ', 'T')
+            const fechaClase = new Date(fechaLimpia.split('T')[0] + 'T12:00:00')
 
-                // Si el mes de la clase no está en nuestra ventana permitida, lo ignoramos
-                if (!allowedMonths.includes(mesKey)) return
+            // 🛡️ BLINDAJE 2: Si la fecha es inválida, la ignoramos
+            if (isNaN(fechaClase.getTime())) return
 
-                const esActual = isSameMonth(fechaClase, hoy)
+            const mesKey = format(fechaClase, 'yyyy-MM')
 
-                if (!agrupados[mesKey]) {
-                    agrupados[mesKey] = {
-                        mesKey,
-                        nombreMes: format(fechaClase, "MMMM yyyy", { locale: es }),
-                        esActual,
-                        clases: [],
-                        total_recaudado_mes: 0,
-                        total_profe_mes: 0
-                    }
+            // Si el mes no está en la ventana, lo ignoramos
+            if (!allowedMonths.includes(mesKey)) return
+
+            const esActual = isSameMonth(fechaClase, hoy)
+
+            if (!agrupados[mesKey]) {
+                agrupados[mesKey] = {
+                    mesKey,
+                    nombreMes: format(fechaClase, "MMMM yyyy", { locale: es }),
+                    esActual,
+                    clases: [],
+                    total_recaudado_mes: 0,
+                    total_profe_mes: 0
                 }
-
-                // Calcular totales de esta clase específica
-                const cant_alumnos = clase.inscripciones?.filter((i: any) => i.presente).length || 0
-                const total_clase = clase.inscripciones?.reduce((acc: number, insc: any) => acc + (Number(insc.valor_credito) || 0), 0) || 0
-
-                let pago_profe = 0
-                if (clase.tipo_acuerdo === 'fijo') {
-                    pago_profe = Number(clase.valor_acuerdo) || 0
-                } else {
-                    const porcentaje = (Number(clase.valor_acuerdo) || 0) / 100
-                    pago_profe = total_clase * porcentaje
-                }
-
-                const claseProcesada: ClaseLiquidacion = {
-                    ...clase,
-                    inicio: fechaLimpia, // Guardamos la fecha limpia para mostrarla después
-                    total_clase,
-                    pago_profe,
-                    cant_alumnos
-                }
-
-                agrupados[mesKey].clases.push(claseProcesada)
-                agrupados[mesKey].total_recaudado_mes += total_clase
-                agrupados[mesKey].total_profe_mes += pago_profe
-            })
-
-            // Convertir objeto a Array y ordenar del más reciente al más viejo
-            const listaMeses = Object.values(agrupados).sort((a, b) => b.mesKey.localeCompare(a.mesKey))
-            setMeses(listaMeses)
-
-            if (listaMeses.length > 0) {
-                setExpandedGroup(listaMeses[0].mesKey)
             }
-        }
 
-        setLoading(false)
+            // 🛡️ BLINDAJE 3: Aseguramos que inscripciones sea un array (si no hay, supabase devuelve [])
+            const inscripcionesArreglo = Array.isArray(clase.inscripciones) ? clase.inscripciones : []
+
+            const cant_alumnos = inscripcionesArreglo.filter((i: any) => i.presente).length
+            const total_clase = inscripcionesArreglo.reduce((acc: number, insc: any) => acc + (Number(insc.valor_credito) || 0), 0)
+
+            let pago_profe = 0
+            if (clase.tipo_acuerdo === 'fijo') {
+                pago_profe = Number(clase.valor_acuerdo) || 0
+            } else {
+                const porcentaje = (Number(clase.valor_acuerdo) || 0) / 100
+                pago_profe = total_clase * porcentaje
+            }
+
+            const claseProcesada: ClaseLiquidacion = {
+                ...clase,
+                inicio: fechaLimpia,
+                total_clase,
+                pago_profe,
+                cant_alumnos,
+                inscripciones: inscripcionesArreglo
+            }
+
+            agrupados[mesKey].clases.push(claseProcesada)
+            agrupados[mesKey].total_recaudado_mes += total_clase
+            agrupados[mesKey].total_profe_mes += pago_profe
+        })
     }
 
-    if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
+    const listaMeses = Object.values(agrupados).sort((a, b) => b.mesKey.localeCompare(a.mesKey))
+    return { meses: listaMeses, userName }
+}
+
+export default function MisPagosPage() {
+    const [expandedMonth, setExpandedGroup] = useState<string | null>(null)
+
+    // 🚀 USAMOS SWR PARA CACHEO Y ESTADO DE CARGA
+    const { data, isLoading, error } = useSWR('liquidaciones-profe', fetchLiquidaciones, {
+        revalidateOnFocus: false
+    })
+
+    // Expandir el primer mes automáticamente cuando llegan los datos
+    useEffect(() => {
+        if (data?.meses && data.meses.length > 0 && !expandedMonth) {
+            setExpandedGroup(data.meses[0].mesKey)
+        }
+    }, [data?.meses, expandedMonth])
+
+    if (isLoading) {
+        return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
+    }
+
+    if (error) {
+        return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-red-500 font-bold uppercase">Error al cargar pagos</div>
+    }
+
+    const meses = data?.meses || []
+    const userName = data?.userName || ''
 
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
@@ -169,7 +188,7 @@ export default function MisPagosPage() {
                         return (
                             <div key={mes.mesKey} className={`bg-[#09090b] border ${mes.esActual ? 'border-[#D4E655]/30' : 'border-white/10'} rounded-2xl overflow-hidden transition-all duration-300 shadow-xl`}>
 
-                                {/* CABECERA DEL MES (Click para abrir/cerrar) */}
+                                {/* CABECERA DEL MES */}
                                 <button
                                     onClick={() => setExpandedGroup(isOpen ? null : mes.mesKey)}
                                     className="w-full p-5 flex flex-col md:flex-row justify-between items-start md:items-center bg-[#111]/50 hover:bg-[#111] transition-colors text-left gap-4"
@@ -203,7 +222,7 @@ export default function MisPagosPage() {
                                     </div>
                                 </button>
 
-                                {/* CUADRO TIPO EXCEL (Detalle expandible) */}
+                                {/* CUADRO TIPO EXCEL */}
                                 <div className={`transition-all duration-300 overflow-hidden ${isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
                                     <div className="p-4 md:p-6 border-t border-white/5 bg-[#09090b]">
 
@@ -222,10 +241,13 @@ export default function MisPagosPage() {
                                                 <tbody className="divide-y divide-white/5 text-sm">
                                                     {mes.clases.map((clase) => {
                                                         const dateObj = new Date(clase.inicio);
+                                                        // 🛡️ BLINDAJE 4: Formateo seguro
+                                                        const isSafeDate = !isNaN(dateObj.getTime());
+
                                                         return (
                                                             <tr key={clase.id} className="hover:bg-white/5 transition-colors group">
                                                                 <td className="py-4 pl-2 text-gray-400 font-medium">
-                                                                    {format(dateObj, "dd/MM")} <span className="text-xs ml-1 opacity-50">{format(dateObj, "HH:mm")}</span>
+                                                                    {isSafeDate ? format(dateObj, "dd/MM") : '--/--'} <span className="text-xs ml-1 opacity-50">{isSafeDate ? format(dateObj, "HH:mm") : ''}</span>
                                                                 </td>
                                                                 <td className="py-4 font-bold text-white uppercase">{clase.nombre}</td>
                                                                 <td className="py-4 text-center text-xs text-gray-500 uppercase font-bold">
@@ -248,13 +270,15 @@ export default function MisPagosPage() {
                                         <div className="md:hidden space-y-3">
                                             {mes.clases.map((clase) => {
                                                 const dateObj = new Date(clase.inicio);
+                                                const isSafeDate = !isNaN(dateObj.getTime());
+
                                                 return (
                                                     <div key={clase.id} className="bg-[#111] p-4 rounded-xl border border-white/5">
                                                         <div className="flex justify-between items-start mb-2">
                                                             <div>
                                                                 <h4 className="font-bold text-white uppercase leading-tight">{clase.nombre}</h4>
                                                                 <p className="text-[10px] text-gray-400 flex items-center gap-1 mt-1">
-                                                                    <Calendar size={10} /> {format(dateObj, "dd/MM - HH:mm")} hs
+                                                                    <Calendar size={10} /> {isSafeDate ? format(dateObj, "dd/MM - HH:mm") : '--/--'} hs
                                                                 </p>
                                                             </div>
                                                             <span className="bg-white/10 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
