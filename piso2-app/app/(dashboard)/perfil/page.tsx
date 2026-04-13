@@ -13,35 +13,27 @@ import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 
-import { actualizarPerfilAction } from '@/app/actions/perfil'
-import { useCash } from '@/context/CashContext'
+// 🚀 VOLVEMOS A TU SERVER ACTION ORIGINAL
+import { actualizarPerfilAction, obtenerDatosPerfilAction } from '@/app/actions/perfil'
 
 type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; inicio: string; tipo_clase: string; profesor: { nombre_completo: string } } }
 type PackVencimiento = { fecha_vencimiento: string; creditos_restantes: number; tipo_clase: string }
 
 type PerfilData = {
     profile: any
+    email: string | undefined
     historialClases: HistorialClase[]
     avisos: any[]
     proximoVencimiento: PackVencimiento | null
 }
 
-// 🚀 FETCHER BLINDADO
-const fetcherPerfil = async ([key, uid]: [string, string]): Promise<PerfilData> => {
-    const supabase = createClient()
-
-    const [profileReq, historialReq, avisosReq, packsReq] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', uid).single(),
-        supabase.from('clase_alumnos').select(`id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))`).eq('alumno_id', uid).order('created_at', { ascending: false }),
-        supabase.from('avisos').select('*').order('created_at', { ascending: false }),
-        supabase.from('alumno_packs').select('*').eq('user_id', uid).eq('estado', 'activo').order('fecha_vencimiento', { ascending: true }).limit(1)
-    ])
-
-    return {
-        profile: profileReq.data,
-        historialClases: historialReq.data || [],
-        avisos: avisosReq.data || [],
-        proximoVencimiento: packsReq.data?.[0] || null
+// 🚀 EL FETCHER QUE SIEMPRE ANDUVO BIEN
+const fetcherPerfil = async (): Promise<PerfilData> => {
+    try {
+        const data = await obtenerDatosPerfilAction();
+        return data as PerfilData;
+    } catch (error: any) {
+        throw new Error(error.message || "Error al cargar perfil");
     }
 }
 
@@ -50,14 +42,13 @@ function PerfilContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
 
-    // 🛡️ REFS PARA FRENAR BUCLES
+    // 🛡️ REFS DE BLINDAJE
     const pagoNotificado = useRef(false)
     const formInicializado = useRef(false)
 
-    const { userId, isLoading: contextLoading } = useCash()
-
+    // SWR LIMPIO (Sin depender del CashContext)
     const { data, error, isLoading, mutate } = useSWR<PerfilData>(
-        !contextLoading && userId ? ['mi-perfil', userId] : null,
+        'mi-perfil',
         fetcherPerfil,
         { revalidateOnFocus: true }
     )
@@ -66,7 +57,7 @@ function PerfilContent() {
     const historialClases = data?.historialClases || []
     const avisos = data?.avisos || []
     const proximoVencimiento = data?.proximoVencimiento || null
-    const userEmail = profile?.email || ''
+    const userEmail = data?.email || ''
 
     const [saving, setSaving] = useState(false)
     const [uploadingFile, setUploadingFile] = useState(false)
@@ -80,7 +71,7 @@ function PerfilContent() {
         edad: '', direccion: '', contacto_emergencia: '', plan_medico: '', condiciones_medicas: '', apto_fisico_url: ''
     })
 
-    // 🚀 INICIALIZACIÓN DE FORMULARIO DE FORMA SEGURA (UNA SOLA VEZ)
+    // 🚀 EL FRENO DE MANO QUE EVITA EL CONGELAMIENTO
     useEffect(() => {
         if (profile && !formInicializado.current) {
             setFormData({
@@ -91,11 +82,11 @@ function PerfilContent() {
                 contacto_emergencia: profile.contacto_emergencia || '', plan_medico: profile.plan_medico || '',
                 condiciones_medicas: profile.condiciones_medicas || '', apto_fisico_url: profile.apto_fisico_url || ''
             })
-            formInicializado.current = true // Apaga el bucle
+            formInicializado.current = true
         }
     }, [profile, userEmail])
 
-    // 🚀 RADAR FLUIDO (SEGURO CONTRA CONGELAMIENTOS)
+    // 🚀 EL RADAR FLUIDO DE MERCADO PAGO
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
         let radarInterval: NodeJS.Timeout
@@ -214,7 +205,7 @@ function PerfilContent() {
         try { await supabase.auth.signOut() } finally { window.location.href = '/' }
     }
 
-    if (isLoading || contextLoading) {
+    if (isLoading) {
         return (
             <div className="min-h-screen bg-[#050505] flex items-center justify-center">
                 <Loader2 className="animate-spin text-[#D4E655] w-12 h-12" />
@@ -222,7 +213,7 @@ function PerfilContent() {
         )
     }
 
-    if (error || (!profile && !contextLoading)) {
+    if (error || !profile) {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-4">
                 <AlertTriangle className="text-orange-500 w-16 h-16" />
