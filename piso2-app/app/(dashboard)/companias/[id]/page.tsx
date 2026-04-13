@@ -6,7 +6,8 @@ import { useParams, useRouter } from 'next/navigation'
 import {
     Loader2, UsersRound, Shield, ArrowLeft,
     MessageSquare, Calendar, Users, Info,
-    Clock, MapPin, User, ChevronRight, Image as ImageIcon
+    Clock, MapPin, User, ChevronRight, Image as ImageIcon,
+    Send // 🚀 IMPORTAMOS EL ICONO DE ENVIAR
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
@@ -52,6 +53,13 @@ export default function CompaniaDetallePage() {
 
     // Pestañas de navegación interna
     const [activeTab, setActiveTab] = useState<'muro' | 'clases' | 'miembros'>('muro')
+
+    // 🚀 ESTADOS PARA EL MURO / AVISOS
+    const [notifMessage, setNotifMessage] = useState('')
+    const [sendingNotif, setSendingNotif] = useState(false)
+
+    // 🚀 DEFINIMOS QUIÉN ES STAFF (Tienen superpoderes en el muro)
+    const isStaffGeneral = ['admin', 'recepcion', 'coordinador'].includes(userRole || '')
 
     useEffect(() => {
         if (!loadingContext) {
@@ -166,6 +174,34 @@ export default function CompaniaDetallePage() {
         setLoading(false)
     }
 
+    // 🚀 NUEVA FUNCIÓN: ENVIAR AVISO A LA COMPAÑÍA
+    const handleSendNotif = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (miembros.length === 0) return toast.error("El grupo no tiene integrantes aún.")
+
+        setSendingNotif(true)
+        try {
+            const notifs = miembros.map(m => ({
+                usuario_id: m.id,
+                titulo: `Aviso: ${compania?.nombre}`,
+                mensaje: notifMessage,
+                link: `/companias/${compania?.id}`,
+                leido: false
+            }))
+
+            const { error } = await supabase.from('notificaciones').insert(notifs)
+            if (error) throw error
+
+            toast.success("Aviso enviado a todos los integrantes")
+            setNotifMessage('')
+        } catch (error: any) {
+            console.error("Error al enviar aviso:", error)
+            toast.error("Hubo un error al enviar el aviso.")
+        } finally {
+            setSendingNotif(false)
+        }
+    }
+
     if (loading || loadingContext) {
         return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-blue-500 w-12 h-12" /></div>
     }
@@ -243,11 +279,39 @@ export default function CompaniaDetallePage() {
                             </div>
                         </div>
 
-                        <div className="text-center py-20 border border-dashed border-white/10 rounded-3xl bg-[#111]/50">
-                            <MessageSquare size={32} className="mx-auto mb-3 text-gray-600" />
-                            <p className="text-gray-500 font-bold uppercase text-sm">El muro está vacío</p>
-                            <p className="text-xs text-gray-600 mt-1">Pronto los coordinadores podrán publicar avisos acá.</p>
-                        </div>
+                        {/* 🚀 FORMULARIO DE AVISOS (SOLO STAFF GENERAL) */}
+                        {isStaffGeneral ? (
+                            <div className="bg-[#111] border border-white/5 rounded-3xl p-6 relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
+                                <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-4 relative z-10">
+                                    <MessageSquare size={18} className="text-blue-500" /> Publicar en el Muro
+                                </h3>
+                                <form onSubmit={handleSendNotif} className="relative z-10 space-y-4">
+                                    <textarea
+                                        required
+                                        value={notifMessage}
+                                        onChange={e => setNotifMessage(e.target.value)}
+                                        placeholder="Escribí un aviso para todos los integrantes de la compañía..."
+                                        className="w-full bg-[#09090b] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-blue-500 min-h-[120px] resize-none transition-colors"
+                                    />
+                                    <div className="flex justify-end">
+                                        <button
+                                            disabled={sendingNotif}
+                                            type="submit"
+                                            className="w-full md:w-auto px-8 py-4 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-blue-500 transition-colors shadow-lg"
+                                        >
+                                            {sendingNotif ? <Loader2 className="animate-spin" /> : <><Send size={16} /> Enviar Aviso a {miembros.length} Alumnos</>}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        ) : (
+                            <div className="text-center py-20 border border-dashed border-white/10 rounded-3xl bg-[#111]/50">
+                                <MessageSquare size={32} className="mx-auto mb-3 text-gray-600" />
+                                <p className="text-gray-500 font-bold uppercase text-sm">El muro de avisos</p>
+                                <p className="text-xs text-gray-600 mt-1">Los coordinadores publicarán información importante acá.</p>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -297,10 +361,10 @@ export default function CompaniaDetallePage() {
                                                 </div>
                                             </div>
 
-                                            {/* Action */}
+                                            {/* Action (Aparece botón de gestionar si es Staff, si no el alumno puede ver la clase) */}
                                             <div className="p-4 bg-[#09090b] border-t border-white/5 mt-auto">
-                                                <Link href={`/clase/${clase.id}`} className="w-full bg-blue-600/10 text-blue-400 border border-blue-600/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">
-                                                    Detalles de la Clase <ChevronRight size={14} />
+                                                <Link href={isStaffGeneral ? `/clase/${clase.id}` : `/mis-clases`} className="w-full bg-blue-600/10 text-blue-400 border border-blue-600/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">
+                                                    {isStaffGeneral ? 'Gestionar / Lista' : 'Ir a Mis Clases'} <ChevronRight size={14} />
                                                 </Link>
                                             </div>
                                         </div>

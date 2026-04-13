@@ -13,7 +13,7 @@ import Link from 'next/link'
 import {
     crearCompaniaAction,
     toggleMiembroCompaniaAction,
-    eliminarCompaniaAction // 👈 Agregamos esta
+    eliminarCompaniaAction
 } from '@/app/actions/companias'
 
 type Compania = {
@@ -84,6 +84,7 @@ export default function CompaniasPage() {
                 queryCompanias = queryCompanias.eq('id', '00000000-0000-0000-0000-000000000000') // Truco para que venga vacío
             }
         }
+        // 🚀 SI ES ADMIN O RECEPCIÓN: El query pasa directo sin filtros (.eq) y trae todas las compañías
 
         const { data: dataCompanias } = await queryCompanias
 
@@ -95,8 +96,8 @@ export default function CompaniasPage() {
             setCompanias(companiasConConteo)
         }
 
-        // 2. Si es Admin o Coordinador, traemos datos para gestionar
-        if (['admin', 'coordinador'].includes(rol)) {
+        // 2. Si es Admin, Recepción o Coordinador, traemos datos para gestionar
+        if (['admin', 'recepcion', 'coordinador'].includes(rol)) { // 🚀 Agregamos recepcion acá
             const { data: coords } = await supabase
                 .from('profiles')
                 .select('id, nombre_completo')
@@ -184,7 +185,8 @@ export default function CompaniasPage() {
 
     if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
-    const isAdminOrCoord = ['admin', 'coordinador'].includes(userRole)
+    // 🚀 BLINDAJE VISUAL: Definimos quiénes son "Staff General"
+    const isStaffGeneral = ['admin', 'recepcion', 'coordinador'].includes(userRole)
 
     return (
         <div className="min-h-screen bg-[#050505] text-white pb-24 selection:bg-[#D4E655] selection:text-black animate-in fade-in">
@@ -201,10 +203,10 @@ export default function CompaniasPage() {
                                 <span className="text-blue-400 font-bold text-[10px] tracking-[0.3em] uppercase">Grupos Exclusivos</span>
                             </div>
                             <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter text-white leading-none">
-                                Compañías {isAdminOrCoord && <span className="text-gray-500 text-2xl">/ Staff</span>}
+                                Compañías {isStaffGeneral && <span className="text-gray-500 text-2xl">/ Staff</span>}
                             </h1>
                         </div>
-                        {isAdminOrCoord && userRole === 'admin' && (
+                        {isStaffGeneral && (
                             <button onClick={() => setIsCreateModalOpen(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-blue-500 transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(37,99,235,0.3)]">
                                 <Plus size={16} /> Crear Grupo
                             </button>
@@ -215,8 +217,8 @@ export default function CompaniasPage() {
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
 
-                {/* VISTA ALUMNO (SIN COMPAÑÍA) */}
-                {!isAdminOrCoord && companias.length === 0 && (
+                {/* 🚀 VISTA ALUMNO (SIN COMPAÑÍA) - AHORA NO ECHA A RECEPCIÓN */}
+                {!isStaffGeneral && companias.length === 0 && (
                     <div className="min-h-[400px] flex flex-col items-center justify-center relative overflow-hidden">
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-blue-500/5 rounded-full blur-[100px] pointer-events-none" />
                         <div className="max-w-md w-full bg-[#09090b] border border-blue-500/20 rounded-3xl p-8 text-center relative z-10 animate-in zoom-in-95 duration-500 shadow-2xl shadow-blue-500/5">
@@ -233,11 +235,11 @@ export default function CompaniasPage() {
                     {companias.map((compania) => (
                         <div key={compania.id} className="bg-[#09090b] border border-white/5 rounded-3xl overflow-hidden flex flex-col transition-all group hover:border-blue-500/30 hover:shadow-[0_0_30px_rgba(37,99,235,0.1)] relative">
                             {/* BOTÓN DE ELIMINAR (SOLO ADMIN) */}
-                            {userRole === 'admin' && (
+                            {isStaffGeneral && (
                                 <div className="absolute top-4 right-4 z-20">
                                     <button
                                         onClick={(e) => {
-                                            e.preventDefault() // Evita que se disparen otras acciones
+                                            e.preventDefault()
                                             handleEliminarCompania(compania.id, compania.nombre)
                                         }}
                                         disabled={procesando}
@@ -272,7 +274,7 @@ export default function CompaniasPage() {
                                     Entrar al Espacio <ChevronRight size={16} />
                                 </Link>
 
-                                {isAdminOrCoord && (
+                                {isStaffGeneral && ( // 🚀 Ahora Recepción puede ver esto
                                     <button
                                         onClick={() => abrirGestionMiembros(compania)}
                                         className="w-full bg-white/5 text-white border border-white/10 font-bold uppercase py-3 rounded-xl hover:bg-white/10 transition-all text-xs tracking-widest flex items-center justify-center gap-2"

@@ -102,14 +102,38 @@ export default function NotificacionesPage() {
     const eliminarLeidas = async () => {
         if (!userId || !notificaciones) return
 
-        // Mutación optimista
+        // 1. Guardamos el estado anterior por si falla la base de datos
+        const estadoAnterior = [...notificaciones]
+
+        // 2. Mutación optimista (las borramos de la pantalla al instante)
         const nuevasNotifs = notificaciones.filter(n => !n.leido)
         mutate(nuevasNotifs, false)
 
-        // Impacto real
-        await supabase.from('notificaciones').delete().eq('usuario_id', userId).eq('leido', true)
+        // 3. Impacto real: Le pedimos a Supabase que borre y nos DEVUELVA lo que borró (.select)
+        const { data, error } = await supabase
+            .from('notificaciones')
+            .delete()
+            .eq('usuario_id', userId)
+            .eq('leido', true)
+            .select() // 🚀 CRÍTICO: Obliga a Supabase a confesar qué borró
+
+        if (error) {
+            console.error("❌ Error de Supabase:", error)
+            toast.error('Error al eliminar: ' + error.message)
+            mutate(estadoAnterior, false) // Revertimos la pantalla
+            return
+        }
+
+        // Si no dio error, pero la data viene vacía, ¡es culpa del RLS!
+        if (!data || data.length === 0) {
+            console.warn("⚠️ Supabase no borró nada. Probablemente falten permisos RLS para DELETE.")
+            toast.error('Faltan permisos en la base de datos para eliminar.')
+            mutate(estadoAnterior, false) // Revertimos la pantalla
+            return
+        }
+
         toast.success('Notificaciones leídas eliminadas')
-        mutate() // Sincronizamos
+        mutate() // Sincronizamos final
     }
 
     // --- ESTADOS DE CARGA Y ERROR ---

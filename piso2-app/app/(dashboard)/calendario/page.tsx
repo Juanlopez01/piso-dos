@@ -335,28 +335,31 @@ export default function CalendarioPage() {
         try {
             let query = supabase.from('profiles').select('id').eq('rol', 'alumno')
 
-            // Si es de La Liga, avisamos solo a los de ese nivel. Si no, a todos por defecto.
+            // 1. Si es de La Liga, avisamos a los de ese nivel específico.
             if (datosClase.esLaLiga) {
                 query = query.eq('nivel_liga', datosClase.ligaNivel)
             }
-            // 💡 NOTA: Si en el futuro agregás una columna 'intereses' a los perfiles, 
-            // podés descomentar y usar esta línea:
-            // query = query.contains('intereses', [datosClase.tipo])
+            // 2. Si es una clase Regular y tiene un ritmo, buscamos en el array de intereses
+            else if (datosClase.ritmoId) {
+                // 🚀 MAGIA: Busca si el ID del ritmo de la clase está adentro del array del alumno
+                query = query.contains('intereses_ritmos', [datosClase.ritmoId])
+            }
 
             const { data: alumnos, error } = await query
 
+            // Si falla o no hay nadie con ese interés, cortamos silenciosamente
             if (error || !alumnos || alumnos.length === 0) return
 
             const notifs = alumnos.map((a: { id: string }) => ({
-                user_id: a.id,
+                usuario_id: a.id, // 🚀 Volvimos a usuario_id como está en tu Base de Datos
                 titulo: `¡Nueva clase: ${datosClase.nombre}!`,
-                mensaje: `Se abrió un nuevo horario de ${datosClase.tipo}. ¡Asegurá tu lugar antes de que se llene!`,
+                mensaje: `Se abrió un nuevo horario. ¡Asegurá tu lugar antes de que se llene!`,
                 link: '/explorar',
                 leido: false
             }))
 
             await supabase.from('notificaciones').insert(notifs)
-            console.log(`✅ Megáfono activado: Se avisó de la nueva clase a ${alumnos.length} alumnos.`)
+            console.log(`✅ Megáfono activado: Se avisó de la nueva clase a ${alumnos.length} alumnos interesados.`)
         } catch (error) {
             console.error('Error al enviar notificaciones automáticas:', error)
         }
@@ -603,7 +606,7 @@ export default function CalendarioPage() {
                                                                     </span>
                                                                     <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><GraduationCap size={10} /> {evt.clase_data?.nivel}</span>
                                                                     {evt.clase_data?.es_audicion && <span className="flex items-center gap-1 bg-pink-500/10 text-pink-400 border border-pink-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Sparkles size={10} className="text-pink-500" /> Audición</span>}
-                                                                    {evt.clase_data?.es_la_liga && <span className="flex items-center gap-1 bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Star size={10} className="fill-yellow-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})</span>}
+                                                                    {evt.clase_data?.es_la_liga && <span className="flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})</span>}
                                                                     {evt.clase_data?.compania_nombre && <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><UsersRound size={10} className="text-blue-500" /> {evt.clase_data.compania_nombre}</span>}
                                                                 </>
                                                             ) : (<span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><User size={10} /> Cliente Externo</span>)}
@@ -611,13 +614,33 @@ export default function CalendarioPage() {
                                                         <div className="flex items-end justify-between border-t border-white/5 pt-2 mt-auto gap-2">
                                                             {evt.tipo === 'Clase' ? (
                                                                 <>
-                                                                    <button onClick={(e) => { e.stopPropagation(); prepararEdicion(evt) }} className="text-gray-500 hover:text-blue-400 p-2 bg-white/5 rounded hover:bg-blue-400/10 transition-colors ml-1"><Pencil size={14} /></button>
+                                                                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); prepararEdicion(evt) }} className="text-gray-500 hover:text-blue-400 p-2 bg-white/5 rounded hover:bg-blue-400/10 transition-colors ml-1"><Pencil size={14} /></button>
                                                                     <a href={`/clase/${evt.id}`} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase py-2 rounded hover:bg-white transition-colors text-center shadow-[0_0_10px_rgba(212,230,85,0.2)]">Gestionar / Lista</a>
-                                                                    <button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: evt.id, serieId: evt.clase_data?.serie_id || null }) }} className="text-gray-500 hover:text-red-500 p-2 bg-white/5 rounded hover:bg-red-500/10 transition-colors ml-1"><Trash2 size={14} /></button>
+                                                                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget({ id: evt.id, serieId: evt.clase_data?.serie_id || null }) }} className="text-gray-500 hover:text-red-500 p-2 bg-white/5 rounded hover:bg-red-500/10 transition-colors ml-1"><Trash2 size={14} /></button>
                                                                 </>
                                                             ) : (<div className="flex gap-2 w-full"><div className="flex-1 text-[10px] text-gray-500 italic flex items-center"><Info size={12} className="mr-1" /> Alquiler externo</div><a href="/alquileres" className="px-3 py-2 bg-white/10 text-white rounded text-[10px] font-bold uppercase hover:bg-white/20">Ver Alquileres</a></div>)}
                                                         </div>
                                                     </div>
+
+                                                    {/* 🚀 MODAL DE ELIMINAR BLINDADO (AHORA ES FLOTANTE GLOBAL) */}
+                                                    {deleteTarget?.id === evt.id && (
+                                                        <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] flex flex-col items-center justify-center p-4 text-center animate-in fade-in" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget(null); }}>
+                                                            <div className="bg-[#09090b] border border-red-500/30 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col items-center" onClick={e => e.stopPropagation()}>
+                                                                <AlertCircle className="text-red-500 mb-3" size={40} />
+                                                                <h4 className="text-white font-black uppercase text-lg mb-1">¿Cancelar Clase?</h4>
+                                                                <p className="text-gray-400 text-xs mb-6 leading-relaxed">Esta acción cancelará la clase de la agenda y no se puede revertir.</p>
+                                                                <div className="flex flex-col gap-3 w-full">
+                                                                    <div className="flex gap-3 w-full">
+                                                                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget(null) }} className="flex-1 py-3 bg-white/5 rounded-xl font-bold text-xs uppercase hover:bg-white/10 transition-colors">Volver</button>
+                                                                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleConfirmDelete('single') }} className="flex-[2] py-3 bg-red-500 text-white rounded-xl font-black text-xs uppercase hover:bg-red-600 shadow-[0_0_15px_rgba(239,68,68,0.3)] transition-colors">Solo esta clase</button>
+                                                                    </div>
+                                                                    {deleteTarget.serieId && (
+                                                                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleConfirmDelete('serie') }} className="w-full py-3 bg-red-950/50 border border-red-500/50 text-red-400 rounded-xl font-black text-xs uppercase hover:bg-red-900/50 transition-colors">Eliminar toda la serie</button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )
                                         })

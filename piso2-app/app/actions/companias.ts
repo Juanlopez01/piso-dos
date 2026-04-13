@@ -14,7 +14,7 @@ export async function crearCompaniaAction(payload: { nombre: string, descripcion
     try {
         // 🔒 Verificamos Rol
         const { data: profile } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
-        if (!profile || !['admin', 'coordinador'].includes(profile.rol)) {
+        if (!profile || !['admin', 'coordinador', 'recepcion'].includes(profile.rol)) {
             throw new Error('Solo administradores o coordinadores pueden crear grupos.')
         }
 
@@ -38,7 +38,7 @@ export async function toggleMiembroCompaniaAction(companiaId: string, alumnoId: 
     try {
         // 🔒 Verificamos Rol
         const { data: profile } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
-        if (!profile || !['admin', 'coordinador'].includes(profile.rol)) {
+        if (!profile || !['admin', 'coordinador', 'recepcion'].includes(profile.rol)) {
             throw new Error('No tenés permisos para modificar miembros.')
         }
 
@@ -64,7 +64,7 @@ export async function eliminarCompaniaAction(companiaId: string) {
         if (!session?.user) throw new Error('No autorizado')
 
         const { data: profile } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
-        if (!profile || profile.rol !== 'admin') throw new Error('Solo un Admin puede eliminar compañías')
+        if (!profile || profile.rol !== 'admin' && profile.rol !== 'recepcion' && profile.rol !== 'coordinador') throw new Error('Solo un Admin puede eliminar compañías')
 
         const { error } = await supabase.from('companias').delete().eq('id', companiaId)
         if (error) throw new Error(error.message)

@@ -8,11 +8,13 @@ import {
     ArrowLeft, Calendar, Clock, User, Check, X,
     DollarSign, FileText, UserPlus, Trash2, AlertTriangle,
     Wallet, CreditCard, Loader2, Users, Star, Ticket, Package,
-    BookOpen, BellRing, Send, Sparkles
+    BookOpen, BellRing, Send, Sparkles, Download // 🚀 IMPORTAMOS DOWNLOAD
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { Toaster, toast } from 'sonner'
+import jsPDF from 'jspdf' // 🚀 IMPORTAMOS GENERADOR DE PDF
+import autoTable from 'jspdf-autotable' // 🚀 IMPORTAMOS GENERADOR DE TABLAS PARA PDF
 
 // 🚀 IMPORTAMOS LAS ACTIONS
 import {
@@ -26,7 +28,7 @@ import {
 type Inscripcion = {
     id: string
     user_id: string | null
-    user: { nombre: string; apellido: string; nombre_completo?: string; email: string } | null
+    user: { nombre: string; apellido: string; nombre_completo?: string; email: string, telefono?: string | null } | null
     nombre_invitado: string | null
     modalidad: string
     valor_credito: number
@@ -70,7 +72,7 @@ const fetcher = async ([key, id]: [string, string]) => {
         if (profile) role = profile.rol
     }
 
-    // ✅ ACÁ ESTÁ LA MAGIA: Le aclaramos a Supabase qué llave foránea usar (!profesor_id y !sala_id)
+    // ✅ ACÁ ESTÁ LA MAGIA: Le aclaramos a Supabase qué llave foránea usar
     const { data: dataClase, error: errorClase } = await supabase
         .from('clases')
         .select(`
@@ -85,9 +87,10 @@ const fetcher = async ([key, id]: [string, string]) => {
         console.error("🚨 Error al cargar la clase:", errorClase.message)
     }
 
+    // 🚀 AHORA TAMBIÉN TRAEMOS EL TELÉFONO DEL ALUMNO SI TIENE CUENTA
     const { data: dataInsc } = await supabase
         .from('inscripciones')
-        .select(`*, user:profiles!user_id(nombre, apellido, nombre_completo, email)`)
+        .select(`*, user:profiles!user_id(nombre, apellido, nombre_completo, email, telefono)`)
         .eq('clase_id', id)
         .order('created_at', { ascending: true })
 
@@ -217,9 +220,19 @@ export default function ClaseDetallePage() {
             let alumnoIdFinal = alumnoSeleccionado?.id || null
             let nombreInvitadoStr = null
 
+            // 🚀 LÓGICA PARA AUDICIONES ACTUALIZADA
             if (clase.es_audicion) {
                 guestForm.tipo = 'invitado'
-                nombreInvitadoStr = `${guestForm.nombre} ${guestForm.apellido} (${guestForm.telefono})`.trim()
+
+                // Extraemos el nombre de donde sea que venga (buscado o tipeado)
+                const nomFinal = alumnoIdFinal
+                    ? (alumnoSeleccionado?.nombre_completo || alumnoSeleccionado?.nombre)
+                    : `${guestForm.nombre} ${guestForm.apellido}`
+
+                const telFinal = guestForm.telefono ? `(${guestForm.telefono})` : ''
+
+                // Queda guardado como: "Juan Perez (3624112233)"
+                nombreInvitadoStr = `${nomFinal} ${telFinal}`.trim()
             } else {
                 if (guestForm.tipo === 'suelta') {
                     const precios = PRECIOS_ALUMNO[clase.tipo_clase === 'Especial' ? 'Especial' : 'Regular']
@@ -253,7 +266,7 @@ export default function ClaseDetallePage() {
             mutate()
             setIsGuestOpen(false)
             setAlumnoSeleccionado(null)
-            setGuestForm({ ...guestForm, nombre: '', apellido: '', email: '', packSeleccionadoId: '' })
+            setGuestForm({ ...guestForm, nombre: '', apellido: '', email: '', telefono: '', packSeleccionadoId: '' })
         } catch (err: any) {
             toast.error(err.message)
         } finally {
@@ -289,6 +302,67 @@ export default function ClaseDetallePage() {
         setSendingNotif(false)
     }
 
+    // 🚀 LÓGICA PARA GENERAR PDF DE AUDICIÓN
+    const handleDownloadPDF = () => {
+        if (!clase) return
+
+        const doc = new jsPDF()
+
+        // Título y Cabecera
+        doc.setFontSize(18)
+        doc.setFont("helvetica", "bold")
+        doc.text(`LISTA DE AUDICIÓN: ${clase.nombre.toUpperCase()}`, 14, 22)
+
+        doc.setFontSize(11)
+        doc.setFont("helvetica", "normal")
+        doc.setTextColor(100, 100, 100)
+        doc.text(`Fecha: ${fechaText} | Hora: ${horaText} hs | Sala: ${clase.sala.nombre}`, 14, 30)
+
+        // Preparar Datos para la Tabla
+        const tableColumn = ["#", "Participante", "Contacto", "Firma / Presente"]
+        const tableRows: any[] = []
+
+        inscripciones.forEach((insc, index) => {
+            let nombre = insc.user?.nombre_completo || [insc.user?.nombre, insc.user?.apellido].join(' ').trim() || insc.nombre_invitado || 'Sin nombre'
+            let contacto = insc.user?.telefono || insc.user?.email || '-'
+
+            // Extraer el teléfono escondido en los invitados tipo "Juan Perez (3624123456)"
+            if (insc.es_invitado && insc.nombre_invitado && insc.nombre_invitado.includes('(')) {
+                const match = insc.nombre_invitado.match(/(.*)\s\((.*)\)/)
+                if (match) {
+                    nombre = match[1].trim()
+                    contacto = match[2].trim()
+                }
+            }
+
+            tableRows.push([
+                (index + 1).toString(),
+                nombre,
+                contacto,
+                insc.presente ? 'PRESENTE' : '' // Queda vacío para firmar o tildar si no vino aún
+            ])
+        })
+
+        // Renderizar Tabla
+        autoTable(doc, {
+            head: [tableColumn],
+            body: tableRows,
+            startY: 40,
+            theme: 'grid',
+            headStyles: { fillColor: [236, 72, 153], textColor: [255, 255, 255], fontStyle: 'bold' }, // Color rosa Audición
+            alternateRowStyles: { fillColor: [250, 250, 250] },
+            styles: { fontSize: 10, cellPadding: 5 },
+            columnStyles: {
+                0: { cellWidth: 10 },
+                1: { cellWidth: 60 },
+                2: { cellWidth: 60 },
+                3: { cellWidth: 50 }, // Espacio para la firma
+            }
+        })
+
+        doc.save(`Audicion_${clase.nombre.replace(/\s+/g, '_')}.pdf`)
+    }
+
     if (isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-[#D4E655]"><Loader2 className="animate-spin" /></div>
 
     const showFinance = userRole === 'admin' || userRole === 'recepcion'
@@ -319,6 +393,12 @@ export default function ClaseDetallePage() {
                         </div>
                     </div>
                     <div className="flex gap-2 w-full md:w-auto">
+                        {/* 🚀 BOTÓN DE DESCARGA PDF */}
+                        {clase?.es_audicion && (
+                            <button onClick={handleDownloadPDF} className="flex-1 md:flex-none bg-white/5 border border-white/10 text-white px-4 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 hover:border-pink-500 hover:text-pink-400 transition-colors">
+                                <Download size={18} /> Lista
+                            </button>
+                        )}
                         <button onClick={() => setIsNotifModalOpen(true)} className="flex-1 md:flex-none bg-[#111] border border-white/10 text-white px-4 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 hover:border-[#D4E655]"><BellRing size={18} /> Aviso</button>
                         <button onClick={() => setIsGuestOpen(true)} className={`flex-1 md:flex-none px-6 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 ${clase?.es_audicion ? 'bg-pink-500' : 'bg-[#D4E655] text-black'}`}><UserPlus size={18} /> Inscribir</button>
                     </div>
@@ -395,19 +475,50 @@ export default function ClaseDetallePage() {
                                     </div>
                                 </>
                             )}
-                            {guestForm.tipo === 'pack' && (
+
+                            {/* BÚSQUEDA OPCIONAL PARA AUDICIONES */}
+                            {clase?.es_audicion && !alumnoSeleccionado && (
+                                <div className="relative mb-4 pb-4 border-b border-white/10">
+                                    <label className="text-[10px] font-bold text-pink-500 uppercase ml-1">Buscar si ya es alumno (Opcional)</label>
+                                    <input placeholder="Nombre o email..." value={busquedaAlumno} onChange={e => setBusquedaAlumno(e.target.value)} className="w-full bg-[#111] border border-pink-500/30 rounded-xl p-4 text-white outline-none focus:border-pink-500" />
+                                    {resultadosBusqueda.length > 0 && (
+                                        <div className="absolute z-10 w-full mt-2 bg-[#1a1a1c] border border-white/10 rounded-xl overflow-hidden">
+                                            {resultadosBusqueda.map(alum => (
+                                                <div key={alum.id} onClick={() => { setAlumnoSeleccionado(alum); setBusquedaAlumno(''); setResultadosBusqueda([]); }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
+                                                    <div><p className="text-xs font-bold text-white uppercase">{alum.nombre_completo || alum.nombre}</p><p className="text-[10px] text-gray-500">{alum.email}</p></div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            {clase?.es_audicion && alumnoSeleccionado && (
+                                <div className="bg-pink-500/10 border border-pink-500/30 p-4 rounded-xl flex items-center justify-between mb-4">
+                                    <div><p className="text-xs font-bold text-white uppercase">{alumnoSeleccionado.nombre_completo}</p><p className="text-[9px] text-pink-400">Alumno Registrado</p></div>
+                                    <button type="button" onClick={() => setAlumnoSeleccionado(null)}><X size={16} /></button>
+                                </div>
+                            )}
+
+                            {guestForm.tipo === 'pack' && !clase?.es_audicion && (
                                 <select required value={guestForm.packSeleccionadoId} onChange={e => setGuestForm({ ...guestForm, packSeleccionadoId: e.target.value })} className="w-full bg-[#111] border border-[#D4E655]/30 rounded-xl p-4 text-white font-bold outline-none">
                                     <option value="">Seleccionar Pack...</option>
                                     {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} - ${p.precio.toLocaleString()}</option>)}
                                 </select>
                             )}
+
                             {!alumnoSeleccionado && (
                                 <div className="grid grid-cols-2 gap-4">
                                     <input required placeholder="Nombre" value={guestForm.nombre} onChange={e => setGuestForm({ ...guestForm, nombre: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                     <input required placeholder="Apellido" value={guestForm.apellido} onChange={e => setGuestForm({ ...guestForm, apellido: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                 </div>
                             )}
-                            <button disabled={processing} type="submit" className={`w-full py-5 rounded-2xl font-black uppercase text-sm tracking-widest transition-all ${clase?.es_audicion ? 'bg-pink-500' : 'bg-[#D4E655] text-black'}`}>
+
+                            {/* 🚀 INPUT DE TELÉFONO PARA AUDICIONES */}
+                            {clase?.es_audicion && (
+                                <input required={!alumnoSeleccionado} placeholder="Teléfono de contacto" type="tel" value={guestForm.telefono} onChange={e => setGuestForm({ ...guestForm, telefono: e.target.value })} className="w-full bg-[#111] border border-pink-500/30 rounded-xl p-4 text-sm outline-none focus:border-pink-500 mt-2" />
+                            )}
+
+                            <button disabled={processing} type="submit" className={`w-full py-5 rounded-2xl font-black uppercase text-sm tracking-widest transition-all mt-4 ${clase?.es_audicion ? 'bg-pink-500 hover:bg-pink-400 text-white' : 'bg-[#D4E655] hover:bg-white text-black'}`}>
                                 {processing ? <Loader2 className="animate-spin mx-auto" /> : 'Confirmar Registro'}
                             </button>
                         </form>
