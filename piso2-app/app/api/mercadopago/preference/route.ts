@@ -30,7 +30,7 @@ export async function POST(request: Request) {
         // ==========================================
         if (tipo_pago === 'cuota_liga') {
             tituloFinal = `Cuota La Liga - Mes ${mes}/${anio}`
-            precioFinal = 15000 // ⚠️ CAMBIÁ ESTO POR EL VALOR REAL DE LA CUOTA
+            precioFinal = 1 // ⚠️ CAMBIÁ ESTO POR EL VALOR REAL DE LA CUOTA
 
             metadataCustom.tipo_pago = 'cuota_liga'
             if (mes) metadataCustom.mes = String(mes)
