@@ -68,7 +68,7 @@ export async function POST(request: Request) {
         // 2. CREAMOS LA PREFERENCIA DE MERCADO PAGO
         // ==========================================
         const preference = new Preference(client)
-        let rutaDestino = tipo_pago === 'cuota_liga' ? "/liga" : "/perfil"
+        let rutaDestino = tipo_pago === 'cuota_liga' ? "/la-liga" : "/perfil"
 
         const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
 
