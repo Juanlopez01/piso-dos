@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import useSWR from 'swr'
@@ -30,16 +30,17 @@ const CRITERIOS_EVALUACION = [
     "Escucha grupal", "Sincronización con compañeros", "Adaptación al trabajo colectivo"
 ]
 
-// 🚀 EL FETCHER MAESTRO (SWR)
-const fetcherLiga = async () => {
-    const supabase = createClient()
-    // ✅ Rápido y seguro leyendo la cookie local
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) throw new Error("No user")
+// --- HELPER DE FECHAS SEGURAS ---
+const parseSafeDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return new Date()
+    const cleanStr = dateStr.replace('+00:00', '').replace('+00', '').replace('Z', '').replace(' ', 'T')
+    const parsed = new Date(cleanStr)
+    return isNaN(parsed.getTime()) ? new Date() : parsed
+}
 
-    const user = session.user;
-
-    const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+// 🚀 EL FETCHER MAESTRO (Recibe UID y Supabase Singleton)
+const fetcherLiga = async (uid: string, supabase: any) => {
+    const { data: profile } = await supabase.from('profiles').select('*').eq('id', uid).single()
     if (!profile) throw new Error("No profile")
 
     const isStaff = ['admin', 'recepcion', 'profesor'].includes(profile.rol)
@@ -49,9 +50,9 @@ const fetcherLiga = async () => {
     // 1. AVISOS
     let queryAvisos = supabase.from('liga_avisos').select('*, autor:profiles!liga_avisos_autor_id_fkey(nombre_completo)').order('created_at', { ascending: false }).limit(30)
     if (profile.rol === 'profesor') {
-        queryAvisos = queryAvisos.or(`autor_id.eq.${user.id},tipo_destino.eq.general`)
+        queryAvisos = queryAvisos.or(`autor_id.eq.${uid},tipo_destino.eq.general`)
     } else if (!isStaff) {
-        queryAvisos = queryAvisos.or(`tipo_destino.eq.general,and(tipo_destino.eq.nivel,nivel_destino.eq.${nivelAlumno}),and(tipo_destino.eq.individual,alumno_id.eq.${user.id})`)
+        queryAvisos = queryAvisos.or(`tipo_destino.eq.general,and(tipo_destino.eq.nivel,nivel_destino.eq.${nivelAlumno}),and(tipo_destino.eq.individual,alumno_id.eq.${uid})`)
     }
     const { data: avisos } = await queryAvisos
 
@@ -61,21 +62,17 @@ const fetcherLiga = async () => {
 
     let queryClases = supabase
         .from('clases')
-        .select('id, nombre, inicio, liga_nivel, profesor_id')
+        .select(`
+            id, nombre, inicio, liga_nivel, profesor_id,
+            profesor:profiles!clases_profesor_id_fkey(nombre_completo)
+        `)
         .eq('es_la_liga', true)
         .neq('estado', 'cancelada')
 
-    if (profile.rol === 'profesor') queryClases = queryClases.eq('profesor_id', user.id)
+    if (profile.rol === 'profesor') queryClases = queryClases.eq('profesor_id', uid)
     else if (!isStaff) queryClases = queryClases.eq('liga_nivel', nivelAlumno)
 
-    // 👉 AGREGAMOS EL ERROR ACÁ
-    const { data: dataClases, error: errorClases } = await queryClases
-
-    // Si hay error, lo gritamos en la consola
-    if (errorClases) {
-        console.error("🚨 ERROR TRAYENDO CLASES:", errorClases.message, errorClases.details)
-    }
-
+    const { data: dataClases } = await queryClases
 
     // 3. DATOS ALUMNO (Evaluaciones y Pagos)
     let misEvaluaciones: any[] = []
@@ -84,10 +81,10 @@ const fetcherLiga = async () => {
     if (!isStaff) {
         const mesActual = new Date().getMonth() + 1
         const anioActual = new Date().getFullYear()
-        const { data: pagoMes } = await supabase.from('liga_pagos').select('id').eq('alumno_id', user.id).eq('mes', mesActual).eq('anio', anioActual).maybeSingle()
+        const { data: pagoMes } = await supabase.from('liga_pagos').select('id').eq('alumno_id', uid).eq('mes', mesActual).eq('anio', anioActual).maybeSingle()
         deudaCuota = !pagoMes
 
-        const { data: evals } = await supabase.from('liga_evaluaciones').select('*').eq('alumno_id', user.id).eq('cuatrimestre', cuatrimestreActual)
+        const { data: evals } = await supabase.from('liga_evaluaciones').select('*').eq('alumno_id', uid).eq('cuatrimestre', cuatrimestreActual)
         if (evals) misEvaluaciones = evals
     }
 
@@ -123,9 +120,7 @@ const fetcherLiga = async () => {
     if (isStaff) {
         const { data: perfiles } = await supabase.from('profiles').select('id, nombre, apellido, email, nivel_liga').eq('rol', 'alumno').not('nivel_liga', 'is', null).order('nombre', { ascending: true })
         if (perfiles) {
-            allStudents = perfiles.filter((p: { id: string, nombre: string | null, apellido: string | null, email: string, nivel_liga: number | null }) =>
-                p.nombre && p.nombre.trim() !== ''
-            )
+            allStudents = perfiles.filter((p: any) => p.nombre && p.nombre.trim() !== '')
         }
     }
 
@@ -136,12 +131,13 @@ const fetcherLiga = async () => {
 
 export default function LaLigaPage() {
     const router = useRouter()
-    const { hasLigaAccess, isLoading: loadingContext } = useCash()
+    const [supabase] = useState(() => createClient())
+    const { hasLigaAccess, userId, isLoading: loadingContext } = useCash()
 
-    // 🚀 SWR (Reemplaza al useEffect gigante)
+    // 🚀 SWR REPARADO (Sincronizado con el Singleton)
     const { data, isLoading: loadingSWR, mutate, error } = useSWR(
-        hasLigaAccess && !loadingContext ? 'liga-data' : null,
-        fetcherLiga,
+        hasLigaAccess && !loadingContext && userId ? ['liga-data', userId] : null,
+        ([_, uid]) => fetcherLiga(uid as string, supabase),
         { revalidateOnFocus: false }
     )
 
@@ -192,21 +188,46 @@ export default function LaLigaPage() {
     }
 
     const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, allStudents } = data
-
-    const faltaAptoFisico = !profile.apto_fisico_url
     const nivelActual = profile.nivel_liga || profile.nivel || 1
     const filteredStudents = allStudents.filter(s => (s.nombre + ' ' + s.apellido).toLowerCase().includes(searchStudent.toLowerCase()))
 
-    // --- ACCIONES CON SERVER ACTIONS ---
+    // --- ACCIONES ---
+
+    const generarLinkPagoLiga = async () => {
+        setProcesandoPago(true)
+        try {
+            const mesActual = new Date().getMonth() + 1
+            const anioActual = new Date().getFullYear()
+            const precioCuota = 15000
+
+            const res = await fetch('/api/mercadopago/preference', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    titulo: `Cuota La Liga - Mes ${mesActual}/${anioActual}`,
+                    precio: precioCuota,
+                    userId: userId, // 🚀 USAMOS EL ID DEL CONTEXTO
+                    tipo_pago: 'cuota_liga',
+                    mes: mesActual,
+                    anio: anioActual
+                })
+            })
+
+            const resData = await res.json()
+            if (resData.url) window.location.href = resData.url
+            else throw new Error('No se pudo generar el link')
+        } catch (err) {
+            toast.error('Error al conectar con Mercado Pago.')
+        } finally {
+            setProcesandoPago(false)
+        }
+    }
 
     const enviarAviso = async (e: React.FormEvent) => {
         e.preventDefault()
         setEnviandoAviso(true)
         if (!avisoForm.titulo || !avisoForm.mensaje) {
             setEnviandoAviso(false); return toast.error("Completá título y mensaje")
-        }
-        if (avisoForm.tipo_destino === 'individual' && !avisoForm.alumno_id) {
-            setEnviandoAviso(false); return toast.error("Seleccioná un alumno")
         }
 
         const payload = {
@@ -221,34 +242,27 @@ export default function LaLigaPage() {
         if (response.success) {
             toast.success("Comunicado publicado")
             setAvisoForm({ titulo: '', mensaje: '', tipo_destino: 'general', nivel_destino: 1, alumno_id: '' })
-            router.refresh()
-            setTimeout(() => mutate(), 500)
+            mutate()
         } else {
-            toast.error(response.error || "Error al enviar aviso")
+            toast.error(response.error || "Error")
         }
         setEnviandoAviso(false)
     }
 
     const eliminarAviso = async (id: string) => {
-        if (!confirm("¿Seguro que querés borrar este aviso?")) return
+        if (!confirm("¿Borrar aviso?")) return
         const response = await eliminarAvisoAction(id)
         if (response.success) {
-            toast.success("Aviso eliminado")
-            router.refresh()
-            setTimeout(() => mutate(), 500)
-        } else {
-            toast.error(response.error || "Error al eliminar")
+            toast.success("Eliminado")
+            mutate()
         }
     }
 
     const cambiarNivelLiga = async (id: string, nuevoNivel: number | null) => {
         const response = await cambiarNivelLigaAction(id, nuevoNivel)
         if (response.success) {
-            toast.success(nuevoNivel === null ? 'Alumno removido' : `Cambiado a Nivel ${nuevoNivel}`)
-            router.refresh()
-            setTimeout(() => mutate(), 500)
-        } else {
-            toast.error(response.error || "Error al actualizar")
+            toast.success('Actualizado')
+            mutate()
         }
     }
 
@@ -256,7 +270,7 @@ export default function LaLigaPage() {
         setGuardandoEval(true)
         const notasFaltantes = Object.values(notas).some(v => v === 0 || isNaN(v))
         if (notasFaltantes) {
-            toast.error('Por favor, calificá todos los criterios del 1 al 10 antes de guardar.')
+            toast.error('Completá todas las notas.')
             setGuardandoEval(false); return
         }
 
@@ -278,35 +292,28 @@ export default function LaLigaPage() {
 
         const response = await guardarEvaluacionAction(payload)
         if (response.success) {
-            toast.success('Evaluación guardada correctamente')
+            toast.success('Guardado')
             setEvalModalOpen(false)
-            cargarAlumnos(selectedMateria) // Recarga silenciosa de la lista de alumnos
-        } else {
-            toast.error(response.error || 'Error al guardar')
+            cargarAlumnos(selectedMateria)
+            mutate()
         }
         setGuardandoEval(false)
     }
 
-    // Funciones locales
     const cargarAlumnos = async (materia: any) => {
         setSelectedMateria(materia)
         setLoadingAlumnos(true)
         try {
-            const supabaseClient = createClient()
-            const { data: perfiles } = await supabaseClient.from('profiles').select('id, nombre, apellido, email, rol, nivel_liga').eq('rol', 'alumno').eq('nivel_liga', materia.liga_nivel)
-
+            const { data: perfiles } = await supabase.from('profiles').select('id, nombre, apellido, email, rol, nivel_liga').eq('rol', 'alumno').eq('nivel_liga', materia.liga_nivel)
             const alumnosReales = perfiles ? perfiles.filter((p: any) => p.nombre && p.nombre.trim() !== '') : []
             const cuatrimestreActual = '2026-1'
-            const { data: evaluaciones } = await supabaseClient.from('liga_evaluaciones').select('alumno_id, nota_final, aprobado').eq('clase_id', materia.id).eq('cuatrimestre', cuatrimestreActual)
+            const { data: evaluaciones } = await supabase.from('liga_evaluaciones').select('alumno_id, nota_final, aprobado').eq('clase_id', materia.id).eq('cuatrimestre', cuatrimestreActual)
 
             const alumnosMapeados = alumnosReales.map((perfil: any) => {
                 const evalExistente = evaluaciones?.find((e: any) => e.alumno_id === perfil.id)
                 return { ...perfil, evaluacion: evalExistente || null }
             })
-
             setAlumnosList(alumnosMapeados)
-        } catch (error: any) {
-            toast.error('Error al cargar alumnos: ' + error.message)
         } finally {
             setLoadingAlumnos(false)
         }
@@ -318,8 +325,7 @@ export default function LaLigaPage() {
         const notasIniciales: Record<string, number> = {}
 
         if (alumno.evaluacion) {
-            const supabaseClient = createClient()
-            const { data: evalCompleta } = await supabaseClient.from('liga_evaluaciones').select('criterios_notas, observaciones_docente').eq('alumno_id', alumno.id).eq('clase_id', selectedMateria.id).single()
+            const { data: evalCompleta } = await supabase.from('liga_evaluaciones').select('criterios_notas, observaciones_docente').eq('alumno_id', alumno.id).eq('clase_id', selectedMateria.id).single()
             if (evalCompleta) {
                 setNotas(evalCompleta.criterios_notas || {})
                 setObservaciones(evalCompleta.observaciones_docente || '')
@@ -340,45 +346,15 @@ export default function LaLigaPage() {
         return (suma / valores.length).toFixed(2)
     }
 
-    const generarLinkPagoLiga = async () => {
-        setProcesandoPago(true)
-        try {
-            const mesActual = new Date().getMonth() + 1
-            const anioActual = new Date().getFullYear()
-            const precioCuota = 15000 // <-- CAMBIÁ ESTE VALOR POR EL PRECIO REAL
-
-            const res = await fetch('/api/mercadopago/preference', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    titulo: `Cuota La Liga - Mes ${mesActual}/${anioActual}`,
-                    precio: precioCuota,
-                    usuarioId: profile.id,
-                    tipo_pago: 'cuota_liga',
-                    mes: mesActual,
-                    anio: anioActual
-                })
-            })
-
-            const data = await res.json()
-            if (data.url) window.location.href = data.url
-            else throw new Error('No se pudo generar el link')
-        } catch (error) {
-            toast.error('Error al conectar con Mercado Pago.')
-        } finally {
-            setProcesandoPago(false)
-        }
-    }
-
     if (!isStaff && !legajoCompleto) {
         return (
             <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8 flex flex-col items-center justify-center relative overflow-hidden">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#D4E655]/5 rounded-full blur-[100px] pointer-events-none" />
-                <div className="max-w-md w-full bg-[#09090b] border border-[#D4E655]/20 rounded-3xl p-8 text-center relative z-10 animate-in zoom-in-95 duration-500 shadow-2xl shadow-[#D4E655]/5">
+                <div className="max-w-md w-full bg-[#09090b] border border-[#D4E655]/20 rounded-3xl p-8 text-center relative z-10 animate-in zoom-in-95 duration-500 shadow-2xl">
                     <div className="w-20 h-20 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-yellow-500/20"><Lock className="text-yellow-500 w-10 h-10" /></div>
                     <h1 className="text-2xl font-black uppercase tracking-tighter text-white mb-3">Legajo Incompleto</h1>
                     <p className="text-gray-400 text-sm mb-8 leading-relaxed">Para acceder a <span className="text-[#D4E655] font-bold">La Liga</span>, primero completá tu ficha médica.</p>
-                    <Link href="/perfil" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg">Ir a completar mi Perfil <ChevronRight size={16} /></Link>
+                    <Link href="/perfil" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2">Ir a mi Perfil <ChevronRight size={16} /></Link>
                 </div>
             </div>
         )
@@ -388,7 +364,6 @@ export default function LaLigaPage() {
         <div className="min-h-screen bg-[#050505] text-white pb-24 selection:bg-[#D4E655] selection:text-black">
             <Toaster position="top-center" richColors theme="dark" />
 
-            {/* HEADER COMPARTIDO */}
             <div className="bg-[#111] border-b border-white/5 pt-8 pb-0 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-[#D4E655]/5 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
                 <div className="max-w-7xl mx-auto px-4 md:px-8">
@@ -403,15 +378,12 @@ export default function LaLigaPage() {
                             </h1>
                         </div>
                         {!isStaff && (
-                            <div className="flex items-center gap-3">
-                                <span className="bg-[#D4E655] text-black px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest shadow-[0_0_15px_rgba(212,230,85,0.2)]">
-                                    Nivel {nivelActual}
-                                </span>
-                            </div>
+                            <span className="bg-[#D4E655] text-black px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest shadow-[0_0_15px_rgba(212,230,85,0.2)]">
+                                Nivel {nivelActual}
+                            </span>
                         )}
                     </div>
 
-                    {/* TABS PARA ADMIN / RECEPCIÓN / PROFESOR */}
                     {isStaff && (
                         <div className="flex gap-6 border-b border-white/10 relative z-10 mt-2 overflow-x-auto custom-scrollbar">
                             <button onClick={() => setAdminTab('evaluaciones')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'evaluaciones' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
@@ -432,335 +404,170 @@ export default function LaLigaPage() {
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
 
-                {/* --- ALERTAS CRÍTICAS (SOLO ALUMNO) --- */}
-                {!isStaff && (faltaAptoFisico || deudaCuota) && (
-                    <div className="space-y-3">
-                        {faltaAptoFisico && (
-                            <div className="bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                <div className="flex items-start gap-3">
-                                    <FileWarning className="text-orange-500 shrink-0 mt-0.5" size={20} />
-                                    <div>
-                                        <h4 className="font-black text-orange-500 uppercase text-xs tracking-widest mb-1">Apto Físico Pendiente</h4>
-                                        <p className="text-gray-400 text-[10px] sm:text-xs leading-relaxed">Aún no subiste tu certificado médico. Recordá que tenés tiempo máximo hasta <strong className="text-white">Mayo</strong>.</p>
-                                    </div>
-                                </div>
-                                <Link href="/perfil" className="shrink-0 bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-colors text-center">
-                                    Subir Ahora
-                                </Link>
+                {!isStaff && (deudaCuota) && (
+                    <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                            <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={20} />
+                            <div>
+                                <h4 className="font-black text-red-500 uppercase text-xs tracking-widest mb-1">Cuota Vencida</h4>
+                                <p className="text-gray-400 text-[10px] sm:text-xs">Tenés pendiente la cuota de este mes. Abonala para ver tu boletín.</p>
                             </div>
-                        )}
-                        {deudaCuota && (
-                            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                <div className="flex items-start gap-3">
-                                    <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={20} />
-                                    <div>
-                                        <h4 className="font-black text-red-500 uppercase text-xs tracking-widest mb-1">Cuota Vencida</h4>
-                                        <p className="text-gray-400 text-[10px] sm:text-xs leading-relaxed">Tenés pendiente la cuota de La Liga de este mes. Abonala para destrabar tu boletín.</p>
-                                    </div>
-                                </div>
-                                <button onClick={generarLinkPagoLiga} disabled={procesandoPago} className="shrink-0 bg-red-500/20 hover:bg-red-500/30 text-red-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2">
-                                    {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : 'Pagar Online con MP'}
-                                </button>
-                            </div>
-                        )}
+                        </div>
+                        <button onClick={generarLinkPagoLiga} disabled={procesandoPago} className="shrink-0 bg-red-500/20 hover:bg-red-500/30 text-red-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2">
+                            {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : 'Pagar Online con MP'}
+                        </button>
                     </div>
                 )}
 
-                {/* =========================================
-                    VISTA GESTIÓN ADMIN / RECEPCION
-                ========================================= */}
+                {/* --- VISTA GESTIÓN --- */}
                 {canManage && adminTab === 'gestion' && (
-                    <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[500px] flex flex-col shadow-xl animate-in fade-in">
+                    <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl animate-in fade-in">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-6 border-b border-white/5">
-                            <div>
-                                <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2">
-                                    <Users size={24} className="text-[#D4E655]" /> Padrón de Alumnos
-                                </h3>
-                                <p className="text-xs text-gray-500 uppercase font-bold mt-1">Asigná o remové alumnos de los niveles de La Liga.</p>
-                            </div>
+                            <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2"><Users size={24} className="text-[#D4E655]" /> Padrón de Alumnos</h3>
                             <div className="relative w-full md:w-72">
                                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                                <input type="text" placeholder="Buscar alumno..." value={searchStudent} onChange={(e) => setSearchStudent(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white text-xs font-bold outline-none focus:border-[#D4E655]" />
+                                <input type="text" placeholder="Buscar..." value={searchStudent} onChange={(e) => setSearchStudent(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white text-xs font-bold outline-none focus:border-[#D4E655]" />
                             </div>
                         </div>
-
-                        <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                {filteredStudents.map(alumno => (
-                                    <div key={alumno.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex flex-col justify-between gap-4 group hover:border-white/20 transition-all">
-                                        <div>
-                                            <h4 className="font-black text-white text-sm capitalize truncate">{alumno.nombre} {alumno.apellido}</h4>
-                                            {alumno.nivel_liga ? (
-                                                <span className="mt-1 inline-flex items-center gap-1 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                                    <Star size={10} className="fill-[#D4E655]/50" /> Nivel {alumno.nivel_liga}
-                                                </span>
-                                            ) : (
-                                                <span className="mt-1 inline-block text-[9px] font-bold text-gray-500 uppercase tracking-widest">Sin asignar</span>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center gap-2 border-t border-white/5 pt-3">
-                                            {!alumno.nivel_liga ? (
-                                                <>
-                                                    <button onClick={() => cambiarNivelLiga(alumno.id, 1)} className="flex-1 bg-white/5 hover:bg-purple-500/20 hover:text-purple-400 text-gray-400 py-2 rounded-lg text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1">Nivel 1</button>
-                                                    <button onClick={() => cambiarNivelLiga(alumno.id, 2)} className="flex-1 bg-white/5 hover:bg-purple-500/20 hover:text-purple-400 text-gray-400 py-2 rounded-lg text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1">Nivel 2</button>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <button onClick={() => cambiarNivelLiga(alumno.id, alumno.nivel_liga === 1 ? 2 : 1)} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg text-[10px] font-black uppercase transition-colors">
-                                                        Pasar a Nivel {alumno.nivel_liga === 1 ? 2 : 1}
-                                                    </button>
-                                                    <button onClick={() => cambiarNivelLiga(alumno.id, null)} className="shrink-0 bg-red-500/10 hover:bg-red-500/20 text-red-500 px-3 py-2 rounded-lg text-[10px] font-black transition-colors" title="Remover de La Liga">
-                                                        <UserMinus size={14} />
-                                                    </button>
-                                                </>
-                                            )}
-                                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {filteredStudents.map(alumno => (
+                                <div key={alumno.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex flex-col justify-between gap-4 group hover:border-white/20 transition-all">
+                                    <div>
+                                        <h4 className="font-black text-white text-sm capitalize truncate">{alumno.nombre} {alumno.apellido}</h4>
+                                        <span className="mt-1 inline-flex items-center gap-1 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                            <Star size={10} className="fill-[#D4E655]/50" /> Nivel {alumno.nivel_liga || '-'}
+                                        </span>
                                     </div>
-                                ))}
-                                {filteredStudents.length === 0 && (
-                                    <div className="col-span-full py-12 text-center text-gray-500">
-                                        <Search size={32} className="mx-auto mb-3 opacity-30" />
-                                        <p className="text-xs font-bold uppercase tracking-widest">No se encontraron alumnos</p>
+                                    <div className="flex items-center gap-2 border-t border-white/5 pt-3">
+                                        <button onClick={() => cambiarNivelLiga(alumno.id, 1)} className="flex-1 bg-white/5 hover:bg-white/10 text-gray-400 py-2 rounded-lg text-[10px] font-black uppercase transition-colors">Nivel 1</button>
+                                        <button onClick={() => cambiarNivelLiga(alumno.id, 2)} className="flex-1 bg-white/5 hover:bg-white/10 text-gray-400 py-2 rounded-lg text-[10px] font-black uppercase transition-colors">Nivel 2</button>
+                                        <button onClick={() => cambiarNivelLiga(alumno.id, null)} className="shrink-0 bg-red-500/10 hover:bg-red-500 text-red-500 px-3 py-2 rounded-lg text-[10px] font-black"><UserMinus size={14} /></button>
                                     </div>
-                                )}
-                            </div>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 )}
 
-                {/* =========================================
-                    VISTA COMUNICADOS (PESTAÑA STAFF)
-                ========================================= */}
+                {/* --- VISTA COMUNICADOS --- */}
                 {isStaff && adminTab === 'comunicados' && (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
-                        <div className="lg:col-span-5 bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl">
-                            <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6 border-b border-white/5 pb-4">
-                                <Send size={20} className="text-[#D4E655]" /> Redactar Aviso
-                            </h3>
+                        <div className="lg:col-span-5 bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl h-fit">
+                            <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6"><Send size={20} className="text-[#D4E655]" /> Redactar Aviso</h3>
                             <form onSubmit={enviarAviso} className="space-y-4">
-                                <div>
-                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Destinatarios</label>
-                                    <select value={avisoForm.tipo_destino} onChange={e => setAvisoForm({ ...avisoForm, tipo_destino: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]">
-                                        <option value="general">Toda La Liga (General)</option>
-                                        <option value="nivel">Un Nivel Específico</option>
-                                        <option value="individual">Un Alumno Específico</option>
-                                    </select>
-                                </div>
+                                <select value={avisoForm.tipo_destino} onChange={e => setAvisoForm({ ...avisoForm, tipo_destino: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none">
+                                    <option value="general">Toda La Liga</option>
+                                    <option value="nivel">Un Nivel</option>
+                                    <option value="individual">Un Alumno</option>
+                                </select>
                                 {avisoForm.tipo_destino === 'nivel' && (
-                                    <div className="animate-in fade-in zoom-in-95">
-                                        <label className="text-[10px] font-bold text-[#D4E655] uppercase tracking-widest mb-2 block">Seleccionar Nivel</label>
-                                        <div className="flex gap-2">
-                                            <button type="button" onClick={() => setAvisoForm({ ...avisoForm, nivel_destino: 1 })} className={`flex-1 py-3 rounded-xl border text-xs font-black uppercase transition-colors ${avisoForm.nivel_destino === 1 ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/10 hover:border-white/30'}`}>Nivel 1</button>
-                                            <button type="button" onClick={() => setAvisoForm({ ...avisoForm, nivel_destino: 2 })} className={`flex-1 py-3 rounded-xl border text-xs font-black uppercase transition-colors ${avisoForm.nivel_destino === 2 ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/10 hover:border-white/30'}`}>Nivel 2</button>
-                                        </div>
+                                    <div className="flex gap-2">
+                                        <button type="button" onClick={() => setAvisoForm({ ...avisoForm, nivel_destino: 1 })} className={`flex-1 py-3 rounded-xl border text-xs font-black ${avisoForm.nivel_destino === 1 ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-400'}`}>Nivel 1</button>
+                                        <button type="button" onClick={() => setAvisoForm({ ...avisoForm, nivel_destino: 2 })} className={`flex-1 py-3 rounded-xl border text-xs font-black ${avisoForm.nivel_destino === 2 ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-400'}`}>Nivel 2</button>
                                     </div>
                                 )}
                                 {avisoForm.tipo_destino === 'individual' && (
-                                    <div className="animate-in fade-in zoom-in-95">
-                                        <label className="text-[10px] font-bold text-[#D4E655] uppercase tracking-widest mb-2 block">Seleccionar Alumno</label>
-                                        <select value={avisoForm.alumno_id} onChange={e => setAvisoForm({ ...avisoForm, alumno_id: e.target.value })} className="w-full bg-[#111] border border-[#D4E655]/50 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]">
-                                            <option value="">Elegí un alumno...</option>
-                                            {allStudents.map(a => <option key={a.id} value={a.id}>{a.nombre} {a.apellido} (Nivel {a.nivel_liga})</option>)}
-                                        </select>
-                                    </div>
+                                    <select value={avisoForm.alumno_id} onChange={e => setAvisoForm({ ...avisoForm, alumno_id: e.target.value })} className="w-full bg-[#111] border border-[#D4E655]/50 rounded-xl p-3 text-white text-sm">
+                                        <option value="">Elegí un alumno...</option>
+                                        {allStudents.map(a => <option key={a.id} value={a.id}>{a.nombre} {a.apellido}</option>)}
+                                    </select>
                                 )}
-                                <div className="pt-2">
-                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Título del Aviso</label>
-                                    <input type="text" required placeholder="Ej: Cambio de horario..." value={avisoForm.titulo} onChange={e => setAvisoForm({ ...avisoForm, titulo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Mensaje</label>
-                                    <textarea required placeholder="Escribí el comunicado acá..." value={avisoForm.mensaje} onChange={e => setAvisoForm({ ...avisoForm, mensaje: e.target.value })} className="w-full h-32 bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655] resize-none" />
-                                </div>
-                                <button disabled={enviandoAviso} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-4 shadow-lg">
-                                    {enviandoAviso ? <Loader2 size={16} className="animate-spin" /> : <><Send size={16} /> Publicar Aviso</>}
+                                <input type="text" required placeholder="Título..." value={avisoForm.titulo} onChange={e => setAvisoForm({ ...avisoForm, titulo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none" />
+                                <textarea required placeholder="Mensaje..." value={avisoForm.mensaje} onChange={e => setAvisoForm({ ...avisoForm, mensaje: e.target.value })} className="w-full h-32 bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none resize-none" />
+                                <button disabled={enviandoAviso} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs flex items-center justify-center gap-2">
+                                    {enviandoAviso ? <Loader2 size={16} className="animate-spin" /> : <><Send size={16} /> Publicar</>}
                                 </button>
                             </form>
                         </div>
-
-                        {/* Historial de Avisos */}
                         <div className="lg:col-span-7 bg-[#111] border border-white/5 rounded-3xl p-6">
-                            <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6 border-b border-white/5 pb-4">
-                                <Megaphone size={20} className="text-[#D4E655]" /> Cartelera Activa
-                            </h3>
-                            <div className="space-y-4 max-h-[500px] overflow-y-auto custom-scrollbar pr-2">
-                                {avisos.length > 0 ? avisos.map((aviso: any) => (
-                                    <div key={aviso.id} className="bg-[#09090b] border-l-2 border-[#D4E655] p-5 rounded-r-xl border-y border-r border-white/5 relative group">
-                                        {(canManage || aviso.autor_id === profile.id) && (
-                                            <button onClick={() => eliminarAviso(aviso.id)} className="absolute top-4 right-4 text-gray-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
-                                                <Trash2 size={14} />
-                                            </button>
+                            <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6"><Megaphone size={20} className="text-[#D4E655]" /> Cartelera Activa</h3>
+                            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                                {avisos.map((aviso: any) => (
+                                    <div key={aviso.id} className="bg-[#09090b] border-l-2 border-[#D4E655] p-5 rounded-r-xl relative group">
+                                        {(canManage || aviso.autor_id === userId) && (
+                                            <button onClick={() => eliminarAviso(aviso.id)} className="absolute top-4 right-4 text-gray-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button>
                                         )}
                                         <div className="flex items-center gap-2 mb-2">
-                                            <span className="text-[9px] font-black bg-white/10 text-white px-2 py-0.5 rounded uppercase">
-                                                {aviso.tipo_destino === 'general' ? 'General' : aviso.tipo_destino === 'nivel' ? `Nivel ${aviso.nivel_destino}` : 'Individual'}
-                                            </span>
+                                            <span className="text-[9px] font-black bg-white/10 text-white px-2 py-0.5 rounded uppercase">{aviso.tipo_destino}</span>
                                             <span className="text-[9px] font-bold text-gray-500 uppercase">{format(new Date(aviso.created_at), 'dd MMM HH:mm', { locale: es })}</span>
                                         </div>
-                                        <h4 className="font-bold text-white text-sm uppercase mb-1 pr-6">{aviso.titulo}</h4>
-                                        <p className="text-xs text-gray-400 leading-relaxed mb-3">{aviso.mensaje}</p>
-                                        <div className="text-[9px] text-gray-600 font-bold uppercase tracking-widest border-t border-white/5 pt-2">Por: {aviso?.autor?.nombre_completo || 'Staff'}</div>
+                                        <h4 className="font-bold text-white text-sm uppercase mb-1">{aviso.titulo}</h4>
+                                        <p className="text-xs text-gray-400 mb-3">{aviso.mensaje}</p>
+                                        <div className="text-[9px] text-gray-600 font-bold uppercase pt-2 border-t border-white/5">Por: {aviso?.autor?.nombre_completo || 'Staff'}</div>
                                     </div>
-                                )) : (
-                                    <div className="text-center py-12">
-                                        <CheckCircle2 size={40} className="text-gray-700 mx-auto mb-3 opacity-50" />
-                                        <p className="text-gray-500 text-xs font-bold uppercase tracking-widest">La cartelera está vacía</p>
-                                    </div>
-                                )}
+                                ))}
                             </div>
                         </div>
                     </div>
                 )}
 
-                {/* =========================================
-                    VISTA DOCENTE / STAFF (EVALUACIONES)
-                ========================================= */}
+                {/* --- VISTA EVALUACIONES --- */}
                 {isStaff && adminTab === 'evaluaciones' && (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
                         <div className="lg:col-span-4 space-y-4">
-                            <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/10 pb-2">
-                                <BookOpen size={16} className="text-[#D4E655]" /> Clases registradas
-                            </h3>
-                            {materias.length > 0 ? materias.map((mat: any) => (
-                                <div key={mat.id} onClick={() => cargarAlumnos(mat)} className={`bg-[#111] border rounded-xl p-4 cursor-pointer transition-all ${selectedMateria?.id === mat.id ? 'border-[#D4E655] shadow-[0_0_15px_rgba(212,230,85,0.1)]' : 'border-white/5 hover:border-white/20'}`}>
-                                    <div className="flex items-start justify-between mb-1">
-                                        <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block">Nivel {mat.liga_nivel}</span>
-                                        {mat.proxima_clase && (
-                                            <span className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest bg-[#D4E655]/10 px-2 py-0.5 rounded flex items-center gap-1">
-                                                <Clock size={10} /> {format(new Date(mat.proxima_clase), "d MMM • HH:mm", { locale: es })}
-                                            </span>
-                                        )}
+                            <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/10 pb-2"><BookOpen size={16} className="text-[#D4E655]" /> Clases Formación</h3>
+                            {materias.map((mat: any) => (
+                                <div key={mat.id} onClick={() => cargarAlumnos(mat)} className={`bg-[#111] border rounded-xl p-4 cursor-pointer transition-all ${selectedMateria?.id === mat.id ? 'border-[#D4E655]' : 'border-white/5 hover:border-white/20'}`}>
+                                    <div className="flex justify-between mb-1">
+                                        <span className="text-[9px] font-bold text-gray-500 uppercase">Nivel {mat.liga_nivel}</span>
+                                        {mat.proxima_clase && <span className="text-[9px] text-[#D4E655] font-bold uppercase">{format(parseSafeDate(mat.proxima_clase), "d MMM • HH:mm", { locale: es })}</span>}
                                     </div>
                                     <h4 className="font-black text-white uppercase text-sm truncate">{mat.nombre}</h4>
                                 </div>
-                            )) : (
-                                <p className="text-xs text-gray-500 italic">No tenés materias registradas en La Liga.</p>
-                            )}
+                            ))}
                         </div>
-
-                        <div className="lg:col-span-8 bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[400px] flex flex-col">
+                        <div className="lg:col-span-8 bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[400px]">
                             {selectedMateria ? (
-                                <>
-                                    <div className="flex items-center justify-between mb-6 border-b border-white/5 pb-4">
-                                        <div>
-                                            <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2">
-                                                <Users size={20} className="text-[#D4E655]" /> Alumnos
-                                            </h3>
-                                            <p className="text-xs text-gray-500 font-bold uppercase mt-1">{selectedMateria.nombre} • Nivel {selectedMateria.liga_nivel}</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {alumnosList.map(alumno => (
+                                        <div key={alumno.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex items-center justify-between">
+                                            <div>
+                                                <h4 className="font-bold text-white text-sm capitalize">{alumno.nombre} {alumno.apellido}</h4>
+                                                {alumno.evaluacion ? <span className="text-[10px] font-black uppercase text-green-500 tracking-widest">Nota: {alumno.evaluacion.nota_final}</span> : <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Pendiente</span>}
+                                            </div>
+                                            <button onClick={() => abrirModalEvaluacion(alumno)} className="bg-white/5 hover:bg-[#D4E655] text-white hover:text-black w-10 h-10 rounded-lg flex items-center justify-center transition-all shrink-0"><ClipboardEdit size={16} /></button>
                                         </div>
-                                    </div>
-                                    {loadingAlumnos ? (
-                                        <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin text-gray-500" /></div>
-                                    ) : alumnosList.length > 0 ? (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 overflow-y-auto pr-2 custom-scrollbar">
-                                            {alumnosList.map(alumno => (
-                                                <div key={alumno.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex items-center justify-between group">
-                                                    <div>
-                                                        <h4 className="font-bold text-white text-sm capitalize">{alumno.nombre} {alumno.apellido}</h4>
-                                                        {alumno.evaluacion ? (
-                                                            <div className={`mt-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest ${alumno.evaluacion.aprobado ? 'text-green-500' : 'text-red-500'}`}>
-                                                                {alumno.evaluacion.aprobado ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />} Nota: {alumno.evaluacion.nota_final}
-                                                            </div>
-                                                        ) : (
-                                                            <span className="mt-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest block">Pendiente de evaluación</span>
-                                                        )}
-                                                    </div>
-                                                    <button onClick={() => abrirModalEvaluacion(alumno)} className="bg-white/5 hover:bg-[#D4E655] text-white hover:text-black w-10 h-10 rounded-lg flex items-center justify-center transition-all shrink-0">
-                                                        <ClipboardEdit size={16} />
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div className="flex-1 flex flex-col items-center justify-center text-gray-600 opacity-50">
-                                            <Users size={40} className="mb-2" />
-                                            <p className="text-xs font-bold uppercase">No hay alumnos en este nivel</p>
-                                        </div>
-                                    )}
-                                </>
-                            ) : (
-                                <div className="flex-1 flex flex-col items-center justify-center text-gray-600 opacity-50 text-center">
-                                    <ClipboardEdit size={48} className="mb-4" />
-                                    <h4 className="font-bold uppercase text-sm">Seleccioná una materia</h4>
-                                    <p className="text-[10px] uppercase">Para ver y evaluar a tus alumnos</p>
+                                    ))}
                                 </div>
-                            )}
+                            ) : <div className="flex flex-col items-center justify-center h-full text-gray-600 uppercase font-black text-xs opacity-50"><ClipboardEdit size={48} className="mb-4" /> Seleccioná una materia</div>}
                         </div>
                     </div>
                 )}
 
-                {/* =========================================
-                    VISTA ALUMNO (Dashboard Normal)
-                ========================================= */}
+                {/* --- VISTA ALUMNO DASHBOARD --- */}
                 {!isStaff && (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
                         <div className="lg:col-span-2 space-y-6">
                             <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[400px]">
-                                <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6 border-b border-white/5 pb-4">
-                                    <BookOpen size={20} className="text-[#D4E655]" /> Mis Disciplinas
-                                </h3>
-                                {materias.length > 0 ? (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        {materias.map((materia: any) => (
-                                            <div key={materia.id} onClick={() => {
-                                                if (deudaCuota) return toast.error('¡Bloqueado! Tenés que abonar la cuota del mes para ver tu boletín.')
-                                                if (materia.evaluacion) { setSelectedBoletin(materia); setBoletinModalOpen(true) }
-                                                else toast.info('Todavía no tenés notas cargadas en esta disciplina.')
-                                            }} className={`bg-[#111] border ${materia.evaluacion ? 'border-[#D4E655]/30 cursor-pointer hover:border-[#D4E655]' : 'border-white/5'} rounded-2xl p-5 transition-all group relative overflow-hidden flex flex-col`}>
-                                                <div className="absolute top-0 right-0 w-24 h-24 bg-[#D4E655]/5 rounded-full blur-2xl -mr-8 -mt-8 transition-all group-hover:bg-[#D4E655]/10"></div>
-                                                <div className="flex justify-between items-start mb-4 relative z-10">
-                                                    <span className="bg-white/5 text-gray-400 text-[9px] font-bold uppercase px-2 py-1 rounded">Materia Obligatoria</span>
-                                                    <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]"></div>
-                                                </div>
-                                                <h4 className="font-black text-xl uppercase tracking-tighter text-white mb-1 group-hover:text-[#D4E655] transition-colors truncate relative z-10">{materia.nombre}</h4>
-                                                <p className="text-[10px] text-gray-400 mb-5 uppercase font-bold tracking-widest relative z-10">Prof: {materia.profesor}</p>
-                                                <div className="mb-5 relative z-10">
-                                                    <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block mb-1 flex items-center gap-1"><Clock size={10} /> Próxima Clase</span>
-                                                    {materia.proxima_clase ? (
-                                                        <span className="text-xs font-black text-white bg-white/5 px-2 py-1.5 rounded-md border border-white/10 block w-max">{format(new Date(materia.proxima_clase), "EEE d MMM • HH:mm", { locale: es })}</span>
-                                                    ) : (
-                                                        <span className="text-[10px] font-bold text-gray-600 bg-white/5 px-2 py-1.5 rounded-md border border-white/5 block w-max italic">A confirmar</span>
-                                                    )}
-                                                </div>
-                                                <div className="pt-4 border-t border-white/5 mt-auto relative z-10 flex items-center justify-between">
-                                                    {materia.evaluacion ? (
-                                                        <span className="bg-[#D4E655] text-black text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-lg flex items-center gap-2 shadow-[0_0_10px_rgba(212,230,85,0.2)] w-full justify-center"><FileText size={14} /> Ver Boletín</span>
-                                                    ) : (
-                                                        <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest text-center w-full py-2 bg-white/5 rounded-lg border border-white/5">Evaluación Pendiente</span>
-                                                    )}
-                                                </div>
+                                <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6"><BookOpen size={20} className="text-[#D4E655]" /> Mis Disciplinas</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    {materias.map((materia: any) => (
+                                        <div key={materia.id} onClick={() => {
+                                            if (deudaCuota) return toast.error('Tenés que abonar para ver tu boletín.')
+                                            if (materia.evaluacion) { setSelectedBoletin(materia); setBoletinModalOpen(true) }
+                                            else toast.info('Evaluación pendiente.')
+                                        }} className={`bg-[#111] border ${materia.evaluacion ? 'border-[#D4E655]/30 cursor-pointer hover:border-[#D4E655]' : 'border-white/5'} rounded-2xl p-5 flex flex-col relative overflow-hidden`}>
+                                            <h4 className="font-black text-xl uppercase tracking-tighter text-white mb-1 truncate">{materia.nombre}</h4>
+                                            <p className="text-[10px] text-gray-400 mb-5 uppercase font-bold tracking-widest">Prof: {materia.profesor}</p>
+                                            <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-center">
+                                                {materia.evaluacion ? <span className="bg-[#D4E655] text-black text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-lg flex items-center gap-2 w-full justify-center"><FileText size={14} /> Boletín</span> : <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">En Proceso</span>}
                                             </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center h-full py-12 text-center">
-                                        <CalendarX size={48} className="text-gray-700 mb-4" />
-                                        <h4 className="font-bold text-gray-400 uppercase text-sm mb-1">Sin disciplinas asignadas</h4>
-                                        <p className="text-xs text-gray-600">Asegurate de que las clases estén bien configuradas en el calendario.</p>
-                                    </div>
-                                )}
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         </div>
-
                         <div className="lg:col-span-1">
-                            <div className="bg-[#111] border border-white/5 rounded-3xl p-6 relative lg:sticky lg:top-24">
-                                <h3 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-6 text-white border-b border-white/5 pb-4"><Megaphone size={18} className="text-[#D4E655]" /> Cartelera y Avisos</h3>
+                            <div className="bg-[#111] border border-white/5 rounded-3xl p-6">
+                                <h3 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-6 text-white"><Megaphone size={18} className="text-[#D4E655]" /> Avisos</h3>
                                 <div className="space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
-                                    {avisos.length > 0 ? avisos.map((aviso: any) => (
-                                        <div key={aviso.id} className="bg-black/40 border-l-2 border-[#D4E655] p-4 rounded-r-lg group hover:bg-white/5 transition-colors">
-                                            <div className="flex items-center justify-between mb-1">
-                                                <span className="text-[9px] font-bold text-gray-500 uppercase">{format(new Date(aviso.created_at), 'dd MMM yyyy', { locale: es })}</span>
-                                                {aviso.tipo_destino === 'individual' && <span className="bg-[#D4E655]/20 text-[#D4E655] text-[8px] font-black uppercase px-2 py-0.5 rounded">Solo para vos</span>}
-                                            </div>
+                                    {avisos.map((aviso: any) => (
+                                        <div key={aviso.id} className="bg-black/40 border-l-2 border-[#D4E655] p-4 rounded-r-lg">
+                                            <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">{format(new Date(aviso.created_at), 'dd MMM yyyy', { locale: es })}</span>
                                             <h4 className="font-bold text-white text-xs sm:text-sm uppercase mb-2">{aviso.titulo}</h4>
                                             <p className="text-[10px] sm:text-xs text-gray-400 leading-relaxed">{aviso.mensaje}</p>
                                         </div>
-                                    )) : (
-                                        <div className="text-center py-8">
-                                            <CheckCircle2 size={32} className="text-gray-600 mx-auto mb-3 opacity-50" />
-                                            <p className="text-gray-500 text-xs font-bold uppercase tracking-widest">No hay avisos nuevos</p>
-                                        </div>
-                                    )}
+                                    ))}
                                 </div>
                             </div>
                         </div>
@@ -768,115 +575,80 @@ export default function LaLigaPage() {
                 )}
             </div>
 
-            {/* MODALES */}
-
-            {/* MODAL DE EVALUACIÓN (Solo Docentes / Staff) */}
+            {/* MODAL EVALUACIÓN */}
             {isStaff && evalModalOpen && selectedAlumno && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setEvalModalOpen(false)}>
                     <div className="w-full max-w-5xl max-h-[95vh] bg-[#09090b] border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
                         <div className="p-6 border-b border-white/5 bg-[#111] flex justify-between items-center shrink-0">
                             <div>
-                                <h3 className="text-2xl font-black uppercase text-white tracking-tighter">Evaluación Cuatrimestral</h3>
-                                <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest mt-1">{selectedAlumno.nombre} {selectedAlumno.apellido} • {selectedMateria?.nombre}</p>
+                                <h3 className="text-2xl font-black uppercase text-white tracking-tighter leading-none">Evaluación Cuatrimestral</h3>
+                                <p className="text-[#D4E655] text-xs font-bold uppercase mt-1">{selectedAlumno.nombre} {selectedAlumno.apellido}</p>
                             </div>
                             <div className="text-right">
-                                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block">Promedio Final</span>
+                                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block">Promedio</span>
                                 <span className={`text-3xl font-black leading-none ${parseFloat(calcularPromedio() as string) >= 6 ? 'text-green-500' : 'text-red-500'}`}>{calcularPromedio()}</span>
                             </div>
                         </div>
-
                         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                            <div className="bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs p-4 rounded-xl mb-6 font-medium flex gap-3 items-center">
-                                <AlertCircle size={16} className="shrink-0" />
-                                Calificá cada ítem del 1 al 10. Se requiere un promedio mayor a 6 para aprobar. El valor 0 significa "No evaluado".
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                                 {CRITERIOS_EVALUACION.map((crit, idx) => (
-                                    <div key={idx} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between gap-3 hover:border-white/20 transition-colors">
-                                        <label className="text-[10px] text-gray-300 font-bold uppercase leading-tight flex-1">{crit}</label>
-                                        <input type="number" min="0" max="10" value={notas[crit] || 0} onChange={e => { let val = parseInt(e.target.value) || 0; if (val > 10) val = 10; if (val < 0) val = 0; setNotas({ ...notas, [crit]: val }) }} className="w-16 bg-black border border-white/10 rounded-lg p-2 text-center text-white font-black text-sm outline-none focus:border-[#D4E655]" />
+                                    <div key={idx} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between gap-3 transition-colors">
+                                        <label className="text-[10px] text-gray-300 font-bold uppercase flex-1">{crit}</label>
+                                        <input type="number" min="0" max="10" value={notas[crit] || 0} onChange={e => { let val = parseInt(e.target.value) || 0; if (val > 10) val = 10; if (val < 0) val = 0; setNotas({ ...notas, [crit]: val }) }} className="w-14 bg-black border border-white/10 rounded p-2 text-center text-white font-black text-sm outline-none focus:border-[#D4E655]" />
                                     </div>
                                 ))}
                             </div>
-                            <div className="mt-8 border-t border-white/5 pt-6">
-                                <label className="text-xs font-black uppercase text-[#D4E655] tracking-widest block mb-2">Observaciones y Devolución (Opcional)</label>
-                                <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)} placeholder="Escribí acá el feedback personalizado que el alumno leerá..." className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-[#D4E655] resize-none h-32" />
-                            </div>
+                            <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)} placeholder="Comentarios..." className="w-full mt-8 bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none h-32" />
                         </div>
-
                         <div className="p-4 border-t border-white/5 bg-[#111] flex justify-end gap-3 shrink-0">
-                            <button onClick={() => setEvalModalOpen(false)} className="px-6 py-3 rounded-xl font-bold text-gray-400 text-xs uppercase hover:bg-white/5 transition-colors">Cancelar</button>
-                            <button onClick={guardarEvaluacion} disabled={guardandoEval} className="px-8 py-3 bg-[#D4E655] text-black font-black uppercase rounded-xl hover:bg-white transition-all shadow-lg text-xs flex items-center gap-2">
-                                {guardandoEval ? <Loader2 size={16} className="animate-spin" /> : <><Save size={16} /> Guardar Evaluación</>}
-                            </button>
+                            <button onClick={() => setEvalModalOpen(false)} className="px-6 py-3 font-bold text-gray-400 text-xs uppercase">Cancelar</button>
+                            <button onClick={guardarEvaluacion} disabled={guardandoEval} className="px-8 py-3 bg-[#D4E655] text-black font-black uppercase rounded-xl text-xs">Guardar</button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* MODAL DE BOLETÍN (Solo Alumnos) */}
+            {/* MODAL BOLETÍN */}
             {!isStaff && boletinModalOpen && selectedBoletin?.evaluacion && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setBoletinModalOpen(false)}>
-                    <div className="w-full max-w-4xl max-h-[95vh] bg-[#09090b] border border-[#D4E655]/30 rounded-2xl flex flex-col overflow-hidden shadow-2xl shadow-[#D4E655]/5" onClick={e => e.stopPropagation()}>
-                        <div className="p-6 md:p-8 border-b border-white/5 bg-[#111] flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shrink-0 relative overflow-hidden">
-                            <div className="absolute top-0 right-0 w-48 h-48 bg-[#D4E655]/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none" />
-                            <div className="relative z-10">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <FileText size={16} className="text-[#D4E655]" />
-                                    <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.2em] uppercase">Boletín Oficial • Cuatrimestre 1</span>
-                                </div>
+                    <div className="w-full max-w-4xl max-h-[95vh] bg-[#09090b] border border-[#D4E655]/30 rounded-2xl flex flex-col overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="p-8 border-b border-white/5 bg-[#111] flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shrink-0">
+                            <div>
+                                <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.2em] uppercase">Boletín Oficial</span>
                                 <h3 className="text-3xl font-black uppercase text-white tracking-tighter leading-none mb-1">{selectedBoletin.nombre}</h3>
                                 <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">Prof: {selectedBoletin.profesor}</p>
                             </div>
-                            <div className="relative z-10 bg-black/50 border border-white/10 rounded-2xl p-4 flex items-center gap-4 min-w-[160px]">
+                            <div className="bg-black/50 border border-white/10 rounded-2xl p-4 flex items-center gap-4">
                                 <div>
-                                    <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block mb-1">Nota Final</span>
-                                    <span className={`text-4xl font-black leading-none ${selectedBoletin.evaluacion.aprobado ? 'text-[#D4E655]' : 'text-red-500'}`}>
-                                        {selectedBoletin.evaluacion.nota_final}
-                                    </span>
+                                    <span className="text-[9px] text-gray-500 font-bold uppercase block mb-1">Nota Final</span>
+                                    <span className={`text-4xl font-black leading-none ${selectedBoletin.evaluacion.aprobado ? 'text-[#D4E655]' : 'text-red-500'}`}>{selectedBoletin.evaluacion.nota_final}</span>
                                 </div>
-                                <div className="border-l border-white/10 pl-4">
-                                    {selectedBoletin.evaluacion.aprobado ? (
-                                        <div className="flex flex-col items-center justify-center text-green-500">
-                                            <CheckCircle2 size={24} className="mb-1" />
-                                            <span className="text-[9px] font-black uppercase tracking-widest">Aprobado</span>
-                                        </div>
-                                    ) : (
-                                        <div className="flex flex-col items-center justify-center text-red-500">
-                                            <AlertTriangle size={24} className="mb-1" />
-                                            <span className="text-[9px] font-black uppercase tracking-widest">A Recuperar</span>
-                                        </div>
-                                    )}
+                                <div className="border-l border-white/10 pl-4 flex flex-col items-center">
+                                    {selectedBoletin.evaluacion.aprobado ? <CheckCircle2 size={24} className="text-green-500 mb-1" /> : <AlertTriangle size={24} className="text-red-500 mb-1" />}
+                                    <span className="text-[9px] font-black uppercase tracking-widest">{selectedBoletin.evaluacion.aprobado ? 'Aprobado' : 'A Recuperar'}</span>
                                 </div>
                             </div>
                         </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar bg-[#09090b]">
+                        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-[#09090b]">
                             {selectedBoletin.evaluacion.observaciones_docente && (
                                 <div className="mb-8">
-                                    <h4 className="text-xs font-black uppercase text-white tracking-widest border-b border-white/10 pb-2 mb-4">Devolución del Docente</h4>
-                                    <div className="bg-[#111] border-l-4 border-[#D4E655] rounded-r-xl p-5">
-                                        <p className="text-sm text-gray-300 leading-relaxed italic">"{selectedBoletin.evaluacion.observaciones_docente}"</p>
-                                    </div>
+                                    <h4 className="text-xs font-black uppercase text-white tracking-widest border-b border-white/10 pb-2 mb-4">Devolución</h4>
+                                    <p className="text-sm text-gray-300 italic">"{selectedBoletin.evaluacion.observaciones_docente}"</p>
                                 </div>
                             )}
-                            <div>
-                                <h4 className="text-xs font-black uppercase text-white tracking-widest border-b border-white/10 pb-2 mb-4">Detalle por Criterio</h4>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                                    {Object.entries(selectedBoletin.evaluacion.criterios_notas || {}).map(([criterio, nota]: [string, any], idx) => (
-                                        nota > 0 ? (
-                                            <div key={idx} className="bg-[#111] border border-white/5 rounded-lg p-3 flex justify-between items-center group hover:bg-white/5 transition-colors">
-                                                <span className="text-[10px] text-gray-400 font-bold uppercase leading-tight pr-2">{criterio}</span>
-                                                <span className={`text-sm font-black w-8 h-8 rounded bg-black flex items-center justify-center shrink-0 border border-white/5 ${nota >= 6 ? 'text-green-400' : 'text-red-400'}`}>{nota}</span>
-                                            </div>
-                                        ) : null
-                                    ))}
-                                </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                {Object.entries(selectedBoletin.evaluacion.criterios_notas || {}).map(([criterio, nota]: [string, any], idx) => (
+                                    nota > 0 && (
+                                        <div key={idx} className="bg-[#111] border border-white/5 rounded-lg p-3 flex justify-between items-center group hover:bg-white/5 transition-colors">
+                                            <span className="text-[10px] text-gray-400 font-bold uppercase leading-tight pr-2">{criterio}</span>
+                                            <span className={`text-sm font-black w-8 h-8 rounded bg-black flex items-center justify-center shrink-0 border border-white/5 ${nota >= 6 ? 'text-green-400' : 'text-red-400'}`}>{nota}</span>
+                                        </div>
+                                    )
+                                ))}
                             </div>
                         </div>
-
-                        <div className="p-4 border-t border-white/5 bg-[#111] shrink-0 text-center">
-                            <button onClick={() => setBoletinModalOpen(false)} className="w-full md:w-auto px-12 py-3 bg-white/5 text-white font-black uppercase rounded-xl hover:bg-white hover:text-black transition-all text-xs tracking-widest">Cerrar Boletín</button>
+                        <div className="p-4 border-t border-white/5 bg-[#111] text-center">
+                            <button onClick={() => setBoletinModalOpen(false)} className="px-12 py-3 bg-white/5 text-white font-black uppercase rounded-xl hover:bg-white hover:text-black transition-all text-xs">Cerrar</button>
                         </div>
                     </div>
                 </div>

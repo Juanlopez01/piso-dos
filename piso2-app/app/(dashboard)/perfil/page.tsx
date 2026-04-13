@@ -17,6 +17,14 @@ import { actualizarPerfilAction } from '@/app/actions/perfil'
 import { useCash } from '@/context/CashContext'
 import Link from 'next/link'
 
+// 🚀 HELPER PARA FECHAS SEGURAS (Evita que se corran los horarios)
+const parseSafeDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return new Date()
+    const cleanStr = dateStr.replace('+00:00', '').replace('+00', '').replace('Z', '').replace(' ', 'T')
+    const parsed = new Date(cleanStr)
+    return isNaN(parsed.getTime()) ? new Date() : parsed
+}
+
 type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; inicio: string; tipo_clase: string; profesor: { nombre_completo: string } } }
 type PackVencimiento = { fecha_vencimiento: string; creditos_restantes: number; tipo_clase: string }
 
@@ -27,11 +35,12 @@ type PerfilData = {
     proximoVencimiento: PackVencimiento | null
 }
 
-// 🚀 FETCHER ORDENADO: Recibe el ID directamente
+// 🚀 FETCHER ORDENADO Y APUNTANDO A LA TABLA CORRECTA
 const fetcherPerfil = async (uid: string, supabase: any): Promise<PerfilData> => {
     const [profileReq, historialReq, avisosReq, packsReq] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', uid).single(),
-        supabase.from('clase_alumnos').select(`id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))`).eq('alumno_id', uid).order('created_at', { ascending: false }),
+        // 🚀 FIX: Usamos inscripciones, user_id y la relación estricta del profe
+        supabase.from('inscripciones').select(`id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles!clases_profesor_id_fkey(nombre_completo))`).eq('user_id', uid).order('created_at', { ascending: false }),
         supabase.from('avisos').select('*').order('created_at', { ascending: false }),
         supabase.from('alumno_packs').select('*').eq('user_id', uid).eq('estado', 'activo').order('fecha_vencimiento', { ascending: true }).limit(1)
     ])
@@ -109,7 +118,6 @@ function PerfilContent() {
     }, [searchParams, mutate])
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        // ... (Tu código intacto)
         const inputElement = e.target;
         try {
             if (!inputElement.files || inputElement.files.length === 0 || !profile) return;
@@ -133,7 +141,6 @@ function PerfilContent() {
     }
 
     const handleSave = async (e: React.FormEvent) => {
-        // ... (Tu código intacto)
         e.preventDefault();
         if (!profile) return;
 
@@ -171,7 +178,6 @@ function PerfilContent() {
     }
 
     const handlePasswordChange = async (e: React.FormEvent) => {
-        // ... (Tu código intacto)
         e.preventDefault()
         if (newPassword.length < 6) return toast.error('Mínimo 6 caracteres')
         if (newPassword !== confirmNewPassword) return toast.error('No coinciden')
@@ -213,7 +219,6 @@ function PerfilContent() {
         )
     }
 
-    // ... TODO TU HTML (RENDERIZADO) QUEDA IGUAL, LO PEGO COMPLETO:
     const isProfe = profile?.rol === 'profesor'
     const isAlumno = profile?.rol === 'alumno' || profile?.rol === 'user'
     const datosIncompletos = isProfe && (!formData.nombre_remplazo || !formData.contacto_remplazo || !formData.alias_cbu)
@@ -372,7 +377,6 @@ function PerfilContent() {
                                             <p className="text-[9px] sm:text-[10px] opacity-80 leading-relaxed">Tenés {proximoVencimiento.creditos_restantes} clase(s) {proximoVencimiento.tipo_clase} que vencen el <strong>{format(new Date(proximoVencimiento.fecha_vencimiento), "d 'de' MMMM", { locale: es })}</strong>.</p>
                                         </div>
                                     </div>
-                                    {/* 🚀 ACÁ ESTABA EL ERROR DEL FREEZE: Usamos Link nativo en vez del router.push */}
                                     <Link href="/explorar" className="w-full sm:w-auto shrink-0 bg-black/20 hover:bg-black/40 text-center px-4 py-2 sm:py-3 rounded-lg text-[10px] font-black uppercase transition-colors">
                                         Usar Ahora
                                     </Link>
@@ -390,7 +394,8 @@ function PerfilContent() {
                                     </div>
                                 ) : (
                                     historialClases.map((historial) => {
-                                        const fechaClase = new Date(historial.clase.inicio)
+                                        // 🚀 ACÁ USAMOS LA FECHA SEGURA
+                                        const fechaClase = parseSafeDate(historial.clase.inicio)
                                         const esPasada = fechaClase < new Date()
                                         return (
                                             <div key={historial.id} className="bg-[#111] border border-white/5 p-4 rounded-xl flex items-center justify-between gap-3 hover:bg-white/5 transition-colors group">

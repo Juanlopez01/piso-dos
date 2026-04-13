@@ -8,7 +8,16 @@ import { es } from 'date-fns/locale'
 import { CalendarCheck, MapPin, User, Clock, Loader2, ArrowRight, PlayCircle, StopCircle, Calendar, CheckCircle2, XCircle, Trash2, Lock } from 'lucide-react'
 import Link from 'next/link'
 import { toast, Toaster } from 'sonner'
-import { cancelarReservaAction } from '@/app/actions/mis-clases' // 🚀 IMPORTAMOS LA ACTION SEGURA
+import { cancelarReservaAction } from '@/app/actions/mis-clases'
+import { useCash } from '@/context/CashContext' // 🚀 IMPORTAMOS EL CONTEXTO GLOBAL
+
+// --- HELPER DE FECHAS SEGURAS ---
+const parseSafeDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return new Date()
+    const cleanStr = dateStr.replace('+00:00', '').replace('+00', '').replace('Z', '').replace(' ', 'T')
+    const parsed = new Date(cleanStr)
+    return isNaN(parsed.getTime()) ? new Date() : parsed
+}
 
 // --- TIPOS ---
 type HistorialAlumno = {
@@ -42,23 +51,13 @@ type MisClasesData = {
     historialAlumno: HistorialAlumno[]
 }
 
-// 🚀 FETCHER OPTIMIZADO (Sin getUser)
-const fetcherMisClases = async (): Promise<MisClasesData> => {
-    const supabase = createClient()
-
-    // ✅ Lectura de caché rápida y segura
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-
-    if (!user) {
-        window.location.href = '/login'
-        throw new Error("No auth")
-    }
-
+// 🚀 FETCHER ORDENADO (Recibe el ID, usa el Singleton, NO pide sesión)
+// 🚀 FETCHER ORDENADO Y CON RASTREADOR DE ERRORES
+const fetcherMisClases = async (uid: string, supabase: any): Promise<MisClasesData> => {
     const { data: profile, error: errProfile } = await supabase
         .from('profiles')
         .select('id, rol, nombre')
-        .eq('id', user.id)
+        .eq('id', uid)
         .single()
 
     if (errProfile || !profile) throw new Error("Perfil no encontrado")
@@ -73,23 +72,28 @@ const fetcherMisClases = async (): Promise<MisClasesData> => {
                 id, nombre, inicio, fin, tipo_clase, estado,
                 sala:salas(nombre, sede:sedes(nombre))
             `)
-            .eq('profesor_id', user.id)
+            .eq('profesor_id', uid)
             .order('inicio', { ascending: true })
 
         clasesProfe = (misClasesData as any) || []
     } else {
-        const { data: historialData } = await supabase
+        console.log("🟠 [Mis Clases] Buscando reservas para el alumno ID:", uid)
+
+        // 🚀 APUNTAMOS A LA TABLA CORRECTA: clase_alumnos
+        const { data: historialData, error: errHistorial } = await supabase
             .from('inscripciones')
             .select(`
                 id, created_at, presente,
                 clase:clases (
                     id, nombre, inicio, tipo_clase, imagen_url,
                     sala:salas ( nombre, sede:sedes ( nombre ) ),
-                    profesor:profiles ( nombre_completo )
+                    profesor:profiles!clases_profesor_id_fkey ( nombre_completo ) 
                 )
             `)
-            .eq('user_id', user.id)
+            .eq('user_id', uid)
             .order('created_at', { ascending: false })
+
+        console.log("✅ DATA DEVUELTA POR SUPABASE:", historialData)
 
         if (historialData) {
             historialAlumno = (historialData as any).sort((a: any, b: any) =>
@@ -100,14 +104,18 @@ const fetcherMisClases = async (): Promise<MisClasesData> => {
 
     return { profile, clasesProfe, historialAlumno }
 }
-
 export default function MisClasesPage() {
+    // 1. Usamos el Singleton de Supabase de forma segura
     const [supabase] = useState(() => createClient())
 
+    // 2. Escuchamos al Contexto Global
+    const { userId, isLoading: contextLoading } = useCash()
+
+    // 3. SWR Condicionado a que el Contexto nos de permiso y el ID
     const { data, error, isLoading, mutate } = useSWR<MisClasesData>(
-        'mis-clases',
-        fetcherMisClases,
-        { revalidateOnFocus: true }
+        !contextLoading && userId ? ['mis-clases', userId] : null,
+        ([_, uid]) => fetcherMisClases(uid as string, supabase),
+        { revalidateOnFocus: false, dedupingInterval: 3000 } // 🛡️ Apagamos el revalidateOnFocus para evitar parpadeos
     )
 
     const profile = data?.profile || null
@@ -126,24 +134,23 @@ export default function MisClasesPage() {
 
         // 🚀 MUTACIÓN OPTIMISTA
         const optimisticHistorial = historialAlumno.filter(item => item.id !== inscripcionId)
-        mutate({ ...data!, historialAlumno: optimisticHistorial }, false)
+        await mutate({ ...data!, historialAlumno: optimisticHistorial }, false)
 
-        // Llamamos al Server Action
         const res = await cancelarReservaAction(inscripcionId, claseTipo)
 
         if (res.success) {
             toast.success('Reserva cancelada. Crédito devuelto.')
-            mutate() // Sincronizamos con el servidor
+            mutate() // Sincronizamos con DB
         } else {
             toast.error(res.error)
-            mutate() // Revertimos la UI si falló
+            mutate() // Revertimos si falla
         }
 
         setProcesandoId(null)
     }
 
-    if (isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-8 h-8" /></div>
-    if (error || !profile) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-red-500 font-bold uppercase">Error al cargar datos. Refrescá la página.</div>
+    if (isLoading || contextLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-8 h-8" /></div>
+    if (error || (!profile && !contextLoading)) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-red-500 font-bold uppercase">Error al cargar datos. Refrescá la página.</div>
 
     const ahora = new Date()
 
@@ -151,9 +158,9 @@ export default function MisClasesPage() {
     // VISTA PARA PROFESORES
     // ==========================================
     if (userRole === 'profesor' || userRole === 'admin') {
-        const clasesActivas = clasesProfe.filter(c => c.estado !== 'cancelada' && new Date(c.fin.replace('+00', '')) > ahora)
-        const clasesInactivas = clasesProfe.filter(c => c.estado === 'cancelada' || new Date(c.fin.replace('+00', '')) <= ahora)
-        clasesInactivas.sort((a, b) => new Date(b.inicio).getTime() - new Date(a.inicio).getTime())
+        const clasesActivas = clasesProfe.filter(c => c.estado !== 'cancelada' && parseSafeDate(c.fin) > ahora)
+        const clasesInactivas = clasesProfe.filter(c => c.estado === 'cancelada' || parseSafeDate(c.fin) <= ahora)
+        clasesInactivas.sort((a, b) => parseSafeDate(b.inicio).getTime() - parseSafeDate(a.inicio).getTime())
 
         return (
             <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
@@ -176,7 +183,7 @@ export default function MisClasesPage() {
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                             {clasesActivas.map((clase) => {
-                                const inicioDate = new Date(clase.inicio.replace('+00', '').replace(' ', 'T'))
+                                const inicioDate = parseSafeDate(clase.inicio)
                                 return (
                                     <div key={clase.id} className="bg-[#09090b] border border-white/10 rounded-2xl p-5 hover:border-[#D4E655]/40 transition-all group flex flex-col">
                                         <div className="flex justify-between items-start mb-4">
@@ -209,7 +216,7 @@ export default function MisClasesPage() {
                         </h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 opacity-60">
                             {clasesInactivas.slice(0, 3).map((clase) => {
-                                const inicioDate = new Date(clase.inicio.replace('+00', '').replace(' ', 'T'))
+                                const inicioDate = parseSafeDate(clase.inicio)
                                 return (
                                     <div key={clase.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex justify-between items-center">
                                         <div>
@@ -232,8 +239,8 @@ export default function MisClasesPage() {
     // ==========================================
     // VISTA PARA ALUMNOS
     // ==========================================
-    const clasesProximas = historialAlumno.filter(item => new Date(item.clase.inicio.replace('+00', '').replace(' ', 'T')) > ahora)
-    const clasesPasadas = historialAlumno.filter(item => new Date(item.clase.inicio.replace('+00', '').replace(' ', 'T')) <= ahora)
+    const clasesProximas = historialAlumno.filter(item => parseSafeDate(item.clase.inicio) > ahora)
+    const clasesPasadas = historialAlumno.filter(item => parseSafeDate(item.clase.inicio) <= ahora)
 
     return (
         <div className="pb-24 px-4 pt-4 md:p-8 min-h-screen bg-[#050505] animate-in fade-in">
@@ -255,7 +262,7 @@ export default function MisClasesPage() {
                     {clasesProximas.length > 0 ? (
                         <div className="space-y-4">
                             {clasesProximas.map((item) => {
-                                const claseDateLocal = new Date(item.clase.inicio.replace('+00', '').replace(' ', 'T'))
+                                const claseDateLocal = parseSafeDate(item.clase.inicio)
                                 const horasFaltantes = differenceInHours(claseDateLocal, ahora)
                                 const esCancelable = horasFaltantes >= 24
 
@@ -317,7 +324,7 @@ export default function MisClasesPage() {
                     {clasesPasadas.length > 0 ? (
                         <div className="space-y-4 opacity-80">
                             {clasesPasadas.slice(0, 3).map((item) => {
-                                const claseDateLocal = new Date(item.clase.inicio.replace('+00', '').replace(' ', 'T'))
+                                const claseDateLocal = parseSafeDate(item.clase.inicio)
 
                                 return (
                                     <div key={item.id} className="bg-[#111] border border-white/5 rounded-xl overflow-hidden flex flex-row transition-colors">
