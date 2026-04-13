@@ -39,22 +39,20 @@ export default function RootLayout({
       <body className={`${inter.className} bg-[#050505] text-white min-h-screen antialiased flex flex-col md:flex-row`}>
 
         {/* 🚀 2. EL GUARDIÁN SILENCIOSO ENVUELVE TODA LA APP */}
-        <SessionProvider>
-          <SWRProvider>
-            <CashProvider>
+        <SWRProvider>
+          <CashProvider>
 
 
 
-              {/* 4. Envolvemos a children en un main que ocupe el resto del espacio */}
-              <main className="flex-1 min-w-0 pb-16 md:pb-0">
-                {children}
-              </main>
+            {/* 4. Envolvemos a children en un main que ocupe el resto del espacio */}
+            <main className="flex-1 min-w-0 pb-16 md:pb-0">
+              {children}
+            </main>
 
-              <Toaster position="top-center" richColors theme="dark" />
+            <Toaster position="top-center" richColors theme="dark" />
 
-            </CashProvider>
-          </SWRProvider>
-        </SessionProvider>
+          </CashProvider>
+        </SWRProvider>
 
       </body>
     </html>
