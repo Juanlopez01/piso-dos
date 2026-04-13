@@ -3,7 +3,7 @@
 import { createClient } from '@/utils/supabase/client'
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import useSWR, { useSWRConfig } from 'swr' // 👈 FIX N°1: Importamos el mutador global
+import useSWR, { useSWRConfig } from 'swr'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
@@ -14,8 +14,8 @@ import {
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
 import Image from 'next/image'
-
 import { inscribirAlumnoAction } from '@/app/actions/cartelera'
+import { useCash } from '@/context/CashContext'
 
 const parseSafeDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return new Date()
@@ -28,20 +28,13 @@ type ClaseInstancia = { id: string; inicio: string; fin: string; cupo_maximo: nu
 type ClaseAgrupada = { key_grupo: string; nombre: string; tipo_clase: string; imagen_url?: string | null; ritmo_id?: string | null; profesor: { nombre_completo: string }; instancias: ClaseInstancia[] }
 type CarteleraData = { perfil: { id: string, creditos_regulares: number, creditos_seminarios: number } | null; clasesAgrupadas: ClaseAgrupada[] }
 
-// 🚀 FIX N°2: Pasamos Supabase como parámetro para no crear 100 clientes
-const fetcherCartelera = async (supabase: any): Promise<CarteleraData> => {
-    const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
-
+// 🚀 FETCHER ORDENADO
+const fetcherCartelera = async (uid: string | null, supabase: any): Promise<CarteleraData> => {
     let profile = null
 
-    if (user) {
+    if (uid) {
         supabase.rpc('limpiar_creditos_vencidos').then()
-        const { data: userProfile } = await supabase
-            .from('profiles')
-            .select('id, creditos_regulares, creditos_seminarios')
-            .eq('id', user.id)
-            .single()
+        const { data: userProfile } = await supabase.from('profiles').select('id, creditos_regulares, creditos_seminarios').eq('id', uid).single()
         profile = userProfile
     }
 
@@ -68,7 +61,7 @@ const fetcherCartelera = async (supabase: any): Promise<CarteleraData> => {
             const instancia: ClaseInstancia = {
                 id: c.id, inicio: c.inicio, fin: c.fin, cupo_maximo: c.cupo_maximo,
                 inscritos_count: inscritos.length,
-                ya_inscrito: user ? inscritos.some((i: any) => i.user_id === user.id) : false,
+                ya_inscrito: uid ? inscritos.some((i: any) => i.user_id === uid) : false,
                 estado: c.estado,
                 sala: Array.isArray(c.sala) ? c.sala[0] : c.sala
             }
@@ -92,20 +85,16 @@ const fetcherCartelera = async (supabase: any): Promise<CarteleraData> => {
 
 export default function ExplorarClasesPage() {
     const router = useRouter()
-
-    // Creamos el cliente UNA SOLA VEZ para toda la página
     const [supabase] = useState(() => createClient())
-
-    // Traemos el mutador global que SÍ tiene permisos para tocar el Perfil
     const { mutate: globalMutate } = useSWRConfig()
 
+    // 🛡️ ESPERAMOS AL CONTEXTO
+    const { userId, isLoading: contextLoading } = useCash()
+
     const { data, isLoading, mutate: mutateCartelera } = useSWR<CarteleraData>(
-        'cartelera',
-        () => fetcherCartelera(supabase), // Le inyectamos el cliente sano
-        {
-            revalidateOnFocus: false,
-            dedupingInterval: 3000
-        }
+        !contextLoading ? ['cartelera', userId] : null,
+        ([_, uid]) => fetcherCartelera(uid as string | null, supabase),
+        { revalidateOnFocus: false, dedupingInterval: 3000 }
     )
 
     const clasesAgrupadas = data?.clasesAgrupadas || []
@@ -131,7 +120,7 @@ export default function ExplorarClasesPage() {
 
         setProcesandoId(instancia.id)
 
-        // 🚀 MUTACIÓN OPTIMISTA AL INSTANTE
+        // 🚀 MUTACIÓN OPTIMISTA (El botón cambia al instante)
         const optimisticAgrupadas = clasesAgrupadas.map(g => {
             if (g.key_grupo === grupo.key_grupo) {
                 return {
@@ -149,13 +138,12 @@ export default function ExplorarClasesPage() {
 
         if (response.success) {
             toast.success(response.message)
-            // Forzamos la actualización local
             mutateCartelera()
-            // 🚀 FIX N°3: Le gritamos al Perfil que actualice sus datos usando el comando global
-            globalMutate('mi-perfil')
+            // 🚀 AVISAMOS AL PERFIL QUE ACTUALICE SUS DATOS SIN ROMPER NADA
+            globalMutate(['perfil', userId])
         } else {
             toast.error(response.error || 'Error al procesar reserva')
-            mutateCartelera() // Revertir optimismo si falla
+            mutateCartelera()
         }
         setProcesandoId(null)
     }
@@ -171,8 +159,9 @@ export default function ExplorarClasesPage() {
 
     const ritmosSugeridos = useMemo(() => Array.from(new Set(clasesAgrupadas.map(c => c.nombre.split(' ')[0]))).slice(0, 5), [clasesAgrupadas])
 
-    if (isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
+    if (isLoading || contextLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
+    // ... TODO TU HTML (RENDERIZADO) QUEDA IGUAL, LO PEGO COMPLETO:
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
             <Toaster position="top-center" richColors theme="dark" />
