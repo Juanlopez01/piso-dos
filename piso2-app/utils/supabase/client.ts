@@ -1,19 +1,20 @@
 import { createBrowserClient } from '@supabase/ssr'
 
-// 1. Creamos una variable global por fuera de la función
-let supabaseInstance: ReturnType<typeof createBrowserClient> | undefined
+// 🚀 LA BALA DE PLATA: Guardamos la conexión acá arriba
+let browserClient: ReturnType<typeof createBrowserClient> | undefined = undefined;
 
 export function createClient() {
-    // 2. Si la conexión YA EXISTE, devolvemos la misma para todos
-    if (supabaseInstance) {
-        return supabaseInstance
+    // Si la conexión ya existe, devolvemos la misma a todos los que pregunten.
+    // ¡ESTO ELIMINA EL EMBOTELLAMIENTO Y LOS CUELGUES DE RAIZ!
+    if (browserClient) {
+        return browserClient;
     }
 
-    // 3. Si no existe, la creamos por primera y ÚNICA vez
-    supabaseInstance = createBrowserClient(
+    // Si no existe, la creamos por primera y única vez.
+    browserClient = createBrowserClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     )
 
-    return supabaseInstance
+    return browserClient;
 }
