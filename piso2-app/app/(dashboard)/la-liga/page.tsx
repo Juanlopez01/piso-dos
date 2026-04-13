@@ -1,8 +1,8 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useState, useRef, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation' // 🚀 Agregado useSearchParams
+import { useState, useRef, useEffect, Suspense } from 'react' // 🚀 AGREGAMOS Suspense ACÁ
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import useSWR from 'swr'
 import {
@@ -129,15 +129,14 @@ const fetcherLiga = async (uid: string, supabase: any) => {
     return { profile, isStaff, canManage, legajoCompleto, avisos: avisos || [], materias, deudaCuota, allStudents }
 }
 
-export default function LaLigaPage() {
+// 🚀 RENOMBRAMOS LA FUNCIÓN PRINCIPAL
+function LaLigaContent() {
     const router = useRouter()
-    const searchParams = useSearchParams() // 🚀 RADAR ACTIVADO
+    const searchParams = useSearchParams()
     const [supabase] = useState(() => createClient())
 
-    // 🚀 Sacamos "hasLigaAccess" para no echar al alumno
     const { userId, isLoading: loadingContext } = useCash()
 
-    // 🚀 SWR ahora carga datos si hay usuario (sin pedir permisos estrictos)
     const { data, isLoading: loadingSWR, mutate, error } = useSWR(
         !loadingContext && userId ? ['liga-data', userId] : null,
         ([_, uid]) => fetcherLiga(uid as string, supabase),
@@ -171,9 +170,7 @@ export default function LaLigaPage() {
         if (pagoStatus === 'exito' && !pagoNotificado.current) {
             pagoNotificado.current = true
             toast.success('¡Pago de cuota aprobado exitosamente!', { duration: 5000 })
-            // Limpia la URL para que no quede fea
             router.replace('/la-liga', { scroll: false })
-            // Actualiza SWR para sacar el cartel de deuda
             setTimeout(() => mutate(), 1500)
         } else if (pagoStatus === 'error' && !pagoNotificado.current) {
             pagoNotificado.current = true
@@ -668,5 +665,19 @@ export default function LaLigaPage() {
                 </div>
             )}
         </div>
+    )
+}
+
+// 🚀 EL ENVOLTORIO PROTECTOR
+export default function LaLigaPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center">
+                <Loader2 className="animate-spin text-[#D4E655] w-12 h-12 mb-4" />
+                <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">Cargando La Liga...</p>
+            </div>
+        }>
+            <LaLigaContent />
+        </Suspense>
     )
 }
