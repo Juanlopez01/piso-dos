@@ -13,8 +13,8 @@ import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 
-// Solo usamos la Action para GUARDAR, no para buscar datos
-import { actualizarPerfilAction } from '@/app/actions/perfil'
+// 🚀 VOLVEMOS A TU SERVER ACTION ORIGINAL (La que funciona bárbaro)
+import { actualizarPerfilAction, obtenerDatosPerfilAction } from '@/app/actions/perfil'
 
 type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; inicio: string; tipo_clase: string; profesor: { nombre_completo: string } } }
 type PackVencimiento = { fecha_vencimiento: string; creditos_restantes: number; tipo_clase: string }
@@ -27,26 +27,13 @@ type PerfilData = {
     proximoVencimiento: PackVencimiento | null
 }
 
-// 🚀 EL FETCHER 100% CLIENTE (No despierta al CashContext ni toca cookies)
+// 🚀 EL FETCHER QUE SIEMPRE TE ANDUVO BIEN
 const fetcherPerfil = async (): Promise<PerfilData> => {
-    const supabase = createClient()
-
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) throw new Error("NO_AUTH")
-
-    const [profileReq, historialReq, avisosReq, packsReq] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', user.id).single(),
-        supabase.from('clase_alumnos').select(`id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles(nombre_completo))`).eq('alumno_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('avisos').select('*').order('created_at', { ascending: false }),
-        supabase.from('alumno_packs').select('*').eq('user_id', user.id).eq('estado', 'activo').order('fecha_vencimiento', { ascending: true }).limit(1)
-    ])
-
-    return {
-        profile: profileReq.data,
-        email: user.email,
-        historialClases: historialReq.data || [],
-        avisos: avisosReq.data || [],
-        proximoVencimiento: packsReq.data?.[0] || null
+    try {
+        const data = await obtenerDatosPerfilAction();
+        return data as PerfilData;
+    } catch (error: any) {
+        throw new Error(error.message || "Error al cargar perfil");
     }
 }
 
@@ -55,15 +42,16 @@ function PerfilContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
 
+    // 🛡️ REFS DE BLINDAJE
     const pagoNotificado = useRef(false)
     const formInicializado = useRef(false)
 
-    // 🚀 SWR CONDICIONADO: revalidateOnFocus APAGADO para que no parpadee al tipear
+    // 🚀 SWR CONDICIONADO: revalidateOnFocus APAGADO para que no se congele al escribir
     const { data, error, isLoading, mutate } = useSWR<PerfilData>(
-        'mi-perfil-cliente',
+        'mi-perfil',
         fetcherPerfil,
         {
-            revalidateOnFocus: false,
+            revalidateOnFocus: false, // <-- La magia anti-cuelgues
             dedupingInterval: 5000
         }
     )
@@ -86,6 +74,7 @@ function PerfilContent() {
         edad: '', direccion: '', contacto_emergencia: '', plan_medico: '', condiciones_medicas: '', apto_fisico_url: ''
     })
 
+    // 🚀 EL FRENO DE MANO AL FORMULARIO
     useEffect(() => {
         if (profile && !formInicializado.current) {
             setFormData({
@@ -100,20 +89,25 @@ function PerfilContent() {
         }
     }, [profile, userEmail])
 
-    // RADAR DE MERCADO PAGO SEGURO
+    // 🚀 EL RADAR FLUIDO DE MERCADO PAGO
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
+        let radarInterval: NodeJS.Timeout
 
         if (pagoStatus && !pagoNotificado.current) {
             pagoNotificado.current = true
 
             if (pagoStatus === 'exito') {
                 toast.success('¡Pago aprobado! Sincronizando tus créditos...', { duration: 5000 })
+
                 router.replace('/perfil', { scroll: false })
 
-                // Refrescamos suavemente sin loops
-                setTimeout(() => mutate(), 2000)
-                setTimeout(() => mutate(), 4500)
+                let intentos = 0
+                radarInterval = setInterval(async () => {
+                    intentos++
+                    await mutate()
+                    if (intentos >= 4) clearInterval(radarInterval)
+                }, 2000)
 
             } else if (pagoStatus === 'error') {
                 toast.error('El pago no se procesó o fue rechazado.')
@@ -122,6 +116,10 @@ function PerfilContent() {
                 toast.info('Pago pendiente. Se sumará cuando MP lo apruebe.')
                 router.replace('/perfil', { scroll: false })
             }
+        }
+
+        return () => {
+            if (radarInterval) clearInterval(radarInterval)
         }
     }, [searchParams, router, mutate])
 
