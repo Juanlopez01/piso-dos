@@ -279,31 +279,29 @@ export default function MisPagosPage() {
                                                 const isSafeDate = !isNaN(dateObj.getTime());
 
                                                 return (
-                                                    <div className="md:hidden space-y-3">
-                                                        {mes.clases.map((clase) => {
-                                                            // 🚀 MISMA LÓGICA: Extracción manual de texto
-                                                            const [fechaParte, horaParte] = clase.inicio.split('T');
-                                                            const horaDisplay = horaParte ? horaParte.substring(0, 5) : '00:00';
-                                                            const [anio, mesStr, dia] = fechaParte.split('-');
-                                                            const fechaDisplay = `${dia}/${mesStr}`;
+                                                    <div key={clase.id} className="bg-[#111] p-4 rounded-xl border border-white/5">
+                                                        <div className="flex justify-between items-start mb-2">
+                                                            <div>
+                                                                <h4 className="font-bold text-white uppercase leading-tight">{clase.nombre}</h4>
+                                                                <p className="text-[10px] text-gray-400 flex items-center gap-1 mt-1">
+                                                                    <Calendar size={10} /> {isSafeDate ? format(dateObj, "dd/MM - HH:mm") : '--/--'} hs
+                                                                </p>
+                                                            </div>
+                                                            <span className="bg-white/10 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
+                                                                <Users size={10} /> {clase.cant_alumnos}
+                                                            </span>
+                                                        </div>
 
-                                                            return (
-                                                                <div key={clase.id} className="bg-[#111] p-4 rounded-xl border border-white/5">
-                                                                    <div className="flex justify-between items-start mb-2">
-                                                                        <div>
-                                                                            <h4 className="font-bold text-white uppercase leading-tight">{clase.nombre}</h4>
-                                                                            <p className="text-[10px] text-gray-400 flex items-center gap-1 mt-1">
-                                                                                <Calendar size={10} /> {fechaDisplay} - {horaDisplay} hs
-                                                                            </p>
-                                                                        </div>
-                                                                        <span className="bg-white/10 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
-                                                                            <Users size={10} /> {clase.cant_alumnos}
-                                                                        </span>
-                                                                    </div>
-                                                                    {/* ... resto del contenido de la tarjeta igual ... */}
-                                                                </div>
-                                                            )
-                                                        })}
+                                                        <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-white/5">
+                                                            <div>
+                                                                <p className="text-[9px] text-gray-500 uppercase font-bold">Acuerdo</p>
+                                                                <p className="text-xs text-gray-300">{clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : 'Monto Fijo'}</p>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <p className="text-[9px] text-gray-500 uppercase font-bold">Mi Pago</p>
+                                                                <p className="text-sm font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</p>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 )
                                             })}
