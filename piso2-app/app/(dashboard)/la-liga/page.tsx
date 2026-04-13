@@ -1,8 +1,8 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useState, useRef, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useRef, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation' // 🚀 Agregado useSearchParams
 import Link from 'next/link'
 import useSWR from 'swr'
 import {
@@ -131,16 +131,20 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
 export default function LaLigaPage() {
     const router = useRouter()
+    const searchParams = useSearchParams() // 🚀 RADAR ACTIVADO
     const [supabase] = useState(() => createClient())
-    const { hasLigaAccess, userId, isLoading: loadingContext } = useCash()
 
-    // 🚀 SWR REPARADO (Sincronizado con el Singleton)
+    // 🚀 Sacamos "hasLigaAccess" para no echar al alumno
+    const { userId, isLoading: loadingContext } = useCash()
+
+    // 🚀 SWR ahora carga datos si hay usuario (sin pedir permisos estrictos)
     const { data, isLoading: loadingSWR, mutate, error } = useSWR(
-        hasLigaAccess && !loadingContext && userId ? ['liga-data', userId] : null,
+        !loadingContext && userId ? ['liga-data', userId] : null,
         ([_, uid]) => fetcherLiga(uid as string, supabase),
         { revalidateOnFocus: false }
     )
 
+    const pagoNotificado = useRef(false)
     const [procesandoPago, setProcesandoPago] = useState(false)
     const [adminTab, setAdminTab] = useState<'evaluaciones' | 'gestion' | 'comunicados'>('evaluaciones')
     const [selectedMateria, setSelectedMateria] = useState<any>(null)
@@ -161,12 +165,22 @@ export default function LaLigaPage() {
     const [boletinModalOpen, setBoletinModalOpen] = useState(false)
     const [selectedBoletin, setSelectedBoletin] = useState<any>(null)
 
-    // Redirección si no tiene acceso
-    if (!loadingContext && !hasLigaAccess) {
-        toast.error('Acceso denegado. No pertenecés a La Liga.')
-        router.replace('/explorar')
-        return null
-    }
+    // 🚀 RADAR DE ÉXITO MERCADO PAGO
+    useEffect(() => {
+        const pagoStatus = searchParams.get('pago')
+        if (pagoStatus === 'exito' && !pagoNotificado.current) {
+            pagoNotificado.current = true
+            toast.success('¡Pago de cuota aprobado exitosamente!', { duration: 5000 })
+            // Limpia la URL para que no quede fea
+            router.replace('/la-liga', { scroll: false })
+            // Actualiza SWR para sacar el cartel de deuda
+            setTimeout(() => mutate(), 1500)
+        } else if (pagoStatus === 'error' && !pagoNotificado.current) {
+            pagoNotificado.current = true
+            toast.error('El pago no se procesó o fue rechazado.')
+            router.replace('/la-liga', { scroll: false })
+        }
+    }, [searchParams, mutate, router])
 
     if (loadingSWR || loadingContext) {
         return (
@@ -206,7 +220,7 @@ export default function LaLigaPage() {
                 body: JSON.stringify({
                     titulo: `Cuota La Liga - Mes ${mesActual}/${anioActual}`,
                     precio: precioCuota,
-                    userId: userId, // 🚀 USAMOS EL ID DEL CONTEXTO
+                    userId: userId,
                     tipo_pago: 'cuota_liga',
                     mes: mesActual,
                     anio: anioActual
