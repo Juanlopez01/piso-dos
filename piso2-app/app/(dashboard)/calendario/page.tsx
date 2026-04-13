@@ -330,6 +330,38 @@ export default function CalendarioPage() {
         setModalMode('edit');
     }
 
+    // 🚀 FUNCIÓN PARA NOTIFICAR ALUMNOS AUTOMÁTICAMENTE
+    const notificarAlumnos = async (datosClase: typeof form) => {
+        try {
+            let query = supabase.from('profiles').select('id').eq('rol', 'alumno')
+
+            // Si es de La Liga, avisamos solo a los de ese nivel. Si no, a todos por defecto.
+            if (datosClase.esLaLiga) {
+                query = query.eq('nivel_liga', datosClase.ligaNivel)
+            }
+            // 💡 NOTA: Si en el futuro agregás una columna 'intereses' a los perfiles, 
+            // podés descomentar y usar esta línea:
+            // query = query.contains('intereses', [datosClase.tipo])
+
+            const { data: alumnos, error } = await query
+
+            if (error || !alumnos || alumnos.length === 0) return
+
+            const notifs = alumnos.map((a: { id: string }) => ({
+                user_id: a.id,
+                titulo: `¡Nueva clase: ${datosClase.nombre}!`,
+                mensaje: `Se abrió un nuevo horario de ${datosClase.tipo}. ¡Asegurá tu lugar antes de que se llene!`,
+                link: '/explorar',
+                leido: false
+            }))
+
+            await supabase.from('notificaciones').insert(notifs)
+            console.log(`✅ Megáfono activado: Se avisó de la nueva clase a ${alumnos.length} alumnos.`)
+        } catch (error) {
+            console.error('Error al enviar notificaciones automáticas:', error)
+        }
+    }
+
     const handleGuardarClase = async (e: React.FormEvent) => {
         e.preventDefault()
         if (form.fechas.length === 0) return toast.error('Seleccioná al menos una fecha')
@@ -387,6 +419,9 @@ export default function CalendarioPage() {
                 const response = await crearClasesAction(form, publicUrl)
                 if (!response.success) throw new Error(response.error)
                 toast.success(`${response.cantidad} clase(s) creada(s) correctamente`)
+
+                // 🚀 DISPARAMOS NOTIFICACIONES A LOS ALUMNOS
+                notificarAlumnos(form)
             }
 
             // Limpieza
@@ -436,7 +471,7 @@ export default function CalendarioPage() {
     const getEventStyle = (evt: EventoAgenda) => {
         if (evt.tipo === 'Alquiler') return { border: 'border-white', text: 'text-white', bg: 'bg-white' }
         if (evt.clase_data?.es_audicion) return { border: 'border-pink-500', text: 'text-pink-500', bg: 'bg-pink-500' }
-        if (evt.clase_data?.es_la_liga) return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500' }
+        if (evt.clase_data?.es_la_liga) return { border: 'border-yellow-500', text: 'text-yellow-500', bg: 'bg-yellow-500' }
         switch (evt.subtitulo) {
             case 'Regular': return { border: 'border-orange-500', text: 'text-orange-500', bg: 'bg-orange-500' }
             case 'Seminario': return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500' }
@@ -568,7 +603,7 @@ export default function CalendarioPage() {
                                                                     </span>
                                                                     <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><GraduationCap size={10} /> {evt.clase_data?.nivel}</span>
                                                                     {evt.clase_data?.es_audicion && <span className="flex items-center gap-1 bg-pink-500/10 text-pink-400 border border-pink-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Sparkles size={10} className="text-pink-500" /> Audición</span>}
-                                                                    {evt.clase_data?.es_la_liga && <span className="flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})</span>}
+                                                                    {evt.clase_data?.es_la_liga && <span className="flex items-center gap-1 bg-yellow-500/10 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Star size={10} className="fill-yellow-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})</span>}
                                                                     {evt.clase_data?.compania_nombre && <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><UsersRound size={10} className="text-blue-500" /> {evt.clase_data.compania_nombre}</span>}
                                                                 </>
                                                             ) : (<span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><User size={10} /> Cliente Externo</span>)}
@@ -583,19 +618,6 @@ export default function CalendarioPage() {
                                                             ) : (<div className="flex gap-2 w-full"><div className="flex-1 text-[10px] text-gray-500 italic flex items-center"><Info size={12} className="mr-1" /> Alquiler externo</div><a href="/alquileres" className="px-3 py-2 bg-white/10 text-white rounded text-[10px] font-bold uppercase hover:bg-white/20">Ver Alquileres</a></div>)}
                                                         </div>
                                                     </div>
-
-                                                    {deleteTarget?.id === evt.id && (
-                                                        <div className="absolute inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-center p-4 text-center animate-in fade-in">
-                                                            <AlertCircle className="text-red-500 mb-2" size={32} />
-                                                            <h4 className="text-white font-black uppercase mb-1">¿Eliminar Clase?</h4>
-                                                            <p className="text-gray-400 text-[10px] mb-4">Esta acción cancelará la clase.</p>
-                                                            <div className="flex gap-2 w-full">
-                                                                <button onClick={() => setDeleteTarget(null)} className="flex-1 py-2 bg-white/10 rounded font-bold text-[10px] uppercase hover:bg-white/20">Cancelar</button>
-                                                                <button onClick={() => handleConfirmDelete('single')} className="flex-1 py-2 bg-red-500 text-white rounded font-bold text-[10px] uppercase hover:bg-red-600 shadow-[0_0_15px_rgba(239,68,68,0.3)]">Solo esta</button>
-                                                                {deleteTarget.serieId && <button onClick={() => handleConfirmDelete('serie')} className="flex-1 py-2 bg-red-900 border border-red-500 text-white rounded font-bold text-[10px] uppercase hover:bg-red-800">Toda la serie</button>}
-                                                            </div>
-                                                        </div>
-                                                    )}
                                                 </div>
                                             )
                                         })

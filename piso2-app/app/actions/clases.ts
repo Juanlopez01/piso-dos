@@ -244,3 +244,49 @@ export async function duplicarMesAction(mesOrigen: string) { // mesOrigen format
         return { success: false, error: error.message }
     }
 }
+
+export async function notificarClasePorInteres(nuevaClase: any) {
+    const supabase = await createClient() // Tu cliente de Supabase de servidor
+
+    try {
+        // 1. Buscamos a los alumnos que les interese este tipo de clase
+        // Asumiendo que tenés un campo en profiles que coincida, por ejemplo 'intereses' o 'nivel_liga'
+        const { data: alumnosInteresados, error: errorAlumnos } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('rol', 'alumno')
+        // Acá ponés tu lógica de filtro. Por ejemplo, si tenés un array de intereses:
+        // .contains('intereses', [nuevaClase.tipo_clase]) 
+        // O si querés avisarle a todos los de un nivel:
+        // .eq('nivel', nuevaClase.nivel_requerido)
+
+        if (errorAlumnos || !alumnosInteresados || alumnosInteresados.length === 0) {
+            console.log("No hay alumnos con este interés para notificar.")
+            return
+        }
+
+        // 2. Armamos el paquete de notificaciones (BULK)
+        // Esto es súper eficiente porque armamos un Array y lo mandamos de 1 sola vez
+        const nuevasNotificaciones = alumnosInteresados.map(alumno => ({
+            usuario_id: alumno.id, // 🚀 Tu columna correcta
+            titulo: `¡Nueva clase de ${nuevaClase.tipo_clase}!`,
+            mensaje: `Se abrió un nuevo horario para ${nuevaClase.nombre}. ¡Asegurá tu lugar antes de que se llene!`,
+            link: '/explorar', // Opcional: Podés mandarlos directo al detalle de la clase
+            leido: false
+        }))
+
+        // 3. Insertamos todo de golpe en la base de datos
+        const { error: errorNotifs } = await supabase
+            .from('notificaciones')
+            .insert(nuevasNotificaciones)
+
+        if (errorNotifs) {
+            console.error("❌ Error enviando notificaciones automáticas:", errorNotifs)
+        } else {
+            console.log(`✅ ¡Megáfono activado! Se avisó a ${alumnosInteresados.length} alumnos.`)
+        }
+
+    } catch (error) {
+        console.error("Error en el megáfono:", error)
+    }
+}

@@ -2,12 +2,13 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
-import { Bell, CheckCircle2, Circle, Loader2, ArrowRight, Trash2 } from 'lucide-react'
-import Link from 'next/link'
+import { Bell, CheckCircle2, Circle, Loader2, ArrowRight, Trash2, AlertTriangle } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { toast, Toaster } from 'sonner'
 import { useRouter } from 'next/navigation'
+import useSWR from 'swr'
+import { useCash } from '@/context/CashContext' // 🚀 IMPORTAMOS EL CONTEXTO GLOBAL
 
 type Notificacion = {
     id: string
@@ -18,82 +19,114 @@ type Notificacion = {
     created_at: string
 }
 
+// 🚀 FETCHER ORDENADO (Recibe el UID directamente)
+const fetcherNotificaciones = async (uid: string, supabase: any): Promise<Notificacion[]> => {
+    const { data, error } = await supabase
+        .from('notificaciones')
+        .select('*')
+        .eq('usuario_id', uid)
+        .order('created_at', { ascending: false })
+
+    if (error) throw new Error(error.message)
+    return data || []
+}
+
 export default function NotificacionesPage() {
+    // 1. Singleton de Supabase
     const [supabase] = useState(() => createClient())
     const router = useRouter()
-    const [notificaciones, setNotificaciones] = useState<Notificacion[]>([])
-    const [loading, setLoading] = useState(true)
-    const [userId, setUserId] = useState<string | null>(null)
 
+    // 2. Extraemos el ID del usuario desde el Contexto (Sin pelear por la sesión)
+    const { userId, isLoading: contextLoading } = useCash()
+
+    // 3. SWR: Se encarga del caché y la carga automática
+    const { data: notificaciones, error, isLoading, mutate } = useSWR<Notificacion[]>(
+        !contextLoading && userId ? ['notificaciones', userId] : null,
+        ([_, uid]) => fetcherNotificaciones(uid as string, supabase),
+        { revalidateOnFocus: true }
+    )
+
+    // 4. SUSCRIPCIÓN EN TIEMPO REAL (Para que caigan al instante)
     useEffect(() => {
-        fetchNotificaciones()
+        if (!userId) return
 
-        // Opcional: Recarga automática si entra una nueva notificación mientras mira la página
         const channel = supabase
             .channel('realtime_notifs_page')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notificaciones' }, () => {
-                fetchNotificaciones()
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'notificaciones',
+                filter: `usuario_id=eq.${userId}` // 🚀 Escuchamos solo nuestras notificaciones
+            }, () => {
+                // Le avisamos a SWR que hay datos nuevos
+                mutate()
+                // Opcional: Un sonido o toast extra si estás en la página
             })
             .subscribe()
 
         return () => { supabase.removeChannel(channel) }
-    }, [])
-
-    const fetchNotificaciones = async () => {
-        setLoading(true)
-        const { data: { user } } = await supabase.auth.getSession()
-        if (!user) return
-        setUserId(user.id)
-
-        const { data, error } = await supabase
-            .from('notificaciones')
-            .select('*')
-            .eq('usuario_id', user.id)
-            .order('created_at', { ascending: false })
-
-        if (error) {
-            console.error('Error fetching notificaciones:', error)
-            toast.error('Error al cargar notificaciones')
-        } else if (data) {
-            setNotificaciones(data)
-        }
-        setLoading(false)
-    }
+    }, [userId, supabase, mutate])
 
     const handleClickNotificacion = async (id: string, leido: boolean, link: string | null) => {
-        // Si no está leída, la marcamos como leída en la base de datos
-        if (!leido) {
-            await supabase.from('notificaciones').update({ leido: true }).eq('id', id)
-            setNotificaciones(prev => prev.map(n => n.id === id ? { ...n, leido: true } : n))
+        // 🚀 MUTACIÓN OPTIMISTA: Lo marcamos como leído en la pantalla al instante
+        if (!leido && notificaciones) {
+            const nuevasNotifs = notificaciones.map(n => n.id === id ? { ...n, leido: true } : n)
+            mutate(nuevasNotifs, false)
 
-            // Emitir un evento personalizado para que el Sidebar (o cualquier otro lado) se entere
+            // Impactamos en la base de datos de fondo
+            await supabase.from('notificaciones').update({ leido: true }).eq('id', id)
+            mutate() // Sincronizamos por las dudas
+
+            // Le avisamos al Sidebar
             window.dispatchEvent(new Event('notificaciones_actualizadas'))
         }
 
-        // Si tiene link, redirigimos
-        if (link) {
-            router.push(link)
-        }
+        // Redirigimos si hay link
+        if (link) router.push(link)
     }
 
     const marcarTodasLeidas = async () => {
-        if (!userId) return
+        if (!userId || !notificaciones) return
+
+        // Mutación optimista
+        const nuevasNotifs = notificaciones.map(n => ({ ...n, leido: true }))
+        mutate(nuevasNotifs, false)
+
+        // Impacto real
         await supabase.from('notificaciones').update({ leido: true }).eq('usuario_id', userId).eq('leido', false)
-        setNotificaciones(prev => prev.map(n => ({ ...n, leido: true })))
         toast.success('Todas marcadas como leídas')
+        mutate() // Sincronizamos
         window.dispatchEvent(new Event('notificaciones_actualizadas'))
     }
 
     const eliminarLeidas = async () => {
-        if (!userId) return
+        if (!userId || !notificaciones) return
+
+        // Mutación optimista
+        const nuevasNotifs = notificaciones.filter(n => !n.leido)
+        mutate(nuevasNotifs, false)
+
+        // Impacto real
         await supabase.from('notificaciones').delete().eq('usuario_id', userId).eq('leido', true)
-        setNotificaciones(prev => prev.filter(n => !n.leido))
         toast.success('Notificaciones leídas eliminadas')
+        mutate() // Sincronizamos
     }
 
-    if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
+    // --- ESTADOS DE CARGA Y ERROR ---
+    if (isLoading || contextLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
-    const unreadCount = notificaciones.filter(n => !n.leido).length
+    if (error) {
+        return (
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-4">
+                <AlertTriangle className="text-orange-500 w-16 h-16" />
+                <h2 className="text-white font-black text-2xl uppercase">Error al cargar</h2>
+                <button onClick={() => window.location.reload()} className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs">Refrescar</button>
+            </div>
+        )
+    }
+
+    const safeNotificaciones = notificaciones || []
+    const unreadCount = safeNotificaciones.filter(n => !n.leido).length
 
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
@@ -117,7 +150,7 @@ export default function NotificacionesPage() {
                             Marcar todas leídas
                         </button>
                     )}
-                    {notificaciones.some(n => n.leido) && (
+                    {safeNotificaciones.some(n => n.leido) && (
                         <button onClick={eliminarLeidas} className="bg-red-500/10 hover:bg-red-500/20 text-red-500 px-4 py-2 rounded-xl text-xs font-bold uppercase transition-colors flex items-center gap-2">
                             <Trash2 size={14} /> Limpiar Leídas
                         </button>
@@ -127,14 +160,14 @@ export default function NotificacionesPage() {
 
             {/* LISTA DE NOTIFICACIONES */}
             <div className="max-w-3xl space-y-3">
-                {notificaciones.length === 0 ? (
+                {safeNotificaciones.length === 0 ? (
                     <div className="bg-[#111] border border-white/5 rounded-2xl p-12 text-center text-gray-500">
                         <Bell className="mx-auto mb-4 opacity-20" size={48} />
                         <p className="font-bold uppercase text-sm">No tenés notificaciones nuevas.</p>
                         <p className="text-xs mt-1">¡Todo al día!</p>
                     </div>
                 ) : (
-                    notificaciones.map((n) => (
+                    safeNotificaciones.map((n) => (
                         <div
                             key={n.id}
                             onClick={() => handleClickNotificacion(n.id, n.leido, n.link)}
