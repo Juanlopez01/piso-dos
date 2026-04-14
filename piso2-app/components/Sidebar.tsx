@@ -41,12 +41,17 @@ function SidebarContent() {
 
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
-        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Liquidaciones', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
+
+        // 🚀 Agregamos "Compañías" al listado base que ven los profes
+        if (userRole === 'profesor') {
+            return ['Inicio', 'Mis Clases', 'Mis Pagos', 'Compañías', 'La Liga', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        }
 
         if (userRole === 'recepcion') {
             if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga', 'Compañías'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Compañías'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Compañías'].includes(item.name)
         }
 
         return item.roles.includes(userRole || 'visitante')

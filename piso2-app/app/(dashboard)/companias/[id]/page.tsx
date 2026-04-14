@@ -7,7 +7,7 @@ import {
     Loader2, UsersRound, Shield, ArrowLeft,
     MessageSquare, Calendar, Users, Info,
     Clock, MapPin, User, ChevronRight, Image as ImageIcon,
-    Send // 🚀 IMPORTAMOS EL ICONO DE ENVIAR
+    Send, BellRing, X // 🚀 Agregados iconos para notifs individuales
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
@@ -50,16 +50,18 @@ export default function CompaniaDetallePage() {
     const [miembros, setMiembros] = useState<Miembro[]>([])
     const [clases, setClases] = useState<ClaseCompania[]>([])
     const [loading, setLoading] = useState(true)
+    const [userId, setUserId] = useState('')
 
-    // Pestañas de navegación interna
     const [activeTab, setActiveTab] = useState<'muro' | 'clases' | 'miembros'>('muro')
 
-    // 🚀 ESTADOS PARA EL MURO / AVISOS
+    // Estados para Muro (Global)
     const [notifMessage, setNotifMessage] = useState('')
     const [sendingNotif, setSendingNotif] = useState(false)
 
-    // 🚀 DEFINIMOS QUIÉN ES STAFF (Tienen superpoderes en el muro)
-    const isStaffGeneral = ['admin', 'recepcion', 'coordinador'].includes(userRole || '')
+    // 🚀 Estados para Notificación Individual
+    const [isIndividualNotifOpen, setIsIndividualNotifOpen] = useState(false)
+    const [selectedAlumno, setSelectedAlumno] = useState<Miembro | null>(null)
+    const [individualMessage, setIndividualMessage] = useState('')
 
     useEffect(() => {
         if (!loadingContext) {
@@ -70,7 +72,6 @@ export default function CompaniaDetallePage() {
     const verificarAccesoYCargar = async () => {
         setLoading(true)
 
-        // 🚀 BLINDAJE: getSession en lugar de getUser
         const { data: { session } } = await supabase.auth.getSession()
         const user = session?.user
 
@@ -78,14 +79,31 @@ export default function CompaniaDetallePage() {
             router.replace('/login')
             return
         }
+        setUserId(user.id)
 
         const companiaId = params.id as string
 
-        // 1. EL PATOVICA
-        const rolesPermitidos = ['admin', 'recepcion', 'profesor', 'coordinador']
-        let tienePermiso = rolesPermitidos.includes(userRole || '')
+        const { data: dataCompania, error } = await supabase
+            .from('companias')
+            .select('*, coordinador:profiles!coordinador_id(nombre_completo)')
+            .eq('id', companiaId)
+            .single()
 
-        if (!tienePermiso && userRole === 'alumno') {
+        if (error || !dataCompania) {
+            toast.error('La compañía no existe')
+            router.replace('/companias')
+            return
+        }
+        setCompania(dataCompania)
+
+        // 🚀 VERIFICACIÓN DE PERMISOS ACTUALIZADA
+        const esAdminORecep = ['admin', 'recepcion'].includes(userRole || '')
+        const esProfeCoordinador = userRole === 'profesor' && dataCompania.coordinador_id === user.id
+        const esProfeComun = userRole === 'profesor' && dataCompania.coordinador_id !== user.id
+
+        let tienePermiso = esAdminORecep || esProfeCoordinador || esProfeComun
+
+        if (userRole === 'alumno') {
             const { data: esMiembro } = await supabase
                 .from('perfiles_companias')
                 .select('compania_id')
@@ -102,21 +120,6 @@ export default function CompaniaDetallePage() {
             return
         }
 
-        // 2. Cargamos Compañía
-        const { data: dataCompania, error } = await supabase
-            .from('companias')
-            .select('*, coordinador:profiles!coordinador_id(nombre_completo)')
-            .eq('id', companiaId)
-            .single()
-
-        if (error || !dataCompania) {
-            toast.error('La compañía no existe')
-            router.replace('/companias')
-            return
-        }
-        setCompania(dataCompania)
-
-        // 3. Cargamos Miembros
         const { data: dataMiembros } = await supabase
             .from('perfiles_companias')
             .select('perfil:profiles(id, nombre_completo, email)')
@@ -130,7 +133,6 @@ export default function CompaniaDetallePage() {
             setMiembros(miembrosLimpios)
         }
 
-        // 4. CARGAMOS LAS CLASES EXCLUSIVAS (Solo la próxima de cada materia)
         const hoy = new Date().toISOString()
         const { data: dataClases } = await supabase
             .from('clases')
@@ -174,8 +176,7 @@ export default function CompaniaDetallePage() {
         setLoading(false)
     }
 
-    // 🚀 NUEVA FUNCIÓN: ENVIAR AVISO A LA COMPAÑÍA
-    const handleSendNotif = async (e: React.FormEvent) => {
+    const handleSendGlobalNotif = async (e: React.FormEvent) => {
         e.preventDefault()
         if (miembros.length === 0) return toast.error("El grupo no tiene integrantes aún.")
 
@@ -195,11 +196,45 @@ export default function CompaniaDetallePage() {
             toast.success("Aviso enviado a todos los integrantes")
             setNotifMessage('')
         } catch (error: any) {
-            console.error("Error al enviar aviso:", error)
             toast.error("Hubo un error al enviar el aviso.")
         } finally {
             setSendingNotif(false)
         }
+    }
+
+    // 🚀 NUEVA FUNCIÓN: AVISO INDIVIDUAL
+    const handleSendIndividualNotif = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!selectedAlumno) return
+
+        setSendingNotif(true)
+        try {
+            const notif = {
+                usuario_id: selectedAlumno.id,
+                titulo: `Aviso de Coordinación: ${compania?.nombre}`,
+                mensaje: individualMessage,
+                link: `/companias/${compania?.id}`,
+                leido: false
+            }
+
+            const { error } = await supabase.from('notificaciones').insert([notif])
+            if (error) throw error
+
+            toast.success(`Aviso enviado a ${selectedAlumno.nombre_completo}`)
+            setIsIndividualNotifOpen(false)
+            setIndividualMessage('')
+            setSelectedAlumno(null)
+        } catch (error: any) {
+            toast.error("Hubo un error al enviar el mensaje.")
+        } finally {
+            setSendingNotif(false)
+        }
+    }
+
+    const openIndividualModal = (alumno: Miembro) => {
+        setSelectedAlumno(alumno)
+        setIndividualMessage('')
+        setIsIndividualNotifOpen(true)
     }
 
     if (loading || loadingContext) {
@@ -207,6 +242,9 @@ export default function CompaniaDetallePage() {
     }
 
     if (!compania) return null
+
+    // 🚀 ¿TIENE PODERES DE COORDINADOR?
+    const hasCoordinatorPowers = ['admin', 'recepcion'].includes(userRole || '') || (userRole === 'profesor' && compania.coordinador_id === userId)
 
     return (
         <div className="min-h-screen bg-[#050505] text-white pb-24 selection:bg-blue-500 selection:text-white animate-in fade-in">
@@ -232,7 +270,7 @@ export default function CompaniaDetallePage() {
                         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
                             <div className="flex items-center gap-2 text-sm text-gray-300 font-bold bg-[#111] px-3 py-1.5 rounded-lg border border-white/5">
                                 <Shield size={16} className="text-blue-400" />
-                                Coord: {compania.coordinador?.nombre_completo || 'Staff Piso 2'}
+                                Coord: {compania.coordinador?.nombre_completo || 'Staff'}
                             </div>
                             <div className="flex items-center gap-2 text-sm text-gray-300 font-bold bg-[#111] px-3 py-1.5 rounded-lg border border-white/5">
                                 <UsersRound size={16} className="text-blue-400" />
@@ -279,14 +317,13 @@ export default function CompaniaDetallePage() {
                             </div>
                         </div>
 
-                        {/* 🚀 FORMULARIO DE AVISOS (SOLO STAFF GENERAL) */}
-                        {isStaffGeneral ? (
+                        {hasCoordinatorPowers ? (
                             <div className="bg-[#111] border border-white/5 rounded-3xl p-6 relative overflow-hidden">
                                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
                                 <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-4 relative z-10">
-                                    <MessageSquare size={18} className="text-blue-500" /> Publicar en el Muro
+                                    <MessageSquare size={18} className="text-blue-500" /> Publicar en el Muro (A todos)
                                 </h3>
-                                <form onSubmit={handleSendNotif} className="relative z-10 space-y-4">
+                                <form onSubmit={handleSendGlobalNotif} className="relative z-10 space-y-4">
                                     <textarea
                                         required
                                         value={notifMessage}
@@ -300,7 +337,7 @@ export default function CompaniaDetallePage() {
                                             type="submit"
                                             className="w-full md:w-auto px-8 py-4 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-blue-500 transition-colors shadow-lg"
                                         >
-                                            {sendingNotif ? <Loader2 className="animate-spin" /> : <><Send size={16} /> Enviar Aviso a {miembros.length} Alumnos</>}
+                                            {sendingNotif ? <Loader2 className="animate-spin" /> : <><Send size={16} /> Enviar a {miembros.length} Alumnos</>}
                                         </button>
                                     </div>
                                 </form>
@@ -321,14 +358,15 @@ export default function CompaniaDetallePage() {
                         {clases.length > 0 ? (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {clases.map((clase) => {
-                                    // 🚀 BLINDAJE DE ZONA HORARIA
-                                    const inicioDate = new Date(clase.inicio.replace('+00', '').replace(' ', 'T'))
-                                    const finDate = new Date(clase.fin.replace('+00', '').replace(' ', 'T'))
-                                    const esHoy = isToday(inicioDate)
+                                    const [fechaParte, horaParte] = clase.inicio.split('T')
+                                    const horaDisplay = horaParte ? horaParte.substring(0, 5) : ''
+                                    const dateObj = new Date(`${fechaParte}T12:00:00`)
+                                    const esHoy = isToday(dateObj)
+                                    const [finFecha, finHora] = clase.fin.split('T')
+                                    const finDisplay = finHora ? finHora.substring(0, 5) : ''
 
                                     return (
                                         <div key={clase.id} className="bg-[#111] border border-white/5 rounded-2xl overflow-hidden hover:border-blue-500/30 transition-all group flex flex-col">
-                                            {/* Imagen */}
                                             <div className="h-32 w-full relative bg-[#1a1a1c] border-b border-white/5 flex items-center justify-center overflow-hidden">
                                                 {clase.imagen_url ? (
                                                     <Image src={clase.imagen_url} alt={clase.nombre} fill className="object-cover group-hover:scale-105 transition-transform duration-500" />
@@ -338,7 +376,6 @@ export default function CompaniaDetallePage() {
                                                 {esHoy && <span className="absolute top-3 left-3 bg-blue-500 text-white text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg shadow-blue-500/40">⚡ Hoy</span>}
                                             </div>
 
-                                            {/* Info */}
                                             <div className="p-5 flex-1">
                                                 <h4 className="font-black uppercase text-white mb-1 truncate text-lg">{clase.nombre}</h4>
                                                 <p className="text-[10px] text-gray-400 flex items-center gap-1.5 mb-4">
@@ -348,11 +385,11 @@ export default function CompaniaDetallePage() {
                                                     <p className="text-[10px] uppercase font-bold text-gray-500">Próximo Ensayo:</p>
                                                     <div className="flex items-center gap-3 text-xs text-gray-300 font-bold">
                                                         <Calendar size={14} className="text-blue-400" />
-                                                        <span className="capitalize">{format(inicioDate, "EEEE d MMMM", { locale: es })}</span>
+                                                        <span className="capitalize">{format(dateObj, "EEEE d MMMM", { locale: es })}</span>
                                                     </div>
                                                     <div className="flex items-center gap-3 text-xs text-gray-400">
                                                         <Clock size={14} className="text-white/30" />
-                                                        <span>{format(inicioDate, "HH:mm")} a {format(finDate, "HH:mm")} hs</span>
+                                                        <span>{horaDisplay} a {finDisplay} hs</span>
                                                     </div>
                                                     <div className="flex items-center gap-3 text-xs text-gray-400">
                                                         <MapPin size={14} className="text-white/30" />
@@ -361,10 +398,9 @@ export default function CompaniaDetallePage() {
                                                 </div>
                                             </div>
 
-                                            {/* Action (Aparece botón de gestionar si es Staff, si no el alumno puede ver la clase) */}
                                             <div className="p-4 bg-[#09090b] border-t border-white/5 mt-auto">
-                                                <Link href={isStaffGeneral ? `/clase/${clase.id}` : `/mis-clases`} className="w-full bg-blue-600/10 text-blue-400 border border-blue-600/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">
-                                                    {isStaffGeneral ? 'Gestionar / Lista' : 'Ir a Mis Clases'} <ChevronRight size={14} />
+                                                <Link href={hasCoordinatorPowers || ['recepcion', 'admin'].includes(userRole || '') ? `/clase/${clase.id}` : `/mis-clases`} className="w-full bg-blue-600/10 text-blue-400 border border-blue-600/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">
+                                                    {hasCoordinatorPowers || ['recepcion', 'admin'].includes(userRole || '') ? 'Gestionar / Lista' : 'Ir a Mis Clases'} <ChevronRight size={14} />
                                                 </Link>
                                             </div>
                                         </div>
@@ -387,14 +423,27 @@ export default function CompaniaDetallePage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {miembros.length > 0 ? (
                                 miembros.map((miembro) => (
-                                    <div key={miembro.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex items-center gap-4 hover:border-blue-500/30 transition-colors">
-                                        <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 font-black text-lg uppercase shrink-0 border border-blue-500/20">
-                                            {miembro.nombre_completo?.[0] || '?'}
+                                    <div key={miembro.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex items-center justify-between gap-4 hover:border-blue-500/30 transition-colors">
+                                        <div className="flex items-center gap-4 overflow-hidden">
+                                            <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 font-black text-lg uppercase shrink-0 border border-blue-500/20">
+                                                {miembro.nombre_completo?.[0] || '?'}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-bold text-white uppercase truncate">{miembro.nombre_completo}</p>
+                                                <p className="text-[10px] text-gray-500 truncate">{miembro.email}</p>
+                                            </div>
                                         </div>
-                                        <div className="min-w-0">
-                                            <p className="text-sm font-bold text-white uppercase truncate">{miembro.nombre_completo}</p>
-                                            <p className="text-[10px] text-gray-500 truncate">{miembro.email}</p>
-                                        </div>
+
+                                        {/* 🚀 BOTÓN AVISO INDIVIDUAL (Solo para Coordinadores) */}
+                                        {hasCoordinatorPowers && (
+                                            <button
+                                                onClick={() => openIndividualModal(miembro)}
+                                                className="p-3 bg-white/5 text-gray-400 hover:text-white hover:bg-blue-600 rounded-xl transition-all"
+                                                title={`Enviar aviso a ${miembro.nombre_completo}`}
+                                            >
+                                                <BellRing size={16} />
+                                            </button>
+                                        )}
                                     </div>
                                 ))
                             ) : (
@@ -406,8 +455,38 @@ export default function CompaniaDetallePage() {
                         </div>
                     </div>
                 )}
-
             </div>
+
+            {/* ==============================================
+                MODAL: AVISO INDIVIDUAL (Solo Coordinador)
+            ============================================== */}
+            {isIndividualNotifOpen && selectedAlumno && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsIndividualNotifOpen(false)}>
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-start mb-6 border-b border-white/10 pb-4">
+                            <div>
+                                <h3 className="text-lg font-black text-white uppercase flex items-center gap-2"><BellRing className="text-blue-500" size={18} /> Aviso Directo</h3>
+                                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-1">Para: {selectedAlumno.nombre_completo}</p>
+                            </div>
+                            <button onClick={() => setIsIndividualNotifOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
+                        </div>
+
+                        <form onSubmit={handleSendIndividualNotif} className="space-y-4">
+                            <textarea
+                                required
+                                value={individualMessage}
+                                onChange={e => setIndividualMessage(e.target.value)}
+                                placeholder={`Escribí un mensaje solo para ${selectedAlumno.nombre_completo}...`}
+                                className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-blue-500 min-h-[120px] resize-none transition-colors"
+                            />
+                            <button disabled={sendingNotif} type="submit" className="w-full bg-blue-600 text-white font-black uppercase py-4 rounded-xl hover:bg-blue-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg">
+                                {sendingNotif ? <Loader2 className="animate-spin" /> : <><Send size={16} /> Enviar Mensaje</>}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
         </div>
     )
 }

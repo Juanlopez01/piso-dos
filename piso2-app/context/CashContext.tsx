@@ -80,12 +80,17 @@ export function CashProvider({ children }: { children: ReactNode }) {
                         compAccess = !!(comp && comp.length > 0);
                     } else if (rolReal === 'profesor') {
                         console.log("🟠 [CashContext] -> Buscando permisos de liga/compañía para profesor...")
-                        const [resLiga, resComp] = await Promise.all([
+                        const [resLiga, resComp, resCoord] = await Promise.all([
                             supabase.from('clases').select('id').eq('profesor_id', uid).eq('es_la_liga', true).limit(1),
-                            supabase.from('clases').select('id').eq('profesor_id', uid).not('compania_id', 'is', null).limit(1)
+                            supabase.from('clases').select('id').eq('profesor_id', uid).not('compania_id', 'is', null).limit(1),
+                            // 🚀 NUEVA CONSULTA: Chequeamos si este profe figura como coordinador de alguna compañía
+                            supabase.from('companias').select('id').eq('coordinador_id', uid).limit(1)
                         ]);
+
                         ligaAccess = !!(resLiga.data && resLiga.data.length > 0);
-                        compAccess = !!(resComp.data && resComp.data.length > 0);
+
+                        // 🚀 MAGIA: Tiene acceso a la pestaña si da clases en una compañía O SI coordina alguna
+                        compAccess = !!(resComp.data && resComp.data.length > 0) || !!(resCoord.data && resCoord.data.length > 0);
                     }
                 }
 

@@ -9,7 +9,6 @@ import {
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
 
-// 🚀 IMPORTAMOS LAS ACTIONS BLINDADAS
 import {
     crearCompaniaAction,
     toggleMiembroCompaniaAction,
@@ -38,18 +37,16 @@ export default function CompaniasPage() {
     const [userId, setUserId] = useState<string>('')
 
     const [companias, setCompanias] = useState<Compania[]>([])
-    const [coordinadores, setCoordinadores] = useState<any[]>([])
+    const [profesores, setProfesores] = useState<any[]>([]) // 🚀 Antes era coordinadores
     const [allAlumnos, setAllAlumnos] = useState<Alumno[]>([])
 
-    // Estados UI
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
     const [selectedCompania, setSelectedCompania] = useState<Compania | null>(null)
     const [miembrosActuales, setMiembrosActuales] = useState<string[]>([])
     const [searchAlumno, setSearchAlumno] = useState('')
-    const [searchCoord, setSearchCoord] = useState('')
+    const [searchProf, setSearchProf] = useState('') // 🚀 Para buscar profes
     const [procesando, setProcesando] = useState(false)
 
-    // Formulario Nueva Compañía
     const [form, setForm] = useState({ nombre: '', descripcion: '', coordinador_id: '' })
 
     useEffect(() => {
@@ -59,7 +56,6 @@ export default function CompaniasPage() {
     const fetchData = async () => {
         setLoading(true)
 
-        // 🚀 BLINDAJE: Usamos getSession para no congelar
         const { data: { session } } = await supabase.auth.getSession()
         const user = session?.user
 
@@ -70,10 +66,12 @@ export default function CompaniasPage() {
         const rol = profile?.rol || 'alumno'
         setUserRole(rol)
 
-        // 1. Traer las Compañías según el Rol
         let queryCompanias = supabase.from('companias').select('*, coordinador:profiles!coordinador_id(nombre_completo)')
 
-        if (rol === 'coordinador') {
+        // 🚀 NUEVA LÓGICA DE ROLES
+        if (rol === 'profesor') {
+            // El profe solo ve la lista general si es coordinador de alguna. 
+            // Si solo da clases sueltas, no necesita ver este panel (va por su agenda).
             queryCompanias = queryCompanias.eq('coordinador_id', user.id)
         } else if (rol === 'alumno') {
             const { data: misCompanias } = await supabase.from('perfiles_companias').select('compania_id').eq('perfil_id', user.id)
@@ -81,10 +79,10 @@ export default function CompaniasPage() {
                 const ids = misCompanias.map((mc: { compania_id: string }) => mc.compania_id)
                 queryCompanias = queryCompanias.in('id', ids)
             } else {
-                queryCompanias = queryCompanias.eq('id', '00000000-0000-0000-0000-000000000000') // Truco para que venga vacío
+                queryCompanias = queryCompanias.eq('id', '00000000-0000-0000-0000-000000000000')
             }
         }
-        // 🚀 SI ES ADMIN O RECEPCIÓN: El query pasa directo sin filtros (.eq) y trae todas las compañías
+        // Admin y Recepción pasan directo (ven todas)
 
         const { data: dataCompanias } = await queryCompanias
 
@@ -96,15 +94,21 @@ export default function CompaniasPage() {
             setCompanias(companiasConConteo)
         }
 
-        // 2. Si es Admin, Recepción o Coordinador, traemos datos para gestionar
-        if (['admin', 'recepcion', 'coordinador'].includes(rol)) { // 🚀 Agregamos recepcion acá
-            const { data: coords } = await supabase
+        // 🚀 CARGAMOS PROFESORES (para que Admin asigne coordinadores)
+        if (['admin', 'recepcion'].includes(rol)) {
+            const { data: profes } = await supabase
                 .from('profiles')
                 .select('id, nombre_completo')
-                .eq('rol', 'coordinador')
+                .eq('rol', 'profesor') // Ahora buscamos profes
                 .order('nombre_completo')
-            if (coords) setCoordinadores(coords)
+            if (profes) setProfesores(profes)
 
+            const { data: alumnos } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'alumno').order('nombre_completo')
+            if (alumnos) setAllAlumnos(alumnos)
+        }
+
+        // Si el usuario es profe y coordinador de alguna, también necesita la lista de alumnos
+        if (rol === 'profesor' && dataCompanias && dataCompanias.length > 0) {
             const { data: alumnos } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'alumno').order('nombre_completo')
             if (alumnos) setAllAlumnos(alumnos)
         }
@@ -119,7 +123,7 @@ export default function CompaniasPage() {
         const payload = {
             nombre: form.nombre,
             descripcion: form.descripcion,
-            coordinador_id: form.coordinador_id || userId
+            coordinador_id: form.coordinador_id || userId // Si no elige, es él mismo
         }
 
         const response = await crearCompaniaAction(payload)
@@ -128,14 +132,15 @@ export default function CompaniasPage() {
             toast.success('Compañía creada con éxito')
             setIsCreateModalOpen(false)
             setForm({ nombre: '', descripcion: '', coordinador_id: '' })
-            setSearchCoord('')
-            fetchData() // Recargamos para ver la nueva
+            setSearchProf('')
+            fetchData()
         } else {
             toast.error(response.error || 'Error al crear la compañía')
         }
 
         setProcesando(false)
     }
+
     const handleEliminarCompania = async (companiaId: string, nombre: string) => {
         if (!window.confirm(`¿Estás seguro de que querés eliminar la compañía "${nombre}"? Toda su información se perderá.`)) return
 
@@ -144,12 +149,13 @@ export default function CompaniasPage() {
 
         if (response.success) {
             toast.success('Compañía eliminada correctamente')
-            fetchData() // Recargamos la grilla para que desaparezca
+            fetchData()
         } else {
             toast.error(response.error || 'Error al eliminar')
         }
         setProcesando(false)
     }
+
     const abrirGestionMiembros = async (compania: Compania) => {
         setSelectedCompania(compania)
         setSearchAlumno('')
@@ -163,7 +169,6 @@ export default function CompaniasPage() {
         const esMiembro = miembrosActuales.includes(alumnoId)
         const accion = esMiembro ? 'remover' : 'agregar'
 
-        // 🚀 MUTACIÓN OPTIMISTA: Cambiamos la UI al instante
         if (esMiembro) {
             setMiembrosActuales(prev => prev.filter(id => id !== alumnoId))
             setCompanias(prev => prev.map(c => c.id === selectedCompania.id ? { ...c, miembros_count: (c.miembros_count || 1) - 1 } : c))
@@ -178,15 +183,17 @@ export default function CompaniasPage() {
             toast.success(accion === 'agregar' ? 'Alumno agregado al grupo' : 'Alumno removido del grupo')
         } else {
             toast.error(response.error || 'Error al modificar miembros')
-            // Si falla, revertimos recargando (opcional, pero seguro)
             fetchData()
         }
     }
 
     if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
-    // 🚀 BLINDAJE VISUAL: Definimos quiénes son "Staff General"
-    const isStaffGeneral = ['admin', 'recepcion', 'coordinador'].includes(userRole)
+    // 🚀 BLINDAJE VISUAL: ¿Quién ve el botón "Gestionar Alumnos"?
+    // Admin, Recepción, o el Profesor que es el Coordinador de esa compañía.
+    const puedeGestionarAlumnos = (companiaCoordinadorId: string) => {
+        return ['admin', 'recepcion'].includes(userRole) || (userRole === 'profesor' && userId === companiaCoordinadorId)
+    }
 
     return (
         <div className="min-h-screen bg-[#050505] text-white pb-24 selection:bg-[#D4E655] selection:text-black animate-in fade-in">
@@ -203,10 +210,10 @@ export default function CompaniasPage() {
                                 <span className="text-blue-400 font-bold text-[10px] tracking-[0.3em] uppercase">Grupos Exclusivos</span>
                             </div>
                             <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter text-white leading-none">
-                                Compañías {isStaffGeneral && <span className="text-gray-500 text-2xl">/ Staff</span>}
+                                Compañías {['admin', 'recepcion', 'profesor'].includes(userRole) && <span className="text-gray-500 text-2xl">/ Staff</span>}
                             </h1>
                         </div>
-                        {isStaffGeneral && (
+                        {['admin', 'recepcion'].includes(userRole) && (
                             <button onClick={() => setIsCreateModalOpen(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-blue-500 transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(37,99,235,0.3)]">
                                 <Plus size={16} /> Crear Grupo
                             </button>
@@ -217,15 +224,17 @@ export default function CompaniasPage() {
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
 
-                {/* 🚀 VISTA ALUMNO (SIN COMPAÑÍA) - AHORA NO ECHA A RECEPCIÓN */}
-                {!isStaffGeneral && companias.length === 0 && (
+                {/* VISTA SIN COMPAÑÍA (Alumnos o Profes que no coordinan nada) */}
+                {!['admin', 'recepcion'].includes(userRole) && companias.length === 0 && (
                     <div className="min-h-[400px] flex flex-col items-center justify-center relative overflow-hidden">
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-blue-500/5 rounded-full blur-[100px] pointer-events-none" />
                         <div className="max-w-md w-full bg-[#09090b] border border-blue-500/20 rounded-3xl p-8 text-center relative z-10 animate-in zoom-in-95 duration-500 shadow-2xl shadow-blue-500/5">
                             <div className="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-blue-500/20"><Lock className="text-blue-500 w-10 h-10" /></div>
                             <h1 className="text-2xl font-black uppercase tracking-tighter text-white mb-3">Acceso Restringido</h1>
-                            <p className="text-gray-400 text-sm mb-6 leading-relaxed">Las Compañías son grupos cerrados de formación intensiva. Actualmente no pertenecés a ninguna.</p>
-                            <Link href="/explorar" className="w-full bg-[#111] text-gray-300 border border-white/10 font-bold uppercase py-4 rounded-xl hover:bg-white hover:text-black transition-all text-xs tracking-widest flex items-center justify-center gap-2">Volver a Cartelera <ChevronRight size={16} /></Link>
+                            <p className="text-gray-400 text-sm mb-6 leading-relaxed">Las Compañías son grupos cerrados de formación intensiva. Actualmente no estás asignado a ninguna.</p>
+                            <Link href={userRole === 'alumno' ? "/explorar" : "/calendario"} className="w-full bg-[#111] text-gray-300 border border-white/10 font-bold uppercase py-4 rounded-xl hover:bg-white hover:text-black transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                {userRole === 'alumno' ? 'Volver a Cartelera' : 'Ir a mi Agenda'} <ChevronRight size={16} />
+                            </Link>
                         </div>
                     </div>
                 )}
@@ -234,8 +243,7 @@ export default function CompaniasPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {companias.map((compania) => (
                         <div key={compania.id} className="bg-[#09090b] border border-white/5 rounded-3xl overflow-hidden flex flex-col transition-all group hover:border-blue-500/30 hover:shadow-[0_0_30px_rgba(37,99,235,0.1)] relative">
-                            {/* BOTÓN DE ELIMINAR (SOLO ADMIN) */}
-                            {isStaffGeneral && (
+                            {userRole === 'admin' && (
                                 <div className="absolute top-4 right-4 z-20">
                                     <button
                                         onClick={(e) => {
@@ -274,7 +282,7 @@ export default function CompaniasPage() {
                                     Entrar al Espacio <ChevronRight size={16} />
                                 </Link>
 
-                                {isStaffGeneral && ( // 🚀 Ahora Recepción puede ver esto
+                                {puedeGestionarAlumnos(compania.coordinador_id) && (
                                     <button
                                         onClick={() => abrirGestionMiembros(compania)}
                                         className="w-full bg-white/5 text-white border border-white/10 font-bold uppercase py-3 rounded-xl hover:bg-white/10 transition-all text-xs tracking-widest flex items-center justify-center gap-2"
@@ -289,9 +297,7 @@ export default function CompaniasPage() {
 
             </div>
 
-            {/* ==============================================
-                MODAL: CREAR COMPAÑÍA (Solo Admin)
-            ============================================== */}
+            {/* MODAL: CREAR COMPAÑÍA (Admin/Recepción) */}
             {isCreateModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsCreateModalOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
@@ -306,17 +312,17 @@ export default function CompaniasPage() {
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Coordinador a cargo</label>
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Profesor Coordinador a cargo</label>
 
                                 {form.coordinador_id ? (
                                     <div className="flex items-center justify-between bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl transition-all">
                                         <div className="flex items-center gap-2">
                                             <Shield size={16} className="text-blue-400" />
                                             <span className="text-xs font-black text-blue-400 uppercase tracking-widest">
-                                                {coordinadores.find(c => c.id === form.coordinador_id)?.nombre_completo || 'Seleccionado'}
+                                                {profesores.find(p => p.id === form.coordinador_id)?.nombre_completo || 'Seleccionado'}
                                             </span>
                                         </div>
-                                        <button type="button" onClick={() => setForm({ ...form, coordinador_id: '' })} className="p-1 text-blue-400 hover:text-white bg-blue-500/20 hover:bg-blue-500/40 rounded-lg transition-colors" title="Cambiar coordinador">
+                                        <button type="button" onClick={() => setForm({ ...form, coordinador_id: '' })} className="p-1 text-blue-400 hover:text-white bg-blue-500/20 hover:bg-blue-500/40 rounded-lg transition-colors" title="Cambiar profe">
                                             <X size={14} />
                                         </button>
                                     </div>
@@ -325,35 +331,30 @@ export default function CompaniasPage() {
                                         <Search className="absolute left-3 top-3.5 text-gray-500" size={16} />
                                         <input
                                             type="text"
-                                            placeholder="Buscar por nombre..."
-                                            value={searchCoord}
-                                            onChange={e => setSearchCoord(e.target.value)}
+                                            placeholder="Buscar profesor por nombre..."
+                                            value={searchProf}
+                                            onChange={e => setSearchProf(e.target.value)}
                                             className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-10 text-white text-sm outline-none focus:border-blue-500 transition-colors"
                                         />
 
-                                        {searchCoord.length > 0 && (
+                                        {searchProf.length > 0 && (
                                             <div className="absolute z-20 w-full mt-2 max-h-40 overflow-y-auto bg-[#1a1a1c] border border-white/10 rounded-xl shadow-2xl custom-scrollbar flex flex-col">
-                                                {coordinadores
-                                                    .filter(c => c.nombre_completo?.toLowerCase().includes(searchCoord.toLowerCase()))
-                                                    .map(c => (
+                                                {profesores
+                                                    .filter(p => p.nombre_completo?.toLowerCase().includes(searchProf.toLowerCase()))
+                                                    .map(p => (
                                                         <button
-                                                            key={c.id}
+                                                            key={p.id}
                                                             type="button"
                                                             onClick={() => {
-                                                                setForm({ ...form, coordinador_id: c.id })
-                                                                setSearchCoord('')
+                                                                setForm({ ...form, coordinador_id: p.id })
+                                                                setSearchProf('')
                                                             }}
                                                             className="text-left px-4 py-3 hover:bg-blue-500/20 text-xs font-bold text-gray-300 hover:text-blue-400 uppercase transition-colors border-b border-white/5 last:border-0"
                                                         >
-                                                            {c.nombre_completo}
+                                                            {p.nombre_completo}
                                                         </button>
                                                     ))
                                                 }
-                                                {coordinadores.filter(c => c.nombre_completo?.toLowerCase().includes(searchCoord.toLowerCase())).length === 0 && (
-                                                    <div className="p-4 text-center text-[10px] text-gray-500 font-bold uppercase tracking-widest">
-                                                        No se encontraron coordinadores
-                                                    </div>
-                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -373,9 +374,7 @@ export default function CompaniasPage() {
                 </div>
             )}
 
-            {/* ==============================================
-                MODAL: GESTIONAR MIEMBROS (Staff)
-            ============================================== */}
+            {/* MODAL: GESTIONAR MIEMBROS (Staff) */}
             {selectedCompania && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setSelectedCompania(null)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-xl rounded-3xl overflow-hidden shadow-2xl relative flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
@@ -432,7 +431,6 @@ export default function CompaniasPage() {
                                     <div className="text-center py-10 opacity-50">
                                         <UsersRound size={32} className="mx-auto mb-3 text-gray-500" />
                                         <p className="text-xs text-gray-400 font-bold uppercase">El grupo está vacío</p>
-                                        <p className="text-[10px] text-gray-500 mt-1">Usá el buscador de arriba para agregar alumnos.</p>
                                     </div>
                                 )}
                             </div>

@@ -1,4 +1,4 @@
-import { Home, Calendar as CalendarIcon, Users, Settings, Package, ShoppingBag, MapPin, Bell, UserCircle, GraduationCap, UsersRound, Search, ShoppingBagIcon, BookOpen, Wallet } from 'lucide-react'
+import { Home, Calendar as CalendarIcon, Users, Settings, Package, ShoppingBag, MapPin, Bell, UserCircle, GraduationCap, UsersRound, Search, ShoppingBagIcon, BookOpen, Wallet, FileSpreadsheet } from 'lucide-react'
 
 export const menuItems = [
     // --- TOP: LOS 4 BOTONES DE ALUMNOS Y PROFES (Para el menú del celu) ---
@@ -23,6 +23,12 @@ export const menuItems = [
     { name: 'Alquileres', href: '/alquileres', icon: ShoppingBag, roles: ['admin', 'recepcion'] },
     { name: 'Productos', href: '/productos', icon: Package, roles: ['admin', 'recepcion'] },
     { name: 'Caja', href: '/caja', icon: ShoppingBag, roles: ['admin', 'recepcion'] },
+    {
+        name: 'Liquidaciones',
+        href: '/liquidaciones',
+        icon: FileSpreadsheet, // Importá FileSpreadsheet de lucide-react
+        roles: ['admin', 'recepcion']
+    },
     { name: 'Sedes', href: '/sedes', icon: MapPin, roles: ['admin'] },
     { name: 'Compañías', href: '/companias', icon: UsersRound, roles: ['admin', 'coordinador', 'profesor', 'alumno'] },
     { name: 'La Liga', href: '/la-liga', icon: GraduationCap, roles: ['admin', 'profesor', 'coordinador', 'alumno'] },
