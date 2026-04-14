@@ -88,8 +88,11 @@ export default function ExplorarClasesPage() {
     const [supabase] = useState(() => createClient())
     const { mutate: globalMutate } = useSWRConfig()
 
-    // 🛡️ ESPERAMOS AL CONTEXTO
-    const { userId, isLoading: contextLoading } = useCash()
+    // 🚀 1. EXTRAEMOS EL ROL DEL USUARIO
+    const { userId, isLoading: contextLoading, userRole } = useCash()
+
+    // 🚀 2. CREAMOS UNA VARIABLE PARA SABER SI ES ADMIN O RECEPCIÓN
+    const esStaff = ['admin', 'recepcion'].includes(userRole || '')
 
     const { data, isLoading, mutate: mutateCartelera } = useSWR<CarteleraData>(
         !contextLoading ? ['cartelera', userId] : null,
@@ -120,7 +123,6 @@ export default function ExplorarClasesPage() {
 
         setProcesandoId(instancia.id)
 
-        // 🚀 MUTACIÓN OPTIMISTA (La lista de atrás cambia al instante)
         const optimisticAgrupadas = clasesAgrupadas.map(g => {
             if (g.key_grupo === grupo.key_grupo) {
                 return {
@@ -134,7 +136,6 @@ export default function ExplorarClasesPage() {
 
         await mutateCartelera({ perfil: optimisticPerfil, clasesAgrupadas: optimisticAgrupadas }, false)
 
-        // 🚀 EL FIX: Actualizamos la "foto" local que está usando el modal en este momento
         setSelectedGrupo(prev => {
             if (!prev) return null;
             return {
@@ -147,18 +148,15 @@ export default function ExplorarClasesPage() {
             }
         })
 
-        // Mandamos a la base de datos real
         const response = await inscribirAlumnoAction(instancia.id, tipoClaseBD, grupo.ritmo_id)
 
         if (response.success) {
             toast.success(response.message)
             mutateCartelera()
-            // 🚀 AVISAMOS AL PERFIL QUE ACTUALICE SUS DATOS SIN ROMPER NADA
             globalMutate(['perfil', userId])
         } else {
             toast.error(response.error || 'Error al procesar reserva')
             mutateCartelera()
-            // 🛡️ BLINDAJE: Si falló en la base de datos, revertimos el modal a como estaba
             setSelectedGrupo(grupo)
         }
         setProcesandoId(null)
@@ -177,7 +175,6 @@ export default function ExplorarClasesPage() {
 
     if (isLoading || contextLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
-    // ... TODO TU HTML (RENDERIZADO) QUEDA IGUAL, LO PEGO COMPLETO:
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
             <Toaster position="top-center" richColors theme="dark" />
@@ -185,25 +182,30 @@ export default function ExplorarClasesPage() {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-8 border-b border-white/10 pb-6">
                 <div>
                     <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white mb-1">Cartelera</h1>
-                    <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">Reservá tu lugar en las próximas clases</p>
+                    <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">
+                        {esStaff ? 'Vista general de clases programadas' : 'Reservá tu lugar en las próximas clases'}
+                    </p>
                 </div>
 
-                <div className="flex gap-3 w-full md:w-auto">
-                    <div className="flex-1 md:flex-none bg-[#D4E655]/10 border border-[#D4E655]/30 rounded-2xl p-3 flex items-center gap-3">
-                        <div className="bg-[#D4E655] text-black p-2 rounded-xl"><Ticket size={20} /></div>
-                        <div>
-                            <p className="text-[10px] text-[#D4E655] font-black uppercase tracking-widest">Regulares</p>
-                            <p className="text-xl font-black leading-none">{perfil?.creditos_regulares || 0}</p>
+                {/* 🚀 3. OCULTAMOS EL BLOQUE DE CRÉDITOS SI ES ADMIN/RECEPCIÓN */}
+                {!esStaff && (
+                    <div className="flex gap-3 w-full md:w-auto">
+                        <div className="flex-1 md:flex-none bg-[#D4E655]/10 border border-[#D4E655]/30 rounded-2xl p-3 flex items-center gap-3">
+                            <div className="bg-[#D4E655] text-black p-2 rounded-xl"><Ticket size={20} /></div>
+                            <div>
+                                <p className="text-[10px] text-[#D4E655] font-black uppercase tracking-widest">Regulares</p>
+                                <p className="text-xl font-black leading-none">{perfil?.creditos_regulares || 0}</p>
+                            </div>
+                        </div>
+                        <div className="flex-1 md:flex-none bg-purple-500/10 border border-purple-500/30 rounded-2xl p-3 flex items-center gap-3">
+                            <div className="bg-purple-50 text-white p-2 rounded-xl"><Star size={20} /></div>
+                            <div>
+                                <p className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Especiales</p>
+                                <p className="text-xl font-black leading-none">{perfil?.creditos_seminarios || 0}</p>
+                            </div>
                         </div>
                     </div>
-                    <div className="flex-1 md:flex-none bg-purple-500/10 border border-purple-500/30 rounded-2xl p-3 flex items-center gap-3">
-                        <div className="bg-purple-50 text-white p-2 rounded-xl"><Star size={20} /></div>
-                        <div>
-                            <p className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Especiales</p>
-                            <p className="text-xl font-black leading-none">{perfil?.creditos_seminarios || 0}</p>
-                        </div>
-                    </div>
-                </div>
+                )}
             </div>
 
             <div className="mb-8 space-y-4">
@@ -300,7 +302,12 @@ export default function ExplorarClasesPage() {
                                         </div>
 
                                         <div className="w-full sm:w-auto">
-                                            {inst.ya_inscrito ? (
+                                            {/* 🚀 4. REEMPLAZAMOS LOS BOTONES SI ES STAFF */}
+                                            {esStaff ? (
+                                                <div className="w-full sm:w-32 py-2.5 bg-white/5 text-gray-400 border border-white/10 rounded-xl flex items-center justify-center text-[10px] font-black uppercase cursor-default">
+                                                    Modo Vista
+                                                </div>
+                                            ) : inst.ya_inscrito ? (
                                                 <div className="w-full sm:w-32 py-2.5 bg-green-500/10 text-green-500 border border-green-500/20 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase"><CheckCircle2 size={14} /> Anotado</div>
                                             ) : estaLleno ? (
                                                 <div className="w-full sm:w-32 py-2.5 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase"><AlertCircle size={14} /> Lleno</div>
