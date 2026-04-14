@@ -39,7 +39,8 @@ export async function proxy(request: NextRequest) {
         const isPublicRoute = request.nextUrl.pathname === '/' ||
             request.nextUrl.pathname.startsWith('/login') ||
             request.nextUrl.pathname.startsWith('/rec-password') ||
-            request.nextUrl.pathname.startsWith('/api/mercadopago') // 🚀 EL PASE VIP PARA MERCADO PAGO
+            request.nextUrl.pathname.startsWith('/api/mercadopago') || // 🚀 EL PASE VIP PARA MERCADO PAGO
+            request.nextUrl.pathname.startsWith('/instalar') // 🚀 EL PASE VIP PARA MERCADO PAGO
 
         // 3. Si hay un error de token o no hay usuario, y quiere entrar a zona privada -> Al login
         if ((error || !user) && !isPublicRoute) {
