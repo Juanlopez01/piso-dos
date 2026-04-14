@@ -120,7 +120,7 @@ export default function ExplorarClasesPage() {
 
         setProcesandoId(instancia.id)
 
-        // 🚀 MUTACIÓN OPTIMISTA (El botón cambia al instante)
+        // 🚀 MUTACIÓN OPTIMISTA (La lista de atrás cambia al instante)
         const optimisticAgrupadas = clasesAgrupadas.map(g => {
             if (g.key_grupo === grupo.key_grupo) {
                 return {
@@ -134,6 +134,20 @@ export default function ExplorarClasesPage() {
 
         await mutateCartelera({ perfil: optimisticPerfil, clasesAgrupadas: optimisticAgrupadas }, false)
 
+        // 🚀 EL FIX: Actualizamos la "foto" local que está usando el modal en este momento
+        setSelectedGrupo(prev => {
+            if (!prev) return null;
+            return {
+                ...prev,
+                instancias: prev.instancias.map(i =>
+                    i.id === instancia.id
+                        ? { ...i, ya_inscrito: true, inscritos_count: i.inscritos_count + 1 }
+                        : i
+                )
+            }
+        })
+
+        // Mandamos a la base de datos real
         const response = await inscribirAlumnoAction(instancia.id, tipoClaseBD, grupo.ritmo_id)
 
         if (response.success) {
@@ -144,6 +158,8 @@ export default function ExplorarClasesPage() {
         } else {
             toast.error(response.error || 'Error al procesar reserva')
             mutateCartelera()
+            // 🛡️ BLINDAJE: Si falló en la base de datos, revertimos el modal a como estaba
+            setSelectedGrupo(grupo)
         }
         setProcesandoId(null)
     }
