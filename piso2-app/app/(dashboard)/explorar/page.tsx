@@ -290,8 +290,13 @@ export default function ExplorarClasesPage() {
                                 <div className="space-y-3 mt-auto pt-4 border-t border-white/5">
                                     <div className="flex items-center gap-3 text-sm text-gray-300">
                                         <MapPin size={14} className="text-white/50" />
-                                        <span>{proximaClase.sala?.nombre} <span className="text-[10px] uppercase ml-1 opacity-50 border border-white/20 px-1 rounded">Sede {proximaClase.sala?.sede?.nombre}</span></span>
+                                        <span>{proximaClase.sala?.nombre} <span className="text-[10px] uppercase ml-1 opacity-50 border border-white/20 px-1 rounded">{proximaClase.sala?.sede?.nombre}</span></span>
                                     </div>
+                                    {/* 🚀 NUEVO: Info de la Hora (Próxima clase) */}
+                                    <p className="flex items-center gap-1.5 text-[11px] font-black text-gray-500 uppercase tracking-widest mt-2 bg-white/5 w-fit px-2 py-1 rounded-md">
+                                        <Clock size={12} className={estilos.icon} />
+                                        {format(parseSafeDate(grupo.instancias[0].inicio), "HH:mm")} HS
+                                    </p>
                                 </div>
                             </div>
                             <div className="p-5 bg-[#111] border-t border-white/5">

@@ -89,10 +89,10 @@ export default function LandingPage() {
           <img src='/2-verde.png' className="font-black text-2xl tracking-tighter flex items-center gap-1 z-50 relative cursor-pointer w-8 md:w-8" onClick={() => window.scrollTo(0, 0)} />
 
           <div className="hidden md:flex items-center gap-8 text-[10px] font-bold tracking-[0.2em] text-gray-400 uppercase">
-            <button onClick={() => window.scrollTo(0, 0)} className="hover:text-white transition-colors">Inicio</button>
-            <button onClick={() => scrollTo('ecosistema')} className="hover:text-white transition-colors">Ecosistema</button>
-            <button onClick={() => scrollTo('alquileres')} className="hover:text-white transition-colors">Salas</button>
-            <button onClick={() => scrollTo('contacto')} className="hover:text-white transition-colors">Contacto</button>
+            <button onClick={() => window.scrollTo(0, 0)} className="hover:text-white transition-colors">INICIO</button>
+            <button onClick={() => scrollTo('ecosistema')} className="hover:text-white transition-colors">ECOSISTEMA</button>
+            <Link href="/alquiler" className="hover:text-white transition-colors">Salas</Link>
+            <button onClick={() => scrollTo('contacto')} className="hover:text-white transition-colors">CONTACTO</button>
             {loggedUser ? (
               <Link href={loggedUser.url} className="ml-4 px-6 py-2 rounded-full border border-[#D4E655]/50 bg-[#D4E655]/10 text-[#D4E655] hover:bg-[#D4E655] hover:text-black transition-all duration-300 shadow-[0_0_10px_rgba(212,230,85,0.1)] hover:shadow-[0_0_20px_rgba(212,230,85,0.4)] flex items-center gap-2">
                 <UserIcon size={14} /> HOLA, {loggedUser.nombre.toUpperCase()}
@@ -112,10 +112,10 @@ export default function LandingPage() {
 
       {/* --- MENU MOBILE OVERLAY --- */}
       <div className={`fixed inset-0 bg-[#050505] z-40 flex flex-col justify-center items-center gap-8 transition-all duration-300 ${isMobileMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
-        <button onClick={() => { window.scrollTo(0, 0); setIsMobileMenuOpen(false) }} className="text-2xl font-black text-white uppercase tracking-widest hover:text-[#D4E655]">Inicio</button>
-        <button onClick={() => scrollTo('ecosistema')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Ecosistema</button>
-        <button onClick={() => scrollTo('alquileres')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Salas</button>
-        <button onClick={() => scrollTo('contacto')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Contacto</button>
+        <button onClick={() => { window.scrollTo(0, 0); setIsMobileMenuOpen(false) }} className="text-2xl font-black text-white uppercase tracking-widest hover:text-[#D4E655]">INICIO</button>
+        <button onClick={() => scrollTo('ecosistema')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">ECOSISTEMA</button>
+        <Link href="/alquiler" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Salas</Link>
+        <button onClick={() => scrollTo('contacto')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">CONTACTO</button>
         {loggedUser ? (
           <Link href={loggedUser.url} onClick={() => setIsMobileMenuOpen(false)} className="mt-4 px-10 py-4 rounded-full border border-[#D4E655] text-[#D4E655] flex items-center gap-3 text-xl font-black uppercase tracking-widest">
             <UserIcon size={24} /> {loggedUser.nombre}
@@ -215,48 +215,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-
-      {/* --- SECCIÓN ALQUILERES (SALAS) --- */}
-      <section id="alquileres" className="py-24 px-6 max-w-7xl mx-auto">
-        <div className="mb-16">
-          <h2 className="text-4xl md:text-6xl font-black uppercase tracking-tighter mb-2">Alquiler de <span className="text-[#D4E655]">Salas</span></h2>
-          <p className="text-gray-400 font-bold uppercase tracking-widest text-xs md:text-sm">Espacios diseñados para crear</p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="group relative bg-[#111] rounded-2xl overflow-hidden border border-white/10 hover:border-[#D4E655]/50 transition-colors">
-            <div className="h-64 bg-zinc-800 overflow-hidden">
-              <div className="w-full h-full bg-[url('https://images.unsplash.com/photo-1518834107812-67b0b7c58434?q=80&w=2000&auto=format&fit=crop')] bg-cover bg-center grayscale group-hover:grayscale-0 transition-all duration-500 group-hover:scale-105"></div>
-            </div>
-            <div className="p-8">
-              <h3 className="text-3xl font-black uppercase tracking-tighter mb-4">Sede <span className="text-[#D4E655]">Obelisco</span></h3>
-              <ul className="space-y-3 text-sm text-gray-400 font-medium mb-8">
-                <li className="flex items-center gap-2"><div className="w-1 h-1 bg-[#D4E655] rounded-full"></div> 8x10 metros cuadrados</li>
-                <li className="flex items-center gap-2"><div className="w-1 h-1 bg-[#D4E655] rounded-full"></div> Piso flotante de madera</li>
-                <li className="flex items-center gap-2"><div className="w-1 h-1 bg-[#D4E655] rounded-full"></div> Espejos frontales y sonido Bluetooth</li>
-                <li className="flex items-center gap-2"><div className="w-1 h-1 bg-[#D4E655] rounded-full"></div> Aire acondicionado</li>
-              </ul>
-              <button className="w-full py-4 border border-white/20 font-bold uppercase text-xs tracking-[0.2em] hover:bg-white hover:text-black transition-colors">Consultar Fechas</button>
-            </div>
-          </div>
-
-          <div className="group relative bg-[#111] rounded-2xl overflow-hidden border border-white/10 hover:border-[#D4E655]/50 transition-colors">
-            <div className="h-64 bg-zinc-800 overflow-hidden">
-              <div className="w-full h-full bg-[url('https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=2000&auto=format&fit=crop')] bg-cover bg-center grayscale group-hover:grayscale-0 transition-all duration-500 group-hover:scale-105"></div>
-            </div>
-            <div className="p-8">
-              <h3 className="text-3xl font-black uppercase tracking-tighter mb-4">Sede <span className="text-[#D4E655]">Congreso</span></h3>
-              <ul className="space-y-3 text-sm text-gray-400 font-medium mb-8">
-                <li className="flex items-center gap-2"><div className="w-1 h-1 bg-[#D4E655] rounded-full"></div> 6x8 metros cuadrados</li>
-                <li className="flex items-center gap-2"><div className="w-1 h-1 bg-[#D4E655] rounded-full"></div> Piso de linóleo profesional</li>
-                <li className="flex items-center gap-2"><div className="w-1 h-1 bg-[#D4E655] rounded-full"></div> Iluminación cálida / fría regulable</li>
-                <li className="flex items-center gap-2"><div className="w-1 h-1 bg-[#D4E655] rounded-full"></div> Ideal para grupos reducidos o ensayos</li>
-              </ul>
-              <button className="w-full py-4 border border-white/20 font-bold uppercase text-xs tracking-[0.2em] hover:bg-white hover:text-black transition-colors">Consultar Fechas</button>
-            </div>
-          </div>
-        </div>
-      </section>
 
       {/* --- SECCIÓN DÓNDE ENCONTRARNOS (Sin Correo) --- */}
       {/* --- SECCIÓN DÓNDE ENCONTRARNOS --- */}
@@ -402,7 +360,9 @@ export default function LandingPage() {
         <h2 className="text-4xl md:text-8xl font-black uppercase tracking-tighter mb-8 max-w-5xl leading-[0.85]">
           Descubrí tu <br />lado Piso2
         </h2>
-
+        <Link href="/alquiler" className="mb-8 group flex items-center gap-2 text-black/60 font-bold uppercase text-[10px] tracking-[0.3em] hover:text-black transition-colors">
+          ¿Buscás sala de ensayo? <ArrowRight size={12} className="group-hover:translate-x-1 transition-transform" />
+        </Link>
         {loggedUser ? (
           <Link href={loggedUser.url} className="bg-black text-white px-12 py-5 rounded-full text-sm font-black uppercase tracking-[0.2em] hover:bg-white hover:text-black transition-all mb-12 shadow-2xl flex items-center gap-2">
             <UserIcon size={18} /> IR A MI PANEL

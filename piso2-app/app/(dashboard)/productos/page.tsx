@@ -108,6 +108,11 @@ export default function TiendaConfigPage() {
     const cupones = data?.cupones || []
     const clasesExclusivas = data?.clasesExclusivas || []
 
+    // Agrupamos los productos para mostrarlos ordenados
+    const exclusivos = productos.filter(p => p.tipo_clase === 'exclusivo')
+    const regulares = productos.filter(p => p.tipo_clase === 'regular')
+    const especiales = productos.filter(p => p.tipo_clase === 'seminario' || p.tipo_clase === 'especial')
+
     // UI States
     const [activeTab, setActiveTab] = useState<'packs' | 'cupones'>('packs')
     const [saving, setSaving] = useState(false)
@@ -119,7 +124,7 @@ export default function TiendaConfigPage() {
     const [formPrecio, setFormPrecio] = useState('')
     const [formCreditos, setFormCreditos] = useState('1')
     const [formTipo, setFormTipo] = useState<'regular' | 'especial' | 'exclusivo'>('regular')
-    const [formPaseReferencia, setFormPaseReferencia] = useState('') // 🚀 NUEVO
+    const [formPaseReferencia, setFormPaseReferencia] = useState('')
 
     // Modal Cupon State
     const [isCuponModalOpen, setIsCuponModalOpen] = useState(false)
@@ -161,8 +166,6 @@ export default function TiendaConfigPage() {
             nombre: formNombre,
             precio: Number(formPrecio),
             creditos: Number(formCreditos),
-            // Convertimos especial a seminario si así lo guarda tu DB internamente aún, 
-            // o lo mandamos como especial/exclusivo
             tipo_clase: formTipo === 'especial' ? 'seminario' : formTipo,
             pase_referencia: formTipo === 'exclusivo' ? formPaseReferencia : null
         }
@@ -287,52 +290,116 @@ export default function TiendaConfigPage() {
                     {/* ========================================================= */}
                     {activeTab === 'packs' && (
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                            <div className="flex justify-end mb-4">
+                            <div className="flex justify-end mb-6">
                                 <button onClick={() => handleOpenProductModal()} className="bg-[#D4E655] text-black font-black uppercase tracking-widest text-xs px-6 py-3 rounded-xl shadow-[0_0_15px_rgba(204,255,0,0.3)] hover:scale-105 transition-transform flex items-center gap-2">
                                     <Plus size={16} /> Nuevo Pack
                                 </button>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {productos.map((prod) => (
-                                    <div key={prod.id} className={`border rounded-xl p-5 relative group transition-all ${prod.activo ? 'bg-[#111] border-white/10 hover:border-[#D4E655]/50' : 'bg-black border-white/5 opacity-50 grayscale'}`}>
-                                        <div className={`absolute top-0 left-0 px-3 py-1 rounded-br-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1 ${prod.tipo_clase === 'exclusivo' ? 'bg-cyan-500/20 text-cyan-400 border-b border-r border-cyan-500/30' : prod.tipo_clase === 'seminario' || prod.tipo_clase === 'especial' ? 'bg-purple-500/20 text-purple-400 border-b border-r border-purple-500/30' : 'bg-white/5 text-gray-400 border-b border-r border-white/10'}`}>
-                                            {prod.tipo_clase === 'exclusivo' ? <ShieldAlert size={10} /> : prod.tipo_clase === 'seminario' || prod.tipo_clase === 'especial' ? <Star size={10} /> : <BookOpen size={10} />}
-                                            {prod.tipo_clase === 'seminario' ? 'especial' : prod.tipo_clase}
-                                        </div>
-
-                                        <div className="absolute top-4 right-4 bg-white/10 px-2 py-1 rounded text-[10px] font-bold uppercase text-white flex items-center gap-1 mt-6">
-                                            <Layers size={10} className={prod.tipo_clase === 'exclusivo' ? 'text-cyan-400' : 'text-[#D4E655]'} />
-                                            {prod.tipo_clase === 'exclusivo' ? '1 Pase' : `${prod.creditos} Créditos`}
-                                        </div>
-
-                                        <div className="mb-4 mt-8">
-                                            <h3 className="text-xl font-black text-white uppercase leading-none mb-2 pr-16">{prod.nombre}</h3>
-                                            <p className={`text-2xl font-bold flex items-baseline gap-0.5 ${prod.tipo_clase === 'exclusivo' ? 'text-cyan-400' : 'text-[#D4E655]'}`}>
-                                                <span className="text-sm opacity-50">$</span>{prod.precio.toLocaleString('es-AR')}
-                                            </p>
-                                        </div>
-
-                                        {prod.tipo_clase === 'exclusivo' && prod.pase_referencia && (
-                                            <div className="text-[9px] text-cyan-500/70 italic uppercase tracking-wider mb-2 line-clamp-1 border-t border-white/5 pt-2">
-                                                Ref: {prod.pase_referencia.split('-').join(' / ')}
+                            {/* SECCIÓN EXCLUSIVOS */}
+                            {exclusivos.length > 0 && (
+                                <div className="mb-10">
+                                    <h3 className="text-cyan-500 font-black uppercase tracking-widest text-xs mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
+                                        <ShieldAlert size={14} /> Exclusivos
+                                    </h3>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {exclusivos.map((prod) => (
+                                            <div key={prod.id} className={`border rounded-xl p-5 relative group transition-all ${prod.activo ? 'bg-[#111] border-cyan-500/20 hover:border-cyan-500/50' : 'bg-black border-white/5 opacity-50 grayscale'}`}>
+                                                <div className="absolute top-0 left-0 px-3 py-1 rounded-br-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1 bg-cyan-500/20 text-cyan-400 border-b border-r border-cyan-500/30">
+                                                    <ShieldAlert size={10} /> exclusivo
+                                                </div>
+                                                <div className="absolute top-4 right-4 bg-white/10 px-2 py-1 rounded text-[10px] font-bold uppercase text-white flex items-center gap-1 mt-6">
+                                                    <Layers size={10} className="text-cyan-400" /> 1 Pase
+                                                </div>
+                                                <div className="mb-2 mt-8">
+                                                    <h3 className="text-xl font-black text-white uppercase leading-none mb-2 pr-16">{prod.nombre}</h3>
+                                                    <p className="text-2xl font-bold text-cyan-400 flex items-baseline gap-0.5">
+                                                        <span className="text-sm opacity-50">$</span>{prod.precio.toLocaleString('es-AR')}
+                                                    </p>
+                                                </div>
+                                                {prod.pase_referencia && (
+                                                    <div className="text-[9px] text-cyan-500/70 italic uppercase tracking-wider mb-2 line-clamp-1 border-t border-white/5 pt-2">
+                                                        Ref: {prod.pase_referencia.split('-').join(' / ')}
+                                                    </div>
+                                                )}
+                                                <div className="flex items-center gap-2 mt-2 pt-4 border-t border-cyan-500/20">
+                                                    <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2"><Edit2 size={14} /> Editar</button>
+                                                    <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-red-500 hover:bg-red-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}><Power size={18} /></button>
+                                                </div>
                                             </div>
-                                        )}
-
-                                        <div className={`flex items-center gap-2 mt-2 pt-4 border-t ${prod.tipo_clase === 'exclusivo' ? 'border-cyan-500/20' : 'border-white/5'}`}>
-                                            <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2"><Edit2 size={14} /> Editar</button>
-                                            <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-red-500 hover:bg-red-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}><Power size={18} /></button>
-                                        </div>
+                                        ))}
                                     </div>
-                                ))}
+                                </div>
+                            )}
 
-                                {productos.length === 0 && (
-                                    <div className="col-span-full text-center py-20 border border-dashed border-white/10 rounded-2xl text-gray-500">
-                                        <Tag size={40} className="mx-auto mb-3 opacity-30" />
-                                        <p className="font-bold uppercase text-sm">No hay packs creados.</p>
+                            {/* SECCIÓN REGULARES */}
+                            {regulares.length > 0 && (
+                                <div className="mb-10">
+                                    <h3 className="text-orange-500 font-black uppercase tracking-widest text-xs mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
+                                        <Ticket size={14} /> Regulares
+                                    </h3>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {regulares.map((prod) => (
+                                            <div key={prod.id} className={`border rounded-xl p-5 relative group transition-all ${prod.activo ? 'bg-[#111] border-orange-500/20 hover:border-orange-500/50' : 'bg-black border-white/5 opacity-50 grayscale'}`}>
+                                                <div className="absolute top-0 left-0 px-3 py-1 rounded-br-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1 bg-orange-500/20 text-orange-400 border-b border-r border-orange-500/30">
+                                                    <BookOpen size={10} /> regular
+                                                </div>
+                                                <div className="absolute top-4 right-4 bg-white/10 px-2 py-1 rounded text-[10px] font-bold uppercase text-white flex items-center gap-1 mt-6">
+                                                    <Layers size={10} className="text-orange-500" /> {prod.creditos} Créditos
+                                                </div>
+                                                <div className="mb-4 mt-8">
+                                                    <h3 className="text-xl font-black text-white uppercase leading-none mb-2 pr-16">{prod.nombre}</h3>
+                                                    <p className="text-2xl font-bold text-orange-500 flex items-baseline gap-0.5">
+                                                        <span className="text-sm opacity-50">$</span>{prod.precio.toLocaleString('es-AR')}
+                                                    </p>
+                                                </div>
+                                                <div className="flex items-center gap-2 mt-4 pt-4 border-t border-orange-500/20">
+                                                    <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2"><Edit2 size={14} /> Editar</button>
+                                                    <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-red-500 hover:bg-red-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}><Power size={18} /></button>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
-                                )}
-                            </div>
+                                </div>
+                            )}
+
+                            {/* SECCIÓN ESPECIALES */}
+                            {especiales.length > 0 && (
+                                <div className="mb-10">
+                                    <h3 className="text-purple-500 font-black uppercase tracking-widest text-xs mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
+                                        <Star size={14} /> Especiales
+                                    </h3>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {especiales.map((prod) => (
+                                            <div key={prod.id} className={`border rounded-xl p-5 relative group transition-all ${prod.activo ? 'bg-[#111] border-purple-500/20 hover:border-purple-500/50' : 'bg-black border-white/5 opacity-50 grayscale'}`}>
+                                                <div className="absolute top-0 left-0 px-3 py-1 rounded-br-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1 bg-purple-500/20 text-purple-400 border-b border-r border-purple-500/30">
+                                                    <Star size={10} /> especial
+                                                </div>
+                                                <div className="absolute top-4 right-4 bg-white/10 px-2 py-1 rounded text-[10px] font-bold uppercase text-white flex items-center gap-1 mt-6">
+                                                    <Layers size={10} className="text-purple-500" /> {prod.creditos} Créditos
+                                                </div>
+                                                <div className="mb-4 mt-8">
+                                                    <h3 className="text-xl font-black text-white uppercase leading-none mb-2 pr-16">{prod.nombre}</h3>
+                                                    <p className="text-2xl font-bold text-purple-500 flex items-baseline gap-0.5">
+                                                        <span className="text-sm opacity-50">$</span>{prod.precio.toLocaleString('es-AR')}
+                                                    </p>
+                                                </div>
+                                                <div className="flex items-center gap-2 mt-4 pt-4 border-t border-purple-500/20">
+                                                    <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2"><Edit2 size={14} /> Editar</button>
+                                                    <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-red-500 hover:bg-red-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}><Power size={18} /></button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {productos.length === 0 && (
+                                <div className="text-center py-20 border border-dashed border-white/10 rounded-2xl text-gray-500">
+                                    <Tag size={40} className="mx-auto mb-3 opacity-30" />
+                                    <p className="font-bold uppercase text-sm">No hay packs creados.</p>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -404,7 +471,7 @@ export default function TiendaConfigPage() {
                             <div className="space-y-2">
                                 <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Tipo de Clase</label>
                                 <div className="grid grid-cols-3 gap-2 bg-black border border-white/10 p-1.5 rounded-2xl">
-                                    <button type="button" onClick={() => setFormTipo('regular')} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all flex flex-col items-center justify-center gap-1 ${formTipo === 'regular' ? 'bg-white text-black shadow-lg' : 'text-gray-500 hover:text-white'}`}><BookOpen size={14} /> Regular</button>
+                                    <button type="button" onClick={() => setFormTipo('regular')} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all flex flex-col items-center justify-center gap-1 ${formTipo === 'regular' ? 'bg-orange-500 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}><BookOpen size={14} /> Regular</button>
                                     <button type="button" onClick={() => setFormTipo('especial')} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all flex flex-col items-center justify-center gap-1 ${formTipo === 'especial' ? 'bg-purple-500 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}><Star size={14} /> Especial</button>
                                     <button type="button" onClick={() => setFormTipo('exclusivo')} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all flex flex-col items-center justify-center gap-1 ${formTipo === 'exclusivo' ? 'bg-cyan-500 text-black shadow-lg' : 'text-gray-500 hover:text-white'}`}><ShieldAlert size={14} /> Exclusivo</button>
                                 </div>
@@ -451,7 +518,7 @@ export default function TiendaConfigPage() {
 
                             <div className="pt-6 flex gap-3">
                                 <button type="button" onClick={() => setIsProductModalOpen(false)} className="flex-1 py-4 bg-white/5 hover:bg-white/10 rounded-2xl font-bold text-gray-400 text-xs uppercase transition-colors">Cancelar</button>
-                                <button type="submit" disabled={saving} className={`flex-[2] text-black font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg text-xs flex justify-center items-center ${formTipo === 'exclusivo' ? 'bg-cyan-500 hover:bg-white' : 'bg-[#D4E655] hover:bg-white'}`}>
+                                <button type="submit" disabled={saving} className={`flex-[2] text-black font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg text-xs flex justify-center items-center ${formTipo === 'exclusivo' ? 'bg-cyan-500 hover:bg-white' : formTipo === 'regular' ? 'bg-orange-500 text-white hover:text-black hover:bg-white' : 'bg-purple-500 text-white hover:text-black hover:bg-white'}`}>
                                     {saving ? <Loader2 className="animate-spin mr-2" /> : 'Guardar Pack'}
                                 </button>
                             </div>

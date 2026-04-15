@@ -16,9 +16,9 @@ type Producto = {
     nombre: string
     precio: number
     creditos: number
-    tipo_clase: 'regular' | 'seminario' | 'especial' | 'exclusivo' // 🚀 NUEVO
+    tipo_clase: 'regular' | 'seminario' | 'especial' | 'exclusivo'
     descripcion?: string
-    pase_referencia?: string // 🚀 NUEVO
+    pase_referencia?: string
 }
 
 type Cupon = {
@@ -27,7 +27,6 @@ type Cupon = {
     porcentaje: number
 }
 
-// 🚀 ACTUALIZADO: creditos_especiales
 type TiendaData = {
     userProfile: { id: string, creditos_regulares: number, creditos_especiales: number } | null
     productos: Producto[]
@@ -43,7 +42,7 @@ const fetcherTienda = async (): Promise<TiendaData> => {
     if (user) {
         const { data: profile } = await supabase
             .from('profiles')
-            .select('id, creditos_regulares, creditos_especiales') // 🚀 ACTUALIZADO
+            .select('id, creditos_regulares, creditos_especiales')
             .eq('id', user.id)
             .single()
         if (profile) userProfile = profile
@@ -177,7 +176,6 @@ function TiendaContent() {
                     productoId: selectedPack.id,
                     userId: userId,
                     cuponId: cuponAplicado ? cuponAplicado.id : null,
-                    // 🚀 Le avisamos al Webhook si es un pase exclusivo
                     tipo_pago: selectedPack.tipo_clase === 'exclusivo' ? 'exclusivo' : 'pack',
                     pase_referencia: selectedPack.pase_referencia || null
                 })
@@ -231,7 +229,7 @@ function TiendaContent() {
                 </p>
             </div>
 
-            {/* 🚀 SECCIÓN PASES EXCLUSIVOS (ARRIBA DE TODO) */}
+            {/* 🚀 SECCIÓN PASES EXCLUSIVOS */}
             {exclusivos.length > 0 && (
                 <div className="mb-16">
                     <div className="flex items-center gap-3 mb-6">
@@ -249,7 +247,7 @@ function TiendaContent() {
                                     <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-cyan-400" /> Acceso Directo</div>
                                     <p className="text-xs text-gray-500 leading-relaxed italic">{p.descripcion || 'Pase válido únicamente para las clases de este grupo específico.'}</p>
                                 </div>
-                                <button onClick={() => openCheckout(p)} className="w-full bg-cyan-500/10 hover:bg-cyan-500 text-cyan-400 hover:text-black border border-cyan-500/30 rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all">
+                                <button onClick={() => openCheckout(p)} className="w-full bg-cyan-600 hover:bg-cyan-400 text-black rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all shadow-md">
                                     Comprar Pase
                                 </button>
                             </div>
@@ -258,27 +256,27 @@ function TiendaContent() {
                 </div>
             )}
 
-            {/* SECCIÓN REGULARES */}
+            {/* 🚀 SECCIÓN REGULARES (NARANJA) */}
             {regulares.length > 0 && (
                 <div className="mb-16">
                     <div className="flex items-center gap-3 mb-6">
-                        <div className="bg-[#D4E655] text-black p-2 rounded-lg"><Ticket size={20} /></div>
+                        <div className="bg-orange-500 text-white p-2 rounded-lg"><Ticket size={20} /></div>
                         <h2 className="text-xl font-black uppercase tracking-tighter">Clases Regulares</h2>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                         {regulares.map((p) => (
-                            <div key={p.id} className="bg-[#09090b] border border-white/10 rounded-3xl p-6 flex flex-col hover:border-[#D4E655]/50 transition-all group relative overflow-hidden shadow-2xl">
+                            <div key={p.id} className="bg-[#09090b] border border-white/10 rounded-3xl p-6 flex flex-col hover:border-orange-500/50 transition-all group relative overflow-hidden shadow-2xl">
                                 {p.creditos > 1 && (
-                                    <div className="absolute -right-8 top-4 rotate-45 bg-[#D4E655] text-black text-[8px] font-black uppercase px-10 py-1 shadow-lg">Ahorro</div>
+                                    <div className="absolute -right-8 top-4 rotate-45 bg-orange-500 text-white text-[8px] font-black uppercase px-10 py-1 shadow-lg">Ahorro</div>
                                 )}
                                 <h3 className="text-xl font-black text-white uppercase mb-1">{p.nombre}</h3>
-                                <div className="text-4xl font-black text-[#D4E655] mb-4">${p.precio.toLocaleString()}</div>
+                                <div className="text-4xl font-black text-orange-500 mb-4">${p.precio.toLocaleString()}</div>
                                 <div className="space-y-3 mb-8 flex-1">
-                                    <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-[#D4E655]" /> {p.creditos} Clases Disponibles</div>
+                                    <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-orange-500" /> {p.creditos} Clases Disponibles</div>
                                     <div className="flex items-center gap-2 text-xs text-gray-500 font-bold uppercase tracking-widest"><Info size={14} /> ${Math.round(p.precio / p.creditos).toLocaleString()} por clase</div>
                                 </div>
-                                <button onClick={() => openCheckout(p)} className="w-full bg-[#111] hover:bg-white text-white hover:text-black border border-white/10 rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all">
+                                <button onClick={() => openCheckout(p)} className="w-full bg-orange-500 hover:bg-orange-400 text-white rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all shadow-md">
                                     Comprar Ahora
                                 </button>
                             </div>
@@ -287,11 +285,11 @@ function TiendaContent() {
                 </div>
             )}
 
-            {/* SECCIÓN ESPECIALES */}
+            {/* 🚀 SECCIÓN ESPECIALES (VIOLETA CON BOTÓN BLANCO) */}
             {especiales.length > 0 && (
                 <div>
                     <div className="flex items-center gap-3 mb-6">
-                        <div className="bg-purple-600 text-white p-2 rounded-lg"><Star size={20} /></div>
+                        <div className="bg-purple-500 text-white p-2 rounded-lg"><Star size={20} /></div>
                         <h2 className="text-xl font-black uppercase tracking-tighter">Especiales</h2>
                     </div>
 
@@ -299,12 +297,12 @@ function TiendaContent() {
                         {especiales.map((p) => (
                             <div key={p.id} className="bg-[#09090b] border border-purple-500/20 rounded-3xl p-6 flex flex-col hover:border-purple-500/50 transition-all group relative overflow-hidden shadow-2xl">
                                 <h3 className="text-xl font-black text-white uppercase mb-1">{p.nombre}</h3>
-                                <div className="text-4xl font-black text-purple-500 mb-4">${p.precio.toLocaleString()}</div>
+                                <div className="text-4xl font-black text-purple-400 mb-4">${p.precio.toLocaleString()}</div>
                                 <div className="space-y-3 mb-8 flex-1">
-                                    <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-purple-500" /> {p.creditos} Créditos Especiales</div>
+                                    <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-purple-400" /> {p.creditos} Créditos Especiales</div>
                                     <p className="text-xs text-gray-500 leading-relaxed italic">{p.descripcion || 'Válido para Workshops, Intensivos y masterclass.'}</p>
                                 </div>
-                                <button onClick={() => openCheckout(p)} className="w-full bg-purple-600/10 hover:bg-purple-600 text-purple-500 hover:text-white border border-purple-600/30 rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all">
+                                <button onClick={() => openCheckout(p)} className="w-full bg-white hover:bg-purple-200 text-black rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all shadow-md">
                                     Comprar Ahora
                                 </button>
                             </div>
@@ -318,7 +316,7 @@ function TiendaContent() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in" onClick={() => !generandoPago && setIsCheckoutOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
                         <div className="text-center mb-6">
-                            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-[0_0_20px_rgba(212,230,85,0.4)] ${selectedPack.tipo_clase === 'exclusivo' ? 'bg-cyan-500 text-black' : selectedPack.tipo_clase === 'regular' ? 'bg-[#D4E655] text-black' : 'bg-purple-600 text-white'}`}>
+                            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg ${selectedPack.tipo_clase === 'exclusivo' ? 'bg-cyan-500 text-black shadow-cyan-500/20' : selectedPack.tipo_clase === 'regular' ? 'bg-orange-500 text-white shadow-orange-500/20' : 'bg-purple-500 text-white shadow-purple-500/20'}`}>
                                 {selectedPack.tipo_clase === 'exclusivo' ? <ShieldAlert size={32} /> : <ShoppingBasket size={32} />}
                             </div>
                             <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Finalizar Compra</h3>
@@ -339,7 +337,7 @@ function TiendaContent() {
                             ) : (
                                 <>
                                     <input type="text" placeholder="Código de Descuento" value={cuponInput} onChange={e => setCuponInput(e.target.value.toUpperCase())} className="flex-1 bg-transparent text-white text-sm px-4 outline-none font-mono uppercase" />
-                                    <button onClick={handleValidarCupon} disabled={validandoCupon} className="bg-white/10 hover:bg-[#D4E655] text-gray-300 hover:text-black font-bold text-[10px] uppercase px-4 py-3 rounded-lg transition-colors flex items-center">
+                                    <button onClick={handleValidarCupon} disabled={validandoCupon} className="bg-white/10 hover:bg-white text-gray-300 hover:text-black font-bold text-[10px] uppercase px-4 py-3 rounded-lg transition-colors flex items-center">
                                         {validandoCupon ? <Loader2 size={14} className="animate-spin" /> : 'Aplicar'}
                                     </button>
                                 </>
@@ -356,7 +354,7 @@ function TiendaContent() {
                             )}
                             <div className="flex justify-between items-center">
                                 <span className="text-xs text-gray-300 font-bold uppercase">Total a Pagar</span>
-                                <span className={`text-3xl font-black ${selectedPack.tipo_clase === 'exclusivo' ? 'text-cyan-400' : 'text-[#D4E655]'}`}>${precioFinal.toLocaleString()}</span>
+                                <span className={`text-3xl font-black ${selectedPack.tipo_clase === 'exclusivo' ? 'text-cyan-400' : selectedPack.tipo_clase === 'regular' ? 'text-orange-500' : 'text-purple-400'}`}>${precioFinal.toLocaleString()}</span>
                             </div>
                         </div>
 
