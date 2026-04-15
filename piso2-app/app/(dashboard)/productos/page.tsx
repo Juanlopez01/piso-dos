@@ -4,7 +4,7 @@ import { createClient } from '@/utils/supabase/client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
-import { Plus, Tag, Edit2, Trash2, Power, Loader2, Layers, BookOpen, Star, Percent, Ticket } from 'lucide-react'
+import { Plus, Tag, Edit2, Trash2, Power, Loader2, Layers, BookOpen, Star, Percent, Ticket, ShieldAlert } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -22,7 +22,8 @@ type Producto = {
     precio: number
     creditos: number
     activo: boolean
-    tipo_clase: 'regular' | 'seminario'
+    tipo_clase: 'regular' | 'seminario' | 'especial' | 'exclusivo'
+    pase_referencia?: string
 }
 
 type Cupon = {
@@ -33,9 +34,16 @@ type Cupon = {
     created_at: string
 }
 
+type ClaseExclusiva = {
+    nombre: string
+    profesor_nombre: string
+    key_grupo: string
+}
+
 type TiendaConfigData = {
     productos: Producto[]
     cupones: Cupon[]
+    clasesExclusivas: ClaseExclusiva[]
 }
 
 // 🚀 FETCHER UNIFICADO DE SWR
@@ -53,24 +61,52 @@ const fetcherTiendaConfig = async (): Promise<TiendaConfigData> => {
         .select('*')
         .order('created_at', { ascending: false })
 
+    // 🚀 BUSCAMOS CLASES EXCLUSIVAS EN LA AGENDA
+    const hoy = new Date().toISOString()
+    const { data: dataClases } = await supabase
+        .from('clases')
+        .select(`id, nombre, tipo_clase, profesor:profiles!clases_profesor_id_fkey(nombre_completo)`)
+        .gte('inicio', hoy)
+        .eq('es_combinable', false) // Solo las que tienen candado
+        .neq('estado', 'cancelada')
+
+    const mapExclusivas = new Map<string, ClaseExclusiva>()
+
+    if (dataClases) {
+        dataClases.forEach((c: any) => {
+            const profeNombre = Array.isArray(c.profesor) ? c.profesor[0]?.nombre_completo : c.profesor?.nombre_completo || 'Staff'
+            const key = `${c.nombre}-${profeNombre}-${c.tipo_clase}`
+
+            // Guardamos 1 sola por grupo (para no repetir si dan 4 clases en el mes)
+            if (!mapExclusivas.has(key)) {
+                mapExclusivas.set(key, {
+                    nombre: c.nombre,
+                    profesor_nombre: profeNombre,
+                    key_grupo: key
+                })
+            }
+        })
+    }
+
     return {
         productos: (dataProds as Producto[]) || [],
-        cupones: (dataCupones as Cupon[]) || []
+        cupones: (dataCupones as Cupon[]) || [],
+        clasesExclusivas: Array.from(mapExclusivas.values())
     }
 }
 
 export default function TiendaConfigPage() {
     const router = useRouter()
 
-    // 🚀 SWR AL MANDO
     const { data, isLoading, mutate } = useSWR<TiendaConfigData>(
         'tienda-config',
         fetcherTiendaConfig,
-        { revalidateOnFocus: false } // Evitamos recargas al cambiar de pestaña
+        { revalidateOnFocus: false }
     )
 
     const productos = data?.productos || []
     const cupones = data?.cupones || []
+    const clasesExclusivas = data?.clasesExclusivas || []
 
     // UI States
     const [activeTab, setActiveTab] = useState<'packs' | 'cupones'>('packs')
@@ -82,7 +118,8 @@ export default function TiendaConfigPage() {
     const [formNombre, setFormNombre] = useState('')
     const [formPrecio, setFormPrecio] = useState('')
     const [formCreditos, setFormCreditos] = useState('1')
-    const [formTipo, setFormTipo] = useState<'regular' | 'seminario'>('regular')
+    const [formTipo, setFormTipo] = useState<'regular' | 'especial' | 'exclusivo'>('regular')
+    const [formPaseReferencia, setFormPaseReferencia] = useState('') // 🚀 NUEVO
 
     // Modal Cupon State
     const [isCuponModalOpen, setIsCuponModalOpen] = useState(false)
@@ -98,26 +135,36 @@ export default function TiendaConfigPage() {
             setFormNombre(prod.nombre)
             setFormPrecio(prod.precio.toString())
             setFormCreditos(prod.creditos.toString())
-            setFormTipo(prod.tipo_clase || 'regular')
+            setFormTipo(prod.tipo_clase === 'seminario' ? 'especial' : prod.tipo_clase || 'regular')
+            setFormPaseReferencia(prod.pase_referencia || '')
         } else {
             setEditingProdId(null)
             setFormNombre('')
             setFormPrecio('')
             setFormCreditos('1')
             setFormTipo('regular')
+            setFormPaseReferencia('')
         }
         setIsProductModalOpen(true)
     }
 
     const handleSaveProduct = async (e: React.FormEvent) => {
         e.preventDefault()
+
+        if (formTipo === 'exclusivo' && !formPaseReferencia) {
+            return toast.error("Por favor, seleccioná una clase vinculada para este pase exclusivo.")
+        }
+
         setSaving(true)
 
         const payload = {
             nombre: formNombre,
             precio: Number(formPrecio),
             creditos: Number(formCreditos),
-            tipo_clase: formTipo
+            // Convertimos especial a seminario si así lo guarda tu DB internamente aún, 
+            // o lo mandamos como especial/exclusivo
+            tipo_clase: formTipo === 'especial' ? 'seminario' : formTipo,
+            pase_referencia: formTipo === 'exclusivo' ? formPaseReferencia : null
         }
 
         const response = await guardarProductoAction(payload, editingProdId || undefined)
@@ -135,7 +182,6 @@ export default function TiendaConfigPage() {
     }
 
     const toggleProductStatus = async (id: string, currentStatus: boolean) => {
-        // 🚀 MUTACIÓN OPTIMISTA
         const optimisticProds = productos.map(p => p.id === id ? { ...p, activo: !currentStatus } : p)
         mutate({ ...data!, productos: optimisticProds }, false)
 
@@ -147,7 +193,7 @@ export default function TiendaConfigPage() {
             setTimeout(() => mutate(), 500)
         } else {
             toast.error(response.error || 'Error al cambiar estado')
-            mutate() // Revierte en caso de fallo
+            mutate()
         }
     }
 
@@ -178,7 +224,6 @@ export default function TiendaConfigPage() {
     }
 
     const toggleCuponStatus = async (id: string, currentStatus: boolean) => {
-        // 🚀 MUTACIÓN OPTIMISTA
         const optimisticCupones = cupones.map(c => c.id === id ? { ...c, activo: !currentStatus } : c)
         mutate({ ...data!, cupones: optimisticCupones }, false)
 
@@ -190,14 +235,13 @@ export default function TiendaConfigPage() {
             setTimeout(() => mutate(), 500)
         } else {
             toast.error(response.error || 'Error al cambiar estado')
-            mutate() // Revertimos
+            mutate()
         }
     }
 
     const deleteCupon = async (id: string) => {
         if (!confirm('¿Eliminar cupón definitivamente? Los alumnos que ya lo usaron no perderán su descuento, pero nadie más podrá usarlo.')) return
 
-        // 🚀 MUTACIÓN OPTIMISTA
         const optimisticCupones = cupones.filter(c => c.id !== id)
         mutate({ ...data!, cupones: optimisticCupones }, false)
 
@@ -209,7 +253,7 @@ export default function TiendaConfigPage() {
             setTimeout(() => mutate(), 500)
         } else {
             toast.error(response.error || 'Error al eliminar')
-            mutate() // Revertimos
+            mutate()
         }
     }
 
@@ -224,7 +268,6 @@ export default function TiendaConfigPage() {
                     <p className="text-[#D4E655] font-bold text-xs tracking-widest uppercase mt-1">Gestión de Precios y Descuentos</p>
                 </div>
 
-                {/* TABS DE NAVEGACIÓN */}
                 <div className="flex bg-[#111] p-1 rounded-xl border border-white/5 w-full md:w-auto">
                     <button onClick={() => setActiveTab('packs')} className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-xs font-black uppercase transition-all ${activeTab === 'packs' ? 'bg-white text-black shadow-lg' : 'text-gray-500 hover:text-white'}`}>
                         <Ticket size={16} /> Packs
@@ -253,22 +296,30 @@ export default function TiendaConfigPage() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {productos.map((prod) => (
                                     <div key={prod.id} className={`border rounded-xl p-5 relative group transition-all ${prod.activo ? 'bg-[#111] border-white/10 hover:border-[#D4E655]/50' : 'bg-black border-white/5 opacity-50 grayscale'}`}>
-                                        <div className={`absolute top-0 left-0 px-3 py-1 rounded-br-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1 ${prod.tipo_clase === 'seminario' ? 'bg-purple-500/20 text-purple-400 border-b border-r border-purple-500/30' : 'bg-white/5 text-gray-400 border-b border-r border-white/10'}`}>
-                                            {prod.tipo_clase === 'seminario' ? <Star size={10} /> : <BookOpen size={10} />} {prod.tipo_clase}
+                                        <div className={`absolute top-0 left-0 px-3 py-1 rounded-br-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1 ${prod.tipo_clase === 'exclusivo' ? 'bg-cyan-500/20 text-cyan-400 border-b border-r border-cyan-500/30' : prod.tipo_clase === 'seminario' || prod.tipo_clase === 'especial' ? 'bg-purple-500/20 text-purple-400 border-b border-r border-purple-500/30' : 'bg-white/5 text-gray-400 border-b border-r border-white/10'}`}>
+                                            {prod.tipo_clase === 'exclusivo' ? <ShieldAlert size={10} /> : prod.tipo_clase === 'seminario' || prod.tipo_clase === 'especial' ? <Star size={10} /> : <BookOpen size={10} />}
+                                            {prod.tipo_clase === 'seminario' ? 'especial' : prod.tipo_clase}
                                         </div>
 
                                         <div className="absolute top-4 right-4 bg-white/10 px-2 py-1 rounded text-[10px] font-bold uppercase text-white flex items-center gap-1 mt-6">
-                                            <Layers size={10} className="text-[#D4E655]" /> {prod.creditos} Créditos
+                                            <Layers size={10} className={prod.tipo_clase === 'exclusivo' ? 'text-cyan-400' : 'text-[#D4E655]'} />
+                                            {prod.tipo_clase === 'exclusivo' ? '1 Pase' : `${prod.creditos} Créditos`}
                                         </div>
 
                                         <div className="mb-4 mt-8">
                                             <h3 className="text-xl font-black text-white uppercase leading-none mb-2 pr-16">{prod.nombre}</h3>
-                                            <p className="text-2xl font-bold text-[#D4E655] flex items-baseline gap-0.5">
+                                            <p className={`text-2xl font-bold flex items-baseline gap-0.5 ${prod.tipo_clase === 'exclusivo' ? 'text-cyan-400' : 'text-[#D4E655]'}`}>
                                                 <span className="text-sm opacity-50">$</span>{prod.precio.toLocaleString('es-AR')}
                                             </p>
                                         </div>
 
-                                        <div className="flex items-center gap-2 mt-4 pt-4 border-t border-white/5">
+                                        {prod.tipo_clase === 'exclusivo' && prod.pase_referencia && (
+                                            <div className="text-[9px] text-cyan-500/70 italic uppercase tracking-wider mb-2 line-clamp-1 border-t border-white/5 pt-2">
+                                                Ref: {prod.pase_referencia.split('-').join(' / ')}
+                                            </div>
+                                        )}
+
+                                        <div className={`flex items-center gap-2 mt-2 pt-4 border-t ${prod.tipo_clase === 'exclusivo' ? 'border-cyan-500/20' : 'border-white/5'}`}>
                                             <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2"><Edit2 size={14} /> Editar</button>
                                             <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-red-500 hover:bg-red-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}><Power size={18} /></button>
                                         </div>
@@ -347,33 +398,60 @@ export default function TiendaConfigPage() {
                     <div className="bg-[#111] border border-white/10 w-full md:max-w-md md:rounded-3xl rounded-t-3xl p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
                         <h3 className="text-2xl font-black text-white uppercase mb-6 flex items-center gap-3">
                             {editingProdId ? <Edit2 className="text-[#D4E655]" size={24} /> : <Plus className="text-[#D4E655]" size={24} />}
-                            {editingProdId ? 'Editar Precio' : 'Nuevo Pack'}
+                            {editingProdId ? 'Editar Pack' : 'Nuevo Pack'}
                         </h3>
                         <form onSubmit={handleSaveProduct} className="space-y-5">
                             <div className="space-y-2">
                                 <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Tipo de Clase</label>
-                                <div className="grid grid-cols-2 gap-2 bg-black border border-white/10 p-1.5 rounded-2xl">
-                                    <button type="button" onClick={() => setFormTipo('regular')} className={`py-4 text-xs font-black uppercase rounded-xl transition-all flex items-center justify-center gap-2 ${formTipo === 'regular' ? 'bg-white text-black shadow-lg' : 'text-gray-500 hover:text-white'}`}><BookOpen size={16} /> Regular</button>
-                                    <button type="button" onClick={() => setFormTipo('seminario')} className={`py-4 text-xs font-black uppercase rounded-xl transition-all flex items-center justify-center gap-2 ${formTipo === 'seminario' ? 'bg-purple-500 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}><Star size={16} /> Especial</button>
+                                <div className="grid grid-cols-3 gap-2 bg-black border border-white/10 p-1.5 rounded-2xl">
+                                    <button type="button" onClick={() => setFormTipo('regular')} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all flex flex-col items-center justify-center gap-1 ${formTipo === 'regular' ? 'bg-white text-black shadow-lg' : 'text-gray-500 hover:text-white'}`}><BookOpen size={14} /> Regular</button>
+                                    <button type="button" onClick={() => setFormTipo('especial')} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all flex flex-col items-center justify-center gap-1 ${formTipo === 'especial' ? 'bg-purple-500 text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}><Star size={14} /> Especial</button>
+                                    <button type="button" onClick={() => setFormTipo('exclusivo')} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all flex flex-col items-center justify-center gap-1 ${formTipo === 'exclusivo' ? 'bg-cyan-500 text-black shadow-lg' : 'text-gray-500 hover:text-white'}`}><ShieldAlert size={14} /> Exclusivo</button>
                                 </div>
                             </div>
-                            <div className="space-y-2">
+
+                            {/* 🚀 DESPLEGABLE INTELIGENTE PARA EXCLUSIVOS */}
+                            {formTipo === 'exclusivo' && (
+                                <div className="space-y-2 mt-4 p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl animate-in fade-in">
+                                    <label className="text-[10px] uppercase font-bold text-cyan-400 tracking-widest pl-1 flex items-center gap-1">
+                                        <ShieldAlert size={12} /> Clase Vinculada
+                                    </label>
+                                    <select
+                                        required={formTipo === 'exclusivo'}
+                                        value={formPaseReferencia}
+                                        onChange={e => setFormPaseReferencia(e.target.value)}
+                                        className="w-full bg-black border border-cyan-500/30 rounded-2xl p-4 text-white text-xs font-bold outline-none focus:border-cyan-500 transition-colors"
+                                    >
+                                        <option value="">Seleccioná la clase bloqueada...</option>
+                                        {clasesExclusivas.map(c => (
+                                            <option key={c.key_grupo} value={c.key_grupo}>{c.nombre} con {c.profesor_nombre}</option>
+                                        ))}
+                                    </select>
+                                    {clasesExclusivas.length === 0 && <p className="text-[9px] text-gray-500 italic mt-1 pl-1">No hay clases con candado programadas en la agenda.</p>}
+                                </div>
+                            )}
+
+                            <div className="space-y-2 mt-4">
                                 <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Nombre del Pack</label>
-                                <input autoFocus required placeholder={formTipo === 'seminario' ? "Ej: Seminario Intensivo" : "Ej: Pack 8 Clases"} value={formNombre} onChange={e => setFormNombre(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors" />
+                                <input autoFocus required placeholder={formTipo === 'especial' ? "Ej: Workshop Ritmos" : formTipo === 'exclusivo' ? "Ej: Pase Masterclass Juan" : "Ej: Pack 8 Clases"} value={formNombre} onChange={e => setFormNombre(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors" />
                             </div>
+
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Precio ($)</label>
                                     <input required type="number" placeholder="0" value={formPrecio} onChange={e => setFormPrecio(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors" />
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Créditos</label>
+                                    <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">
+                                        {formTipo === 'exclusivo' ? 'Cant. Pases' : 'Créditos'}
+                                    </label>
                                     <input required type="number" placeholder="1" value={formCreditos} onChange={e => setFormCreditos(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors" />
                                 </div>
                             </div>
+
                             <div className="pt-6 flex gap-3">
                                 <button type="button" onClick={() => setIsProductModalOpen(false)} className="flex-1 py-4 bg-white/5 hover:bg-white/10 rounded-2xl font-bold text-gray-400 text-xs uppercase transition-colors">Cancelar</button>
-                                <button type="submit" disabled={saving} className="flex-[2] bg-[#D4E655] text-black font-black uppercase tracking-widest rounded-2xl hover:bg-white transition-all shadow-[0_0_20px_rgba(212,230,85,0.3)] text-xs flex justify-center items-center">
+                                <button type="submit" disabled={saving} className={`flex-[2] text-black font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg text-xs flex justify-center items-center ${formTipo === 'exclusivo' ? 'bg-cyan-500 hover:bg-white' : 'bg-[#D4E655] hover:bg-white'}`}>
                                     {saving ? <Loader2 className="animate-spin mr-2" /> : 'Guardar Pack'}
                                 </button>
                             </div>

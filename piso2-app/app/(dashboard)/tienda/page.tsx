@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import {
     ShoppingBasket, Ticket, Star, Check,
-    Smartphone, Zap, Loader2, Info, Tag, X, CreditCard
+    Smartphone, Zap, Loader2, Info, Tag, X, CreditCard, ShieldAlert
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 
@@ -16,8 +16,9 @@ type Producto = {
     nombre: string
     precio: number
     creditos: number
-    tipo_clase: 'regular' | 'seminario'
+    tipo_clase: 'regular' | 'seminario' | 'especial' | 'exclusivo' // 🚀 NUEVO
     descripcion?: string
+    pase_referencia?: string // 🚀 NUEVO
 }
 
 type Cupon = {
@@ -26,16 +27,15 @@ type Cupon = {
     porcentaje: number
 }
 
+// 🚀 ACTUALIZADO: creditos_especiales
 type TiendaData = {
-    userProfile: { id: string, creditos_regulares: number, creditos_seminarios: number } | null
+    userProfile: { id: string, creditos_regulares: number, creditos_especiales: number } | null
     productos: Producto[]
 }
 
-// 🚀 FETCHER UNIFICADO DE SWR
 const fetcherTienda = async (): Promise<TiendaData> => {
     const supabase = createClient()
 
-    // 🚀 LA CORRECCIÓN: Extraemos la 'session' primero
     const { data: { session } } = await supabase.auth.getSession()
     const user = session?.user
 
@@ -43,7 +43,7 @@ const fetcherTienda = async (): Promise<TiendaData> => {
     if (user) {
         const { data: profile } = await supabase
             .from('profiles')
-            .select('id, creditos_regulares, creditos_seminarios')
+            .select('id, creditos_regulares, creditos_especiales') // 🚀 ACTUALIZADO
             .eq('id', user.id)
             .single()
         if (profile) userProfile = profile
@@ -66,7 +66,6 @@ function TiendaContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
 
-    // 🚀 SWR AL MANDO
     const { data, isLoading, mutate } = useSWR<TiendaData>(
         'tienda-datos',
         fetcherTienda,
@@ -92,7 +91,6 @@ function TiendaContent() {
     // MP States
     const [generandoPago, setGenerandoPago] = useState(false)
 
-    // 🪄 EFECTO PARA LOS CARTELITOS DE MERCADO PAGO
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
 
@@ -121,7 +119,6 @@ function TiendaContent() {
         setIsCheckoutOpen(true)
     }
 
-    // --- LÓGICA DE CUPONES ---
     const handleValidarCupon = async () => {
         if (!cuponInput.trim()) return toast.error('Ingresá un código válido')
         if (!userId) return toast.error('Debes iniciar sesión para usar cupones')
@@ -167,12 +164,11 @@ function TiendaContent() {
         setCuponInput('')
     }
 
-    // --- LÓGICA MERCADO PAGO ---
     const handlePagarConMP = async () => {
         if (!userId) return toast.error('Debes iniciar sesión')
         if (!selectedPack) return
 
-        setGenerandoPago(true) // Ponemos el botón a girar
+        setGenerandoPago(true)
         try {
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
@@ -181,7 +177,9 @@ function TiendaContent() {
                     productoId: selectedPack.id,
                     userId: userId,
                     cuponId: cuponAplicado ? cuponAplicado.id : null,
-                    tipo_pago: 'pack'
+                    // 🚀 Le avisamos al Webhook si es un pase exclusivo
+                    tipo_pago: selectedPack.tipo_clase === 'exclusivo' ? 'exclusivo' : 'pack',
+                    pase_referencia: selectedPack.pase_referencia || null
                 })
             })
 
@@ -194,7 +192,6 @@ function TiendaContent() {
             }
 
             if (responseData.url) {
-                // 🚀 LA MAGIA: Navegamos en la misma pestaña exactamente
                 window.location.href = responseData.url
             }
 
@@ -203,6 +200,7 @@ function TiendaContent() {
             setGenerandoPago(false)
         }
     }
+
     const precioBase = selectedPack?.precio || 0
     const descuentoDinero = cuponAplicado ? (precioBase * (cuponAplicado.porcentaje / 100)) : 0
     const precioFinal = precioBase - descuentoDinero
@@ -216,7 +214,8 @@ function TiendaContent() {
     if (isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
     const regulares = productos.filter(p => p.tipo_clase === 'regular')
-    const seminarios = productos.filter(p => p.tipo_clase === 'seminario')
+    const especiales = productos.filter(p => p.tipo_clase === 'seminario' || p.tipo_clase === 'especial')
+    const exclusivos = productos.filter(p => p.tipo_clase === 'exclusivo')
 
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
@@ -232,35 +231,64 @@ function TiendaContent() {
                 </p>
             </div>
 
-            {/* SECCIÓN REGULARES */}
-            <div className="mb-16">
-                <div className="flex items-center gap-3 mb-6">
-                    <div className="bg-[#D4E655] text-black p-2 rounded-lg"><Ticket size={20} /></div>
-                    <h2 className="text-xl font-black uppercase tracking-tighter">Clases Regulares</h2>
-                </div>
+            {/* 🚀 SECCIÓN PASES EXCLUSIVOS (ARRIBA DE TODO) */}
+            {exclusivos.length > 0 && (
+                <div className="mb-16">
+                    <div className="flex items-center gap-3 mb-6">
+                        <div className="bg-cyan-500 text-black p-2 rounded-lg"><ShieldAlert size={20} /></div>
+                        <h2 className="text-xl font-black uppercase tracking-tighter">Pases Exclusivos</h2>
+                    </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {regulares.map((p) => (
-                        <div key={p.id} className="bg-[#09090b] border border-white/10 rounded-3xl p-6 flex flex-col hover:border-[#D4E655]/50 transition-all group relative overflow-hidden shadow-2xl">
-                            {p.creditos > 1 && (
-                                <div className="absolute -right-8 top-4 rotate-45 bg-[#D4E655] text-black text-[8px] font-black uppercase px-10 py-1 shadow-lg">Ahorro</div>
-                            )}
-                            <h3 className="text-xl font-black text-white uppercase mb-1">{p.nombre}</h3>
-                            <div className="text-4xl font-black text-[#D4E655] mb-4">${p.precio.toLocaleString()}</div>
-                            <div className="space-y-3 mb-8 flex-1">
-                                <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-[#D4E655]" /> {p.creditos} Clases Disponibles</div>
-                                <div className="flex items-center gap-2 text-xs text-gray-500 font-bold uppercase tracking-widest"><Info size={14} /> ${Math.round(p.precio / p.creditos).toLocaleString()} por clase</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {exclusivos.map((p) => (
+                            <div key={p.id} className="bg-[#09090b] border border-cyan-500/20 rounded-3xl p-6 flex flex-col hover:border-cyan-500/50 transition-all group relative overflow-hidden shadow-2xl">
+                                <div className="absolute -right-8 top-4 rotate-45 bg-cyan-500 text-black text-[8px] font-black uppercase px-10 py-1 shadow-lg">Exclusiva</div>
+                                <h3 className="text-xl font-black text-white uppercase mb-1 pr-6">{p.nombre}</h3>
+                                <div className="text-4xl font-black text-cyan-400 mb-4">${p.precio.toLocaleString()}</div>
+                                <div className="space-y-3 mb-8 flex-1">
+                                    <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-cyan-400" /> Acceso Directo</div>
+                                    <p className="text-xs text-gray-500 leading-relaxed italic">{p.descripcion || 'Pase válido únicamente para las clases de este grupo específico.'}</p>
+                                </div>
+                                <button onClick={() => openCheckout(p)} className="w-full bg-cyan-500/10 hover:bg-cyan-500 text-cyan-400 hover:text-black border border-cyan-500/30 rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all">
+                                    Comprar Pase
+                                </button>
                             </div>
-                            <button onClick={() => openCheckout(p)} className="w-full bg-[#111] hover:bg-white text-white hover:text-black border border-white/10 rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all">
-                                Comprar Ahora
-                            </button>
-                        </div>
-                    ))}
+                        ))}
+                    </div>
                 </div>
-            </div>
+            )}
 
-            {/* SECCIÓN SEMINARIOS */}
-            {seminarios.length > 0 && (
+            {/* SECCIÓN REGULARES */}
+            {regulares.length > 0 && (
+                <div className="mb-16">
+                    <div className="flex items-center gap-3 mb-6">
+                        <div className="bg-[#D4E655] text-black p-2 rounded-lg"><Ticket size={20} /></div>
+                        <h2 className="text-xl font-black uppercase tracking-tighter">Clases Regulares</h2>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {regulares.map((p) => (
+                            <div key={p.id} className="bg-[#09090b] border border-white/10 rounded-3xl p-6 flex flex-col hover:border-[#D4E655]/50 transition-all group relative overflow-hidden shadow-2xl">
+                                {p.creditos > 1 && (
+                                    <div className="absolute -right-8 top-4 rotate-45 bg-[#D4E655] text-black text-[8px] font-black uppercase px-10 py-1 shadow-lg">Ahorro</div>
+                                )}
+                                <h3 className="text-xl font-black text-white uppercase mb-1">{p.nombre}</h3>
+                                <div className="text-4xl font-black text-[#D4E655] mb-4">${p.precio.toLocaleString()}</div>
+                                <div className="space-y-3 mb-8 flex-1">
+                                    <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-[#D4E655]" /> {p.creditos} Clases Disponibles</div>
+                                    <div className="flex items-center gap-2 text-xs text-gray-500 font-bold uppercase tracking-widest"><Info size={14} /> ${Math.round(p.precio / p.creditos).toLocaleString()} por clase</div>
+                                </div>
+                                <button onClick={() => openCheckout(p)} className="w-full bg-[#111] hover:bg-white text-white hover:text-black border border-white/10 rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all">
+                                    Comprar Ahora
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* SECCIÓN ESPECIALES */}
+            {especiales.length > 0 && (
                 <div>
                     <div className="flex items-center gap-3 mb-6">
                         <div className="bg-purple-600 text-white p-2 rounded-lg"><Star size={20} /></div>
@@ -268,13 +296,13 @@ function TiendaContent() {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        {seminarios.map((p) => (
+                        {especiales.map((p) => (
                             <div key={p.id} className="bg-[#09090b] border border-purple-500/20 rounded-3xl p-6 flex flex-col hover:border-purple-500/50 transition-all group relative overflow-hidden shadow-2xl">
                                 <h3 className="text-xl font-black text-white uppercase mb-1">{p.nombre}</h3>
                                 <div className="text-4xl font-black text-purple-500 mb-4">${p.precio.toLocaleString()}</div>
                                 <div className="space-y-3 mb-8 flex-1">
                                     <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-purple-500" /> {p.creditos} Créditos Especiales</div>
-                                    <p className="text-xs text-gray-500 leading-relaxed italic">Válido para Workshops, Intensivos y clases masterclass.</p>
+                                    <p className="text-xs text-gray-500 leading-relaxed italic">{p.descripcion || 'Válido para Workshops, Intensivos y masterclass.'}</p>
                                 </div>
                                 <button onClick={() => openCheckout(p)} className="w-full bg-purple-600/10 hover:bg-purple-600 text-purple-500 hover:text-white border border-purple-600/30 rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all">
                                     Comprar Ahora
@@ -290,8 +318,8 @@ function TiendaContent() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in" onClick={() => !generandoPago && setIsCheckoutOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
                         <div className="text-center mb-6">
-                            <div className="w-16 h-16 bg-[#D4E655] text-black rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-[0_0_20px_rgba(212,230,85,0.4)]">
-                                <ShoppingBasket size={32} />
+                            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-[0_0_20px_rgba(212,230,85,0.4)] ${selectedPack.tipo_clase === 'exclusivo' ? 'bg-cyan-500 text-black' : selectedPack.tipo_clase === 'regular' ? 'bg-[#D4E655] text-black' : 'bg-purple-600 text-white'}`}>
+                                {selectedPack.tipo_clase === 'exclusivo' ? <ShieldAlert size={32} /> : <ShoppingBasket size={32} />}
                             </div>
                             <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Finalizar Compra</h3>
                             <p className="text-gray-400 text-sm font-bold uppercase tracking-widest mt-1">{selectedPack.nombre}</p>
@@ -328,7 +356,7 @@ function TiendaContent() {
                             )}
                             <div className="flex justify-between items-center">
                                 <span className="text-xs text-gray-300 font-bold uppercase">Total a Pagar</span>
-                                <span className="text-3xl font-black text-[#D4E655]">${precioFinal.toLocaleString()}</span>
+                                <span className={`text-3xl font-black ${selectedPack.tipo_clase === 'exclusivo' ? 'text-cyan-400' : 'text-[#D4E655]'}`}>${precioFinal.toLocaleString()}</span>
                             </div>
                         </div>
 

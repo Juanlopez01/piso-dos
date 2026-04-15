@@ -1,4 +1,3 @@
-// app/actions/clases.ts
 'use server'
 
 // 👇 IMPORTAMOS EL LECTOR DE COOKIES
@@ -7,14 +6,12 @@ import { v4 as uuidv4 } from 'uuid'
 import {
     startOfMonth,
     endOfMonth,
-    eachWeekOfInterval,
     format,
     addMonths,
     setHours,
     setMinutes,
     getDay,
     addDays,
-    startOfDay
 } from 'date-fns'
 import { revalidatePath } from 'next/cache'
 
@@ -38,6 +35,7 @@ type EditarClaseInput = {
     compania_id?: string
     es_audicion: boolean
     imagen_url?: string
+    es_combinable?: boolean // 🚀 Agregado al tipo
 }
 
 export async function editarClaseAction(input: EditarClaseInput) {
@@ -72,6 +70,7 @@ export async function editarClaseAction(input: EditarClaseInput) {
             compania_id: input.tipo_clase === 'Compañía' ? input.compania_id : null,
             es_audicion: input.es_audicion,
             imagen_url: input.imagen_url || null,
+            es_combinable: input.es_combinable ?? true, // 🚀 Agregado al payload de actualización
             updated_at: new Date().toISOString(),
         }
 
@@ -150,7 +149,8 @@ export async function crearClasesAction(form: any, publicUrl: string | null) {
             es_la_liga: form.esLaLiga,
             liga_nivel: form.esLaLiga ? form.ligaNivel : null,
             compania_id: form.tipo === 'Compañía' ? form.companiaId : null,
-            es_audicion: form.esAudicion
+            es_audicion: form.esAudicion,
+            es_combinable: form.esCombinable ?? true // 🚀 Agregado al guardado de creación masiva
         }))
 
         const { error } = await supabase.from('clases').insert(clasesAInsertar)
@@ -167,20 +167,18 @@ export async function crearClasesAction(form: any, publicUrl: string | null) {
     }
 }
 
-export async function duplicarMesAction(mesOrigen: string) { // mesOrigen formato "YYYY-MM"
+export async function duplicarMesAction(mesOrigen: string) {
     const supabase = await createClient()
     try {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
-        // 1. Configurar fechas de origen y destino
-        const fechaBaseOrigen = new Date(mesOrigen + "-02") // Forzamos día 2 para evitar líos de zona horaria
+        const fechaBaseOrigen = new Date(mesOrigen + "-02")
         const inicioOrigen = startOfMonth(fechaBaseOrigen)
         const finOrigen = endOfMonth(fechaBaseOrigen)
 
         const inicioDestino = startOfMonth(addMonths(inicioOrigen, 1))
 
-        // 2. Traer todas las clases del mes de origen
         const { data: clases, error: errFetch } = await supabase
             .from('clases')
             .select('*')
@@ -190,29 +188,23 @@ export async function duplicarMesAction(mesOrigen: string) { // mesOrigen format
         if (errFetch) throw errFetch
         if (!clases || clases.length === 0) throw new Error('No hay clases en el mes seleccionado para duplicar.')
 
-        // 3. Agrupación por series para mantener la integridad
-        // Si una clase tiene el mismo serie_id original, en el nuevo mes deben compartir un nuevo serie_id
         const mapaSeries = new Map()
 
         const nuevasClases = clases.map((clase) => {
             const fechaOriginal = new Date(clase.inicio)
 
-            // Calculamos en qué semana del mes estaba (0, 1, 2, 3, 4)
             const diaSemana = getDay(fechaOriginal)
             const diaMes = fechaOriginal.getDate()
             const semanaDelMes = Math.floor((diaMes - 1) / 7)
 
-            // Buscamos el mismo día de la semana en la misma semana del mes de destino
             let nuevaFecha = addDays(inicioDestino, (semanaDelMes * 7))
             while (getDay(nuevaFecha) !== diaSemana) {
                 nuevaFecha = addDays(nuevaFecha, 1)
             }
 
-            // Ajustamos la hora exacta de la clase original
             nuevaFecha = setHours(nuevaFecha, fechaOriginal.getHours())
             nuevaFecha = setMinutes(nuevaFecha, fechaOriginal.getMinutes())
 
-            // Lógica de Series: si era una serie, generamos un ID nuevo por cada grupo
             let nuevoSerieId = null
             if (clase.serie_id) {
                 if (!mapaSeries.has(clase.serie_id)) {
@@ -221,18 +213,15 @@ export async function duplicarMesAction(mesOrigen: string) { // mesOrigen format
                 nuevoSerieId = mapaSeries.get(clase.serie_id)
             }
 
-            // Retornamos el nuevo objeto (quitando IDs viejos)
             const { id, created_at, ...datosClase } = clase
             return {
                 ...datosClase,
                 inicio: nuevaFecha.toISOString(),
                 serie_id: nuevoSerieId,
-                // Si tenés columna de fin, calculala igual o sumale la duración
                 fin: clase.fin ? addDays(new Date(clase.fin), 28).toISOString() : null
             }
         })
 
-        // 4. Inserción masiva
         const { error: errInsert } = await supabase.from('clases').insert(nuevasClases)
         if (errInsert) throw errInsert
 
@@ -246,36 +235,27 @@ export async function duplicarMesAction(mesOrigen: string) { // mesOrigen format
 }
 
 export async function notificarClasePorInteres(nuevaClase: any) {
-    const supabase = await createClient() // Tu cliente de Supabase de servidor
+    const supabase = await createClient()
 
     try {
-        // 1. Buscamos a los alumnos que les interese este tipo de clase
-        // Asumiendo que tenés un campo en profiles que coincida, por ejemplo 'intereses' o 'nivel_liga'
         const { data: alumnosInteresados, error: errorAlumnos } = await supabase
             .from('profiles')
             .select('id')
             .eq('rol', 'alumno')
-        // Acá ponés tu lógica de filtro. Por ejemplo, si tenés un array de intereses:
-        // .contains('intereses', [nuevaClase.tipo_clase]) 
-        // O si querés avisarle a todos los de un nivel:
-        // .eq('nivel', nuevaClase.nivel_requerido)
 
         if (errorAlumnos || !alumnosInteresados || alumnosInteresados.length === 0) {
             console.log("No hay alumnos con este interés para notificar.")
             return
         }
 
-        // 2. Armamos el paquete de notificaciones (BULK)
-        // Esto es súper eficiente porque armamos un Array y lo mandamos de 1 sola vez
         const nuevasNotificaciones = alumnosInteresados.map(alumno => ({
-            usuario_id: alumno.id, // 🚀 Tu columna correcta
+            usuario_id: alumno.id,
             titulo: `¡Nueva clase de ${nuevaClase.tipo_clase}!`,
             mensaje: `Se abrió un nuevo horario para ${nuevaClase.nombre}. ¡Asegurá tu lugar antes de que se llene!`,
-            link: '/explorar', // Opcional: Podés mandarlos directo al detalle de la clase
+            link: '/explorar',
             leido: false
         }))
 
-        // 3. Insertamos todo de golpe en la base de datos
         const { error: errorNotifs } = await supabase
             .from('notificaciones')
             .insert(nuevasNotificaciones)

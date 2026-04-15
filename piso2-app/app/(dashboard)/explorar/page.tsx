@@ -26,15 +26,14 @@ const parseSafeDate = (dateStr: string | null | undefined) => {
 
 type ClaseInstancia = { id: string; inicio: string; fin: string; cupo_maximo: number; inscritos_count: number; ya_inscrito: boolean; estado: string; sala: { nombre: string; sede: { nombre: string } } }
 type ClaseAgrupada = { key_grupo: string; nombre: string; tipo_clase: string; imagen_url?: string | null; ritmo_id?: string | null; profesor: { nombre_completo: string }; instancias: ClaseInstancia[] }
-type CarteleraData = { perfil: { id: string, creditos_regulares: number, creditos_seminarios: number } | null; clasesAgrupadas: ClaseAgrupada[] }
+type CarteleraData = { perfil: { id: string, creditos_regulares: number, creditos_especiales: number } | null; clasesAgrupadas: ClaseAgrupada[] }
 
-// 🚀 FETCHER ORDENADO
 const fetcherCartelera = async (uid: string | null, supabase: any): Promise<CarteleraData> => {
     let profile = null
 
     if (uid) {
         supabase.rpc('limpiar_creditos_vencidos').then()
-        const { data: userProfile } = await supabase.from('profiles').select('id, creditos_regulares, creditos_seminarios').eq('id', uid).single()
+        const { data: userProfile } = await supabase.from('profiles').select('id, creditos_regulares, creditos_especiales').eq('id', uid).single()
         profile = userProfile
     }
 
@@ -88,10 +87,7 @@ export default function ExplorarClasesPage() {
     const [supabase] = useState(() => createClient())
     const { mutate: globalMutate } = useSWRConfig()
 
-    // 🚀 1. EXTRAEMOS EL ROL DEL USUARIO
     const { userId, isLoading: contextLoading, userRole } = useCash()
-
-    // 🚀 2. CREAMOS UNA VARIABLE PARA SABER SI ES ADMIN O RECEPCIÓN
     const esStaff = ['admin', 'recepcion'].includes(userRole || '')
 
     const { data, isLoading, mutate: mutateCartelera } = useSWR<CarteleraData>(
@@ -115,9 +111,10 @@ export default function ExplorarClasesPage() {
         }
 
         const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(grupo.tipo_clase)
-        const tipoClaseBD = esEspecial ? 'seminario' : 'regular'
-        const columnaUpdate = esEspecial ? 'creditos_seminarios' : 'creditos_regulares'
-        const creditosActuales = perfil[columnaUpdate as 'creditos_regulares' | 'creditos_seminarios'] || 0
+
+        const tipoClaseBD = esEspecial ? 'especial' : 'regular'
+        const columnaUpdate = esEspecial ? 'creditos_especiales' : 'creditos_regulares'
+        const creditosActuales = perfil[columnaUpdate as 'creditos_regulares' | 'creditos_especiales'] || 0
 
         if (creditosActuales <= 0) return toast.error("No tenés créditos suficientes.")
 
@@ -148,7 +145,8 @@ export default function ExplorarClasesPage() {
             }
         })
 
-        const response = await inscribirAlumnoAction(instancia.id, tipoClaseBD, grupo.ritmo_id)
+        // 🚀 ACÁ ESTÁ EL CAMBIO: Mandamos grupo.key_grupo como paseReferencia
+        const response = await inscribirAlumnoAction(instancia.id, tipoClaseBD, grupo.key_grupo)
 
         if (response.success) {
             toast.success(response.message)
@@ -187,7 +185,6 @@ export default function ExplorarClasesPage() {
                     </p>
                 </div>
 
-                {/* 🚀 3. OCULTAMOS EL BLOQUE DE CRÉDITOS SI ES ADMIN/RECEPCIÓN */}
                 {!esStaff && (
                     <div className="flex gap-3 w-full md:w-auto">
                         <div className="flex-1 md:flex-none bg-[#D4E655]/10 border border-[#D4E655]/30 rounded-2xl p-3 flex items-center gap-3">
@@ -201,7 +198,7 @@ export default function ExplorarClasesPage() {
                             <div className="bg-purple-50 text-white p-2 rounded-xl"><Star size={20} /></div>
                             <div>
                                 <p className="text-[10px] text-purple-400 font-black uppercase tracking-widest">Especiales</p>
-                                <p className="text-xl font-black leading-none">{perfil?.creditos_seminarios || 0}</p>
+                                <p className="text-xl font-black leading-none">{perfil?.creditos_especiales || 0}</p>
                             </div>
                         </div>
                     </div>
@@ -283,7 +280,7 @@ export default function ExplorarClasesPage() {
                             {selectedGrupo.instancias.map((inst) => {
                                 const estaLleno = inst.cupo_maximo > 0 && inst.inscritos_count >= inst.cupo_maximo
                                 const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(selectedGrupo.tipo_clase)
-                                const creditosDisponibles = perfil ? (esEspecial ? perfil.creditos_seminarios : perfil.creditos_regulares) : 0
+                                const creditosDisponibles = perfil ? (esEspecial ? perfil.creditos_especiales : perfil.creditos_regulares) : 0
 
                                 const inicioDate = parseSafeDate(inst.inicio)
                                 const finDate = parseSafeDate(inst.fin)
@@ -302,7 +299,6 @@ export default function ExplorarClasesPage() {
                                         </div>
 
                                         <div className="w-full sm:w-auto">
-                                            {/* 🚀 4. REEMPLAZAMOS LOS BOTONES SI ES STAFF */}
                                             {esStaff ? (
                                                 <div className="w-full sm:w-32 py-2.5 bg-white/5 text-gray-400 border border-white/10 rounded-xl flex items-center justify-center text-[10px] font-black uppercase cursor-default">
                                                     Modo Vista

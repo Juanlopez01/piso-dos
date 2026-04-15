@@ -101,3 +101,46 @@ export async function eliminarCuponAction(id: string) {
         return { success: false, error: error.message }
     }
 }
+
+// --- ACCIONES PARA PASES EXCLUSIVOS ---
+
+export async function cargarPaseExclusivoAction(usuarioId: string, paseReferencia: string, cantidadComprada: number) {
+    const supabase = await createClient()
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        // 1. Buscamos si el usuario ya tiene pases para esta clase
+        const { data: paseExistente } = await supabase
+            .from('pases_exclusivos')
+            .select('id, cantidad')
+            .eq('usuario_id', usuarioId)
+            .eq('pase_referencia', paseReferencia)
+            .single()
+
+        if (paseExistente) {
+            // 2A. Si ya tiene, le sumamos los nuevos
+            const { error } = await supabase
+                .from('pases_exclusivos')
+                .update({ cantidad: paseExistente.cantidad + cantidadComprada })
+                .eq('id', paseExistente.id)
+
+            if (error) throw new Error(error.message)
+        } else {
+            // 2B. Si es la primera vez, le creamos la fila
+            const { error } = await supabase
+                .from('pases_exclusivos')
+                .insert([{
+                    usuario_id: usuarioId,
+                    pase_referencia: paseReferencia,
+                    cantidad: cantidadComprada
+                }])
+
+            if (error) throw new Error(error.message)
+        }
+
+        return { success: true, message: 'Pase exclusivo cargado con éxito' }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}

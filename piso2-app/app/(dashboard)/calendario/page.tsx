@@ -8,14 +8,14 @@ import useSWR from 'swr'
 import {
     format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
     eachDayOfInterval, isSameDay, addMonths, subMonths, isSameMonth,
-    differenceInMinutes, addMinutes // 🚀 IMPORTAMOS FUNCIONES MATEMÁTICAS DE TIEMPO
+    differenceInMinutes, addMinutes
 } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
     ChevronLeft, ChevronRight, X, Plus, MapPin, Trash2, Loader2,
     Info, DollarSign, Image as ImageIcon, Briefcase, GraduationCap,
     Music, User, AlertCircle, CalendarDays, Star, UsersRound, Building2, Sparkles, Pencil,
-    CopyPlus
+    CopyPlus, ShieldAlert
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Image from 'next/image'
@@ -55,6 +55,7 @@ type EventoAgenda = {
         liga_nivel: number | null
         compania_nombre: string | null
         es_audicion: boolean
+        es_combinable: boolean // 🚀 NUEVO
     }
     alquiler_data?: {
         telefono: string
@@ -95,6 +96,7 @@ type RPCClase = {
     liga_nivel: number | null
     compania_nombre: string | null
     es_audicion: boolean
+    es_combinable: boolean // 🚀 NUEVO
     estado: string
 }
 
@@ -122,7 +124,6 @@ type RPCAgendaData = {
     companias: CompaniaMin[] | null
 }
 
-// 🚀 FETCHER PARA SWR
 const fetcher = async ([key, startIso, endIso, startDateStr, endDateStr]: string[]) => {
     const supabase = createClient()
     const { data, error } = await supabase.rpc('get_agenda_completa', {
@@ -158,7 +159,8 @@ const fetcher = async ([key, startIso, endIso, startDateStr, endDateStr]: string
                     serie_id: c.serie_id, tipo_clase: c.tipo_clase, tipo_acuerdo: c.tipo_acuerdo,
                     valor_acuerdo: c.valor_acuerdo, ritmo_id: c.ritmo_id, es_la_liga: c.es_la_liga || false,
                     liga_nivel: c.liga_nivel || null, compania_nombre: c.compania_nombre || null,
-                    es_audicion: c.es_audicion || false
+                    es_audicion: c.es_audicion || false,
+                    es_combinable: c.es_combinable ?? true
                 }
             })
         })
@@ -210,7 +212,8 @@ export default function CalendarioPage() {
         hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '',
         profeId: '', profe2Id: '',
         tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: [] as Date[],
-        esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false
+        esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false,
+        esCombinable: true // 🚀 NUEVO
     })
     const [formFile, setFormFile] = useState<File | null>(null)
 
@@ -233,7 +236,6 @@ export default function CalendarioPage() {
     )
 
     const handleDuplicarMes = async () => {
-        // Ejemplo: Duplicar el mes actual
         const mesActualStr = format(new Date(), "yyyy-MM")
         const nombreMesSiguiente = format(addMonths(new Date(), 1), "MMMM", { locale: es })
 
@@ -247,7 +249,6 @@ export default function CalendarioPage() {
 
         if (res.success) {
             toast.success(`¡Listo! Se crearon ${res.count} clases en ${nombreMesSiguiente}.`)
-            // router.refresh() o mutate() si usás SWR
         } else {
             toast.error(res.error)
         }
@@ -297,12 +298,10 @@ export default function CalendarioPage() {
         }
     }
 
-    // 🚀 LÓGICA PARA PREPARAR LA EDICIÓN (Calculando la duración dinámicamente)
     const prepararEdicion = (evt: EventoAgenda) => {
         if (!evt.clase_data) return;
         setEditingId(evt.id);
 
-        // Calculamos la duración real restando inicio y fin
         const duracionReal = differenceInMinutes(new Date(evt.fin), new Date(evt.inicio));
 
         setForm({
@@ -312,7 +311,7 @@ export default function CalendarioPage() {
             nivel: evt.clase_data.nivel,
             ritmoId: evt.clase_data.ritmo_id || '',
             hora: evt.inicio.split('T')[1].substring(0, 5),
-            duracion: duracionReal > 0 ? duracionReal : 60, // Fallback por las dudas
+            duracion: duracionReal > 0 ? duracionReal : 60,
             cupoMaximo: evt.clase_data.cupo_maximo || 20,
             sedeId: evt.sede_id,
             salaId: evt.clase_data.sala_id || '',
@@ -324,34 +323,30 @@ export default function CalendarioPage() {
             esLaLiga: evt.clase_data.es_la_liga,
             ligaNivel: evt.clase_data.liga_nivel || 1,
             companiaId: evt.clase_data.compania_id || '',
-            esAudicion: evt.clase_data.es_audicion
+            esAudicion: evt.clase_data.es_audicion,
+            esCombinable: evt.clase_data.es_combinable ?? true
         });
 
         setModalMode('edit');
     }
 
-    // 🚀 FUNCIÓN PARA NOTIFICAR ALUMNOS AUTOMÁTICAMENTE
     const notificarAlumnos = async (datosClase: typeof form) => {
         try {
             let query = supabase.from('profiles').select('id').eq('rol', 'alumno')
 
-            // 1. Si es de La Liga, avisamos a los de ese nivel específico.
             if (datosClase.esLaLiga) {
                 query = query.eq('nivel_liga', datosClase.ligaNivel)
             }
-            // 2. Si es una clase Regular y tiene un ritmo, buscamos en el array de intereses
             else if (datosClase.ritmoId) {
-                // 🚀 MAGIA: Busca si el ID del ritmo de la clase está adentro del array del alumno
                 query = query.contains('intereses_ritmos', [datosClase.ritmoId])
             }
 
             const { data: alumnos, error } = await query
 
-            // Si falla o no hay nadie con ese interés, cortamos silenciosamente
             if (error || !alumnos || alumnos.length === 0) return
 
             const notifs = alumnos.map((a: { id: string }) => ({
-                usuario_id: a.id, // 🚀 Volvimos a usuario_id como está en tu Base de Datos
+                usuario_id: a.id,
                 titulo: `¡Nueva clase: ${datosClase.nombre}!`,
                 mensaje: `Se abrió un nuevo horario. ¡Asegurá tu lugar antes de que se llene!`,
                 link: '/explorar',
@@ -370,6 +365,7 @@ export default function CalendarioPage() {
         if (form.fechas.length === 0) return toast.error('Seleccioná al menos una fecha')
         if (!form.salaId || !form.profeId) return toast.error('Faltan datos (Sala o Profe)')
         if (form.tipo === 'Compañía' && !form.companiaId) return toast.error('Falta seleccionar Compañía')
+        if (!form.esCombinable && !form.ritmoId) return toast.error('Las clases exclusivas requieren seleccionar un Ritmo')
 
         setUploading(true)
         try {
@@ -386,7 +382,6 @@ export default function CalendarioPage() {
             }
 
             if (modalMode === 'edit' && editingId) {
-                // 🚀 MODO EDICIÓN: Calculamos "fin" en base al "inicio" + "duracion"
                 const inicioStr = `${format(form.fechas[0], 'yyyy-MM-dd')}T${form.hora}:00`;
                 const inicioDate = new Date(inicioStr);
                 const finDate = addMinutes(inicioDate, form.duracion);
@@ -398,7 +393,7 @@ export default function CalendarioPage() {
                     nivel: form.nivel,
                     ritmo_id: form.ritmoId || null,
                     inicio: inicioStr,
-                    fin: format(finDate, "yyyy-MM-dd'T'HH:mm:ss"), // Enviamos el FIN calculado
+                    fin: format(finDate, "yyyy-MM-dd'T'HH:mm:ss"),
                     cupo_maximo: form.esAudicion ? 9999 : form.cupoMaximo,
                     sala_id: form.salaId,
                     profesor_id: form.profeId,
@@ -408,7 +403,8 @@ export default function CalendarioPage() {
                     es_la_liga: form.esLaLiga,
                     liga_nivel: form.esLaLiga ? form.ligaNivel : null,
                     compania_id: form.tipo === 'Compañía' ? form.companiaId : null,
-                    es_audicion: form.esAudicion
+                    es_audicion: form.esAudicion,
+                    es_combinable: form.esCombinable
                 };
 
                 if (publicUrl) updatePayload.imagen_url = publicUrl;
@@ -418,23 +414,20 @@ export default function CalendarioPage() {
 
                 toast.success('Clase actualizada correctamente');
             } else {
-                // MODO CREACIÓN
                 const response = await crearClasesAction(form, publicUrl)
                 if (!response.success) throw new Error(response.error)
                 toast.success(`${response.cantidad} clase(s) creada(s) correctamente`)
 
-                // 🚀 DISPARAMOS NOTIFICACIONES A LOS ALUMNOS
                 notificarAlumnos(form)
             }
 
-            // Limpieza
             setModalMode('view')
             setForm({
                 nombre: '', descripcion: '', tipo: 'Regular', nivel: 'Open', ritmoId: '',
                 hora: '18:00', duracion: 60, cupoMaximo: 20, sedeId: '', salaId: '',
                 profeId: '', profe2Id: '', tipoAcuerdo: 'porcentaje', valorAcuerdo: '',
                 fechas: selectedDate ? [selectedDate] : [],
-                esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false
+                esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false, esCombinable: true
             } as any)
             setFormFile(null)
             mutate()
@@ -475,11 +468,12 @@ export default function CalendarioPage() {
         if (evt.tipo === 'Alquiler') return { border: 'border-white', text: 'text-white', bg: 'bg-white' }
         if (evt.clase_data?.es_audicion) return { border: 'border-pink-500', text: 'text-pink-500', bg: 'bg-pink-500' }
         if (evt.clase_data?.es_la_liga) return { border: 'border-yellow-500', text: 'text-yellow-500', bg: 'bg-yellow-500' }
+        if (evt.clase_data?.es_combinable === false) return { border: 'border-cyan-500', text: 'text-cyan-400', bg: 'bg-cyan-500' }
+
         switch (evt.subtitulo) {
             case 'Regular': return { border: 'border-orange-500', text: 'text-orange-500', bg: 'bg-orange-500' }
-            case 'Seminario': return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500' }
-            case 'Intensivo': return { border: 'border-gray-500', text: 'text-gray-400', bg: 'bg-black' }
-            case 'Formación': return { border: 'border-yellow-400', text: 'text-yellow-400', bg: 'bg-yellow-400' }
+            case 'Especial': return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500' }
+            case 'Formacion': return { border: 'border-yellow-400', text: 'text-yellow-400', bg: 'bg-yellow-400' }
             case 'Compañía': return { border: 'border-blue-500', text: 'text-blue-500', bg: 'bg-blue-500' }
             default: return { border: 'border-[#D4E655]', text: 'text-[#D4E655]', bg: 'bg-[#D4E655]' }
         }
@@ -494,7 +488,6 @@ export default function CalendarioPage() {
         <div className="h-full flex flex-col pb-24 md:pb-10 px-2 pt-2">
             <Toaster position="top-center" richColors theme="dark" />
 
-            {/* HEADER FILTROS */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 md:gap-0">
                 <div className="flex items-center gap-3">
                     <div>
@@ -532,7 +525,6 @@ export default function CalendarioPage() {
                 </div>
             </div>
 
-            {/* GRILLA CALENDARIO */}
             <div className="grid grid-cols-7 mb-2">{['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'].map(d => <div key={d} className="text-center text-gray-500 text-[9px] font-black uppercase tracking-wider">{d}</div>)}</div>
 
             <div className="grid grid-cols-7 gap-1 auto-rows-fr h-full overflow-y-auto">
@@ -558,7 +550,6 @@ export default function CalendarioPage() {
                 })}
             </div>
 
-            {/* MODAL */}
             {isModalOpen && selectedDate && (
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setIsModalOpen(false)}>
                     <div className="w-full h-[95vh] md:h-auto md:max-h-[90vh] md:max-w-3xl bg-[#09090b] md:border border-white/10 md:rounded-2xl flex flex-col overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -595,7 +586,13 @@ export default function CalendarioPage() {
                                                         <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{evt.inicio.split('T')[1].substring(0, 5)}</span><span className="text-[8px] uppercase font-bold text-gray-400 block">{evt.sala_nombre} ({evt.sala_sede})</span></div>
                                                     </div>
                                                     <div className="flex-1 p-3 flex flex-col justify-center relative">
-                                                        <div className="flex justify-between items-start mb-1"><h4 className="text-sm font-bold text-white uppercase leading-tight pr-2">{evt.titulo}</h4><span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${style.bg}/10 ${style.text} border ${style.border}/20`}>{evt.subtitulo}</span></div>
+                                                        <div className="flex justify-between items-start mb-1">
+                                                            <h4 className="text-sm font-bold text-white uppercase leading-tight pr-2 flex items-center gap-1">
+                                                                {evt.clase_data?.es_combinable === false && <ShieldAlert size={12} className="text-cyan-400" />}
+                                                                {evt.titulo}
+                                                            </h4>
+                                                            <span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${style.bg}/10 ${style.text} border ${style.border}/20`}>{evt.subtitulo}</span>
+                                                        </div>
                                                         <div className="text-[10px] text-gray-400 font-medium flex items-center gap-2 mb-2 flex-wrap">
                                                             {evt.tipo === 'Clase' ? (
                                                                 <>
@@ -622,7 +619,6 @@ export default function CalendarioPage() {
                                                         </div>
                                                     </div>
 
-                                                    {/* 🚀 MODAL DE ELIMINAR BLINDADO (AHORA ES FLOTANTE GLOBAL) */}
                                                     {deleteTarget?.id === evt.id && (
                                                         <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] flex flex-col items-center justify-center p-4 text-center animate-in fade-in" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget(null); }}>
                                                             <div className="bg-[#09090b] border border-red-500/30 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col items-center" onClick={e => e.stopPropagation()}>
@@ -660,7 +656,12 @@ export default function CalendarioPage() {
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Nombre</label><input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-sm outline-none focus:border-[#D4E655]" required /></div>
                                                 <div className="space-y-1">
-                                                    <label className="text-[9px] font-bold text-gray-500 uppercase flex justify-between"><span>Ritmo</span><button type="button" onClick={() => setIsCreatingRitmo(!isCreatingRitmo)} className="text-[#D4E655] text-[8px] uppercase">Nuevo</button></label>
+                                                    <label className="text-[9px] font-bold text-gray-500 uppercase flex justify-between">
+                                                        <span className={!form.esCombinable && !form.ritmoId ? 'text-red-400' : ''}>
+                                                            Ritmo {!form.esCombinable && '*Requerido'}
+                                                        </span>
+                                                        <button type="button" onClick={() => setIsCreatingRitmo(!isCreatingRitmo)} className="text-[#D4E655] text-[8px] uppercase">Nuevo</button>
+                                                    </label>
                                                     {isCreatingRitmo ? (
                                                         <div className="flex gap-2"><input value={nuevoRitmoNombre} onChange={e => setNuevoRitmoNombre(e.target.value)} className="flex-1 bg-[#111] border border-[#D4E655] rounded-lg px-3 text-white text-xs" /><button type="button" onClick={() => handleCrearRitmo()} className="bg-[#D4E655] text-black font-bold px-3 rounded-lg text-[10px] uppercase">OK</button></div>
                                                     ) : (
@@ -679,9 +680,8 @@ export default function CalendarioPage() {
                                                             setForm({ ...form, tipo: e.target.value, cupoMaximo: isCompania ? 20 : form.cupoMaximo })
                                                         }} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]">
                                                             <option value="Regular">Regular</option>
+                                                            <option value="Especial">Especial</option>
                                                             <option value="Formacion">Formación</option>
-                                                            <option value="Seminario">Seminario</option>
-                                                            <option value="Intensivo">Intensivo</option>
                                                             <option value="Compañía">Compañía</option>
                                                         </select>
                                                     </div>
@@ -706,6 +706,20 @@ export default function CalendarioPage() {
                                                             onChange={e => setForm({ ...form, cupoMaximo: Number(e.target.value) })}
                                                             className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs disabled:opacity-50 disabled:text-[#D4E655]"
                                                         />
+                                                    </div>
+
+                                                    {/* 🚀 NUEVO: Switch de Combinable */}
+                                                    <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-cyan-500/5 p-3 rounded-xl border-dashed border-cyan-500/20">
+                                                        <label className="flex items-center gap-3 cursor-pointer">
+                                                            <div className="relative flex items-center">
+                                                                <input type="checkbox" checked={form.esCombinable} onChange={e => setForm({ ...form, esCombinable: e.target.checked })} className="peer sr-only" />
+                                                                <div className="w-10 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-[10px] font-black uppercase text-cyan-400 flex items-center gap-1">Acepta Créditos {form.tipo === 'Especial' ? 'Especiales' : 'Regulares'}</span>
+                                                                <span className="text-[8px] text-gray-500 block leading-tight mt-0.5">Si lo apagás, será Exclusiva y requerirá un Pase del Ritmo elegido.</span>
+                                                            </div>
+                                                        </label>
                                                     </div>
 
                                                     {form.tipo === 'Compañía' && (
@@ -773,7 +787,7 @@ export default function CalendarioPage() {
                                                 <div className="md:col-span-7 space-y-4">
                                                     <div className="grid grid-cols-2 gap-2">
                                                         <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Hora</label><input type="time" value={form.hora} onChange={e => setForm({ ...form, hora: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs" required /></div>
-                                                        <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Duración</label><input type="number" value={form.duracion} onChange={e => setForm({ ...form, duracion: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs" /></div>
+                                                        <div className="space-y-1"><label className="text-[9px] font-bold text-gray-500 uppercase">Duración (min)</label><input type="number" value={form.duracion} onChange={e => setForm({ ...form, duracion: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-lg p-3 text-white text-xs" /></div>
                                                     </div>
                                                     <div className="grid grid-cols-2 gap-2">
                                                         <select value={form.sedeId} onChange={e => setForm({ ...form, sedeId: e.target.value, salaId: '' })} className="bg-[#111] border border-white/10 rounded-lg p-3 text-white text-[10px]"><option value="">Sede...</option>{sedes.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}</select>

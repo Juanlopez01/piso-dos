@@ -9,7 +9,8 @@ const client = new MercadoPagoConfig({
 export async function POST(request: Request) {
     try {
         const body = await request.json()
-        const { userId, productoId, cuponId, tipo_pago, mes, anio } = body
+        // 🚀 1. Atrapamos el pase_referencia que viene de la tienda
+        const { userId, productoId, cuponId, tipo_pago, mes, anio, pase_referencia } = body
 
         if (!userId) {
             console.error("❌ MP Preference: Falta userId en el request")
@@ -19,7 +20,6 @@ export async function POST(request: Request) {
         let tituloFinal = ""
         let precioFinal = 0
 
-        // 🚀 FORZAMOS A QUE TODO SEA STRING (A MP le da alergia otra cosa)
         let metadataCustom: Record<string, string> = {
             usuario_id: String(userId),
             user_id: String(userId)
@@ -41,7 +41,6 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: "Falta producto a comprar" }, { status: 400 })
             }
 
-            // 🚀 Solo llamamos a Supabase si es un pack (ahorra memoria)
             const supabase = await createClient()
             const { data: pack, error } = await supabase
                 .from('productos')
@@ -57,11 +56,13 @@ export async function POST(request: Request) {
             tituloFinal = pack.nombre
             precioFinal = pack.precio
 
-            metadataCustom.tipo_pago = 'pack_clases'
+            metadataCustom.tipo_pago = String(tipo_pago) // Puede ser 'pack' o 'exclusivo'
             metadataCustom.producto_id = String(productoId)
             metadataCustom.tipo_clase = String(pack.tipo_clase)
             metadataCustom.creditos = String(pack.creditos)
             if (cuponId) metadataCustom.cupon_id = String(cuponId)
+            // 🚀 2. Si es exclusivo, le pegamos la llave a la metadata
+            if (pase_referencia) metadataCustom.pase_referencia = String(pase_referencia)
         }
 
         // ==========================================
@@ -93,7 +94,6 @@ export async function POST(request: Request) {
             }
         }
 
-        // 🚀 ESCUDO LOCALHOST: Mercado Pago explota (Error 400) si le mandás un localhost en notification_url
         if (!baseUrl.includes('localhost')) {
             mpPayload.body.notification_url = `${baseUrl}/api/mercadopago/webhook`
         }
@@ -106,7 +106,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ url: result.init_point })
 
     } catch (error: any) {
-        // 🚀 LOG DETALLADO: Si MP falla, te dice exactamente por qué en la terminal
         console.error("❌ Error grave en la API de Mercado Pago:", error?.message || error)
         if (error?.cause) console.error("🔍 Causa detallada MP:", error.cause)
         return NextResponse.json({ error: "Error interno al procesar el pago" }, { status: 500 })

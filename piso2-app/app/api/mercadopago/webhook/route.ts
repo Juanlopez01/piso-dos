@@ -1,4 +1,3 @@
-// app/api/mercadopago/webhook/route.ts
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -32,14 +31,10 @@ export async function POST(request: Request) {
 
         let paymentIdToProcess = null;
 
-        // 🚀 EL BLINDAJE DEFINITIVO: Atrapamos Pagos O Órdenes
         if (type.includes('payment')) {
-            // Caso 1: Mercado Pago nos mandó el pago directo (Ideal)
             paymentIdToProcess = id;
             console.log(`[WEBHOOK] Es un Pago directo. ID: ${paymentIdToProcess}`);
-
         } else if (type.includes('merchant_order')) {
-            // Caso 2: Mercado Pago nos mandó la orden (El problema que tenías)
             console.log(`[WEBHOOK] Es una Orden (Merchant Order). Entrando a buscar el pago...`);
 
             const moResponse = await fetch(`https://api.mercadopago.com/merchant_orders/${id}`, {
@@ -48,7 +43,6 @@ export async function POST(request: Request) {
 
             if (moResponse.ok) {
                 const moData = await moResponse.json();
-                // Buscamos si adentro de esta orden hay algún pago aprobado
                 const pagoAprobado = moData.payments?.find((p: any) => p.status === 'approved');
 
                 if (pagoAprobado) {
@@ -66,13 +60,12 @@ export async function POST(request: Request) {
             return NextResponse.json({ message: 'Evento ignorado' }, { status: 200 });
         }
 
-        // Si llegamos acá y no tenemos un ID de pago, cortamos
         if (!paymentIdToProcess) {
             return NextResponse.json({ message: 'No hay pago para procesar' }, { status: 200 });
         }
 
         // ==========================================
-        // 2. AHORA SÍ, VALIDAMOS EL PAGO REAL
+        // 2. VALIDAMOS EL PAGO REAL EN MP
         // ==========================================
         const mpResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentIdToProcess}`, {
             headers: { Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` }
@@ -131,14 +124,13 @@ export async function POST(request: Request) {
             }
 
             // ==========================================
-            // DESVÍO B: COMPRA DE PACK NORMAL
+            // DESVÍO B: COMPRA DE PACK (Normal o Exclusivo)
             // ==========================================
-            const { user_id, producto_id, cupon_id, tipo_clase, creditos } = metadata;
+            const { user_id, producto_id, cupon_id, tipo_clase, creditos, pase_referencia } = metadata;
             const montoAbonado = payment.transaction_amount;
 
-            console.log(`[WEBHOOK] Procesando carga para Usuario: ${user_id}, Pack: ${producto_id}`);
+            console.log(`[WEBHOOK] Procesando carga para Usuario: ${user_id}, Pack: ${producto_id}, Tipo: ${tipo_clase}`);
 
-            // Validamos que no hayamos cargado ESTE MISMO PAGO antes (por si MP avisa 2 veces)
             const { data: pagoExistente } = await supabase
                 .from('alumno_packs')
                 .select('id')
@@ -154,6 +146,7 @@ export async function POST(request: Request) {
             fechaActual.setDate(fechaActual.getDate() + 30);
             const fechaVencimiento = fechaActual.toISOString();
 
+            // 1. Guardamos el comprobante en alumno_packs (para el historial)
             const { error: errPack } = await supabase.from('alumno_packs').insert({
                 user_id: user_id,
                 producto_id: producto_id,
@@ -168,20 +161,43 @@ export async function POST(request: Request) {
 
             if (errPack) throw errPack;
 
-            const fieldToUpdate = tipo_clase === 'regular' ? 'creditos_regulares' : 'creditos_seminarios';
+            // 2. Entregamos el producto según el tipo de clase
+            if (tipo_clase === 'exclusivo') {
+                // 🚀 LÓGICA DE PASE EXCLUSIVO
+                const { data: paseExistente } = await supabase
+                    .from('pases_exclusivos')
+                    .select('id, cantidad')
+                    .eq('usuario_id', user_id)
+                    .eq('pase_referencia', pase_referencia)
+                    .maybeSingle();
 
-            const { data: profile } = await supabase.from('profiles').select(fieldToUpdate).eq('id', user_id).single();
-            const currentCreds = (profile as any)?.[fieldToUpdate] || 0;
+                if (paseExistente) {
+                    await supabase.from('pases_exclusivos').update({ cantidad: paseExistente.cantidad + Number(creditos) }).eq('id', paseExistente.id);
+                } else {
+                    await supabase.from('pases_exclusivos').insert({
+                        usuario_id: user_id,
+                        pase_referencia: pase_referencia,
+                        cantidad: Number(creditos)
+                    });
+                }
+                console.log(`🌟 [WEBHOOK] ¡Pase Exclusivo acreditado con éxito! (${pase_referencia})`);
+            } else {
+                // 🚀 LÓGICA DE SUBE (Créditos Regulares o Especiales)
+                // ACÁ ESTÁ CORREGIDO: creditos_especiales
+                const fieldToUpdate = tipo_clase === 'regular' ? 'creditos_regulares' : 'creditos_especiales';
 
-            await supabase.from('profiles').update({
-                [fieldToUpdate]: currentCreds + Number(creditos)
-            }).eq('id', user_id);
+                const { data: profile } = await supabase.from('profiles').select(fieldToUpdate).eq('id', user_id).single();
+                const currentCreds = (profile as any)?.[fieldToUpdate] || 0;
+
+                await supabase.from('profiles').update({
+                    [fieldToUpdate]: currentCreds + Number(creditos)
+                }).eq('id', user_id);
+                console.log(`🌟 [WEBHOOK] ¡Créditos de sistema SUBE acreditados con éxito!`);
+            }
 
             if (cupon_id) {
                 await supabase.from('cupones_usados').insert({ cupon_id: cupon_id, user_id: user_id });
             }
-
-            console.log("🌟 [WEBHOOK] ¡Clases acreditadas con éxito en Supabase!");
         }
 
         return NextResponse.json({ success: true }, { status: 200 });
