@@ -129,70 +129,44 @@ export async function POST(request: Request) {
             const { user_id, producto_id, cupon_id, tipo_clase, creditos, pase_referencia } = metadata;
             const montoAbonado = payment.transaction_amount;
 
-            console.log(`[WEBHOOK] Procesando carga para Usuario: ${user_id}, Pack: ${producto_id}, Tipo: ${tipo_clase}`);
+            console.log(`[WEBHOOK] Procesando carga: User ${user_id}, Tipo ${tipo_clase}, Ref: ${pase_referencia}`);
 
+            // 1. Evitar duplicados
             const { data: pagoExistente } = await supabase
                 .from('alumno_packs')
                 .select('id')
                 .eq('mp_payment_id', paymentIdToProcess.toString())
                 .maybeSingle();
 
-            if (pagoExistente) {
-                console.log("✅ [WEBHOOK] Este pago ya estaba acreditado.");
-                return NextResponse.json({ message: 'Pago ya procesado' }, { status: 200 });
-            }
+            if (pagoExistente) return NextResponse.json({ message: 'Pago ya procesado' }, { status: 200 });
 
-            const fechaActual = new Date();
-            fechaActual.setDate(fechaActual.getDate() + 30);
-            const fechaVencimiento = fechaActual.toISOString();
-
-            // 1. Guardamos el comprobante en alumno_packs (para el historial)
-            const { error: errPack } = await supabase.from('alumno_packs').insert({
-                user_id: user_id,
-                producto_id: producto_id,
-                tipo_clase: tipo_clase,
+            // 2. Registrar el pack en el historial
+            await supabase.from('alumno_packs').insert({
+                user_id, producto_id, tipo_clase,
                 cantidad_inicial: Number(creditos),
                 creditos_restantes: Number(creditos),
                 monto_abonado: montoAbonado,
-                fecha_vencimiento: fechaVencimiento,
                 estado: 'activo',
                 mp_payment_id: paymentIdToProcess.toString()
             });
 
-            if (errPack) throw errPack;
-
-            // 2. Entregamos el producto según el tipo de clase
-            if (tipo_clase === 'exclusivo') {
-                // 🚀 LÓGICA DE PASE EXCLUSIVO
-                const { data: paseExistente } = await supabase
-                    .from('pases_exclusivos')
-                    .select('id, cantidad')
-                    .eq('usuario_id', user_id)
-                    .eq('pase_referencia', pase_referencia)
-                    .maybeSingle();
-
-                if (paseExistente) {
-                    await supabase.from('pases_exclusivos').update({ cantidad: paseExistente.cantidad + Number(creditos) }).eq('id', paseExistente.id);
-                } else {
-                    await supabase.from('pases_exclusivos').insert({
-                        usuario_id: user_id,
-                        pase_referencia: pase_referencia,
-                        cantidad: Number(creditos)
-                    });
-                }
-                console.log(`🌟 [WEBHOOK] ¡Pase Exclusivo acreditado con éxito! (${pase_referencia})`);
+            // 3. 🚀 CARGA DE SALDO INTELIGENTE
+            if (String(tipo_clase) === 'exclusivo') {
+                // Si es exclusivo, insertamos/actualizamos en la tabla de pases
+                // Usamos un RPC o un UPSERT manual:
+                const { error: errPase } = await supabase.rpc('cargar_pase_exclusivo_manual', {
+                    p_usuario_id: user_id,
+                    p_referencia: pase_referencia,
+                    p_cantidad: Number(creditos)
+                });
+                if (errPase) console.error("Error cargando pase exclusivo:", errPase);
             } else {
-                // 🚀 LÓGICA DE SUBE (Créditos Regulares o Especiales)
-                // ACÁ ESTÁ CORREGIDO: creditos_especiales
-                const fieldToUpdate = tipo_clase === 'regular' ? 'creditos_regulares' : 'creditos_especiales';
-
-                const { data: profile } = await supabase.from('profiles').select(fieldToUpdate).eq('id', user_id).single();
-                const currentCreds = (profile as any)?.[fieldToUpdate] || 0;
-
+                // Si es regular/especial, sumamos al perfil
+                const field = tipo_clase === 'regular' ? 'creditos_regulares' : 'creditos_especiales';
+                const { data: prof } = await supabase.from('profiles').select(field).eq('id', user_id).single();
                 await supabase.from('profiles').update({
-                    [fieldToUpdate]: currentCreds + Number(creditos)
+                    [field]: ((prof as any)?.[field] || 0) + Number(creditos)
                 }).eq('id', user_id);
-                console.log(`🌟 [WEBHOOK] ¡Créditos de sistema SUBE acreditados con éxito!`);
             }
 
             if (cupon_id) {

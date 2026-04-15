@@ -9,7 +9,7 @@ import { es } from 'date-fns/locale'
 import {
     Search, Music, Calendar, Clock, MapPin,
     User, Ticket, Star, Loader2, CheckCircle2, AlertCircle, Image as ImageIcon,
-    X, ArrowRight
+    X, ArrowRight, ShieldCheck, Lock
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
@@ -25,23 +25,36 @@ const parseSafeDate = (dateStr: string | null | undefined) => {
 }
 
 type ClaseInstancia = { id: string; inicio: string; fin: string; cupo_maximo: number; inscritos_count: number; ya_inscrito: boolean; estado: string; sala: { nombre: string; sede: { nombre: string } } }
-type ClaseAgrupada = { key_grupo: string; nombre: string; tipo_clase: string; imagen_url?: string | null; ritmo_id?: string | null; profesor: { nombre_completo: string }; instancias: ClaseInstancia[] }
-type CarteleraData = { perfil: { id: string, creditos_regulares: number, creditos_especiales: number } | null; clasesAgrupadas: ClaseAgrupada[] }
+type ClaseAgrupada = { key_grupo: string; nombre: string; tipo_clase: string; imagen_url?: string | null; ritmo_id?: string | null; profesor: { nombre_completo: string }; instancias: ClaseInstancia[]; es_combinable: boolean }
+
+type CarteleraData = {
+    perfil: { id: string, creditos_regulares: number, creditos_especiales: number } | null;
+    clasesAgrupadas: ClaseAgrupada[];
+    pasesExclusivos: Record<string, number>;
+}
 
 const fetcherCartelera = async (uid: string | null, supabase: any): Promise<CarteleraData> => {
     let profile = null
+    let pasesExclusivos: Record<string, number> = {}
 
     if (uid) {
         supabase.rpc('limpiar_creditos_vencidos').then()
         const { data: userProfile } = await supabase.from('profiles').select('id, creditos_regulares, creditos_especiales').eq('id', uid).single()
         profile = userProfile
+
+        const { data: pases } = await supabase.from('pases_exclusivos').select('pase_referencia, cantidad').eq('usuario_id', uid)
+        if (pases) {
+            pases.forEach((p: { pase_referencia: string; cantidad: number }) => {
+                pasesExclusivos[p.pase_referencia] = p.cantidad
+            })
+        }
     }
 
     const hoy = new Date().toISOString()
     const { data: clasesData } = await supabase
         .from('clases')
         .select(`
-            id, nombre, inicio, fin, tipo_clase, cupo_maximo, estado, imagen_url, ritmo_id,
+            id, nombre, inicio, fin, tipo_clase, cupo_maximo, estado, imagen_url, ritmo_id, es_combinable,
             profesor:profiles!clases_profesor_id_fkey(nombre_completo),
             sala:salas(nombre, sede:sedes(nombre)),
             inscripciones(user_id)
@@ -68,7 +81,8 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
                 agrupador[key] = {
                     key_grupo: key, nombre: c.nombre, tipo_clase: c.tipo_clase,
                     imagen_url: c.imagen_url, ritmo_id: c.ritmo_id,
-                    profesor: { nombre_completo: nombreProfe }, instancias: []
+                    profesor: { nombre_completo: nombreProfe }, instancias: [],
+                    es_combinable: c.es_combinable ?? true
                 }
             }
             agrupador[key].instancias.push(instancia)
@@ -79,7 +93,7 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
     arrAgrupado.forEach(g => g.instancias.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime()))
     arrAgrupado.sort((a, b) => new Date(a.instancias[0].inicio).getTime() - new Date(b.instancias[0].inicio).getTime())
 
-    return { perfil: profile as any, clasesAgrupadas: arrAgrupado }
+    return { perfil: profile as any, clasesAgrupadas: arrAgrupado, pasesExclusivos }
 }
 
 export default function ExplorarClasesPage() {
@@ -98,11 +112,12 @@ export default function ExplorarClasesPage() {
 
     const clasesAgrupadas = data?.clasesAgrupadas || []
     const perfil = data?.perfil || null
+    const pasesExclusivos = data?.pasesExclusivos || {}
 
     const [procesandoId, setProcesandoId] = useState<string | null>(null)
     const [selectedGrupo, setSelectedGrupo] = useState<ClaseAgrupada | null>(null)
     const [filtroTexto, setFiltroTexto] = useState('')
-    const [filtroTipo, setFiltroTipo] = useState<'Todos' | 'Regular' | 'Especial'>('Todos')
+    const [filtroTipo, setFiltroTipo] = useState<'Todos' | 'Regular' | 'Especial' | 'Exclusivo'>('Todos')
 
     const handleInscribirse = async (instancia: ClaseInstancia, grupo: ClaseAgrupada) => {
         if (!perfil) {
@@ -110,43 +125,17 @@ export default function ExplorarClasesPage() {
             return router.push('/login')
         }
 
-        const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(grupo.tipo_clase)
-
-        const tipoClaseBD = esEspecial ? 'especial' : 'regular'
-        const columnaUpdate = esEspecial ? 'creditos_especiales' : 'creditos_regulares'
-        const creditosActuales = perfil[columnaUpdate as 'creditos_regulares' | 'creditos_especiales'] || 0
-
-        if (creditosActuales <= 0) return toast.error("No tenés créditos suficientes.")
+        if (!grupo.es_combinable) {
+            const pasesDisponibles = pasesExclusivos[grupo.key_grupo] || 0
+            if (pasesDisponibles <= 0) return toast.error("Clase Exclusiva. Necesitás el pase de este grupo.")
+        } else {
+            const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(grupo.tipo_clase)
+            const columna = esEspecial ? 'creditos_especiales' : 'creditos_regulares'
+            if ((perfil as any)[columna] <= 0) return toast.error("No tenés créditos suficientes.")
+        }
 
         setProcesandoId(instancia.id)
-
-        const optimisticAgrupadas = clasesAgrupadas.map(g => {
-            if (g.key_grupo === grupo.key_grupo) {
-                return {
-                    ...g,
-                    instancias: g.instancias.map(i => i.id === instancia.id ? { ...i, ya_inscrito: true, inscritos_count: i.inscritos_count + 1 } : i)
-                }
-            }
-            return g
-        })
-        const optimisticPerfil = { ...perfil, [columnaUpdate]: creditosActuales - 1 }
-
-        await mutateCartelera({ perfil: optimisticPerfil, clasesAgrupadas: optimisticAgrupadas }, false)
-
-        setSelectedGrupo(prev => {
-            if (!prev) return null;
-            return {
-                ...prev,
-                instancias: prev.instancias.map(i =>
-                    i.id === instancia.id
-                        ? { ...i, ya_inscrito: true, inscritos_count: i.inscritos_count + 1 }
-                        : i
-                )
-            }
-        })
-
-        // 🚀 ACÁ ESTÁ EL CAMBIO: Mandamos grupo.key_grupo como paseReferencia
-        const response = await inscribirAlumnoAction(instancia.id, tipoClaseBD, grupo.key_grupo)
+        const response = await inscribirAlumnoAction(instancia.id, grupo.tipo_clase, grupo.key_grupo)
 
         if (response.success) {
             toast.success(response.message)
@@ -155,19 +144,26 @@ export default function ExplorarClasesPage() {
         } else {
             toast.error(response.error || 'Error al procesar reserva')
             mutateCartelera()
-            setSelectedGrupo(grupo)
         }
         setProcesandoId(null)
     }
 
     const gruposFiltrados = useMemo(() => {
         return clasesAgrupadas.filter(g => {
-            const coincideTexto = g.nombre.toLowerCase().includes(filtroTexto.toLowerCase()) || g.profesor.nombre_completo.toLowerCase().includes(filtroTexto.toLowerCase())
-            const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(g.tipo_clase)
-            let coincideTipo = filtroTipo === 'Todos' || (filtroTipo === 'Especial' ? esEspecial : !esEspecial)
-            return coincideTexto && coincideTipo
-        })
-    }, [clasesAgrupadas, filtroTexto, filtroTipo])
+            const coincideTexto = g.nombre.toLowerCase().includes(filtroTexto.toLowerCase()) ||
+                g.profesor.nombre_completo.toLowerCase().includes(filtroTexto.toLowerCase());
+
+            const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(g.tipo_clase);
+            const esExclusivo = !g.es_combinable;
+
+            let coincideTipo = true;
+            if (filtroTipo === 'Especial') coincideTipo = esEspecial && !esExclusivo;
+            if (filtroTipo === 'Regular') coincideTipo = !esEspecial && !esExclusivo;
+            if (filtroTipo === 'Exclusivo') coincideTipo = esExclusivo;
+
+            return coincideTexto && coincideTipo;
+        });
+    }, [clasesAgrupadas, filtroTexto, filtroTipo]);
 
     const ritmosSugeridos = useMemo(() => Array.from(new Set(clasesAgrupadas.map(c => c.nombre.split(' ')[0]))).slice(0, 5), [clasesAgrupadas])
 
@@ -205,6 +201,7 @@ export default function ExplorarClasesPage() {
                 )}
             </div>
 
+            {/* 🚀 ACÁ VOLVIERON TUS FILTROS Y BOTONES */}
             <div className="mb-8 space-y-4">
                 <div className="flex flex-col md:flex-row gap-4">
                     <div className="relative flex-1">
@@ -212,8 +209,17 @@ export default function ExplorarClasesPage() {
                         <input type="text" placeholder="Buscar por ritmo, profesor..." value={filtroTexto} onChange={(e) => setFiltroTexto(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white outline-none focus:border-[#D4E655]" />
                     </div>
                     <div className="flex bg-[#111] p-1 rounded-2xl border border-white/10 shrink-0 overflow-x-auto">
-                        {['Todos', 'Regular', 'Especial'].map(tipo => (
-                            <button key={tipo} onClick={() => setFiltroTipo(tipo as any)} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${filtroTipo === tipo ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}>{tipo}</button>
+                        {['Todos', 'Regular', 'Especial', 'Exclusivo'].map(tipo => (
+                            <button
+                                key={tipo}
+                                onClick={() => setFiltroTipo(tipo as any)}
+                                className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${filtroTipo === tipo
+                                    ? (tipo === 'Exclusivo' ? 'bg-cyan-500 text-black' : 'bg-[#D4E655] text-black')
+                                    : 'text-gray-500 hover:text-white'
+                                    }`}
+                            >
+                                {tipo}
+                            </button>
                         ))}
                     </div>
                 </div>
@@ -230,16 +236,17 @@ export default function ExplorarClasesPage() {
                     const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(grupo.tipo_clase)
                     const proximaClase = grupo.instancias[0]
                     const esHoy = isToday(parseSafeDate(proximaClase.inicio))
+                    const esExclusiva = !grupo.es_combinable
 
                     return (
-                        <div key={grupo.key_grupo} className={`bg-[#09090b] rounded-3xl overflow-hidden flex flex-col transition-all group shadow-xl border-2 ${esHoy ? (esEspecial ? 'border-purple-500/50' : 'border-[#D4E655]/50') : 'border-white/10'}`}>
+                        <div key={grupo.key_grupo} className={`bg-[#09090b] rounded-3xl overflow-hidden flex flex-col transition-all group shadow-xl border-2 ${esExclusiva ? 'border-cyan-500/50' : esHoy ? (esEspecial ? 'border-purple-500/50' : 'border-[#D4E655]/50') : 'border-white/10'}`}>
                             <div className="h-48 w-full relative bg-[#1a1a1c] border-b border-white/5 flex items-center justify-center overflow-hidden">
                                 {grupo.imagen_url ? (
                                     <Image src={grupo.imagen_url} alt={grupo.nombre} fill sizes="33vw" className="object-cover group-hover:scale-105 transition-transform duration-500" />
                                 ) : (
                                     <div className="flex flex-col items-center gap-2 text-white/20"><ImageIcon size={40} /><span className="text-[10px] font-black uppercase">Sin Flyer</span></div>
                                 )}
-                                {esHoy && <span className={`absolute top-4 left-4 text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md ${esEspecial ? 'bg-purple-500 text-white' : 'bg-[#D4E655] text-black'}`}>⚡ Próxima Hoy</span>}
+                                {esExclusiva && <span className="absolute top-4 left-4 text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md bg-cyan-500 text-black flex items-center gap-1 shadow-lg"><Lock size={10} /> Pase Exclusivo</span>}
                                 <span className={`absolute top-4 right-4 text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md ${esEspecial ? 'bg-purple-500 text-white' : 'bg-[#D4E655]/80 text-black'}`}>{grupo.tipo_clase}</span>
                             </div>
 
@@ -247,7 +254,7 @@ export default function ExplorarClasesPage() {
                                 <div className="mb-4">
                                     <h3 className="text-xl font-black text-white uppercase leading-tight mb-1">{grupo.nombre}</h3>
                                     <p className="flex items-center gap-1.5 text-sm font-bold text-gray-300">
-                                        <User size={14} className={esEspecial ? 'text-purple-400' : 'text-[#D4E655]'} /> {grupo.profesor.nombre_completo}
+                                        <User size={14} className={esExclusiva ? 'text-cyan-400' : esEspecial ? 'text-purple-400' : 'text-[#D4E655]'} /> {grupo.profesor.nombre_completo}
                                     </p>
                                 </div>
                                 <div className="space-y-3 mt-auto pt-4 border-t border-white/5">
@@ -258,7 +265,7 @@ export default function ExplorarClasesPage() {
                                 </div>
                             </div>
                             <div className="p-5 bg-[#111] border-t border-white/5">
-                                <button onClick={() => setSelectedGrupo(grupo)} className={`w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${esEspecial ? 'bg-purple-600 text-white hover:bg-purple-500' : 'bg-[#D4E655] text-black hover:bg-white'}`}>Ver Fechas <ArrowRight size={16} /></button>
+                                <button onClick={() => setSelectedGrupo(grupo)} className={`w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${esExclusiva ? 'bg-cyan-600 text-black hover:bg-cyan-400' : esEspecial ? 'bg-purple-600 text-white hover:bg-purple-500' : 'bg-[#D4E655] text-black hover:bg-white'}`}>Ver Fechas <ArrowRight size={16} /></button>
                             </div>
                         </div>
                     )
@@ -279,17 +286,24 @@ export default function ExplorarClasesPage() {
                         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar">
                             {selectedGrupo.instancias.map((inst) => {
                                 const estaLleno = inst.cupo_maximo > 0 && inst.inscritos_count >= inst.cupo_maximo
-                                const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(selectedGrupo.tipo_clase)
-                                const creditosDisponibles = perfil ? (esEspecial ? perfil.creditos_especiales : perfil.creditos_regulares) : 0
+                                const esExclusivaModal = !selectedGrupo.es_combinable
+
+                                let tieneSaldo = false
+                                if (esExclusivaModal) {
+                                    tieneSaldo = (pasesExclusivos[selectedGrupo.key_grupo] || 0) > 0
+                                } else {
+                                    const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(selectedGrupo.tipo_clase)
+                                    tieneSaldo = (perfil ? (esEspecial ? perfil.creditos_especiales : perfil.creditos_regulares) : 0) > 0
+                                }
 
                                 const inicioDate = parseSafeDate(inst.inicio)
                                 const finDate = parseSafeDate(inst.fin)
 
                                 return (
-                                    <div key={inst.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between hover:border-white/20 transition-all">
+                                    <div key={inst.id} className={`bg-[#111] border rounded-2xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between hover:border-white/20 transition-all ${esExclusivaModal ? 'border-cyan-500/20' : 'border-white/5'}`}>
                                         <div className="flex-1 w-full">
                                             <div className="flex items-center gap-2 mb-1">
-                                                <Calendar size={14} className={esEspecial ? 'text-purple-400' : 'text-[#D4E655]'} />
+                                                <Calendar size={14} className={esExclusivaModal ? 'text-cyan-400' : 'text-[#D4E655]'} />
                                                 <span className="font-bold text-white capitalize text-sm">{format(inicioDate, "EEEE d 'de' MMMM", { locale: es })}</span>
                                             </div>
                                             <div className="flex items-center gap-4 text-[10px] text-gray-400 font-medium pl-5 mt-1">
@@ -300,24 +314,34 @@ export default function ExplorarClasesPage() {
 
                                         <div className="w-full sm:w-auto">
                                             {esStaff ? (
-                                                <div className="w-full sm:w-32 py-2.5 bg-white/5 text-gray-400 border border-white/10 rounded-xl flex items-center justify-center text-[10px] font-black uppercase cursor-default">
-                                                    Modo Vista
-                                                </div>
+                                                <div className="w-full sm:w-32 py-2.5 bg-white/5 text-gray-400 border border-white/10 rounded-xl flex items-center justify-center text-[10px] font-black uppercase cursor-default">Modo Vista</div>
                                             ) : inst.ya_inscrito ? (
                                                 <div className="w-full sm:w-32 py-2.5 bg-green-500/10 text-green-500 border border-green-500/20 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase"><CheckCircle2 size={14} /> Anotado</div>
                                             ) : estaLleno ? (
                                                 <div className="w-full sm:w-32 py-2.5 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase"><AlertCircle size={14} /> Lleno</div>
-                                            ) : creditosDisponibles <= 0 ? (
-                                                <Link href="/tienda" className="w-full sm:w-36 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase bg-white/5 text-white border border-white/10 hover:bg-white hover:text-black transition-all"><Ticket size={12} /> Sin Saldo</Link>
+                                            ) : !tieneSaldo ? (
+                                                <Link href="/tienda" className="w-full sm:w-36 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase bg-white/5 text-white border border-white/10 hover:bg-white hover:text-black transition-all">
+                                                    {esExclusivaModal ? 'Comprar Pase' : 'Sin Saldo'}
+                                                </Link>
                                             ) : (
-                                                <button onClick={() => handleInscribirse(inst, selectedGrupo)} disabled={procesandoId === inst.id} className={`w-full sm:w-36 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase transition-all ${esEspecial ? 'bg-purple-600 text-white hover:bg-purple-500' : 'bg-[#D4E655] text-black hover:bg-white'} disabled:opacity-50`}>
-                                                    {procesandoId === inst.id ? <Loader2 size={14} className="animate-spin" /> : 'Reservar Lugar'}
+                                                <button onClick={() => handleInscribirse(inst, selectedGrupo)} disabled={procesandoId === inst.id} className={`w-full sm:w-36 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase transition-all ${esExclusivaModal ? 'bg-cyan-500 text-black hover:bg-white' : 'bg-[#D4E655] text-black hover:bg-white'} disabled:opacity-50`}>
+                                                    {procesandoId === inst.id ? <Loader2 size={14} className="animate-spin" /> : 'Reservar con Pase'}
                                                 </button>
                                             )}
                                         </div>
                                     </div>
                                 )
                             })}
+
+                            {!selectedGrupo.es_combinable && (
+                                <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-2xl flex items-center gap-3">
+                                    <ShieldCheck className="text-cyan-400" size={20} />
+                                    <div>
+                                        <p className="text-[10px] text-cyan-400 font-black uppercase">Tu Saldo Exclusivo</p>
+                                        <p className="text-sm font-bold text-white">{pasesExclusivos[selectedGrupo.key_grupo] || 0} Pases disponibles</p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
