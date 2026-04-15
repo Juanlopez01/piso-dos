@@ -10,13 +10,14 @@ import type { Metadata, Viewport } from 'next'
 export const metadata: Metadata = {
   title: 'Piso 2',
   description: 'Gestión de academia',
-  // 👇 AGREGÁ ESTO PARA SALVARLE LA VIDA A LOS iPHONES
   icons: {
-    icon: '/tu-logo-192.png', // El ícono normal para pestañas
-    apple: '/tu-logo-192.png', // 🚀 ESTE ES EL QUE EXIGE EL iPHONE
+    icon: [
+      { url: '/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+    ],
   },
-  // 👇 Y esto ayuda a que Chrome en Android lo tome mejor
-  manifest: '/manifest.json' // o '/manifest.webmanifest' según cómo lo hayas llamado
 }
 
 export const viewport: Viewport = {
