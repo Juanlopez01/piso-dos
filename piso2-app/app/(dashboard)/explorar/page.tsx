@@ -119,6 +119,38 @@ export default function ExplorarClasesPage() {
     const [filtroTexto, setFiltroTexto] = useState('')
     const [filtroTipo, setFiltroTipo] = useState<'Todos' | 'Regular' | 'Especial' | 'Exclusivo'>('Todos')
 
+    // 🎨 FUNCIÓN DE ESTILOS DINÁMICOS
+    const getEstilos = (tipo: string, esExclusiva: boolean) => {
+        if (esExclusiva) return {
+            border: 'border-cyan-500/50',
+            bg: 'bg-cyan-500 text-black',
+            btn: 'bg-cyan-600 text-black hover:bg-cyan-400',
+            icon: 'text-cyan-400'
+        };
+
+        const t = tipo.toLowerCase();
+        if (t === 'formacion') return {
+            border: 'border-[#D4E655]/50',
+            bg: 'bg-[#D4E655] text-black',
+            btn: 'bg-[#D4E655] text-black hover:bg-white',
+            icon: 'text-[#D4E655]'
+        };
+        if (['especial', 'seminario', 'intensivo'].includes(t)) return {
+            border: 'border-purple-500/50',
+            bg: 'bg-purple-500 text-white',
+            btn: 'bg-white text-black hover:bg-purple-200',
+            icon: 'text-purple-400'
+        };
+
+        // REGULAR (NARANJA)
+        return {
+            border: 'border-orange-500/50',
+            bg: 'bg-orange-500 text-white',
+            btn: 'bg-orange-500 text-white hover:bg-orange-400',
+            icon: 'text-orange-400'
+        };
+    }
+
     const handleInscribirse = async (instancia: ClaseInstancia, grupo: ClaseAgrupada) => {
         if (!perfil) {
             toast.error("Debes iniciar sesión para anotarte.")
@@ -183,10 +215,10 @@ export default function ExplorarClasesPage() {
 
                 {!esStaff && (
                     <div className="flex gap-3 w-full md:w-auto">
-                        <div className="flex-1 md:flex-none bg-[#D4E655]/10 border border-[#D4E655]/30 rounded-2xl p-3 flex items-center gap-3">
-                            <div className="bg-[#D4E655] text-black p-2 rounded-xl"><Ticket size={20} /></div>
+                        <div className="flex-1 md:flex-none bg-orange-500/10 border border-orange-500/30 rounded-2xl p-3 flex items-center gap-3">
+                            <div className="bg-orange-500 text-white p-2 rounded-xl"><Ticket size={20} /></div>
                             <div>
-                                <p className="text-[10px] text-[#D4E655] font-black uppercase tracking-widest">Regulares</p>
+                                <p className="text-[10px] text-orange-400 font-black uppercase tracking-widest">Regulares</p>
                                 <p className="text-xl font-black leading-none">{perfil?.creditos_regulares || 0}</p>
                             </div>
                         </div>
@@ -201,7 +233,6 @@ export default function ExplorarClasesPage() {
                 )}
             </div>
 
-            {/* 🚀 ACÁ VOLVIERON TUS FILTROS Y BOTONES */}
             <div className="mb-8 space-y-4">
                 <div className="flex flex-col md:flex-row gap-4">
                     <div className="relative flex-1">
@@ -214,7 +245,7 @@ export default function ExplorarClasesPage() {
                                 key={tipo}
                                 onClick={() => setFiltroTipo(tipo as any)}
                                 className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${filtroTipo === tipo
-                                    ? (tipo === 'Exclusivo' ? 'bg-cyan-500 text-black' : 'bg-[#D4E655] text-black')
+                                    ? (tipo === 'Exclusivo' ? 'bg-cyan-500 text-black' : tipo === 'Regular' ? 'bg-orange-500 text-white' : tipo === 'Especial' ? 'bg-purple-500 text-white' : 'bg-[#D4E655] text-black')
                                     : 'text-gray-500 hover:text-white'
                                     }`}
                             >
@@ -233,13 +264,12 @@ export default function ExplorarClasesPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {gruposFiltrados.map((grupo) => {
-                    const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(grupo.tipo_clase)
-                    const proximaClase = grupo.instancias[0]
-                    const esHoy = isToday(parseSafeDate(proximaClase.inicio))
                     const esExclusiva = !grupo.es_combinable
+                    const estilos = getEstilos(grupo.tipo_clase, esExclusiva)
+                    const proximaClase = grupo.instancias[0]
 
                     return (
-                        <div key={grupo.key_grupo} className={`bg-[#09090b] rounded-3xl overflow-hidden flex flex-col transition-all group shadow-xl border-2 ${esExclusiva ? 'border-cyan-500/50' : esHoy ? (esEspecial ? 'border-purple-500/50' : 'border-[#D4E655]/50') : 'border-white/10'}`}>
+                        <div key={grupo.key_grupo} className={`bg-[#09090b] rounded-3xl overflow-hidden flex flex-col transition-all group shadow-xl border-2 ${estilos.border}`}>
                             <div className="h-48 w-full relative bg-[#1a1a1c] border-b border-white/5 flex items-center justify-center overflow-hidden">
                                 {grupo.imagen_url ? (
                                     <Image src={grupo.imagen_url} alt={grupo.nombre} fill sizes="33vw" className="object-cover group-hover:scale-105 transition-transform duration-500" />
@@ -247,14 +277,14 @@ export default function ExplorarClasesPage() {
                                     <div className="flex flex-col items-center gap-2 text-white/20"><ImageIcon size={40} /><span className="text-[10px] font-black uppercase">Sin Flyer</span></div>
                                 )}
                                 {esExclusiva && <span className="absolute top-4 left-4 text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md bg-cyan-500 text-black flex items-center gap-1 shadow-lg"><Lock size={10} /> Pase Exclusivo</span>}
-                                <span className={`absolute top-4 right-4 text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md ${esEspecial ? 'bg-purple-500 text-white' : 'bg-[#D4E655]/80 text-black'}`}>{grupo.tipo_clase}</span>
+                                <span className={`absolute top-4 right-4 text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md shadow-lg ${estilos.bg}`}>{grupo.tipo_clase}</span>
                             </div>
 
                             <div className="p-5 flex-1 flex flex-col">
                                 <div className="mb-4">
                                     <h3 className="text-xl font-black text-white uppercase leading-tight mb-1">{grupo.nombre}</h3>
                                     <p className="flex items-center gap-1.5 text-sm font-bold text-gray-300">
-                                        <User size={14} className={esExclusiva ? 'text-cyan-400' : esEspecial ? 'text-purple-400' : 'text-[#D4E655]'} /> {grupo.profesor.nombre_completo}
+                                        <User size={14} className={estilos.icon} /> {grupo.profesor.nombre_completo}
                                     </p>
                                 </div>
                                 <div className="space-y-3 mt-auto pt-4 border-t border-white/5">
@@ -265,7 +295,7 @@ export default function ExplorarClasesPage() {
                                 </div>
                             </div>
                             <div className="p-5 bg-[#111] border-t border-white/5">
-                                <button onClick={() => setSelectedGrupo(grupo)} className={`w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all ${esExclusiva ? 'bg-cyan-600 text-black hover:bg-cyan-400' : esEspecial ? 'bg-purple-600 text-white hover:bg-purple-500' : 'bg-[#D4E655] text-black hover:bg-white'}`}>Ver Fechas <ArrowRight size={16} /></button>
+                                <button onClick={() => setSelectedGrupo(grupo)} className={`w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all shadow-md ${estilos.btn}`}>Ver Fechas <ArrowRight size={16} /></button>
                             </div>
                         </div>
                     )
@@ -287,6 +317,7 @@ export default function ExplorarClasesPage() {
                             {selectedGrupo.instancias.map((inst) => {
                                 const estaLleno = inst.cupo_maximo > 0 && inst.inscritos_count >= inst.cupo_maximo
                                 const esExclusivaModal = !selectedGrupo.es_combinable
+                                const estilos = getEstilos(selectedGrupo.tipo_clase, esExclusivaModal)
 
                                 let tieneSaldo = false
                                 if (esExclusivaModal) {
@@ -303,7 +334,7 @@ export default function ExplorarClasesPage() {
                                     <div key={inst.id} className={`bg-[#111] border rounded-2xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between hover:border-white/20 transition-all ${esExclusivaModal ? 'border-cyan-500/20' : 'border-white/5'}`}>
                                         <div className="flex-1 w-full">
                                             <div className="flex items-center gap-2 mb-1">
-                                                <Calendar size={14} className={esExclusivaModal ? 'text-cyan-400' : 'text-[#D4E655]'} />
+                                                <Calendar size={14} className={estilos.icon} />
                                                 <span className="font-bold text-white capitalize text-sm">{format(inicioDate, "EEEE d 'de' MMMM", { locale: es })}</span>
                                             </div>
                                             <div className="flex items-center gap-4 text-[10px] text-gray-400 font-medium pl-5 mt-1">
@@ -324,8 +355,8 @@ export default function ExplorarClasesPage() {
                                                     {esExclusivaModal ? 'Comprar Pase' : 'Sin Saldo'}
                                                 </Link>
                                             ) : (
-                                                <button onClick={() => handleInscribirse(inst, selectedGrupo)} disabled={procesandoId === inst.id} className={`w-full sm:w-36 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase transition-all ${esExclusivaModal ? 'bg-cyan-500 text-black hover:bg-white' : 'bg-[#D4E655] text-black hover:bg-white'} disabled:opacity-50`}>
-                                                    {procesandoId === inst.id ? <Loader2 size={14} className="animate-spin" /> : 'Reservar con Pase'}
+                                                <button onClick={() => handleInscribirse(inst, selectedGrupo)} disabled={procesandoId === inst.id} className={`w-full sm:w-36 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase transition-all shadow-sm ${estilos.btn} disabled:opacity-50`}>
+                                                    {procesandoId === inst.id ? <Loader2 size={14} className="animate-spin" /> : (esExclusivaModal ? 'Reservar con Pase' : 'Reservar Lugar')}
                                                 </button>
                                             )}
                                         </div>
