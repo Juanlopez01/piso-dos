@@ -296,33 +296,33 @@ export default function TiendaConfigPage() {
                                 </button>
                             </div>
 
-                            {/* SECCIÓN EXCLUSIVOS */}
+                            {/* SECCIÓN NO COMBINABLES */}
                             {exclusivos.length > 0 && (
                                 <div className="mb-10">
-                                    <h3 className="text-cyan-500 font-black uppercase tracking-widest text-xs mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
-                                        <ShieldAlert size={14} /> Exclusivos
+                                    <h3 className="text-orange-600 font-black uppercase tracking-widest text-xs mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
+                                        <ShieldAlert size={14} /> No Combinables
                                     </h3>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                         {exclusivos.map((prod) => (
-                                            <div key={prod.id} className={`border rounded-xl p-5 relative group transition-all ${prod.activo ? 'bg-[#111] border-cyan-500/20 hover:border-cyan-500/50' : 'bg-black border-white/5 opacity-50 grayscale'}`}>
-                                                <div className="absolute top-0 left-0 px-3 py-1 rounded-br-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1 bg-cyan-500/20 text-cyan-400 border-b border-r border-cyan-500/30">
-                                                    <ShieldAlert size={10} /> exclusivo
+                                            <div key={prod.id} className={`border rounded-xl p-5 relative group transition-all ${prod.activo ? 'bg-[#111] border-orange-600/20 hover:border-orange-600/50' : 'bg-black border-white/5 opacity-50 grayscale'}`}>
+                                                <div className="absolute top-0 left-0 px-3 py-1 rounded-br-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1 bg-orange-600/20 text-orange-500 border-b border-r border-orange-600/30">
+                                                    <ShieldAlert size={10} /> no combinable
                                                 </div>
                                                 <div className="absolute top-4 right-4 bg-white/10 px-2 py-1 rounded text-[10px] font-bold uppercase text-white flex items-center gap-1 mt-6">
-                                                    <Layers size={10} className="text-cyan-400" /> 1 Pase
+                                                    <Layers size={10} className="text-orange-500" /> {prod.creditos} Créditos
                                                 </div>
                                                 <div className="mb-2 mt-8">
                                                     <h3 className="text-xl font-black text-white uppercase leading-none mb-2 pr-16">{prod.nombre}</h3>
-                                                    <p className="text-2xl font-bold text-cyan-400 flex items-baseline gap-0.5">
+                                                    <p className="text-2xl font-bold text-orange-500 flex items-baseline gap-0.5">
                                                         <span className="text-sm opacity-50">$</span>{prod.precio.toLocaleString('es-AR')}
                                                     </p>
                                                 </div>
                                                 {prod.pase_referencia && (
-                                                    <div className="text-[9px] text-cyan-500/70 italic uppercase tracking-wider mb-2 line-clamp-1 border-t border-white/5 pt-2">
+                                                    <div className="text-[9px] text-orange-500/70 italic uppercase tracking-wider mb-2 line-clamp-1 border-t border-white/5 pt-2">
                                                         Ref: {prod.pase_referencia.split('-').join(' / ')}
                                                     </div>
                                                 )}
-                                                <div className="flex items-center gap-2 mt-2 pt-4 border-t border-cyan-500/20">
+                                                <div className="flex items-center gap-2 mt-2 pt-4 border-t border-orange-600/20">
                                                     <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2"><Edit2 size={14} /> Editar</button>
                                                     <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-red-500 hover:bg-red-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}><Power size={18} /></button>
                                                 </div>

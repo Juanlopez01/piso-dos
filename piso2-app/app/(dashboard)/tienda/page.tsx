@@ -9,6 +9,7 @@ import {
     Smartphone, Zap, Loader2, Info, Tag, X, CreditCard, ShieldAlert
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import Link from 'next/link'
 
 // --- TIPOS ---
 type Producto = {
@@ -229,25 +230,25 @@ function TiendaContent() {
                 </p>
             </div>
 
-            {/* 🚀 SECCIÓN PASES EXCLUSIVOS */}
+            {/* 🚀 SECCIÓN PASES NO COMBINABLES (NARANJA FUERTE) */}
             {exclusivos.length > 0 && (
                 <div className="mb-16">
                     <div className="flex items-center gap-3 mb-6">
-                        <div className="bg-cyan-500 text-black p-2 rounded-lg"><ShieldAlert size={20} /></div>
-                        <h2 className="text-xl font-black uppercase tracking-tighter">Pases Exclusivos</h2>
+                        <div className="bg-orange-600 text-white p-2 rounded-lg"><ShieldAlert size={20} /></div>
+                        <h2 className="text-xl font-black uppercase tracking-tighter">Pases No Combinables</h2>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                         {exclusivos.map((p) => (
-                            <div key={p.id} className="bg-[#09090b] border border-cyan-500/20 rounded-3xl p-6 flex flex-col hover:border-cyan-500/50 transition-all group relative overflow-hidden shadow-2xl">
-                                <div className="absolute -right-8 top-4 rotate-45 bg-cyan-500 text-black text-[8px] font-black uppercase px-10 py-1 shadow-lg">Exclusiva</div>
+                            <div key={p.id} className="bg-[#09090b] border border-orange-600/20 rounded-3xl p-6 flex flex-col hover:border-orange-600/50 transition-all group relative overflow-hidden shadow-2xl">
+                                <div className="absolute -right-8 top-4 rotate-45 bg-orange-600 text-white text-[8px] font-black uppercase px-10 py-1 shadow-lg">No Comb.</div>
                                 <h3 className="text-xl font-black text-white uppercase mb-1 pr-6">{p.nombre}</h3>
-                                <div className="text-4xl font-black text-cyan-400 mb-4">${p.precio.toLocaleString()}</div>
+                                <div className="text-4xl font-black text-orange-500 mb-4">${p.precio.toLocaleString()}</div>
                                 <div className="space-y-3 mb-8 flex-1">
-                                    <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-cyan-400" /> Acceso Directo</div>
-                                    <p className="text-xs text-gray-500 leading-relaxed italic">{p.descripcion || 'Pase válido únicamente para las clases de este grupo específico.'}</p>
+                                    <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-orange-500" /> Pase Directo</div>
+                                    <p className="text-xs text-gray-500 leading-relaxed italic">{p.descripcion || 'Pase válido únicamente para la clase vinculada. No combinable con otras clases.'}</p>
                                 </div>
-                                <button onClick={() => openCheckout(p)} className="w-full bg-cyan-600 hover:bg-cyan-400 text-black rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all shadow-md">
+                                <button onClick={() => openCheckout(p)} className="w-full bg-orange-600 hover:bg-orange-500 text-white rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all shadow-md">
                                     Comprar Pase
                                 </button>
                             </div>
@@ -316,7 +317,7 @@ function TiendaContent() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4 animate-in fade-in" onClick={() => !generandoPago && setIsCheckoutOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
                         <div className="text-center mb-6">
-                            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg ${selectedPack.tipo_clase === 'exclusivo' ? 'bg-cyan-500 text-black shadow-cyan-500/20' : selectedPack.tipo_clase === 'regular' ? 'bg-orange-500 text-white shadow-orange-500/20' : 'bg-purple-500 text-white shadow-purple-500/20'}`}>
+                            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg ${selectedPack.tipo_clase === 'exclusivo' ? 'bg-orange-600 text-white shadow-orange-600/20' : selectedPack.tipo_clase === 'regular' ? 'bg-orange-500 text-white shadow-orange-500/20' : 'bg-purple-500 text-white shadow-purple-500/20'}`}>
                                 {selectedPack.tipo_clase === 'exclusivo' ? <ShieldAlert size={32} /> : <ShoppingBasket size={32} />}
                             </div>
                             <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Finalizar Compra</h3>
@@ -354,7 +355,7 @@ function TiendaContent() {
                             )}
                             <div className="flex justify-between items-center">
                                 <span className="text-xs text-gray-300 font-bold uppercase">Total a Pagar</span>
-                                <span className={`text-3xl font-black ${selectedPack.tipo_clase === 'exclusivo' ? 'text-cyan-400' : selectedPack.tipo_clase === 'regular' ? 'text-orange-500' : 'text-purple-400'}`}>${precioFinal.toLocaleString()}</span>
+                                <span className={`text-3xl font-black ${selectedPack.tipo_clase === 'exclusivo' ? 'text-orange-500' : selectedPack.tipo_clase === 'regular' ? 'text-orange-500' : 'text-purple-400'}`}>${precioFinal.toLocaleString()}</span>
                             </div>
                         </div>
 
@@ -385,11 +386,23 @@ function TiendaContent() {
                             <button onClick={() => setIsCheckoutOpen(false)} disabled={generandoPago} className="w-full text-gray-500 font-bold uppercase text-[10px] hover:text-white transition-colors mt-2">
                                 Cancelar
                             </button>
+
+                            {/* 🚀 NUEVO FOOTER LEGAL */}
+                            <div className="mt-4 pt-4 border-t border-white/5 text-center">
+                                <p className="text-[9px] text-gray-500 uppercase tracking-widest leading-relaxed">
+                                    Al procesar el pago, aceptás que los créditos y pases <strong className="text-white">no son reembolsables ni transferibles</strong>.
+                                    <br />
+                                    <Link href="/terminos" target="_blank" className="text-gray-400 hover:text-white underline decoration-white/20 hover:decoration-white transition-all mt-1 inline-block">
+                                        Ver Términos y Condiciones
+                                    </Link>
+                                </p>
+                            </div>
                         </div>
                     </div>
                 </div>
-            )}
-        </div>
+            )
+            }
+        </div >
     )
 }
 

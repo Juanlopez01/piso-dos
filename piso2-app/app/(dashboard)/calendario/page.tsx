@@ -468,12 +468,18 @@ export default function CalendarioPage() {
         if (evt.tipo === 'Alquiler') return { border: 'border-white', text: 'text-white', bg: 'bg-white' }
         if (evt.clase_data?.es_audicion) return { border: 'border-pink-500', text: 'text-pink-500', bg: 'bg-pink-500' }
         if (evt.clase_data?.es_la_liga) return { border: 'border-yellow-500', text: 'text-yellow-500', bg: 'bg-yellow-500' }
-        if (evt.clase_data?.es_combinable === false) return { border: 'border-cyan-500', text: 'text-cyan-400', bg: 'bg-cyan-500' }
+
+        // 🚀 EXCLUSIVAS / NO COMBINABLES -> Naranja Fuerte
+        if (evt.clase_data?.es_combinable === false) return { border: 'border-orange-700', text: 'text-orange-600', bg: 'bg-orange-700' }
 
         switch (evt.subtitulo) {
-            case 'Regular': return { border: 'border-orange-500', text: 'text-orange-500', bg: 'bg-orange-500' }
+            // 🚀 REGULARES -> Naranja Normal
+            case 'Regular': return { border: 'border-orange-400', text: 'text-orange-400', bg: 'bg-orange-400' }
+            // ESPECIALES -> Violeta
             case 'Especial': return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500' }
-            case 'Formacion': return { border: 'border-yellow-400', text: 'text-yellow-400', bg: 'bg-yellow-400' }
+            // FORMACIÓN -> Amarillo original
+            case 'Formacion': return { border: 'border-[#D4E655]', text: 'text-[#D4E655]', bg: 'bg-[#D4E655]' }
+            // COMPAÑÍA -> Azul
             case 'Compañía': return { border: 'border-blue-500', text: 'text-blue-500', bg: 'bg-blue-500' }
             default: return { border: 'border-[#D4E655]', text: 'text-[#D4E655]', bg: 'bg-[#D4E655]' }
         }
@@ -588,7 +594,7 @@ export default function CalendarioPage() {
                                                     <div className="flex-1 p-3 flex flex-col justify-center relative">
                                                         <div className="flex justify-between items-start mb-1">
                                                             <h4 className="text-sm font-bold text-white uppercase leading-tight pr-2 flex items-center gap-1">
-                                                                {evt.clase_data?.es_combinable === false && <ShieldAlert size={12} className="text-cyan-400" />}
+                                                                {evt.clase_data?.es_combinable === false && <ShieldAlert size={12} className="text-orange-600" />}
                                                                 {evt.titulo}
                                                             </h4>
                                                             <span className={`px-2 py-0.5 rounded text-[8px] uppercase font-bold ${style.bg}/10 ${style.text} border ${style.border}/20`}>{evt.subtitulo}</span>
@@ -708,16 +714,16 @@ export default function CalendarioPage() {
                                                         />
                                                     </div>
 
-                                                    {/* 🚀 NUEVO: Switch de Combinable */}
-                                                    <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-cyan-500/5 p-3 rounded-xl border-dashed border-cyan-500/20">
+                                                    {/* 🚀 NUEVO: Switch de Combinable (ACTUALIZADO A NARANJA FUERTE) */}
+                                                    <div className="md:col-span-3 space-y-2 pt-2 border-t border-white/5 mt-2 bg-orange-600/5 p-3 rounded-xl border-dashed border-orange-600/20">
                                                         <label className="flex items-center gap-3 cursor-pointer">
                                                             <div className="relative flex items-center">
                                                                 <input type="checkbox" checked={form.esCombinable} onChange={e => setForm({ ...form, esCombinable: e.target.checked })} className="peer sr-only" />
-                                                                <div className="w-10 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
+                                                                <div className="w-10 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
                                                             </div>
                                                             <div>
-                                                                <span className="text-[10px] font-black uppercase text-cyan-400 flex items-center gap-1">Acepta Créditos {form.tipo === 'Especial' ? 'Especiales' : 'Regulares'}</span>
-                                                                <span className="text-[8px] text-gray-500 block leading-tight mt-0.5">Si lo apagás, será Exclusiva y requerirá un Pase del Ritmo elegido.</span>
+                                                                <span className="text-[10px] font-black uppercase text-orange-500 flex items-center gap-1">Acepta Créditos {form.tipo === 'Especial' ? 'Especiales' : 'Regulares'}</span>
+                                                                <span className="text-[8px] text-gray-500 block leading-tight mt-0.5">Si lo apagás, será No Combinable y requerirá un crédito de la clase elegida.</span>
                                                             </div>
                                                         </label>
                                                     </div>

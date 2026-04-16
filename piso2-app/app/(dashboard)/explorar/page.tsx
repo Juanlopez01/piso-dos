@@ -122,18 +122,18 @@ export default function ExplorarClasesPage() {
     // 🎨 FUNCIÓN DE ESTILOS DINÁMICOS
     const getEstilos = (tipo: string, esExclusiva: boolean) => {
         if (esExclusiva) return {
-            border: 'border-cyan-500/50',
-            bg: 'bg-cyan-500 text-black',
-            btn: 'bg-cyan-600 text-black hover:bg-cyan-400',
-            icon: 'text-cyan-400'
+            border: 'border-orange-600/50',
+            bg: 'bg-orange-600 text-white',
+            btn: 'bg-orange-700 text-white hover:bg-orange-500',
+            icon: 'text-orange-600'
         };
 
         const t = tipo.toLowerCase();
         if (t === 'formacion') return {
-            border: 'border-[#D4E655]/50',
-            bg: 'bg-[#D4E655] text-black',
-            btn: 'bg-[#D4E655] text-black hover:bg-white',
-            icon: 'text-[#D4E655]'
+            border: 'border-yellow-300/50',
+            bg: 'bg-yellow-300 text-black',
+            btn: 'bg-yellow-300 text-black hover:bg-white',
+            icon: 'text-yellow-300'
         };
         if (['especial', 'seminario', 'intensivo'].includes(t)) return {
             border: 'border-purple-500/50',
@@ -141,7 +141,12 @@ export default function ExplorarClasesPage() {
             btn: 'bg-white text-black hover:bg-purple-200',
             icon: 'text-purple-400'
         };
-
+        if (t === 'compañía') return {
+            border: 'border-cyan-500/50',
+            bg: 'bg-cyan-500 text-black',
+            btn: 'bg-cyan-500 text-black hover:bg-white',
+            icon: 'text-cyan-500'
+        };
         // REGULAR (NARANJA)
         return {
             border: 'border-orange-500/50',
@@ -262,45 +267,79 @@ export default function ExplorarClasesPage() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {gruposFiltrados.map((grupo) => {
                     const esExclusiva = !grupo.es_combinable
                     const estilos = getEstilos(grupo.tipo_clase, esExclusiva)
                     const proximaClase = grupo.instancias[0]
 
                     return (
-                        <div key={grupo.key_grupo} className={`bg-[#09090b] rounded-3xl overflow-hidden flex flex-col transition-all group shadow-xl border-2 ${estilos.border}`}>
-                            <div className="h-48 w-full relative bg-[#1a1a1c] border-b border-white/5 flex items-center justify-center overflow-hidden">
+                        <div key={grupo.key_grupo} className={`group relative w-full aspect-[4/5] sm:h-[450px] bg-[#1a1a1c] rounded-3xl overflow-hidden shadow-xl border-2 flex flex-col justify-between ${estilos.border}`}>
+
+                            {/* 📸 FONDO IMAGEN FULL SIZE */}
+                            <div className="absolute inset-0 z-0">
                                 {grupo.imagen_url ? (
-                                    <Image src={grupo.imagen_url} alt={grupo.nombre} fill sizes="33vw" className="object-cover group-hover:scale-105 transition-transform duration-500" />
+                                    <Image
+                                        src={grupo.imagen_url}
+                                        alt={grupo.nombre}
+                                        fill
+                                        sizes="(max-width: 768px) 100vw, 33vw"
+                                        className="object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
+                                    />
                                 ) : (
-                                    <div className="flex flex-col items-center gap-2 text-white/20"><ImageIcon size={40} /><span className="text-[10px] font-black uppercase">Sin Flyer</span></div>
+                                    <div className="flex flex-col items-center justify-center w-full h-full gap-2 text-white/20 bg-[#1a1a1c]">
+                                        <ImageIcon size={60} />
+                                        <span className="text-[10px] font-black uppercase tracking-widest">Sin Flyer</span>
+                                    </div>
                                 )}
-                                {esExclusiva && <span className="absolute top-4 left-4 text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md bg-cyan-500 text-black flex items-center gap-1 shadow-lg"><Lock size={10} /> Pase Exclusivo</span>}
-                                <span className={`absolute top-4 right-4 text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md shadow-lg ${estilos.bg}`}>{grupo.tipo_clase}</span>
                             </div>
 
-                            <div className="p-5 flex-1 flex flex-col">
-                                <div className="mb-4">
-                                    <h3 className="text-xl font-black text-white uppercase leading-tight mb-1">{grupo.nombre}</h3>
-                                    <p className="flex items-center gap-1.5 text-sm font-bold text-gray-300">
+                            {/* 🌒 CAPA OSCURA SUPERIOR (Para que las píldoras se lean bien sobre imágenes claras) */}
+                            <div className="absolute top-0 inset-x-0 h-32 bg-gradient-to-b from-black/80 to-transparent z-10 pointer-events-none"></div>
+
+                            {/* 🏷️ PÍLDORAS SUPERIORES */}
+                            <div className="relative z-20 p-4 flex justify-between items-start">
+                                {esExclusiva ? (
+                                    <span className="text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md bg-orange-600 text-white flex items-center gap-1 shadow-lg">
+                                        <Lock size={10} /> No combinable
+                                    </span>
+                                ) : (
+                                    <div></div> /* Spacer para mantener el flex justify-between */
+                                )}
+                                <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md shadow-lg ${estilos.bg}`}>
+                                    {grupo.tipo_clase}
+                                </span>
+                            </div>
+
+                            {/* 🪟 BLOQUE DE TEXTO INFERIOR (Con Fondo Negro Blur) */}
+                            <div className="relative z-20 mt-auto bg-black/60 backdrop-blur-md border-t border-white/10 p-5 flex flex-col gap-3">
+
+                                {/* Título y Profe */}
+                                <div>
+                                    <h3 className="text-xl font-black text-white uppercase leading-tight mb-1 drop-shadow-md">{grupo.nombre}</h3>
+                                    <p className="flex items-center gap-1.5 text-sm font-bold text-gray-200 drop-shadow-md">
                                         <User size={14} className={estilos.icon} /> {grupo.profesor.nombre_completo}
                                     </p>
                                 </div>
-                                <div className="space-y-3 mt-auto pt-4 border-t border-white/5">
-                                    <div className="flex items-center gap-3 text-sm text-gray-300">
-                                        <MapPin size={14} className="text-white/50" />
-                                        <span>{proximaClase.sala?.nombre} <span className="text-[10px] uppercase ml-1 opacity-50 border border-white/20 px-1 rounded">{proximaClase.sala?.sede?.nombre}</span></span>
+
+                                {/* Detalles de la clase */}
+                                <div className="flex flex-col gap-2 pt-3 border-t border-white/10">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-xs text-gray-300 font-medium">
+                                            <MapPin size={12} className="text-white/50" />
+                                            <span>{proximaClase.sala?.nombre} <span className="text-[9px] uppercase ml-1 opacity-50 border border-white/20 px-1 rounded">{proximaClase.sala?.sede?.nombre}</span></span>
+                                        </div>
+                                        <p className="flex items-center gap-1.5 text-[10px] font-black text-white uppercase tracking-widest bg-white/10 px-2 py-1.5 rounded-md border border-white/5">
+                                            <Clock size={12} className={estilos.icon} />
+                                            {format(parseSafeDate(proximaClase.inicio), "HH:mm")}
+                                        </p>
                                     </div>
-                                    {/* 🚀 NUEVO: Info de la Hora (Próxima clase) */}
-                                    <p className="flex items-center gap-1.5 text-[11px] font-black text-gray-500 uppercase tracking-widest mt-2 bg-white/5 w-fit px-2 py-1 rounded-md">
-                                        <Clock size={12} className={estilos.icon} />
-                                        {format(parseSafeDate(grupo.instancias[0].inicio), "HH:mm")} HS
-                                    </p>
                                 </div>
-                            </div>
-                            <div className="p-5 bg-[#111] border-t border-white/5">
-                                <button onClick={() => setSelectedGrupo(grupo)} className={`w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all shadow-md ${estilos.btn}`}>Ver Fechas <ArrowRight size={16} /></button>
+
+                                {/* Botón */}
+                                <button onClick={() => setSelectedGrupo(grupo)} className={`w-full mt-2 py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all shadow-lg ${estilos.btn}`}>
+                                    Ver Fechas <ArrowRight size={16} />
+                                </button>
                             </div>
                         </div>
                     )
@@ -370,11 +409,11 @@ export default function ExplorarClasesPage() {
                             })}
 
                             {!selectedGrupo.es_combinable && (
-                                <div className="p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-2xl flex items-center gap-3">
-                                    <ShieldCheck className="text-cyan-400" size={20} />
+                                <div className="p-4 bg-orange-600/5 border border-orange-600/20 rounded-2xl flex items-center gap-3">
+                                    <ShieldCheck className="text-orange-500" size={20} />
                                     <div>
-                                        <p className="text-[10px] text-cyan-400 font-black uppercase">Tu Saldo Exclusivo</p>
-                                        <p className="text-sm font-bold text-white">{pasesExclusivos[selectedGrupo.key_grupo] || 0} Pases disponibles</p>
+                                        <p className="text-[10px] text-orange-500 font-black uppercase">Tu Saldo No Combinable</p>
+                                        <p className="text-sm font-bold text-white">{pasesExclusivos[selectedGrupo.key_grupo] || 0} créditos disponibles para esta clase</p>
                                     </div>
                                 </div>
                             )}
