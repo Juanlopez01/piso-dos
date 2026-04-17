@@ -465,21 +465,22 @@ export default function CalendarioPage() {
     }
 
     const getEventStyle = (evt: EventoAgenda) => {
-        if (evt.tipo === 'Alquiler') return { border: 'border-white', text: 'text-white', bg: 'bg-white' }
+        // 🚀 ALQUILERES -> Ahora Morado/Violeta
+        if (evt.tipo === 'Alquiler') return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500' }
+
         if (evt.clase_data?.es_audicion) return { border: 'border-pink-500', text: 'text-pink-500', bg: 'bg-pink-500' }
         if (evt.clase_data?.es_la_liga) return { border: 'border-yellow-500', text: 'text-yellow-500', bg: 'bg-yellow-500' }
 
-        // 🚀 EXCLUSIVAS / NO COMBINABLES -> Naranja Fuerte
-        if (evt.clase_data?.es_combinable === false) return { border: 'border-orange-700', text: 'text-orange-600', bg: 'bg-orange-700' }
+        // NO COMBINABLES -> Naranja Fuerte
+        if (evt.clase_data?.es_combinable === false) return { border: 'border-orange-600', text: 'text-orange-500', bg: 'bg-orange-600' }
 
         switch (evt.subtitulo) {
-            // 🚀 REGULARES -> Naranja Normal
-            case 'Regular': return { border: 'border-orange-400', text: 'text-orange-400', bg: 'bg-orange-400' }
-            // ESPECIALES -> Violeta
-            case 'Especial': return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500' }
-            // FORMACIÓN -> Amarillo original
+            case 'Regular': return { border: 'border-orange-500', text: 'text-orange-500', bg: 'bg-orange-500' }
+
+            // 🚀 ESPECIALES -> Ahora Blanco
+            case 'Especial': return { border: 'border-white', text: 'text-white', bg: 'bg-white' }
+
             case 'Formacion': return { border: 'border-[#D4E655]', text: 'text-[#D4E655]', bg: 'bg-[#D4E655]' }
-            // COMPAÑÍA -> Azul
             case 'Compañía': return { border: 'border-blue-500', text: 'text-blue-500', bg: 'bg-blue-500' }
             default: return { border: 'border-[#D4E655]', text: 'text-[#D4E655]', bg: 'bg-[#D4E655]' }
         }
@@ -554,6 +555,44 @@ export default function CalendarioPage() {
                         </div>
                     )
                 })}
+            </div>
+
+            {/* 🚀 LEYENDA DE COLORES ACTUALIZADA */}
+            <div className="mt-4 pt-4 border-t border-white/5 flex flex-wrap items-center justify-center gap-4 md:gap-6">
+                <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.6)]"></div>
+                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Regular</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-orange-600 shadow-[0_0_8px_rgba(234,88,12,0.6)]"></div>
+                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">No Combinable</span>
+                </div>
+                {/* Especial ahora es Blanco */}
+                <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.6)]"></div>
+                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Especial</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-[#D4E655] shadow-[0_0_8px_rgba(212,230,85,0.6)]"></div>
+                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Formación</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]"></div>
+                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Compañía</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-yellow-500 shadow-[0_0_8px_rgba(234,179,8,0.6)]"></div>
+                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">La Liga</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-pink-500 shadow-[0_0_8px_rgba(236,72,153,0.6)]"></div>
+                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Audición</span>
+                </div>
+                {/* Alquiler ahora es Morado */}
+                <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.6)]"></div>
+                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Alquiler</span>
+                </div>
             </div>
 
             {isModalOpen && selectedDate && (

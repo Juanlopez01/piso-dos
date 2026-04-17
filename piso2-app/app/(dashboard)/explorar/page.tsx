@@ -61,7 +61,6 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
         `)
         .gte('inicio', hoy)
         .neq('estado', 'cancelada')
-        .neq('tipo_clase', 'Formación')
         .order('inicio', { ascending: true })
 
     const agrupador: Record<string, ClaseAgrupada> = {}
@@ -117,43 +116,29 @@ export default function ExplorarClasesPage() {
     const [procesandoId, setProcesandoId] = useState<string | null>(null)
     const [selectedGrupo, setSelectedGrupo] = useState<ClaseAgrupada | null>(null)
     const [filtroTexto, setFiltroTexto] = useState('')
-    const [filtroTipo, setFiltroTipo] = useState<'Todos' | 'Regular' | 'Especial' | 'Exclusivo'>('Todos')
+    // 🚀 NUEVOS FILTROS
+    const [filtroTipo, setFiltroTipo] = useState<'Todos' | 'Regular' | 'Especial' | 'Intensivo' | 'Formacion' | 'Compañia'>('Todos')
 
     // 🎨 FUNCIÓN DE ESTILOS DINÁMICOS
-    const getEstilos = (tipo: string, esExclusiva: boolean) => {
-        if (esExclusiva) return {
-            border: 'border-orange-600/50',
-            bg: 'bg-orange-600 text-white',
-            btn: 'bg-orange-700 text-white hover:bg-orange-500',
-            icon: 'text-orange-600'
-        };
-
+    const getEstilos = (tipo: string) => {
         const t = tipo.toLowerCase();
-        if (t === 'formacion') return {
-            border: 'border-yellow-300/50',
-            bg: 'bg-yellow-300 text-black',
-            btn: 'bg-yellow-300 text-black hover:bg-white',
-            icon: 'text-yellow-300'
-        };
-        if (['especial', 'seminario', 'intensivo'].includes(t)) return {
-            border: 'border-purple-500/50',
-            bg: 'bg-purple-500 text-white',
-            btn: 'bg-white text-black hover:bg-purple-200',
-            icon: 'text-purple-400'
-        };
-        if (t === 'compañía') return {
-            border: 'border-cyan-500/50',
-            bg: 'bg-cyan-500 text-black',
-            btn: 'bg-cyan-500 text-black hover:bg-white',
-            icon: 'text-cyan-500'
-        };
-        // REGULAR (NARANJA)
-        return {
-            border: 'border-orange-500/50',
-            bg: 'bg-orange-500 text-white',
-            btn: 'bg-orange-500 text-white hover:bg-orange-400',
-            icon: 'text-orange-400'
-        };
+
+        switch (t) {
+            case 'regular':
+                return { border: 'border-orange-500/50', bg: 'bg-orange-500 text-white', btn: 'bg-orange-500 hover:bg-orange-400 text-white', icon: 'text-orange-500' };
+            case 'especial':
+                return { border: 'border-purple-500/50', bg: 'bg-purple-500 text-white', btn: 'bg-white hover:bg-purple-200 text-black', icon: 'text-purple-400' };
+            case 'intensivo':
+                return { border: 'border-fuchsia-600/50', bg: 'bg-fuchsia-600 text-white', btn: 'bg-fuchsia-600 hover:bg-fuchsia-500 text-white', icon: 'text-fuchsia-500' };
+            case 'formacion':
+            case 'formación': // Por si acaso
+                return { border: 'border-[#D4E655]/50', bg: 'bg-[#D4E655] text-black', btn: 'bg-[#D4E655] hover:bg-white text-black', icon: 'text-[#D4E655]' };
+            case 'compañía':
+            case 'compania':
+                return { border: 'border-blue-500/50', bg: 'bg-blue-500 text-white', btn: 'bg-blue-600 hover:bg-blue-400 text-white', icon: 'text-blue-400' };
+            default:
+                return { border: 'border-white/10', bg: 'bg-zinc-800 text-white', btn: 'bg-white text-black hover:bg-gray-200', icon: 'text-white' };
+        }
     }
 
     const handleInscribirse = async (instancia: ClaseInstancia, grupo: ClaseAgrupada) => {
@@ -190,18 +175,20 @@ export default function ExplorarClasesPage() {
             const coincideTexto = g.nombre.toLowerCase().includes(filtroTexto.toLowerCase()) ||
                 g.profesor.nombre_completo.toLowerCase().includes(filtroTexto.toLowerCase());
 
-            const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(g.tipo_clase);
-            const esExclusivo = !g.es_combinable;
-
             let coincideTipo = true;
-            if (filtroTipo === 'Especial') coincideTipo = esEspecial && !esExclusivo;
-            if (filtroTipo === 'Regular') coincideTipo = !esEspecial && !esExclusivo;
-            if (filtroTipo === 'Exclusivo') coincideTipo = esExclusivo;
+            if (filtroTipo !== 'Todos') {
+                // 🚀 ARREGLO: Normalización universal para ignorar tildes y la ñ
+                const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+                const tipoClaseNormalizado = normalize(g.tipo_clase);
+                const filtroNormalizado = normalize(filtroTipo);
+
+                coincideTipo = tipoClaseNormalizado === filtroNormalizado;
+            }
 
             return coincideTexto && coincideTipo;
         });
     }, [clasesAgrupadas, filtroTexto, filtroTipo]);
-
     const ritmosSugeridos = useMemo(() => Array.from(new Set(clasesAgrupadas.map(c => c.nombre.split(' ')[0]))).slice(0, 5), [clasesAgrupadas])
 
     if (isLoading || contextLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
@@ -244,23 +231,36 @@ export default function ExplorarClasesPage() {
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
                         <input type="text" placeholder="Buscar por ritmo, profesor..." value={filtroTexto} onChange={(e) => setFiltroTexto(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-white outline-none focus:border-[#D4E655]" />
                     </div>
-                    <div className="flex bg-[#111] p-1 rounded-2xl border border-white/10 shrink-0 overflow-x-auto">
-                        {['Todos', 'Regular', 'Especial', 'Exclusivo'].map(tipo => (
-                            <button
-                                key={tipo}
-                                onClick={() => setFiltroTipo(tipo as any)}
-                                className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${filtroTipo === tipo
-                                    ? (tipo === 'Exclusivo' ? 'bg-cyan-500 text-black' : tipo === 'Regular' ? 'bg-orange-500 text-white' : tipo === 'Especial' ? 'bg-purple-500 text-white' : 'bg-[#D4E655] text-black')
-                                    : 'text-gray-500 hover:text-white'
-                                    }`}
-                            >
-                                {tipo}
-                            </button>
-                        ))}
+                    {/* 🚀 FILTROS ACTUALIZADOS */}
+                    <div className="flex bg-[#111] p-1 rounded-2xl border border-white/10 shrink-0 overflow-x-auto custom-scrollbar">
+                        {['Todos', 'Regular', 'Especial', 'Intensivo', 'Formacion', 'Compañía'].map(tipo => {
+                            const isActive = filtroTipo === tipo;
+                            let btnStyle = 'text-gray-500 hover:text-white';
+                            if (isActive) {
+                                switch (tipo) {
+                                    case 'Regular': btnStyle = 'bg-orange-500 text-white'; break;
+                                    case 'Especial': btnStyle = 'bg-purple-500 text-white'; break;
+                                    case 'Intensivo': btnStyle = 'bg-fuchsia-600 text-white'; break;
+                                    case 'Formacion': btnStyle = 'bg-[#D4E655] text-black'; break;
+                                    case 'Compañia': btnStyle = 'bg-blue-500 text-white'; break;
+                                    default: btnStyle = 'bg-white text-black'; // Para 'Todos'
+                                }
+                            }
+
+                            return (
+                                <button
+                                    key={tipo}
+                                    onClick={() => setFiltroTipo(tipo as any)}
+                                    className={`px-4 sm:px-6 py-3 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all ${btnStyle}`}
+                                >
+                                    {tipo}
+                                </button>
+                            )
+                        })}
                     </div>
                 </div>
 
-                <div className="flex gap-2 overflow-x-auto pb-2">
+                <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
                     {ritmosSugeridos.map(ritmo => (
                         <button key={ritmo} onClick={() => setFiltroTexto(ritmo)} className="bg-white/5 border border-white/10 hover:bg-white/10 px-4 py-2 rounded-full text-xs font-bold text-gray-300 flex items-center gap-2 transition-colors whitespace-nowrap"><Music size={12} /> {ritmo}</button>
                     ))}
@@ -269,52 +269,43 @@ export default function ExplorarClasesPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {gruposFiltrados.map((grupo) => {
-                    const esExclusiva = !grupo.es_combinable
-                    const estilos = getEstilos(grupo.tipo_clase, esExclusiva)
-                    const proximaClase = grupo.instancias[0]
+                    const esNoCombinable = !grupo.es_combinable;
+                    const estilos = getEstilos(grupo.tipo_clase);
+                    const proximaClase = grupo.instancias[0];
 
                     return (
-                        <div key={grupo.key_grupo} className={`group relative w-full aspect-[4/5] sm:h-[450px] bg-[#1a1a1c] rounded-3xl overflow-hidden shadow-xl border-2 flex flex-col justify-between ${estilos.border}`}>
+                        <div key={grupo.key_grupo} className={`group relative w-full aspect-[4/5] sm:h-[450px] bg-[#1a1a1c] rounded-3xl overflow-hidden shadow-xl border-2 flex flex-col justify-between transition-all ${estilos.border}`}>
 
-                            {/* 📸 FONDO IMAGEN FULL SIZE */}
+                            {/* 📸 FONDO IMAGEN */}
                             <div className="absolute inset-0 z-0">
                                 {grupo.imagen_url ? (
-                                    <Image
-                                        src={grupo.imagen_url}
-                                        alt={grupo.nombre}
-                                        fill
-                                        sizes="(max-width: 768px) 100vw, 33vw"
-                                        className="object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
-                                    />
+                                    <Image src={grupo.imagen_url} alt={grupo.nombre} fill sizes="(max-width: 768px) 100vw, 33vw" className="object-cover group-hover:scale-110 transition-transform duration-700 ease-out" />
                                 ) : (
-                                    <div className="flex flex-col items-center justify-center w-full h-full gap-2 text-white/20 bg-[#1a1a1c]">
-                                        <ImageIcon size={60} />
-                                        <span className="text-[10px] font-black uppercase tracking-widest">Sin Flyer</span>
-                                    </div>
+                                    <div className="flex flex-col items-center justify-center w-full h-full gap-2 text-white/20 bg-[#1a1a1c]"><ImageIcon size={60} /><span className="text-[10px] font-black uppercase">Sin Flyer</span></div>
                                 )}
                             </div>
 
-                            {/* 🌒 CAPA OSCURA SUPERIOR (Para que las píldoras se lean bien sobre imágenes claras) */}
                             <div className="absolute top-0 inset-x-0 h-32 bg-gradient-to-b from-black/80 to-transparent z-10 pointer-events-none"></div>
 
                             {/* 🏷️ PÍLDORAS SUPERIORES */}
-                            <div className="relative z-20 p-4 flex justify-between items-start">
-                                {esExclusiva ? (
-                                    <span className="text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md bg-orange-600 text-white flex items-center gap-1 shadow-lg">
+                            <div className="relative z-20 p-4 flex justify-between items-start gap-2">
+                                {/* Pildorita de NO COMBINABLE (Neutra) */}
+                                {esNoCombinable ? (
+                                    <span className="text-[8px] font-black uppercase px-2 py-1 rounded-full backdrop-blur-md bg-white/90 text-black flex items-center gap-1 shadow-lg border border-black/10">
                                         <Lock size={10} /> No combinable
                                     </span>
                                 ) : (
-                                    <div></div> /* Spacer para mantener el flex justify-between */
+                                    <div></div>
                                 )}
-                                <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full backdrop-blur-md shadow-lg ${estilos.bg}`}>
+
+                                {/* Pildorita de CATEGORÍA */}
+                                <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-full backdrop-blur-md shadow-lg ${estilos.bg}`}>
                                     {grupo.tipo_clase}
                                 </span>
                             </div>
 
-                            {/* 🪟 BLOQUE DE TEXTO INFERIOR (Con Fondo Negro Blur) */}
+                            {/* 🪟 BLOQUE DE TEXTO INFERIOR */}
                             <div className="relative z-20 mt-auto bg-black/60 backdrop-blur-md border-t border-white/10 p-5 flex flex-col gap-3">
-
-                                {/* Título y Profe */}
                                 <div>
                                     <h3 className="text-xl font-black text-white uppercase leading-tight mb-1 drop-shadow-md">{grupo.nombre}</h3>
                                     <p className="flex items-center gap-1.5 text-sm font-bold text-gray-200 drop-shadow-md">
@@ -322,21 +313,19 @@ export default function ExplorarClasesPage() {
                                     </p>
                                 </div>
 
-                                {/* Detalles de la clase */}
                                 <div className="flex flex-col gap-2 pt-3 border-t border-white/10">
                                     <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2 text-xs text-gray-300 font-medium">
+                                        <div className="flex items-center gap-2 text-xs text-gray-300 font-medium drop-shadow-sm">
                                             <MapPin size={12} className="text-white/50" />
                                             <span>{proximaClase.sala?.nombre} <span className="text-[9px] uppercase ml-1 opacity-50 border border-white/20 px-1 rounded">{proximaClase.sala?.sede?.nombre}</span></span>
                                         </div>
-                                        <p className="flex items-center gap-1.5 text-[10px] font-black text-white uppercase tracking-widest bg-white/10 px-2 py-1.5 rounded-md border border-white/5">
+                                        <p className="flex items-center gap-1.5 text-[10px] font-black text-white uppercase tracking-widest bg-white/10 px-2 py-1.5 rounded-md border border-white/5 backdrop-blur-sm">
                                             <Clock size={12} className={estilos.icon} />
                                             {format(parseSafeDate(proximaClase.inicio), "HH:mm")}
                                         </p>
                                     </div>
                                 </div>
 
-                                {/* Botón */}
                                 <button onClick={() => setSelectedGrupo(grupo)} className={`w-full mt-2 py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all shadow-lg ${estilos.btn}`}>
                                     Ver Fechas <ArrowRight size={16} />
                                 </button>
@@ -344,6 +333,12 @@ export default function ExplorarClasesPage() {
                         </div>
                     )
                 })}
+                {gruposFiltrados.length === 0 && (
+                    <div className="col-span-full py-20 flex flex-col items-center justify-center text-gray-500">
+                        <Search size={40} className="opacity-20 mb-4" />
+                        <p className="text-sm font-bold uppercase tracking-widest text-center">No hay clases programadas para esta categoría.</p>
+                    </div>
+                )}
             </div>
 
             {selectedGrupo && (
@@ -361,7 +356,7 @@ export default function ExplorarClasesPage() {
                             {selectedGrupo.instancias.map((inst) => {
                                 const estaLleno = inst.cupo_maximo > 0 && inst.inscritos_count >= inst.cupo_maximo
                                 const esExclusivaModal = !selectedGrupo.es_combinable
-                                const estilos = getEstilos(selectedGrupo.tipo_clase, esExclusivaModal)
+                                const estilos = getEstilos(selectedGrupo.tipo_clase)
 
                                 let tieneSaldo = false
                                 if (esExclusivaModal) {
@@ -375,7 +370,7 @@ export default function ExplorarClasesPage() {
                                 const finDate = parseSafeDate(inst.fin)
 
                                 return (
-                                    <div key={inst.id} className={`bg-[#111] border rounded-2xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between hover:border-white/20 transition-all ${esExclusivaModal ? 'border-cyan-500/20' : 'border-white/5'}`}>
+                                    <div key={inst.id} className={`bg-[#111] border rounded-2xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between hover:border-white/20 transition-all ${esExclusivaModal ? 'border-gray-500/20' : 'border-white/5'}`}>
                                         <div className="flex-1 w-full">
                                             <div className="flex items-center gap-2 mb-1">
                                                 <Calendar size={14} className={estilos.icon} />
@@ -409,10 +404,10 @@ export default function ExplorarClasesPage() {
                             })}
 
                             {!selectedGrupo.es_combinable && (
-                                <div className="p-4 bg-orange-600/5 border border-orange-600/20 rounded-2xl flex items-center gap-3">
-                                    <ShieldCheck className="text-orange-500" size={20} />
+                                <div className="p-4 bg-white/5 border border-white/20 rounded-2xl flex items-center gap-3">
+                                    <ShieldCheck className="text-white" size={20} />
                                     <div>
-                                        <p className="text-[10px] text-orange-500 font-black uppercase">Tu Saldo No Combinable</p>
+                                        <p className="text-[10px] text-gray-400 font-black uppercase">Tu Saldo No Combinable</p>
                                         <p className="text-sm font-bold text-white">{pasesExclusivos[selectedGrupo.key_grupo] || 0} créditos disponibles para esta clase</p>
                                     </div>
                                 </div>
