@@ -233,7 +233,7 @@ export default function ExplorarClasesPage() {
                     </div>
                     {/* 🚀 FILTROS ACTUALIZADOS */}
                     <div className="flex bg-[#111] p-1 rounded-2xl border border-white/10 shrink-0 overflow-x-auto custom-scrollbar">
-                        {['Todos', 'Regular', 'Especial', 'Intensivo', 'Formacion', 'Compañía'].map(tipo => {
+                        {['Todos', 'Regular', 'Especial', 'Formacion', 'Compañía'].map(tipo => {
                             const isActive = filtroTipo === tipo;
                             let btnStyle = 'text-gray-500 hover:text-white';
                             if (isActive) {
