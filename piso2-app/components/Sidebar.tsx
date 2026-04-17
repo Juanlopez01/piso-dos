@@ -41,7 +41,7 @@ function SidebarContent() {
 
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
-        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Liquidaciones', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Liquidaciones', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         // 🚀 Agregamos "Compañías" al listado base que ven los profes
