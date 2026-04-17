@@ -144,3 +144,19 @@ export async function cargarPaseExclusivoAction(usuarioId: string, paseReferenci
         return { success: false, error: error.message }
     }
 }
+
+export async function eliminarProductoAction(id: string) {
+    try {
+        const supabase = await createClient()
+
+        // Eliminamos el producto de la base de datos
+        const { error } = await supabase.from('productos').delete().eq('id', id)
+
+        if (error) throw error
+
+        return { success: true, message: 'Producto eliminado correctamente' }
+    } catch (error: any) {
+        console.error("Error eliminando producto:", error)
+        return { success: false, error: 'No se pudo eliminar el producto. Revisá si hay compras asociadas a este pack.' }
+    }
+}

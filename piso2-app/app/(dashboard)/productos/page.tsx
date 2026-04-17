@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import { Plus, Tag, Edit2, Trash2, Power, Loader2, Layers, BookOpen, Star, Percent, Ticket, ShieldAlert } from 'lucide-react'
+import { eliminarProductoAction } from '@/app/actions/tienda' // Fijate que coincida con tu ruta
 import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -151,6 +152,20 @@ export default function TiendaConfigPage() {
             setFormPaseReferencia('')
         }
         setIsProductModalOpen(true)
+    }
+
+    const handleDeleteProduct = async (id: string) => {
+        if (!confirm('¿Estás seguro de que querés eliminar este pack definitivamente? Esto no se puede deshacer.')) return;
+
+        const toastId = toast.loading('Eliminando...');
+        const response = await eliminarProductoAction(id);
+
+        if (response.success) {
+            toast.success(response.message, { id: toastId });
+            mutate(); // Actualiza los datos en pantalla
+        } else {
+            toast.error(response.error || 'Error al eliminar', { id: toastId });
+        }
     }
 
     const handleSaveProduct = async (e: React.FormEvent) => {
@@ -322,9 +337,18 @@ export default function TiendaConfigPage() {
                                                         Ref: {prod.pase_referencia.split('-').join(' / ')}
                                                     </div>
                                                 )}
-                                                <div className="flex items-center gap-2 mt-2 pt-4 border-t border-orange-600/20">
-                                                    <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2"><Edit2 size={14} /> Editar</button>
-                                                    <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-red-500 hover:bg-red-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}><Power size={18} /></button>
+                                                <div className="flex items-center gap-2 mt-2 pt-4 border-t border-white/5">
+                                                    <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2">
+                                                        <Edit2 size={14} /> Editar
+                                                    </button>
+                                                    <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-orange-500 hover:bg-orange-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}>
+                                                        <Power size={18} />
+                                                    </button>
+
+                                                    {/* 🚀 ACÁ ESTÁ EL BOTÓN DE ELIMINAR */}
+                                                    <button onClick={() => handleDeleteProduct(prod.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors" title="Eliminar Producto">
+                                                        <Trash2 size={18} />
+                                                    </button>
                                                 </div>
                                             </div>
                                         ))}
@@ -353,9 +377,18 @@ export default function TiendaConfigPage() {
                                                         <span className="text-sm opacity-50">$</span>{prod.precio.toLocaleString('es-AR')}
                                                     </p>
                                                 </div>
-                                                <div className="flex items-center gap-2 mt-4 pt-4 border-t border-orange-500/20">
-                                                    <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2"><Edit2 size={14} /> Editar</button>
-                                                    <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-red-500 hover:bg-red-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}><Power size={18} /></button>
+                                                <div className="flex items-center gap-2 mt-2 pt-4 border-t border-white/5">
+                                                    <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2">
+                                                        <Edit2 size={14} /> Editar
+                                                    </button>
+                                                    <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-orange-500 hover:bg-orange-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}>
+                                                        <Power size={18} />
+                                                    </button>
+
+                                                    {/* 🚀 ACÁ ESTÁ EL BOTÓN DE ELIMINAR */}
+                                                    <button onClick={() => handleDeleteProduct(prod.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors" title="Eliminar Producto">
+                                                        <Trash2 size={18} />
+                                                    </button>
                                                 </div>
                                             </div>
                                         ))}
@@ -384,9 +417,18 @@ export default function TiendaConfigPage() {
                                                         <span className="text-sm opacity-50">$</span>{prod.precio.toLocaleString('es-AR')}
                                                     </p>
                                                 </div>
-                                                <div className="flex items-center gap-2 mt-4 pt-4 border-t border-purple-500/20">
-                                                    <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2"><Edit2 size={14} /> Editar</button>
-                                                    <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-red-500 hover:bg-red-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}><Power size={18} /></button>
+                                                <div className="flex items-center gap-2 mt-2 pt-4 border-t border-white/5">
+                                                    <button onClick={() => handleOpenProductModal(prod)} className="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded-lg text-xs font-bold uppercase text-white flex justify-center items-center gap-2">
+                                                        <Edit2 size={14} /> Editar
+                                                    </button>
+                                                    <button onClick={() => toggleProductStatus(prod.id, prod.activo)} className={`p-2 rounded-lg transition-colors ${prod.activo ? 'text-gray-500 hover:text-orange-500 hover:bg-orange-500/10' : 'text-green-500 hover:bg-green-500/10'}`} title={prod.activo ? "Desactivar" : "Activar"}>
+                                                        <Power size={18} />
+                                                    </button>
+
+                                                    {/* 🚀 ACÁ ESTÁ EL BOTÓN DE ELIMINAR */}
+                                                    <button onClick={() => handleDeleteProduct(prod.id)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors" title="Eliminar Producto">
+                                                        <Trash2 size={18} />
+                                                    </button>
                                                 </div>
                                             </div>
                                         ))}
