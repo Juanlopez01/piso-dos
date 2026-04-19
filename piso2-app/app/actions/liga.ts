@@ -76,3 +76,29 @@ export async function cambiarNivelLigaAction(alumnoId: string, nuevoNivel: numbe
         return { success: false, error: error.message }
     }
 }
+
+export async function actualizarPrecioGlobalAction(clave: string, nuevoValor: number) {
+    const supabase = await createClient()
+    const { error } = await supabase.from('configuraciones').upsert({ clave, valor: nuevoValor })
+    if (error) return { success: false, error: error.message }
+    revalidatePath('/usuarios')
+    return { success: true }
+}
+
+export async function getPreciosLigaAction() {
+    const supabase = await createClient()
+    const { data } = await supabase.from('configuraciones').select('*')
+    return data || []
+}
+
+export async function asignarBecaAction(usuarioId: string, porcentaje: number) {
+    const supabase = await createClient()
+    try {
+        const { error } = await supabase.from('profiles').update({ porcentaje_beca: porcentaje }).eq('id', usuarioId)
+        if (error) throw new Error(error.message)
+        revalidatePath('/la-liga')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}

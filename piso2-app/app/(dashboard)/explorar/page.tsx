@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR, { useSWRConfig } from 'swr'
 import { format } from 'date-fns'
@@ -25,11 +25,11 @@ const parseSafeDate = (dateStr: string | null | undefined) => {
 }
 
 type ClaseInstancia = { id: string; inicio: string; fin: string; cupo_maximo: number; inscritos_count: number; ya_inscrito: boolean; estado: string; sala: { nombre: string; sede: { nombre: string } } }
-// 🚀 CORRECCIÓN: Agregamos liga_nivel al tipo de dato
 type ClaseAgrupada = { key_grupo: string; nombre: string; tipo_clase: string; imagen_url?: string | null; ritmo_id?: string | null; compania_id?: string | null; liga_nivel?: number | null; profesor: { nombre_completo: string }; instancias: ClaseInstancia[]; es_combinable: boolean }
 
+// 🚀 CAMBIO: Ahora "companias" es un array de strings (IDs)
 type CarteleraData = {
-    perfil: { id: string, creditos_regulares: number, creditos_especiales: number, nivel_liga: number | null, compania_id: string | null } | null;
+    perfil: { id: string, creditos_regulares: number, creditos_especiales: number, nivel_liga: number | null, companias: string[] } | null;
     clasesAgrupadas: ClaseAgrupada[];
     pasesExclusivos: Record<string, number>;
 }
@@ -39,15 +39,24 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
     let pasesExclusivos: Record<string, number> = {}
 
     if (uid) {
-        supabase.rpc('limpiar_creditos_vencidos').then()
+        await supabase.rpc('limpiar_creditos_vencidos')
 
-        const { data: userProfile, error } = await supabase.from('profiles').select('id, creditos_regulares, creditos_especiales, nivel_liga, compania_id').eq('id', uid).single()
+        // 1. Traemos el perfil base (donde está el nivel_liga)
+        const { data: userProfile, error } = await supabase.from('profiles').select('*').eq('id', uid).single()
 
         if (error) {
-            const { data: fallbackProfile } = await supabase.from('profiles').select('id, creditos_regulares, creditos_especiales').eq('id', uid).single()
-            profile = fallbackProfile
+            console.error("Error trayendo perfil del alumno:", error.message)
         } else {
-            profile = userProfile
+            // 2. 🚀 Traemos todas las compañías a las que pertenece desde la tabla relacional
+            let companiasDelAlumno: string[] = []
+            const { data: companiasData } = await supabase.from('perfiles_companias').select('compania_id').eq('perfil_id', uid)
+
+            if (companiasData) {
+                companiasDelAlumno = companiasData.map((c: any) => String(c.compania_id))
+            }
+
+            // Armamos el perfil completo juntando ambas cosas
+            profile = { ...userProfile, companias: companiasDelAlumno }
         }
 
         const { data: pases } = await supabase.from('pases_exclusivos').select('pase_referencia, cantidad').eq('usuario_id', uid)
@@ -87,8 +96,7 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
             if (!agrupador[key]) {
                 agrupador[key] = {
                     key_grupo: key, nombre: c.nombre, tipo_clase: c.tipo_clase,
-                    imagen_url: c.imagen_url, ritmo_id: c.ritmo_id, compania_id: c.compania_id,
-                    liga_nivel: c.liga_nivel, // 🚀 CORRECCIÓN: Ahora sí guardamos el nivel de la liga de la clase
+                    imagen_url: c.imagen_url, ritmo_id: c.ritmo_id, compania_id: c.compania_id, liga_nivel: c.liga_nivel,
                     profesor: { nombre_completo: nombreProfe }, instancias: [],
                     es_combinable: c.es_combinable ?? true
                 }
@@ -122,6 +130,15 @@ export default function ExplorarClasesPage() {
     const perfil = data?.perfil || null
     const pasesExclusivos = data?.pasesExclusivos || {}
 
+    useEffect(() => {
+        if (perfil && !esStaff) {
+            console.log("🕵️‍♂️ PERFIL DEL ALUMNO CARGADO:", {
+                NivelLiga: perfil.nivel_liga,
+                Companias: perfil.companias // 🚀 Ahora vemos la lista de compañías
+            });
+        }
+    }, [perfil, esStaff]);
+
     const [procesandoId, setProcesandoId] = useState<string | null>(null)
     const [selectedGrupo, setSelectedGrupo] = useState<ClaseAgrupada | null>(null)
     const [filtroTexto, setFiltroTexto] = useState('')
@@ -143,6 +160,36 @@ export default function ExplorarClasesPage() {
             case 'compania': return { border: 'border-blue-500/50', bg: 'bg-blue-500 text-white', btn: 'bg-blue-600 hover:bg-blue-400 text-white', icon: 'text-blue-400' };
             default: return { border: 'border-white/10', bg: 'bg-zinc-800 text-white', btn: 'bg-white text-black hover:bg-gray-200', icon: 'text-white' };
         }
+    }
+
+    const getEstadoPrivado = (grupo: ClaseAgrupada) => {
+        const normalize = (str: string) => str ? str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : "";
+        const tipo = normalize(grupo.tipo_clase);
+
+        let esPrivada = false;
+        let apto = false;
+        let mensaje = '';
+
+        if (tipo === 'formacion') {
+            esPrivada = true;
+            if (perfil?.nivel_liga != null && grupo.liga_nivel != null) {
+                apto = Number(perfil.nivel_liga) === Number(grupo.liga_nivel);
+            }
+            mensaje = 'Pedir Ingreso';
+        } else if (tipo === 'compania') {
+            esPrivada = true;
+            // 🚀 NUEVA LÓGICA: ¿El ID de esta clase está en la lista de compañías del alumno?
+            if (perfil?.companias && grupo.compania_id != null) {
+                apto = perfil.companias.includes(String(grupo.compania_id));
+            }
+            mensaje = 'Pedir Ingreso';
+
+            if (!esStaff && selectedGrupo?.key_grupo === grupo.key_grupo) {
+                console.log(`[Compañía - ${grupo.nombre}] Tus Companias: [${perfil?.companias.join(', ')}] | Clase ID: ${grupo.compania_id} | Apto: ${apto}`);
+            }
+        }
+
+        return { esPrivada, apto, mensaje };
     }
 
     const handleInscribirse = async (instancia: ClaseInstancia, grupo: ClaseAgrupada) => {
@@ -172,28 +219,6 @@ export default function ExplorarClasesPage() {
             mutateCartelera()
         }
         setProcesandoId(null)
-    }
-
-    const getEstadoPrivado = (grupo: ClaseAgrupada) => {
-        const normalize = (str: string) => str ? str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : "";
-        const tipo = normalize(grupo.tipo_clase);
-
-        let esPrivada = false;
-        let apto = false;
-        let mensaje = '';
-
-        if (tipo === 'formacion') {
-            esPrivada = true;
-            // 🚀 CORRECCIÓN: Convertimos a Number() para evitar que "1" y 1 no coincidan.
-            apto = !!(perfil && perfil.nivel_liga && grupo.liga_nivel && Number(perfil.nivel_liga) === Number(grupo.liga_nivel));
-            mensaje = 'Pedir Ingreso';
-        } else if (tipo === 'compania') {
-            esPrivada = true;
-            apto = !!(perfil && grupo.compania_id && perfil.compania_id && String(perfil.compania_id) === String(grupo.compania_id));
-            mensaje = 'Pedir Ingreso';
-        }
-
-        return { esPrivada, apto, mensaje };
     }
 
     const gruposFiltrados = useMemo(() => {
@@ -324,6 +349,7 @@ export default function ExplorarClasesPage() {
                                     const esNoCombinable = !grupo.es_combinable;
                                     const estilos = getEstilos(grupo.tipo_clase);
                                     const proximaClase = grupo.instancias[0];
+                                    const estadoPrivado = getEstadoPrivado(grupo);
 
                                     return (
                                         <div key={grupo.key_grupo} className={`group relative w-full aspect-[4/5] sm:h-[450px] bg-[#1a1a1c] rounded-3xl overflow-hidden shadow-xl border-2 flex flex-col justify-between transition-all ${estilos.border}`}>
@@ -367,8 +393,11 @@ export default function ExplorarClasesPage() {
                                                     </div>
                                                 </div>
 
-                                                <button onClick={() => setSelectedGrupo(grupo)} className={`w-full mt-2 py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all shadow-lg ${estilos.btn}`}>
-                                                    Ver Fechas <ArrowRight size={16} />
+                                                <button
+                                                    onClick={() => setSelectedGrupo(grupo)}
+                                                    className={`w-full mt-2 py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all shadow-lg ${estadoPrivado.esPrivada && !estadoPrivado.apto && !esStaff ? 'bg-white/10 hover:bg-white/20 text-gray-300' : estilos.btn}`}
+                                                >
+                                                    {estadoPrivado.esPrivada && !estadoPrivado.apto && !esStaff ? 'Info / Ingreso' : 'Ver Fechas'} <ArrowRight size={16} />
                                                 </button>
                                             </div>
                                         </div>
@@ -398,6 +427,9 @@ export default function ExplorarClasesPage() {
                                 const estilos = getEstilos(selectedGrupo.tipo_clase)
                                 const estadoPrivado = getEstadoPrivado(selectedGrupo)
 
+                                // Si es apto para el grupo, consideramos que ya está anotado
+                                const esAutoInscrito = estadoPrivado.esPrivada && estadoPrivado.apto;
+
                                 let tieneSaldo = false
                                 if (esExclusivaModal) {
                                     tieneSaldo = (pasesExclusivos[selectedGrupo.key_grupo] || 0) > 0
@@ -425,14 +457,12 @@ export default function ExplorarClasesPage() {
                                         <div className="w-full sm:w-auto">
                                             {esStaff ? (
                                                 <div className="w-full sm:w-32 py-2.5 bg-white/5 text-gray-400 border border-white/10 rounded-xl flex items-center justify-center text-[10px] font-black uppercase cursor-default">Modo Vista</div>
+                                            ) : (esAutoInscrito || inst.ya_inscrito) ? (
+                                                <div className="w-full sm:w-32 py-3 bg-green-500/10 text-green-500 border border-green-500/20 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase"><CheckCircle2 size={14} /> Tu Grupo</div>
                                             ) : estadoPrivado.esPrivada && !estadoPrivado.apto ? (
                                                 <a href={`https://wa.me/5491122334455?text=Hola,%20quiero%20solicitar%20${encodeURIComponent(estadoPrivado.mensaje.toLowerCase() + ' para ' + selectedGrupo.nombre + '')}`} target="_blank" className={`w-full sm:w-44 py-3 rounded-xl flex items-center justify-center gap-1.5 text-[9px] font-black uppercase transition-all shadow-sm ${estilos.btn}`}>
-                                                    {estadoPrivado.mensaje} <MessageCircle size={14} />
+                                                    <MessageCircle size={14} /> {estadoPrivado.mensaje}
                                                 </a>
-                                            ) : estadoPrivado.esPrivada && estadoPrivado.apto ? (
-                                                <div className="w-full sm:w-32 py-3 bg-green-500/10 text-green-500 border border-green-500/20 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase"><CheckCircle2 size={14} /> Tu Grupo</div>
-                                            ) : inst.ya_inscrito ? (
-                                                <div className="w-full sm:w-32 py-3 bg-green-500/10 text-green-500 border border-green-500/20 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase"><CheckCircle2 size={14} /> Anotado</div>
                                             ) : estaLleno ? (
                                                 <div className="w-full sm:w-32 py-3 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase"><AlertCircle size={14} /> Lleno</div>
                                             ) : !tieneSaldo ? (

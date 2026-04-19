@@ -27,11 +27,102 @@ export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | 
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
-        const { error } = await supabase.from('profiles').update({ nivel_liga: nuevoNivel }).eq('id', usuarioId)
-        if (error) throw new Error(error.message)
+        // 1. Buscamos el nivel actual del usuario ANTES de cambiarlo
+        const { data: userProfile, error: profileError } = await supabase
+            .from('profiles')
+            .select('nivel_liga')
+            .eq('id', usuarioId)
+            .single()
+
+        if (profileError) throw new Error("Error al obtener perfil actual del usuario.")
+
+        // 🚀 BLINDAJE: Convertimos todo a números exactos para que la BD no se confunda
+        const nivelAnterior = userProfile.nivel_liga ? Number(userProfile.nivel_liga) : null
+        const nivelNuevoParsed = nuevoNivel ? Number(nuevoNivel) : null
+
+        // 2. Actualizamos el perfil del usuario con el nuevo nivel
+        const { error: updateError } = await supabase
+            .from('profiles')
+            .update({ nivel_liga: nivelNuevoParsed })
+            .eq('id', usuarioId)
+
+        if (updateError) throw new Error(updateError.message)
+
+        // --- 🚀 INICIO DE LA AUTOMATIZACIÓN ---
+        const hoy = new Date().toISOString()
+
+        // PASO A: BARRER CLASES VIEJAS (Si cambió de nivel o se quedó sin liga)
+        if (nivelAnterior !== null && nivelAnterior !== nivelNuevoParsed) {
+            // Buscamos los IDs de las clases futuras del nivel viejo
+            const { data: clasesViejas } = await supabase
+                .from('clases')
+                .select('id')
+                .gte('inicio', hoy)
+                .eq('liga_nivel', nivelAnterior)
+
+            if (clasesViejas && clasesViejas.length > 0) {
+                const idsClasesViejas = clasesViejas.map(c => c.id)
+                // Borramos las inscripciones a esas clases
+                const { error: deleteError } = await supabase
+                    .from('inscripciones')
+                    .delete()
+                    .eq('user_id', usuarioId)
+                    .in('clase_id', idsClasesViejas)
+
+                if (deleteError) console.error("Error borrando inscripciones viejas:", deleteError)
+            }
+        }
+
+        // PASO B: ANOTAR EN CLASES NUEVAS (Si le pusimos un nivel válido)
+        if (nivelNuevoParsed !== null && nivelAnterior !== nivelNuevoParsed) {
+            // Buscamos todas las clases futuras del nivel nuevo
+            const { data: clasesNuevas, error: fetchError } = await supabase
+                .from('clases')
+                .select('id')
+                .gte('inicio', hoy)
+                .eq('liga_nivel', nivelNuevoParsed)
+                .neq('estado', 'cancelada')
+
+            if (fetchError) console.error("Error buscando clases nuevas:", fetchError)
+
+            if (clasesNuevas && clasesNuevas.length > 0) {
+                // Primero chequeamos en cuáles ya está para no duplicar inscripciones
+                const idsClasesNuevas = clasesNuevas.map(c => c.id)
+                const { data: inscripcionesExistentes } = await supabase
+                    .from('inscripciones')
+                    .select('clase_id')
+                    .eq('user_id', usuarioId)
+                    .in('clase_id', idsClasesNuevas)
+
+                const idsYaAnotados = new Set(inscripcionesExistentes?.map(i => i.clase_id) || [])
+
+                // Filtramos y preparamos las que le faltan
+                const nuevasInscripciones = idsClasesNuevas
+                    .filter(claseId => !idsYaAnotados.has(claseId))
+                    .map(claseId => ({
+                        user_id: usuarioId,
+                        clase_id: claseId
+                    }))
+
+                // Insertamos de golpe
+                if (nuevasInscripciones.length > 0) {
+                    const { error: insertError } = await supabase
+                        .from('inscripciones')
+                        .insert(nuevasInscripciones)
+
+                    if (insertError) {
+                        console.error("Error CRÍTICO al insertar inscripciones:", insertError)
+                        throw new Error(`Error al auto-inscribir: ${insertError.message}`)
+                    }
+                }
+            }
+        }
+        // --- FIN DE LA AUTOMATIZACIÓN ---
+
         revalidatePath('/usuarios')
         return { success: true }
     } catch (error: any) {
+        console.error("Error en cambiarLigaAction:", error)
         return { success: false, error: error.message }
     }
 }

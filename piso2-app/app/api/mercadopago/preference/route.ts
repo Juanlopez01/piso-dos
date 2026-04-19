@@ -9,8 +9,8 @@ const client = new MercadoPagoConfig({
 export async function POST(request: Request) {
     try {
         const body = await request.json()
-        // 🚀 1. Atrapamos el pase_referencia que viene de la tienda
-        const { userId, productoId, cuponId, tipo_pago, mes, anio, pase_referencia } = body
+        // 🚀 1. Agregamos 'precio' para atrapar el valor dinámico que manda la web
+        const { userId, productoId, cuponId, tipo_pago, mes, anio, pase_referencia, precio } = body
 
         if (!userId) {
             console.error("❌ MP Preference: Falta userId en el request")
@@ -30,7 +30,13 @@ export async function POST(request: Request) {
         // ==========================================
         if (tipo_pago === 'cuota_liga') {
             tituloFinal = `Cuota La Liga - Mes ${mes}/${anio}`
-            precioFinal = 1 // ⚠️ CAMBIÁ ESTO POR EL VALOR REAL DE LA CUOTA
+
+            // 🚀 2. Usamos el precio que calculamos automáticamente en el frontend (Base - Beca)
+            precioFinal = Number(precio)
+
+            if (!precioFinal || precioFinal <= 0) {
+                return NextResponse.json({ error: "El precio calculado es inválido" }, { status: 400 })
+            }
 
             metadataCustom.tipo_pago = 'cuota_liga'
             if (mes) metadataCustom.mes = String(mes)

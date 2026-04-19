@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useState, useRef, useEffect, Suspense } from 'react' // 🚀 AGREGAMOS Suspense ACÁ
+import { useState, useRef, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import useSWR from 'swr'
@@ -9,7 +9,8 @@ import {
     Lock, Loader2, AlertTriangle, FileWarning,
     Megaphone, BookOpen, GraduationCap, ChevronRight,
     CheckCircle2, AlertCircle, CalendarX, Users, ClipboardEdit, Save, FileText,
-    Search, UserCog, UserMinus, Star, Send, Trash2, Clock
+    Search, UserCog, UserMinus, Star, Send, Trash2, Clock, Settings2, TrendingUp, Percent,
+    X
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -17,7 +18,18 @@ import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
 
 // 🚀 IMPORTAMOS LAS SERVER ACTIONS
-import { enviarAvisoAction, eliminarAvisoAction, guardarEvaluacionAction, cambiarNivelLigaAction } from '@/app/actions/liga'
+import {
+    enviarAvisoAction,
+    eliminarAvisoAction,
+    guardarEvaluacionAction, actualizarPrecioGlobalAction,
+    asignarBecaAction
+} from '@/app/actions/liga'
+
+// 🚀 IMPORTAMOS LA ACCIÓN "MÁGICA" DE USUARIOS (La que auto-inscribe)
+import {
+
+    cambiarLigaAction
+} from '@/app/actions/usuarios'
 
 const CRITERIOS_EVALUACION = [
     "Puntualidad", "Asistencia / regularidad", "Compromiso con la clase", "Actitud de trabajo",
@@ -30,7 +42,6 @@ const CRITERIOS_EVALUACION = [
     "Escucha grupal", "Sincronización con compañeros", "Adaptación al trabajo colectivo"
 ]
 
-// --- HELPER DE FECHAS SEGURAS ---
 const parseSafeDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return new Date()
     const cleanStr = dateStr.replace('+00:00', '').replace('+00', '').replace('Z', '').replace(' ', 'T')
@@ -38,7 +49,6 @@ const parseSafeDate = (dateStr: string | null | undefined) => {
     return isNaN(parsed.getTime()) ? new Date() : parsed
 }
 
-// 🚀 EL FETCHER MAESTRO (Recibe UID y Supabase Singleton)
 const fetcherLiga = async (uid: string, supabase: any) => {
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', uid).single()
     if (!profile) throw new Error("No profile")
@@ -47,7 +57,6 @@ const fetcherLiga = async (uid: string, supabase: any) => {
     const canManage = ['admin', 'recepcion'].includes(profile.rol)
     const nivelAlumno = profile.nivel_liga || profile.nivel || 1
 
-    // 1. AVISOS
     let queryAvisos = supabase.from('liga_avisos').select('*, autor:profiles!liga_avisos_autor_id_fkey(nombre_completo)').order('created_at', { ascending: false }).limit(30)
     if (profile.rol === 'profesor') {
         queryAvisos = queryAvisos.or(`autor_id.eq.${uid},tipo_destino.eq.general`)
@@ -56,16 +65,12 @@ const fetcherLiga = async (uid: string, supabase: any) => {
     }
     const { data: avisos } = await queryAvisos
 
-    // 2. MATERIAS / CLASES
     const hoyIso = new Date().toISOString()
     const cuatrimestreActual = '2026-1'
 
     let queryClases = supabase
         .from('clases')
-        .select(`
-            id, nombre, inicio, liga_nivel, profesor_id,
-            profesor:profiles!clases_profesor_id_fkey(nombre_completo)
-        `)
+        .select(`id, nombre, inicio, liga_nivel, profesor_id, profesor:profiles!clases_profesor_id_fkey(nombre_completo)`)
         .eq('es_la_liga', true)
         .neq('estado', 'cancelada')
 
@@ -74,7 +79,6 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
     const { data: dataClases } = await queryClases
 
-    // 3. DATOS ALUMNO (Evaluaciones y Pagos)
     let misEvaluaciones: any[] = []
     let deudaCuota = false
 
@@ -88,16 +92,11 @@ const fetcherLiga = async (uid: string, supabase: any) => {
         if (evals) misEvaluaciones = evals
     }
 
-    // 4. PROCESAR MATERIAS
     const disciplinasMap: Record<string, any> = {}
-
     if (dataClases) {
         dataClases.forEach((clase: any) => {
             if (!disciplinasMap[clase.nombre]) {
-                disciplinasMap[clase.nombre] = {
-                    id: clase.id, nombre: clase.nombre, liga_nivel: clase.liga_nivel,
-                    profesor: clase.profesor?.nombre_completo || 'Staff', proxima_clase: null, clases_ids: []
-                }
+                disciplinasMap[clase.nombre] = { id: clase.id, nombre: clase.nombre, liga_nivel: clase.liga_nivel, profesor: clase.profesor?.nombre_completo || 'Staff', proxima_clase: null, clases_ids: [] }
             }
             disciplinasMap[clase.nombre].clases_ids.push(clase.id)
             if (clase.inicio >= hoyIso) {
@@ -115,26 +114,27 @@ const fetcherLiga = async (uid: string, supabase: any) => {
         return { ...disciplina, evaluacion: evaluacion || null }
     }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
 
-    // 5. PADRÓN ALUMNOS (Solo Staff)
     let allStudents: any[] = []
     if (isStaff) {
-        const { data: perfiles } = await supabase.from('profiles').select('id, nombre, apellido, email, nivel_liga').eq('rol', 'alumno').not('nivel_liga', 'is', null).order('nombre', { ascending: true })
-        if (perfiles) {
-            allStudents = perfiles.filter((p: any) => p.nombre && p.nombre.trim() !== '')
-        }
+        const { data: perfiles } = await supabase.from('profiles').select('id, nombre_completo, email, nivel_liga, porcentaje_beca').eq('rol', 'alumno').order('nombre_completo', { ascending: true })
+        if (perfiles) allStudents = perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '')
+    }
+
+    let preciosLiga: any[] = []
+    if (canManage) {
+        const { data: config } = await supabase.from('configuraciones').select('*').like('clave', 'cuota_liga_%')
+        preciosLiga = config || []
     }
 
     const legajoCompleto = isStaff ? true : Boolean(profile.edad && profile.direccion && profile.contacto_emergencia && profile.plan_medico && profile.condiciones_medicas)
 
-    return { profile, isStaff, canManage, legajoCompleto, avisos: avisos || [], materias, deudaCuota, allStudents }
+    return { profile, isStaff, canManage, legajoCompleto, avisos: avisos || [], materias, deudaCuota, allStudents, preciosLiga }
 }
 
-// 🚀 RENOMBRAMOS LA FUNCIÓN PRINCIPAL
 function LaLigaContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const [supabase] = useState(() => createClient())
-
     const { userId, isLoading: loadingContext } = useCash()
 
     const { data, isLoading: loadingSWR, mutate, error } = useSWR(
@@ -145,11 +145,24 @@ function LaLigaContent() {
 
     const pagoNotificado = useRef(false)
     const [procesandoPago, setProcesandoPago] = useState(false)
-    const [adminTab, setAdminTab] = useState<'evaluaciones' | 'gestion' | 'comunicados'>('evaluaciones')
+    const [adminTab, setAdminTab] = useState<'evaluaciones' | 'gestion' | 'comunicados' | 'precios'>('evaluaciones')
     const [selectedMateria, setSelectedMateria] = useState<any>(null)
     const [alumnosList, setAlumnosList] = useState<any[]>([])
     const [loadingAlumnos, setLoadingAlumnos] = useState(false)
+
+    // 🚀 Búsqueda y Filtros
     const [searchStudent, setSearchStudent] = useState('')
+    const [levelFilter, setLevelFilter] = useState<'todos' | '1' | '2'>('todos') // Nuevo estado para los botones
+
+    // Precios
+    const [preciosEdit, setPreciosEdit] = useState<Record<string, string>>({})
+    const [guardandoPrecios, setGuardandoPrecios] = useState(false)
+
+    // Beca Modal
+    const [becaModalOpen, setBecaModalOpen] = useState(false)
+    const [selectedAlumnoBeca, setSelectedAlumnoBeca] = useState<any>(null)
+    const [becaValue, setBecaValue] = useState(0)
+    const [guardandoBeca, setGuardandoBeca] = useState(false)
 
     // Forms
     const [avisoForm, setAvisoForm] = useState({ titulo: '', mensaje: '', tipo_destino: 'general', nivel_destino: 1, alumno_id: '' })
@@ -164,7 +177,6 @@ function LaLigaContent() {
     const [boletinModalOpen, setBoletinModalOpen] = useState(false)
     const [selectedBoletin, setSelectedBoletin] = useState<any>(null)
 
-    // 🚀 RADAR DE ÉXITO MERCADO PAGO
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
         if (pagoStatus === 'exito' && !pagoNotificado.current) {
@@ -178,6 +190,14 @@ function LaLigaContent() {
             router.replace('/la-liga', { scroll: false })
         }
     }, [searchParams, mutate, router])
+
+    useEffect(() => {
+        if (data?.preciosLiga) {
+            const map: any = {}
+            data.preciosLiga.forEach((p: any) => map[p.clave] = p.valor.toString())
+            setPreciosEdit(map)
+        }
+    }, [data?.preciosLiga])
 
     if (loadingSWR || loadingContext) {
         return (
@@ -200,23 +220,46 @@ function LaLigaContent() {
 
     const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, allStudents } = data
     const nivelActual = profile.nivel_liga || profile.nivel || 1
-    const filteredStudents = allStudents.filter(s => (s.nombre + ' ' + s.apellido).toLowerCase().includes(searchStudent.toLowerCase()))
 
-    // --- ACCIONES ---
+    // 🚀 LÓGICA DE FILTRADO (Buscador + Botones)
+    const filteredStudents = allStudents.filter((s: any) => {
+        const matchesSearch = (s.nombre_completo || '').toLowerCase().includes(searchStudent.toLowerCase())
+        const matchesLevel = levelFilter === 'todos' ? true : String(s.nivel_liga) === levelFilter
+        return matchesSearch && matchesLevel
+    })
+
+    const handleGuardarPrecios = async () => {
+        setGuardandoPrecios(true)
+        try {
+            for (const clave in preciosEdit) {
+                await actualizarPrecioGlobalAction(clave, Number(preciosEdit[clave]))
+            }
+            toast.success("Precios de cuotas actualizados")
+            mutate()
+        } catch (e) {
+            toast.error("Error al guardar precios")
+        } finally {
+            setGuardandoPrecios(false)
+        }
+    }
 
     const generarLinkPagoLiga = async () => {
         setProcesandoPago(true)
         try {
             const mesActual = new Date().getMonth() + 1
             const anioActual = new Date().getFullYear()
-            const precioCuota = 15000
+
+            const clavePrecio = `cuota_liga_${nivelActual}`
+            const precioBase = data.preciosLiga.find((p: any) => p.clave === clavePrecio)?.valor || 15000
+            const porcentajeBeca = profile.porcentaje_beca || 0
+            const precioFinal = precioBase - (precioBase * porcentajeBeca / 100)
 
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     titulo: `Cuota La Liga - Mes ${mesActual}/${anioActual}`,
-                    precio: precioCuota,
+                    precio: precioFinal,
                     userId: userId,
                     tipo_pago: 'cuota_liga',
                     mes: mesActual,
@@ -240,15 +283,7 @@ function LaLigaContent() {
         if (!avisoForm.titulo || !avisoForm.mensaje) {
             setEnviandoAviso(false); return toast.error("Completá título y mensaje")
         }
-
-        const payload = {
-            titulo: avisoForm.titulo,
-            mensaje: avisoForm.mensaje,
-            tipo_destino: avisoForm.tipo_destino,
-            nivel_destino: avisoForm.tipo_destino === 'nivel' ? avisoForm.nivel_destino : null,
-            alumno_id: avisoForm.tipo_destino === 'individual' ? avisoForm.alumno_id : null
-        }
-
+        const payload = { titulo: avisoForm.titulo, mensaje: avisoForm.mensaje, tipo_destino: avisoForm.tipo_destino, nivel_destino: avisoForm.tipo_destino === 'nivel' ? avisoForm.nivel_destino : null, alumno_id: avisoForm.tipo_destino === 'individual' ? avisoForm.alumno_id : null }
         const response = await enviarAvisoAction(payload)
         if (response.success) {
             toast.success("Comunicado publicado")
@@ -263,51 +298,30 @@ function LaLigaContent() {
     const eliminarAviso = async (id: string) => {
         if (!confirm("¿Borrar aviso?")) return
         const response = await eliminarAvisoAction(id)
-        if (response.success) {
-            toast.success("Eliminado")
-            mutate()
-        }
+        if (response.success) { toast.success("Eliminado"); mutate() }
     }
 
+    // 🚀 AHORA USA LA ACCIÓN MÁGICA CON AUTO-INSCRIPCIÓN
     const cambiarNivelLiga = async (id: string, nuevoNivel: number | null) => {
-        const response = await cambiarNivelLigaAction(id, nuevoNivel)
+        const response = await cambiarLigaAction(id, nuevoNivel)
         if (response.success) {
-            toast.success('Actualizado')
+            toast.success('Nivel actualizado y clases sincronizadas')
             mutate()
+        } else {
+            toast.error(response.error || 'Error al actualizar')
         }
     }
 
     const guardarEvaluacion = async () => {
         setGuardandoEval(true)
         const notasFaltantes = Object.values(notas).some(v => v === 0 || isNaN(v))
-        if (notasFaltantes) {
-            toast.error('Completá todas las notas.')
-            setGuardandoEval(false); return
-        }
-
+        if (notasFaltantes) { toast.error('Completá todas las notas.'); setGuardandoEval(false); return }
         const notaFinal = parseFloat(calcularPromedio() as string)
         const aprobado = notaFinal >= 6
         const cuatrimestreActual = '2026-1'
-
-        const payload = {
-            alumno_id: selectedAlumno.id,
-            clase_id: selectedMateria.id,
-            cuatrimestre: cuatrimestreActual,
-            anio: new Date().getFullYear(),
-            criterios_notas: notas,
-            observaciones_docente: observaciones,
-            nota_final: notaFinal,
-            aprobado: aprobado,
-            requiere_recuperatorio: !aprobado
-        }
-
+        const payload = { alumno_id: selectedAlumno.id, clase_id: selectedMateria.id, cuatrimestre: cuatrimestreActual, anio: new Date().getFullYear(), criterios_notas: notas, observaciones_docente: observaciones, nota_final: notaFinal, aprobado: aprobado, requiere_recuperatorio: !aprobado }
         const response = await guardarEvaluacionAction(payload)
-        if (response.success) {
-            toast.success('Guardado')
-            setEvalModalOpen(false)
-            cargarAlumnos(selectedMateria)
-            mutate()
-        }
+        if (response.success) { toast.success('Guardado'); setEvalModalOpen(false); cargarAlumnos(selectedMateria); mutate() }
         setGuardandoEval(false)
     }
 
@@ -315,26 +329,22 @@ function LaLigaContent() {
         setSelectedMateria(materia)
         setLoadingAlumnos(true)
         try {
-            const { data: perfiles } = await supabase.from('profiles').select('id, nombre, apellido, email, rol, nivel_liga').eq('rol', 'alumno').eq('nivel_liga', materia.liga_nivel)
-            const alumnosReales = perfiles ? perfiles.filter((p: any) => p.nombre && p.nombre.trim() !== '') : []
+            const { data: perfiles } = await supabase.from('profiles').select('id, nombre_completo, email, rol, nivel_liga').eq('rol', 'alumno').eq('nivel_liga', materia.liga_nivel)
+            const alumnosReales = perfiles ? perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '') : []
             const cuatrimestreActual = '2026-1'
             const { data: evaluaciones } = await supabase.from('liga_evaluaciones').select('alumno_id, nota_final, aprobado').eq('clase_id', materia.id).eq('cuatrimestre', cuatrimestreActual)
-
             const alumnosMapeados = alumnosReales.map((perfil: any) => {
                 const evalExistente = evaluaciones?.find((e: any) => e.alumno_id === perfil.id)
                 return { ...perfil, evaluacion: evalExistente || null }
             })
             setAlumnosList(alumnosMapeados)
-        } finally {
-            setLoadingAlumnos(false)
-        }
+        } finally { setLoadingAlumnos(false) }
     }
 
     const abrirModalEvaluacion = async (alumno: any) => {
         setSelectedAlumno(alumno)
         setObservaciones('')
         const notasIniciales: Record<string, number> = {}
-
         if (alumno.evaluacion) {
             const { data: evalCompleta } = await supabase.from('liga_evaluaciones').select('criterios_notas, observaciones_docente').eq('alumno_id', alumno.id).eq('clase_id', selectedMateria.id).single()
             if (evalCompleta) {
@@ -344,7 +354,6 @@ function LaLigaContent() {
                 return
             }
         }
-
         CRITERIOS_EVALUACION.forEach(crit => notasIniciales[crit] = 0)
         setNotas(notasIniciales)
         setEvalModalOpen(true)
@@ -404,9 +413,14 @@ function LaLigaContent() {
                                 <Megaphone size={14} className="inline mr-2 -mt-1" /> Comunicados
                             </button>
                             {canManage && (
-                                <button onClick={() => setAdminTab('gestion')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'gestion' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
-                                    <UserCog size={14} className="inline mr-2 -mt-1" /> Padrón de Alumnos
-                                </button>
+                                <>
+                                    <button onClick={() => setAdminTab('gestion')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'gestion' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                                        <UserCog size={14} className="inline mr-2 -mt-1" /> Padrón
+                                    </button>
+                                    <button onClick={() => setAdminTab('precios')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'precios' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                                        <Settings2 size={14} className="inline mr-2 -mt-1" /> Precios Cuotas
+                                    </button>
+                                </>
                             )}
                         </div>
                     )}
@@ -430,28 +444,77 @@ function LaLigaContent() {
                     </div>
                 )}
 
-                {/* --- VISTA GESTIÓN --- */}
+                {canManage && adminTab === 'precios' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-bottom-4">
+                        <div className="bg-[#09090b] border border-white/5 rounded-3xl p-8 shadow-xl">
+                            <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-8">
+                                <Settings2 className="text-[#D4E655]" /> Configurar Aranceles
+                            </h3>
+
+                            <div className="space-y-6">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Cuota Liga Nivel 1 ($)</label>
+                                    <div className="relative">
+                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                        <input type="number" value={preciosEdit['cuota_liga_1'] || ''} onChange={e => setPreciosEdit({ ...preciosEdit, cuota_liga_1: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-2xl py-4 pl-10 pr-4 text-white font-black text-lg outline-none focus:border-[#D4E655] transition-all" />
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Cuota Liga Nivel 2 ($)</label>
+                                    <div className="relative">
+                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                        <input type="number" value={preciosEdit['cuota_liga_2'] || ''} onChange={e => setPreciosEdit({ ...preciosEdit, cuota_liga_2: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-2xl py-4 pl-10 pr-4 text-white font-black text-lg outline-none focus:border-[#D4E655] transition-all" />
+                                    </div>
+                                </div>
+                                <button onClick={handleGuardarPrecios} disabled={guardandoPrecios} className="w-full bg-[#D4E655] text-black font-black uppercase py-5 rounded-2xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-[#D4E655]/10 mt-4">
+                                    {guardandoPrecios ? <Loader2 className="animate-spin" /> : <><Save size={18} /> Actualizar Precios</>}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="bg-[#111] border border-white/5 rounded-3xl p-8 flex flex-col justify-center text-center">
+                            <TrendingUp className="text-gray-700 w-16 h-16 mx-auto mb-4" />
+                            <h4 className="text-white font-black uppercase text-sm mb-2">Información de Cobro</h4>
+                            <p className="text-gray-500 text-xs leading-relaxed max-w-xs mx-auto">
+                                Estos valores se aplican automáticamente como precio base al alumno. El sistema luego calculará el porcentaje de beca individual (si el alumno lo tiene) antes de efectuar el cobro.
+                            </p>
+                        </div>
+                    </div>
+                )}
+
                 {canManage && adminTab === 'gestion' && (
                     <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl animate-in fade-in">
-                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-6 border-b border-white/5">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-6 border-b border-white/5">
                             <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2"><Users size={24} className="text-[#D4E655]" /> Padrón de Alumnos</h3>
                             <div className="relative w-full md:w-72">
                                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                                 <input type="text" placeholder="Buscar..." value={searchStudent} onChange={(e) => setSearchStudent(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white text-xs font-bold outline-none focus:border-[#D4E655]" />
                             </div>
                         </div>
+
+                        {/* 🚀 BOTONES DE FILTRO DE NIVEL */}
+                        <div className="flex gap-2 mb-6 overflow-x-auto pb-2 custom-scrollbar">
+                            <button onClick={() => setLevelFilter('todos')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all whitespace-nowrap ${levelFilter === 'todos' ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>Todos</button>
+                            <button onClick={() => setLevelFilter('1')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all whitespace-nowrap ${levelFilter === '1' ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>Nivel 1</button>
+                            <button onClick={() => setLevelFilter('2')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all whitespace-nowrap ${levelFilter === '2' ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>Nivel 2</button>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {filteredStudents.map(alumno => (
+                            {filteredStudents.map((alumno: any) => (
                                 <div key={alumno.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex flex-col justify-between gap-4 group hover:border-white/20 transition-all">
                                     <div>
-                                        <h4 className="font-black text-white text-sm capitalize truncate">{alumno.nombre} {alumno.apellido}</h4>
+                                        <h4 className="font-black text-white text-sm capitalize truncate">{alumno.nombre_completo}</h4>
                                         <span className="mt-1 inline-flex items-center gap-1 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
                                             <Star size={10} className="fill-[#D4E655]/50" /> Nivel {alumno.nivel_liga || '-'}
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-2 border-t border-white/5 pt-3">
-                                        <button onClick={() => cambiarNivelLiga(alumno.id, 1)} className="flex-1 bg-white/5 hover:bg-white/10 text-gray-400 py-2 rounded-lg text-[10px] font-black uppercase transition-colors">Nivel 1</button>
-                                        <button onClick={() => cambiarNivelLiga(alumno.id, 2)} className="flex-1 bg-white/5 hover:bg-white/10 text-gray-400 py-2 rounded-lg text-[10px] font-black uppercase transition-colors">Nivel 2</button>
+                                        <button onClick={() => cambiarNivelLiga(alumno.id, 1)} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase transition-colors ${alumno.nivel_liga == 1 ? 'bg-white/20 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>Nivel 1</button>
+                                        <button onClick={() => cambiarNivelLiga(alumno.id, 2)} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase transition-colors ${alumno.nivel_liga == 2 ? 'bg-white/20 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>Nivel 2</button>
+
+                                        <button onClick={() => { setSelectedAlumnoBeca(alumno); setBecaValue(alumno.porcentaje_beca || 0); setBecaModalOpen(true); }} className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1 transition-colors ${alumno.porcentaje_beca > 0 ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-black' : 'bg-white/5 text-gray-400 hover:bg-emerald-500 hover:text-black'}`}>
+                                            <Percent size={12} /> {alumno.porcentaje_beca > 0 ? `${alumno.porcentaje_beca}%` : ''}
+                                        </button>
+
                                         <button onClick={() => cambiarNivelLiga(alumno.id, null)} className="shrink-0 bg-red-500/10 hover:bg-red-500 text-red-500 px-3 py-2 rounded-lg text-[10px] font-black"><UserMinus size={14} /></button>
                                     </div>
                                 </div>
@@ -480,7 +543,7 @@ function LaLigaContent() {
                                 {avisoForm.tipo_destino === 'individual' && (
                                     <select value={avisoForm.alumno_id} onChange={e => setAvisoForm({ ...avisoForm, alumno_id: e.target.value })} className="w-full bg-[#111] border border-[#D4E655]/50 rounded-xl p-3 text-white text-sm">
                                         <option value="">Elegí un alumno...</option>
-                                        {allStudents.map(a => <option key={a.id} value={a.id}>{a.nombre} {a.apellido}</option>)}
+                                        {allStudents.map((a: any) => <option key={a.id} value={a.id}>{a.nombre_completo}</option>)}
                                     </select>
                                 )}
                                 <input type="text" required placeholder="Título..." value={avisoForm.titulo} onChange={e => setAvisoForm({ ...avisoForm, titulo: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none" />
@@ -530,10 +593,10 @@ function LaLigaContent() {
                         <div className="lg:col-span-8 bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[400px]">
                             {selectedMateria ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {alumnosList.map(alumno => (
+                                    {alumnosList.map((alumno: any) => (
                                         <div key={alumno.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex items-center justify-between">
                                             <div>
-                                                <h4 className="font-bold text-white text-sm capitalize">{alumno.nombre} {alumno.apellido}</h4>
+                                                <h4 className="font-bold text-white text-sm capitalize">{alumno.nombre_completo}</h4>
                                                 {alumno.evaluacion ? <span className="text-[10px] font-black uppercase text-green-500 tracking-widest">Nota: {alumno.evaluacion.nota_final}</span> : <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Pendiente</span>}
                                             </div>
                                             <button onClick={() => abrirModalEvaluacion(alumno)} className="bg-white/5 hover:bg-[#D4E655] text-white hover:text-black w-10 h-10 rounded-lg flex items-center justify-center transition-all shrink-0"><ClipboardEdit size={16} /></button>
@@ -586,6 +649,38 @@ function LaLigaContent() {
                 )}
             </div>
 
+            {/* MODAL ASIGNAR BECA */}
+            {canManage && becaModalOpen && selectedAlumnoBeca && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setBecaModalOpen(false)}>
+                    <div className="w-full max-w-sm bg-[#09090b] border border-white/10 rounded-2xl flex flex-col overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 border-b border-white/5 bg-[#111] flex justify-between items-center shrink-0">
+                            <div>
+                                <h3 className="text-xl font-black uppercase text-white tracking-tighter leading-none">Porcentaje Beca</h3>
+                                <p className="text-[#D4E655] text-xs font-bold uppercase mt-1">{selectedAlumnoBeca.nombre_completo}</p>
+                            </div>
+                            <button onClick={() => setBecaModalOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
+                        </div>
+                        <div className="p-6">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-2">Descuento aplicado (%)</label>
+                            <input type="number" min="0" max="100" value={becaValue} onChange={e => setBecaValue(Number(e.target.value))} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm font-black outline-none focus:border-[#D4E655] text-center" />
+                            <p className="text-[9px] text-gray-500 mt-3 text-center leading-relaxed">Este descuento se aplicará automáticamente a la cuota de La Liga cuando se genere el link de pago.</p>
+                        </div>
+                        <div className="p-4 border-t border-white/5 bg-[#111] flex justify-end gap-3 shrink-0">
+                            <button onClick={() => setBecaModalOpen(false)} className="px-6 py-3 font-bold text-gray-400 text-xs uppercase">Cancelar</button>
+                            <button onClick={async () => {
+                                setGuardandoBeca(true)
+                                const res = await asignarBecaAction(selectedAlumnoBeca.id, becaValue)
+                                if (res.success) { toast.success('Beca actualizada'); mutate(); setBecaModalOpen(false) }
+                                else { toast.error('Error al guardar') }
+                                setGuardandoBeca(false)
+                            }} disabled={guardandoBeca} className="px-8 py-3 bg-[#D4E655] text-black font-black uppercase rounded-xl text-xs flex items-center gap-2">
+                                {guardandoBeca ? <Loader2 size={14} className="animate-spin" /> : 'Guardar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* MODAL EVALUACIÓN */}
             {isStaff && evalModalOpen && selectedAlumno && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setEvalModalOpen(false)}>
@@ -593,7 +688,7 @@ function LaLigaContent() {
                         <div className="p-6 border-b border-white/5 bg-[#111] flex justify-between items-center shrink-0">
                             <div>
                                 <h3 className="text-2xl font-black uppercase text-white tracking-tighter leading-none">Evaluación Cuatrimestral</h3>
-                                <p className="text-[#D4E655] text-xs font-bold uppercase mt-1">{selectedAlumno.nombre} {selectedAlumno.apellido}</p>
+                                <p className="text-[#D4E655] text-xs font-bold uppercase mt-1">{selectedAlumno.nombre_completo}</p>
                             </div>
                             <div className="text-right">
                                 <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest block">Promedio</span>
@@ -668,7 +763,6 @@ function LaLigaContent() {
     )
 }
 
-// 🚀 EL ENVOLTORIO PROTECTOR
 export default function LaLigaPage() {
     return (
         <Suspense fallback={
