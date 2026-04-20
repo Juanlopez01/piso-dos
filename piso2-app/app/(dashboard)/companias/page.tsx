@@ -4,16 +4,21 @@ import { createClient } from '@/utils/supabase/client'
 import { useEffect, useState } from 'react'
 import {
     Loader2, UsersRound, Plus, Shield, X, UserPlus,
-    Trash2, User, Search, MapPin, ChevronRight, Lock
+    Trash2, User, Search, MapPin, ChevronRight, Lock,
+    Settings2, Coins, TrendingUp, Save // 🚀 Importaciones nuevas
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
+import { useCash } from '@/context/CashContext' // Necesitamos el userId para MP
 
 import {
     crearCompaniaAction,
     toggleMiembroCompaniaAction,
     eliminarCompaniaAction
 } from '@/app/actions/companias'
+
+// 🚀 Traemos la acción global para guardar precios
+import { actualizarPrecioGlobalAction } from '@/app/actions/liga'
 
 type Compania = {
     id: string
@@ -35,19 +40,25 @@ export default function CompaniasPage() {
     const [loading, setLoading] = useState(true)
     const [userRole, setUserRole] = useState<string>('alumno')
     const [userId, setUserId] = useState<string>('')
+    const { userId: contextUserId } = useCash() // Para MP
 
     const [companias, setCompanias] = useState<Compania[]>([])
-    const [profesores, setProfesores] = useState<any[]>([]) // 🚀 Antes era coordinadores
+    const [profesores, setProfesores] = useState<any[]>([])
     const [allAlumnos, setAllAlumnos] = useState<Alumno[]>([])
+    const [porcentajeBeca, setPorcentajeBeca] = useState<number>(0) // 🚀 Para el alumno actual
 
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+    const [isConfigPreciosOpen, setIsConfigPreciosOpen] = useState(false) // 🚀 Modal precios
     const [selectedCompania, setSelectedCompania] = useState<Compania | null>(null)
     const [miembrosActuales, setMiembrosActuales] = useState<string[]>([])
     const [searchAlumno, setSearchAlumno] = useState('')
-    const [searchProf, setSearchProf] = useState('') // 🚀 Para buscar profes
+    const [searchProf, setSearchProf] = useState('')
     const [procesando, setProcesando] = useState(false)
 
+    // Precios y Formularios
     const [form, setForm] = useState({ nombre: '', descripcion: '', coordinador_id: '' })
+    const [preciosEdit, setPreciosEdit] = useState<Record<string, string>>({})
+    const [preciosCompania, setPreciosCompania] = useState<Record<string, number>>({})
 
     useEffect(() => {
         fetchData()
@@ -62,16 +73,15 @@ export default function CompaniasPage() {
         if (!user) return
         setUserId(user.id)
 
-        const { data: profile } = await supabase.from('profiles').select('rol').eq('id', user.id).single()
+        // Traemos el rol y la beca
+        const { data: profile } = await supabase.from('profiles').select('rol, porcentaje_beca').eq('id', user.id).single()
         const rol = profile?.rol || 'alumno'
         setUserRole(rol)
+        setPorcentajeBeca(profile?.porcentaje_beca || 0)
 
         let queryCompanias = supabase.from('companias').select('*, coordinador:profiles!coordinador_id(nombre_completo)')
 
-        // 🚀 NUEVA LÓGICA DE ROLES
         if (rol === 'profesor') {
-            // El profe solo ve la lista general si es coordinador de alguna. 
-            // Si solo da clases sueltas, no necesita ver este panel (va por su agenda).
             queryCompanias = queryCompanias.eq('coordinador_id', user.id)
         } else if (rol === 'alumno') {
             const { data: misCompanias } = await supabase.from('perfiles_companias').select('compania_id').eq('perfil_id', user.id)
@@ -82,7 +92,6 @@ export default function CompaniasPage() {
                 queryCompanias = queryCompanias.eq('id', '00000000-0000-0000-0000-000000000000')
             }
         }
-        // Admin y Recepción pasan directo (ven todas)
 
         const { data: dataCompanias } = await queryCompanias
 
@@ -94,38 +103,103 @@ export default function CompaniasPage() {
             setCompanias(companiasConConteo)
         }
 
-        // 🚀 CARGAMOS PROFESORES (para que Admin asigne coordinadores)
+        // CARGAMOS PROFESORES Y ALUMNOS
         if (['admin', 'recepcion'].includes(rol)) {
-            const { data: profes } = await supabase
-                .from('profiles')
-                .select('id, nombre_completo')
-                .eq('rol', 'profesor') // Ahora buscamos profes
-                .order('nombre_completo')
+            const { data: profes } = await supabase.from('profiles').select('id, nombre_completo').eq('rol', 'profesor').order('nombre_completo')
             if (profes) setProfesores(profes)
 
             const { data: alumnos } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'alumno').order('nombre_completo')
             if (alumnos) setAllAlumnos(alumnos)
         }
 
-        // Si el usuario es profe y coordinador de alguna, también necesita la lista de alumnos
         if (rol === 'profesor' && dataCompanias && dataCompanias.length > 0) {
             const { data: alumnos } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'alumno').order('nombre_completo')
             if (alumnos) setAllAlumnos(alumnos)
         }
 
+        // 🚀 CARGAMOS LOS PRECIOS GLOBALES (Si hay compañías)
+        if (dataCompanias && dataCompanias.length > 0) {
+            const clavesCompanias = dataCompanias.map((c: any) => `cuota_compania_${c.id}`)
+            const { data: config } = await supabase.from('configuraciones').select('*').in('clave', clavesCompanias)
+
+            if (config) {
+                const mapPrecios: any = {}
+                config.forEach((p: any) => mapPrecios[p.clave] = p.valor)
+                setPreciosCompania(mapPrecios)
+            }
+        }
+
         setLoading(false)
+    }
+
+    // 🚀 ACCIÓN: Guardar los precios de las compañías
+    const handleGuardarPrecios = async () => {
+        setProcesando(true)
+        try {
+            let huboError = false;
+            for (const compania of companias) {
+                const clave = `cuota_compania_${compania.id}`
+                const valor = preciosEdit[clave]
+                if (valor !== undefined) {
+                    const res = await actualizarPrecioGlobalAction(clave, Number(valor))
+                    if (!res.success) huboError = true;
+                }
+            }
+            if (!huboError) {
+                toast.success("Precios actualizados")
+                setIsConfigPreciosOpen(false)
+                fetchData()
+            } else {
+                toast.error("Error al guardar algunos precios")
+            }
+        } catch (e) {
+            toast.error("Error de conexión al guardar precios")
+        } finally {
+            setProcesando(false)
+        }
+    }
+
+    // 🚀 ACCIÓN: Generar Link MP
+    const generarLinkPagoCompania = async (compania: Compania) => {
+        setProcesando(true)
+        try {
+            const mesActual = new Date().getMonth() + 1
+            const anioActual = new Date().getFullYear()
+
+            const clavePrecio = `cuota_compania_${compania.id}`
+            const precioBase = preciosCompania[clavePrecio] || 15000 // Por defecto si no configuraste
+
+            // Restamos la beca que el admin le haya puesto a este alumno en el padrón general
+            const precioFinal = precioBase - (precioBase * porcentajeBeca / 100)
+
+            const res = await fetch('/api/mercadopago/preference', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    titulo: `Cuota ${compania.nombre} - Mes ${mesActual}/${anioActual}`,
+                    precio: precioFinal,
+                    userId: contextUserId || userId,
+                    tipo_pago: 'cuota_compania',
+                    productoId: compania.id, // Pasamos el ID para registrar de qué compañía es
+                    mes: mesActual,
+                    anio: anioActual
+                })
+            })
+
+            const resData = await res.json()
+            if (resData.url) window.location.href = resData.url
+            else throw new Error('No se pudo generar el link')
+        } catch (err) {
+            toast.error('Error al conectar con Mercado Pago.')
+        } finally {
+            setProcesando(false)
+        }
     }
 
     const handleCrearCompania = async (e: React.FormEvent) => {
         e.preventDefault()
         setProcesando(true)
-
-        const payload = {
-            nombre: form.nombre,
-            descripcion: form.descripcion,
-            coordinador_id: form.coordinador_id || userId // Si no elige, es él mismo
-        }
-
+        const payload = { nombre: form.nombre, descripcion: form.descripcion, coordinador_id: form.coordinador_id || userId }
         const response = await crearCompaniaAction(payload)
 
         if (response.success) {
@@ -137,22 +211,16 @@ export default function CompaniasPage() {
         } else {
             toast.error(response.error || 'Error al crear la compañía')
         }
-
         setProcesando(false)
     }
 
     const handleEliminarCompania = async (companiaId: string, nombre: string) => {
-        if (!window.confirm(`¿Estás seguro de que querés eliminar la compañía "${nombre}"? Toda su información se perderá.`)) return
-
+        if (!window.confirm(`¿Seguro que querés eliminar la compañía "${nombre}"?`)) return
         setProcesando(true)
         const response = await eliminarCompaniaAction(companiaId)
 
-        if (response.success) {
-            toast.success('Compañía eliminada correctamente')
-            fetchData()
-        } else {
-            toast.error(response.error || 'Error al eliminar')
-        }
+        if (response.success) { toast.success('Eliminada'); fetchData() }
+        else { toast.error(response.error || 'Error al eliminar') }
         setProcesando(false)
     }
 
@@ -165,7 +233,6 @@ export default function CompaniasPage() {
 
     const toggleMiembro = async (alumnoId: string) => {
         if (!selectedCompania) return
-
         const esMiembro = miembrosActuales.includes(alumnoId)
         const accion = esMiembro ? 'remover' : 'agregar'
 
@@ -178,19 +245,12 @@ export default function CompaniasPage() {
         }
 
         const response = await toggleMiembroCompaniaAction(selectedCompania.id, alumnoId, accion)
-
-        if (response.success) {
-            toast.success(accion === 'agregar' ? 'Alumno agregado al grupo' : 'Alumno removido del grupo')
-        } else {
-            toast.error(response.error || 'Error al modificar miembros')
-            fetchData()
-        }
+        if (response.success) { toast.success(accion === 'agregar' ? 'Alumno agregado' : 'Alumno removido') }
+        else { toast.error(response.error || 'Error'); fetchData() }
     }
 
     if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
-    // 🚀 BLINDAJE VISUAL: ¿Quién ve el botón "Gestionar Alumnos"?
-    // Admin, Recepción, o el Profesor que es el Coordinador de esa compañía.
     const puedeGestionarAlumnos = (companiaCoordinadorId: string) => {
         return ['admin', 'recepcion'].includes(userRole) || (userRole === 'profesor' && userId === companiaCoordinadorId)
     }
@@ -199,7 +259,6 @@ export default function CompaniasPage() {
         <div className="min-h-screen bg-[#050505] text-white pb-24 selection:bg-[#D4E655] selection:text-black animate-in fade-in">
             <Toaster position="top-center" richColors theme="dark" />
 
-            {/* HEADER COMPARTIDO */}
             <div className="bg-[#111] border-b border-white/5 pt-8 pb-0 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
                 <div className="max-w-7xl mx-auto px-4 md:px-8">
@@ -213,10 +272,22 @@ export default function CompaniasPage() {
                                 Compañías {['admin', 'recepcion', 'profesor'].includes(userRole) && <span className="text-gray-500 text-2xl">/ Staff</span>}
                             </h1>
                         </div>
+
+                        {/* 🚀 BOTONES DE ACCIÓN PARA ADMIN */}
                         {['admin', 'recepcion'].includes(userRole) && (
-                            <button onClick={() => setIsCreateModalOpen(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-blue-500 transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(37,99,235,0.3)]">
-                                <Plus size={16} /> Crear Grupo
-                            </button>
+                            <div className="flex gap-2">
+                                <button onClick={() => {
+                                    const obj: any = {}
+                                    companias.forEach(c => obj[`cuota_compania_${c.id}`] = preciosCompania[`cuota_compania_${c.id}`] || 15000)
+                                    setPreciosEdit(obj)
+                                    setIsConfigPreciosOpen(true)
+                                }} className="bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl font-black uppercase text-xs hover:bg-white/10 transition-all flex items-center gap-2">
+                                    <Settings2 size={16} /> Precios
+                                </button>
+                                <button onClick={() => setIsCreateModalOpen(true)} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-blue-500 transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(37,99,235,0.3)]">
+                                    <Plus size={16} /> Crear Grupo
+                                </button>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -224,7 +295,6 @@ export default function CompaniasPage() {
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
 
-                {/* VISTA SIN COMPAÑÍA (Alumnos o Profes que no coordinan nada) */}
                 {!['admin', 'recepcion'].includes(userRole) && companias.length === 0 && (
                     <div className="min-h-[400px] flex flex-col items-center justify-center relative overflow-hidden">
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-blue-500/5 rounded-full blur-[100px] pointer-events-none" />
@@ -239,23 +309,12 @@ export default function CompaniasPage() {
                     </div>
                 )}
 
-                {/* GRILLA DE COMPAÑÍAS */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {companias.map((compania) => (
                         <div key={compania.id} className="bg-[#09090b] border border-white/5 rounded-3xl overflow-hidden flex flex-col transition-all group hover:border-blue-500/30 hover:shadow-[0_0_30px_rgba(37,99,235,0.1)] relative">
                             {userRole === 'admin' && (
                                 <div className="absolute top-4 right-4 z-20">
-                                    <button
-                                        onClick={(e) => {
-                                            e.preventDefault()
-                                            handleEliminarCompania(compania.id, compania.nombre)
-                                        }}
-                                        disabled={procesando}
-                                        className="p-2 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-full transition-colors border border-red-500/20 shadow-lg"
-                                        title="Eliminar Compañía"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
+                                    <button onClick={(e) => { e.preventDefault(); handleEliminarCompania(compania.id, compania.nombre) }} disabled={procesando} className="p-2 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-full transition-colors border border-red-500/20 shadow-lg" title="Eliminar Compañía"><Trash2 size={16} /></button>
                                 </div>
                             )}
                             <div className="p-6 border-b border-white/5 relative bg-gradient-to-br from-blue-500/10 to-transparent">
@@ -266,7 +325,6 @@ export default function CompaniasPage() {
 
                             <div className="p-6 flex-1 flex flex-col">
                                 <p className="text-sm text-gray-400 leading-relaxed mb-6 italic">"{compania.descripcion || 'Sin descripción'}"</p>
-
                                 <div className="mt-auto flex items-center justify-between pt-4 border-t border-white/5">
                                     <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-widest">
                                         <UsersRound size={16} /> {compania.miembros_count} Miembros
@@ -275,18 +333,19 @@ export default function CompaniasPage() {
                             </div>
 
                             <div className="p-5 bg-[#111] border-t border-white/5 flex flex-col gap-3">
-                                <Link
-                                    href={`/companias/${compania.id}`}
-                                    className="w-full bg-blue-600 text-white font-black uppercase py-3.5 rounded-xl hover:bg-blue-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg"
-                                >
+                                <Link href={`/companias/${compania.id}`} className="w-full bg-blue-600 text-white font-black uppercase py-3.5 rounded-xl hover:bg-blue-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg">
                                     Entrar al Espacio <ChevronRight size={16} />
                                 </Link>
 
+                                {/* 🚀 BOTÓN DE PAGO PARA ALUMNOS */}
+                                {userRole === 'alumno' && (
+                                    <button onClick={() => generarLinkPagoCompania(compania)} disabled={procesando} className="w-full bg-white/5 border border-white/10 text-white font-black uppercase py-3 rounded-xl hover:bg-white hover:text-black transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                        {procesando ? <Loader2 size={14} className="animate-spin" /> : <><Coins size={14} /> Abonar Cuota</>}
+                                    </button>
+                                )}
+
                                 {puedeGestionarAlumnos(compania.coordinador_id) && (
-                                    <button
-                                        onClick={() => abrirGestionMiembros(compania)}
-                                        className="w-full bg-white/5 text-white border border-white/10 font-bold uppercase py-3 rounded-xl hover:bg-white/10 transition-all text-xs tracking-widest flex items-center justify-center gap-2"
-                                    >
+                                    <button onClick={() => abrirGestionMiembros(compania)} className="w-full bg-white/5 text-white border border-white/10 font-bold uppercase py-3 rounded-xl hover:bg-white/10 transition-all text-xs tracking-widest flex items-center justify-center gap-2">
                                         <UserPlus size={14} /> Gestionar Alumnos
                                     </button>
                                 )}
@@ -294,10 +353,40 @@ export default function CompaniasPage() {
                         </div>
                     ))}
                 </div>
-
             </div>
 
-            {/* MODAL: CREAR COMPAÑÍA (Admin/Recepción) */}
+            {/* 🚀 MODAL CONFIGURACIÓN DE PRECIOS */}
+            {isConfigPreciosOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative">
+                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/10">
+                            <h3 className="text-xl font-black text-white uppercase flex items-center gap-2"><Settings2 className="text-blue-500" /> Precios Compañías</h3>
+                            <button onClick={() => setIsConfigPreciosOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
+                        </div>
+                        <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                            {companias.map(compania => (
+                                <div key={compania.id} className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{compania.nombre} ($)</label>
+                                    <div className="relative">
+                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                        <input
+                                            type="number"
+                                            value={preciosEdit[`cuota_compania_${compania.id}`] || ''}
+                                            onChange={e => setPreciosEdit({ ...preciosEdit, [`cuota_compania_${compania.id}`]: e.target.value })}
+                                            className="w-full bg-[#111] border border-white/10 rounded-2xl py-3 pl-10 pr-4 text-white font-black outline-none focus:border-blue-500 transition-all"
+                                        />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <button onClick={handleGuardarPrecios} disabled={procesando} className="w-full bg-blue-600 text-white font-black uppercase py-4 rounded-xl hover:bg-blue-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-6 shadow-[0_0_15px_rgba(37,99,235,0.3)]">
+                            {procesando ? <Loader2 className="animate-spin" /> : <><Save size={18} /> Actualizar Precios</>}
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL: CREAR COMPAÑÍA */}
             {isCreateModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsCreateModalOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
@@ -313,7 +402,6 @@ export default function CompaniasPage() {
 
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Profesor Coordinador a cargo</label>
-
                                 {form.coordinador_id ? (
                                     <div className="flex items-center justify-between bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl transition-all">
                                         <div className="flex items-center gap-2">
@@ -342,15 +430,7 @@ export default function CompaniasPage() {
                                                 {profesores
                                                     .filter(p => p.nombre_completo?.toLowerCase().includes(searchProf.toLowerCase()))
                                                     .map(p => (
-                                                        <button
-                                                            key={p.id}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setForm({ ...form, coordinador_id: p.id })
-                                                                setSearchProf('')
-                                                            }}
-                                                            className="text-left px-4 py-3 hover:bg-blue-500/20 text-xs font-bold text-gray-300 hover:text-blue-400 uppercase transition-colors border-b border-white/5 last:border-0"
-                                                        >
+                                                        <button key={p.id} type="button" onClick={() => { setForm({ ...form, coordinador_id: p.id }); setSearchProf('') }} className="text-left px-4 py-3 hover:bg-blue-500/20 text-xs font-bold text-gray-300 hover:text-blue-400 uppercase transition-colors border-b border-white/5 last:border-0">
                                                             {p.nombre_completo}
                                                         </button>
                                                     ))
@@ -374,7 +454,7 @@ export default function CompaniasPage() {
                 </div>
             )}
 
-            {/* MODAL: GESTIONAR MIEMBROS (Staff) */}
+            {/* MODAL: GESTIONAR MIEMBROS */}
             {selectedCompania && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setSelectedCompania(null)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-xl rounded-3xl overflow-hidden shadow-2xl relative flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
@@ -391,13 +471,7 @@ export default function CompaniasPage() {
                         <div className="p-4 border-b border-white/5 shrink-0 bg-[#09090b]">
                             <div className="relative">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
-                                <input
-                                    type="text"
-                                    placeholder="Buscar alumno para agregar o quitar..."
-                                    value={searchAlumno}
-                                    onChange={(e) => setSearchAlumno(e.target.value)}
-                                    className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white text-sm outline-none focus:border-blue-500 transition-colors"
-                                />
+                                <input type="text" placeholder="Buscar alumno para agregar o quitar..." value={searchAlumno} onChange={(e) => setSearchAlumno(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white text-sm outline-none focus:border-blue-500 transition-colors" />
                             </div>
                         </div>
 
@@ -418,27 +492,17 @@ export default function CompaniasPage() {
                                                         <p className="text-[10px] text-gray-500 truncate">{alumno.email}</p>
                                                     </div>
                                                 </div>
-                                                <button
-                                                    onClick={() => toggleMiembro(alumno.id)}
-                                                    className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest shrink-0 transition-all ${esMiembro ? 'bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20' : 'bg-blue-500/10 text-blue-400 hover:bg-blue-500 hover:text-white border border-blue-500/20'}`}
-                                                >
+                                                <button onClick={() => toggleMiembro(alumno.id)} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest shrink-0 transition-all ${esMiembro ? 'bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20' : 'bg-blue-500/10 text-blue-400 hover:bg-blue-500 hover:text-white border border-blue-500/20'}`}>
                                                     {esMiembro ? 'Remover' : 'Agregar'}
                                                 </button>
                                             </div>
                                         )
                                     })}
-                                {searchAlumno === '' && miembrosActuales.length === 0 && (
-                                    <div className="text-center py-10 opacity-50">
-                                        <UsersRound size={32} className="mx-auto mb-3 text-gray-500" />
-                                        <p className="text-xs text-gray-400 font-bold uppercase">El grupo está vacío</p>
-                                    </div>
-                                )}
                             </div>
                         </div>
                     </div>
                 </div>
             )}
-
         </div>
     )
 }

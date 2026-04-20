@@ -16,9 +16,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "Falta el ID del alumno" }, { status: 400 })
         }
 
-        // 🚀 1. Instanciamos Supabase acá arriba para usarlo en todos lados
         const supabase = await createClient()
-
         let tituloFinal = ""
         let precioFinal = 0
 
@@ -31,51 +29,62 @@ export async function POST(request: Request) {
         // 1. ASIGNACIÓN DE PRECIOS Y METADATA
         // ==========================================
         if (tipo_pago === 'cuota_liga') {
-            tituloFinal = `Cuota La Liga - Mes ${mes}/${anio}`
+            // --- LÓGICA LA LIGA ---
+            const { data: perfil } = await supabase.from('profiles').select('nivel_liga, porcentaje_beca').eq('id', userId).single()
 
-            // 🚀 2. MAGIA: Buscamos nivel y beca reales en la BD
-            const { data: perfil, error: perfilError } = await supabase
-                .from('profiles')
-                .select('nivel_liga, porcentaje_beca')
-                .eq('id', userId)
-                .single()
-
-            if (perfilError || !perfil || !perfil.nivel_liga) {
+            if (!perfil || !perfil.nivel_liga) {
                 return NextResponse.json({ error: "El alumno no tiene un nivel de Liga válido." }, { status: 400 })
             }
 
-            // 🚀 3. Buscamos cuánto sale la cuota para ese nivel en las configuraciones
             const clavePrecio = `cuota_liga_${perfil.nivel_liga}`
-            const { data: config } = await supabase
-                .from('configuraciones')
-                .select('valor')
-                .eq('clave', clavePrecio)
-                .single()
+            const { data: config } = await supabase.from('configuraciones').select('valor').eq('clave', clavePrecio).single()
 
-            const precioBase = config?.valor ? Number(config.valor) : 15000 // Fallback por si no hay config
+            const precioBase = config?.valor ? Number(config.valor) : 15000
             const porcentajeBeca = perfil.porcentaje_beca ? Number(perfil.porcentaje_beca) : 0
 
-            // 🚀 4. Aplicamos el descuento y fijamos el precio final de forma 100% segura
             precioFinal = precioBase - (precioBase * porcentajeBeca / 100)
+            tituloFinal = `Cuota La Liga - Mes ${mes}/${anio}`
 
-            if (!precioFinal || precioFinal <= 0) {
-                return NextResponse.json({ error: "El precio calculado es inválido o negativo" }, { status: 400 })
-            }
+            if (!precioFinal || precioFinal <= 0) return NextResponse.json({ error: "El precio calculado es inválido" }, { status: 400 })
 
             metadataCustom.tipo_pago = 'cuota_liga'
             if (mes) metadataCustom.mes = String(mes)
             if (anio) metadataCustom.anio = String(anio)
+
+        } else if (tipo_pago === 'cuota_compania') {
+            // --- 🚀 NUEVA LÓGICA COMPAÑÍAS ---
+            // A. Buscamos el nombre de la compañía para el título
+            const { data: compania } = await supabase.from('companias').select('nombre').eq('id', productoId).single()
+
+            // B. Buscamos la beca del alumno
+            const { data: perfil } = await supabase.from('profiles').select('porcentaje_beca').eq('id', userId).single()
+
+            // C. Buscamos el precio de esta compañía en configuraciones
+            const clavePrecio = `cuota_compania_${productoId}`
+            const { data: config } = await supabase.from('configuraciones').select('valor').eq('clave', clavePrecio).single()
+
+            const precioBase = config?.valor ? Number(config.valor) : 15000
+            const porcentajeBeca = perfil?.porcentaje_beca ? Number(perfil.porcentaje_beca) : 0
+
+            // Aplicamos la matemática
+            precioFinal = precioBase - (precioBase * porcentajeBeca / 100)
+            tituloFinal = `Cuota ${compania?.nombre || 'Compañía'} - Mes ${mes}/${anio}`
+
+            if (!precioFinal || precioFinal <= 0) return NextResponse.json({ error: "El precio calculado es inválido" }, { status: 400 })
+
+            metadataCustom.tipo_pago = 'cuota_compania'
+            metadataCustom.producto_id = String(productoId)
+            if (mes) metadataCustom.mes = String(mes)
+            if (anio) metadataCustom.anio = String(anio)
+
         } else {
+            // --- LÓGICA CLASES/PACKS REGULARES ---
             if (!productoId) {
                 console.error("❌ MP Preference: Falta productoId para pago regular")
                 return NextResponse.json({ error: "Falta producto a comprar" }, { status: 400 })
             }
 
-            const { data: pack, error } = await supabase
-                .from('productos')
-                .select('nombre, precio, creditos, tipo_clase')
-                .eq('id', productoId)
-                .single()
+            const { data: pack, error } = await supabase.from('productos').select('nombre, precio, creditos, tipo_clase').eq('id', productoId).single()
 
             if (error || !pack) {
                 console.error("❌ MP Preference: Producto no existe en DB:", error?.message)
@@ -85,7 +94,7 @@ export async function POST(request: Request) {
             tituloFinal = pack.nombre
             precioFinal = pack.precio
 
-            metadataCustom.tipo_pago = String(tipo_pago) // Puede ser 'pack' o 'exclusivo'
+            metadataCustom.tipo_pago = String(tipo_pago)
             metadataCustom.producto_id = String(productoId)
             metadataCustom.tipo_clase = String(pack.tipo_clase)
             metadataCustom.creditos = String(pack.creditos)
@@ -97,7 +106,11 @@ export async function POST(request: Request) {
         // 2. CREAMOS LA PREFERENCIA DE MERCADO PAGO
         // ==========================================
         const preference = new Preference(client)
-        let rutaDestino = tipo_pago === 'cuota_liga' ? "/la-liga" : "/perfil"
+
+        // 🚀 Definimos a dónde vuelve el usuario según lo que pagó
+        let rutaDestino = "/perfil"
+        if (tipo_pago === 'cuota_liga') rutaDestino = "/la-liga"
+        else if (tipo_pago === 'cuota_compania') rutaDestino = "/companias"
 
         const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
 

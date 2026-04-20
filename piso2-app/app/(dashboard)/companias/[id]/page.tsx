@@ -7,7 +7,7 @@ import {
     Loader2, UsersRound, Shield, ArrowLeft,
     MessageSquare, Calendar, Users, Info,
     Clock, MapPin, User, ChevronRight, Image as ImageIcon,
-    Send, BellRing, X // 🚀 Agregados iconos para notifs individuales
+    Send, BellRing, X, Percent, CheckCircle2, AlertCircle, Coins
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
@@ -28,6 +28,8 @@ type Miembro = {
     id: string
     nombre_completo: string
     email: string
+    porcentaje_beca?: number
+    pago_compania_al_dia?: boolean
 }
 
 type ClaseCompania = {
@@ -58,10 +60,12 @@ export default function CompaniaDetallePage() {
     const [notifMessage, setNotifMessage] = useState('')
     const [sendingNotif, setSendingNotif] = useState(false)
 
-    // 🚀 Estados para Notificación Individual
+    // Estados para Notificación Individual
     const [isIndividualNotifOpen, setIsIndividualNotifOpen] = useState(false)
     const [selectedAlumno, setSelectedAlumno] = useState<Miembro | null>(null)
     const [individualMessage, setIndividualMessage] = useState('')
+
+    const [procesandoPago, setProcesandoPago] = useState(false)
 
     useEffect(() => {
         if (!loadingContext) {
@@ -96,7 +100,6 @@ export default function CompaniaDetallePage() {
         }
         setCompania(dataCompania)
 
-        // 🚀 VERIFICACIÓN DE PERMISOS ACTUALIZADA
         const esAdminORecep = ['admin', 'recepcion'].includes(userRole || '')
         const esProfeCoordinador = userRole === 'profesor' && dataCompania.coordinador_id === user.id
         const esProfeComun = userRole === 'profesor' && dataCompania.coordinador_id !== user.id
@@ -120,17 +123,43 @@ export default function CompaniaDetallePage() {
             return
         }
 
+        // 🚀 Traemos los miembros CON su beca (quitamos lo de la liga)
         const { data: dataMiembros } = await supabase
             .from('perfiles_companias')
-            .select('perfil:profiles(id, nombre_completo, email)')
+            .select('perfil:profiles(id, nombre_completo, email, porcentaje_beca)')
             .eq('compania_id', companiaId)
 
+        let deudaCompania = false
+
         if (dataMiembros) {
-            const miembrosLimpios = dataMiembros.map((m: any) => m.perfil)
-            miembrosLimpios.sort((a: { nombre_completo: string | null }, b: { nombre_completo: string | null }) =>
-                (a.nombre_completo || '').localeCompare(b.nombre_completo || '')
-            )
-            setMiembros(miembrosLimpios)
+            let miembrosData = dataMiembros.map((m: any) => m.perfil).filter(Boolean)
+
+            const mesActual = new Date().getMonth() + 1
+            const anioActual = new Date().getFullYear()
+
+            // Pagos exclusivos de ESTA Compañía
+            const { data: pagosCia } = await supabase
+                .from('companias_pagos')
+                .select('alumno_id')
+                .eq('compania_id', companiaId)
+                .eq('mes', mesActual)
+                .eq('anio', anioActual)
+
+            const pagosCiaIds = new Set(pagosCia?.map((p: any) => p.alumno_id) || [])
+
+            // Armamos el objeto final del miembro
+            const miembrosCompletos = miembrosData.map((m: any) => ({
+                ...m,
+                pago_compania_al_dia: pagosCiaIds.has(m.id)
+            }))
+
+            miembrosCompletos.sort((a: any, b: any) => (a.nombre_completo || '').localeCompare(b.nombre_completo || ''))
+            setMiembros(miembrosCompletos)
+
+            // VERIFICAMOS SI EL USUARIO ACTUAL DEBE ALGO EN ESTA COMPAÑÍA
+            if (userRole === 'alumno') {
+                deudaCompania = !pagosCiaIds.has(user.id)
+            }
         }
 
         const hoy = new Date().toISOString()
@@ -202,7 +231,6 @@ export default function CompaniaDetallePage() {
         }
     }
 
-    // 🚀 NUEVA FUNCIÓN: AVISO INDIVIDUAL
     const handleSendIndividualNotif = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!selectedAlumno) return
@@ -231,6 +259,36 @@ export default function CompaniaDetallePage() {
         }
     }
 
+    // Link de Pago Compañía
+    const generarLinkPagoCompania = async () => {
+        setProcesandoPago(true)
+        try {
+            const mesActual = new Date().getMonth() + 1
+            const anioActual = new Date().getFullYear()
+
+            const res = await fetch('/api/mercadopago/preference', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userId: userId,
+                    tipo_pago: 'cuota_compania',
+                    productoId: compania?.id,
+                    mes: mesActual,
+                    anio: anioActual,
+                    precio: 1 // El backend recalcula el precio real de forma segura
+                })
+            })
+
+            const resData = await res.json()
+            if (resData.url) window.location.href = resData.url
+            else throw new Error(resData.error || 'No se pudo generar el link')
+        } catch (err) {
+            toast.error('Error al conectar con Mercado Pago.')
+        } finally {
+            setProcesandoPago(false)
+        }
+    }
+
     const openIndividualModal = (alumno: Miembro) => {
         setSelectedAlumno(alumno)
         setIndividualMessage('')
@@ -243,8 +301,11 @@ export default function CompaniaDetallePage() {
 
     if (!compania) return null
 
-    // 🚀 ¿TIENE PODERES DE COORDINADOR?
     const hasCoordinatorPowers = ['admin', 'recepcion'].includes(userRole || '') || (userRole === 'profesor' && compania.coordinador_id === userId)
+
+    // Buscamos si el usuario actual debe la cuota de la compañía para mostrarle el cartel
+    const miPerfilInfo = miembros.find(m => m.id === userId)
+    const deboCompania = !miPerfilInfo?.pago_compania_al_dia && userRole === 'alumno'
 
     return (
         <div className="min-h-screen bg-[#050505] text-white pb-24 selection:bg-blue-500 selection:text-white animate-in fade-in">
@@ -303,8 +364,23 @@ export default function CompaniaDetallePage() {
                 </div>
             </div>
 
-            {/* CONTENIDO DE LAS PESTAÑAS */}
             <div className="max-w-4xl mx-auto px-4 md:px-8 py-8">
+
+                {/* 🚀 CARTEL DE DEUDA COMPAÑÍA (Solo visible para el alumno deudor) */}
+                {deboCompania && (
+                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                        <div className="flex items-start gap-3">
+                            <AlertCircle className="text-blue-500 shrink-0 mt-0.5" size={20} />
+                            <div>
+                                <h4 className="font-black text-blue-500 uppercase text-xs tracking-widest mb-1">Cuota de Compañía Pendiente</h4>
+                                <p className="text-gray-400 text-[10px] sm:text-xs">Aboná la cuota de este mes para mantener tu lugar en el grupo.</p>
+                            </div>
+                        </div>
+                        <button onClick={generarLinkPagoCompania} disabled={procesandoPago} className="shrink-0 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2">
+                            {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : <><Coins size={14} /> Pagar Cuota</>}
+                        </button>
+                    </div>
+                )}
 
                 {/* 1. PESTAÑA: MURO / AVISOS */}
                 {activeTab === 'muro' && (
@@ -417,32 +493,50 @@ export default function CompaniaDetallePage() {
                     </div>
                 )}
 
-                {/* 3. PESTAÑA: MIEMBROS */}
+                {/* 3. PESTAÑA: MIEMBROS (BLINDADA PARA ALUMNOS 🛡️) */}
                 {activeTab === 'miembros' && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {miembros.length > 0 ? (
                                 miembros.map((miembro) => (
-                                    <div key={miembro.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex items-center justify-between gap-4 hover:border-blue-500/30 transition-colors">
-                                        <div className="flex items-center gap-4 overflow-hidden">
-                                            <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 font-black text-lg uppercase shrink-0 border border-blue-500/20">
-                                                {miembro.nombre_completo?.[0] || '?'}
+                                    <div key={miembro.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex flex-col justify-between gap-3 hover:border-blue-500/30 transition-colors">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-4 overflow-hidden">
+                                                <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 font-black text-sm uppercase shrink-0 border border-blue-500/20">
+                                                    {miembro.nombre_completo?.[0] || '?'}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-bold text-white uppercase truncate">{miembro.nombre_completo}</p>
+                                                    {/* El email ahora es privado */}
+                                                    {hasCoordinatorPowers && <p className="text-[10px] text-gray-500 truncate">{miembro.email}</p>}
+                                                </div>
                                             </div>
-                                            <div className="min-w-0">
-                                                <p className="text-sm font-bold text-white uppercase truncate">{miembro.nombre_completo}</p>
-                                                <p className="text-[10px] text-gray-500 truncate">{miembro.email}</p>
-                                            </div>
+
+                                            {hasCoordinatorPowers && (
+                                                <button
+                                                    onClick={() => openIndividualModal(miembro)}
+                                                    className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-blue-600 rounded-xl transition-all"
+                                                    title={`Enviar aviso a ${miembro.nombre_completo}`}
+                                                >
+                                                    <BellRing size={14} />
+                                                </button>
+                                            )}
                                         </div>
 
-                                        {/* 🚀 BOTÓN AVISO INDIVIDUAL (Solo para Coordinadores) */}
+                                        {/* 🚀 Toda la info financiera y de becas ahora es privada y SOLO sobre la compañía */}
                                         {hasCoordinatorPowers && (
-                                            <button
-                                                onClick={() => openIndividualModal(miembro)}
-                                                className="p-3 bg-white/5 text-gray-400 hover:text-white hover:bg-blue-600 rounded-xl transition-all"
-                                                title={`Enviar aviso a ${miembro.nombre_completo}`}
-                                            >
-                                                <BellRing size={16} />
-                                            </button>
+                                            <div className="flex flex-wrap gap-2 pt-2 border-t border-white/5">
+                                                {(miembro.porcentaje_beca ?? 0) > 0 && (
+                                                    <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                        <Percent size={10} /> Beca {miembro.porcentaje_beca}%
+                                                    </span>
+                                                )}
+
+                                                <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${miembro.pago_compania_al_dia ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}>
+                                                    {miembro.pago_compania_al_dia ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
+                                                    Cía {miembro.pago_compania_al_dia ? 'Al Día' : 'Pendiente'}
+                                                </span>
+                                            </div>
                                         )}
                                     </div>
                                 ))
@@ -457,9 +551,7 @@ export default function CompaniaDetallePage() {
                 )}
             </div>
 
-            {/* ==============================================
-                MODAL: AVISO INDIVIDUAL (Solo Coordinador)
-            ============================================== */}
+            {/* MODAL: AVISO INDIVIDUAL */}
             {isIndividualNotifOpen && selectedAlumno && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsIndividualNotifOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>

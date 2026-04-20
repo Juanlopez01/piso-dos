@@ -124,6 +124,45 @@ export async function POST(request: Request) {
             }
 
             // ==========================================
+            // DESVÍO A.2: PAGO DE CUOTA DE COMPAÑÍA 🚀
+            // ==========================================
+            if (metadata.tipo_pago === 'cuota_compania') {
+                const { usuario_id, user_id, producto_id, mes, anio } = metadata;
+                const alumnoId = usuario_id || user_id;
+                const montoAbonado = payment.transaction_amount;
+
+                console.log(`[WEBHOOK COMPAÑIA] Cobrando Compañía ${producto_id} para Usuario: ${alumnoId}, Mes: ${mes}/${anio}`);
+
+                const { data: pagoExistenteCompania } = await supabase
+                    .from('companias_pagos')
+                    .select('id')
+                    .eq('alumno_id', alumnoId)
+                    .eq('compania_id', producto_id)
+                    .eq('mes', mes)
+                    .eq('anio', anio)
+                    .maybeSingle();
+
+                if (pagoExistenteCompania) {
+                    console.log("✅ [WEBHOOK COMPAÑIA] Esta cuota ya estaba paga.");
+                    return NextResponse.json({ message: 'Cuota de compañía ya pagada' }, { status: 200 });
+                }
+
+                const { error: errCompania } = await supabase.from('companias_pagos').insert({
+                    alumno_id: alumnoId,
+                    compania_id: producto_id,
+                    mes: Number(mes),
+                    anio: Number(anio),
+                    monto: montoAbonado,
+                    metodo_pago: 'mercadopago'
+                });
+
+                if (errCompania) throw errCompania;
+
+                console.log("🌟 [WEBHOOK COMPAÑIA] ¡Cuota de Compañía registrada con éxito!");
+                return NextResponse.json({ success: true }, { status: 200 });
+            }
+
+            // ==========================================
             // DESVÍO B: COMPRA DE PACK (Normal o Exclusivo)
             // ==========================================
             const { user_id, producto_id, cupon_id, tipo_clase, creditos, pase_referencia } = metadata;
@@ -150,10 +189,8 @@ export async function POST(request: Request) {
                 mp_payment_id: paymentIdToProcess.toString()
             });
 
-            // 3. 🚀 CARGA DE SALDO INTELIGENTE
+            // 3. CARGA DE SALDO INTELIGENTE
             if (String(tipo_clase) === 'exclusivo') {
-                // Si es exclusivo, insertamos/actualizamos en la tabla de pases
-                // Usamos un RPC o un UPSERT manual:
                 const { error: errPase } = await supabase.rpc('cargar_pase_exclusivo_manual', {
                     p_usuario_id: user_id,
                     p_referencia: pase_referencia,
@@ -161,7 +198,6 @@ export async function POST(request: Request) {
                 });
                 if (errPase) console.error("Error cargando pase exclusivo:", errPase);
             } else {
-                // Si es regular/especial, sumamos al perfil
                 const field = tipo_clase === 'regular' ? 'creditos_regulares' : 'creditos_especiales';
                 const { data: prof } = await supabase.from('profiles').select(field).eq('id', user_id).single();
                 await supabase.from('profiles').update({

@@ -215,3 +215,38 @@ export async function cobrarLigaAction(usuarioId: string, monto: number, metodoP
         return { success: false, error: error.message }
     }
 }
+export async function cobrarCompaniaAction(usuarioId: string, companiaId: string, monto: number, metodoPago: string) {
+    const supabase = await createClient()
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        const user = session.user
+
+        // Chequeamos que la caja esté abierta
+        const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user.id).eq('estado', 'abierta').maybeSingle()
+        if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
+
+        const hoy = new Date()
+        const payload = {
+            alumno_id: usuarioId,
+            compania_id: companiaId,
+            mes: hoy.getMonth() + 1,
+            anio: hoy.getFullYear(),
+            monto: monto,
+            metodo_pago: metodoPago,
+            turno_caja_id: turno.id
+        }
+
+        const { error } = await supabase.from('companias_pagos').insert(payload)
+        if (error) {
+            if (error.code === '23505') throw new Error('Este alumno ya abonó la cuota de esta compañía este mes.')
+            throw new Error(error.message)
+        }
+
+        revalidatePath('/usuarios')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
