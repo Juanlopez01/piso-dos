@@ -3,7 +3,7 @@ import { Home, Calendar as CalendarIcon, Users, Settings, Package, ShoppingBag, 
 export const menuItems = [
     // --- TOP: LOS 4 BOTONES DE ALUMNOS Y PROFES (Para el menú del celu) ---
     // Alumno 1
-    { name: 'Explorar', href: '/explorar', icon: Search, roles: ['admin', 'coordinador', 'alumno', 'visitante'] },
+    { name: 'Explorar', href: '/explorar', icon: Search, roles: ['admin', 'coordinador', 'alumno', 'visitante', 'recepcion'] },
     // Alumno 2 | Profe 1
     { name: 'Mi Perfil', href: '/perfil', icon: UserCircle, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno'] },
     // Alumno 3 | Profe 2

@@ -62,8 +62,8 @@ function MobileNavContent() {
         }
 
         if (userRole === 'recepcion') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Notificaciones', 'La Liga', 'Compañías'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Compañías'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Compañías'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Compañías'].includes(item.name)
         }
 
         return item.roles.includes(userRole || 'visitante')

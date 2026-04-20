@@ -27,7 +27,6 @@ const parseSafeDate = (dateStr: string | null | undefined) => {
 type ClaseInstancia = { id: string; inicio: string; fin: string; cupo_maximo: number; inscritos_count: number; ya_inscrito: boolean; estado: string; sala: { nombre: string; sede: { nombre: string } } }
 type ClaseAgrupada = { key_grupo: string; nombre: string; tipo_clase: string; imagen_url?: string | null; ritmo_id?: string | null; compania_id?: string | null; liga_nivel?: number | null; profesor: { nombre_completo: string }; instancias: ClaseInstancia[]; es_combinable: boolean }
 
-// 🚀 CAMBIO: Ahora "companias" es un array de strings (IDs)
 type CarteleraData = {
     perfil: { id: string, creditos_regulares: number, creditos_especiales: number, nivel_liga: number | null, companias: string[] } | null;
     clasesAgrupadas: ClaseAgrupada[];
@@ -41,13 +40,11 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
     if (uid) {
         await supabase.rpc('limpiar_creditos_vencidos')
 
-        // 1. Traemos el perfil base (donde está el nivel_liga)
         const { data: userProfile, error } = await supabase.from('profiles').select('*').eq('id', uid).single()
 
         if (error) {
             console.error("Error trayendo perfil del alumno:", error.message)
         } else {
-            // 2. 🚀 Traemos todas las compañías a las que pertenece desde la tabla relacional
             let companiasDelAlumno: string[] = []
             const { data: companiasData } = await supabase.from('perfiles_companias').select('compania_id').eq('perfil_id', uid)
 
@@ -55,7 +52,6 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
                 companiasDelAlumno = companiasData.map((c: any) => String(c.compania_id))
             }
 
-            // Armamos el perfil completo juntando ambas cosas
             profile = { ...userProfile, companias: companiasDelAlumno }
         }
 
@@ -118,7 +114,10 @@ export default function ExplorarClasesPage() {
     const { mutate: globalMutate } = useSWRConfig()
 
     const { userId, isLoading: contextLoading, userRole } = useCash()
-    const esStaff = ['admin', 'recepcion'].includes(userRole || '')
+
+    // 🚀 BLINDAJE DE STAFF (Admin, Recepción, Profe). Forzamos a minúscula por las dudas.
+    const safeRole = String(userRole || '').toLowerCase().trim();
+    const esStaff = ['admin', 'recepcion', 'profesor'].includes(safeRole);
 
     const { data, isLoading, mutate: mutateCartelera } = useSWR<CarteleraData>(
         !contextLoading ? ['cartelera', userId] : null,
@@ -129,15 +128,6 @@ export default function ExplorarClasesPage() {
     const clasesAgrupadas = data?.clasesAgrupadas || []
     const perfil = data?.perfil || null
     const pasesExclusivos = data?.pasesExclusivos || {}
-
-    useEffect(() => {
-        if (perfil && !esStaff) {
-            console.log("🕵️‍♂️ PERFIL DEL ALUMNO CARGADO:", {
-                NivelLiga: perfil.nivel_liga,
-                Companias: perfil.companias // 🚀 Ahora vemos la lista de compañías
-            });
-        }
-    }, [perfil, esStaff]);
 
     const [procesandoId, setProcesandoId] = useState<string | null>(null)
     const [selectedGrupo, setSelectedGrupo] = useState<ClaseAgrupada | null>(null)
@@ -178,15 +168,10 @@ export default function ExplorarClasesPage() {
             mensaje = 'Pedir Ingreso';
         } else if (tipo === 'compania') {
             esPrivada = true;
-            // 🚀 NUEVA LÓGICA: ¿El ID de esta clase está en la lista de compañías del alumno?
             if (perfil?.companias && grupo.compania_id != null) {
                 apto = perfil.companias.includes(String(grupo.compania_id));
             }
             mensaje = 'Pedir Ingreso';
-
-            if (!esStaff && selectedGrupo?.key_grupo === grupo.key_grupo) {
-                console.log(`[Compañía - ${grupo.nombre}] Tus Companias: [${perfil?.companias.join(', ')}] | Clase ID: ${grupo.compania_id} | Apto: ${apto}`);
-            }
         }
 
         return { esPrivada, apto, mensaje };
@@ -397,6 +382,7 @@ export default function ExplorarClasesPage() {
                                                     onClick={() => setSelectedGrupo(grupo)}
                                                     className={`w-full mt-2 py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all shadow-lg ${estadoPrivado.esPrivada && !estadoPrivado.apto && !esStaff ? 'bg-white/10 hover:bg-white/20 text-gray-300' : estilos.btn}`}
                                                 >
+                                                    {/* 🚀 ACÁ ES DONDE SE CONTROLA EL TEXTO DEL BOTÓN */}
                                                     {estadoPrivado.esPrivada && !estadoPrivado.apto && !esStaff ? 'Info / Ingreso' : 'Ver Fechas'} <ArrowRight size={16} />
                                                 </button>
                                             </div>
@@ -427,7 +413,6 @@ export default function ExplorarClasesPage() {
                                 const estilos = getEstilos(selectedGrupo.tipo_clase)
                                 const estadoPrivado = getEstadoPrivado(selectedGrupo)
 
-                                // Si es apto para el grupo, consideramos que ya está anotado
                                 const esAutoInscrito = estadoPrivado.esPrivada && estadoPrivado.apto;
 
                                 let tieneSaldo = false
@@ -455,6 +440,7 @@ export default function ExplorarClasesPage() {
                                         </div>
 
                                         <div className="w-full sm:w-auto">
+                                            {/* 🚀 ACÁ ES DONDE SE OCULTAN LOS BOTONES A LOS ADMINS Y RECEPCIÓN */}
                                             {esStaff ? (
                                                 <div className="w-full sm:w-32 py-2.5 bg-white/5 text-gray-400 border border-white/10 rounded-xl flex items-center justify-center text-[10px] font-black uppercase cursor-default">Modo Vista</div>
                                             ) : (esAutoInscrito || inst.ya_inscrito) ? (
@@ -479,7 +465,7 @@ export default function ExplorarClasesPage() {
                                 )
                             })}
 
-                            {!selectedGrupo.es_combinable && (
+                            {!selectedGrupo.es_combinable && !esStaff && (
                                 <div className="p-4 bg-white/5 border border-white/10 rounded-2xl flex items-center gap-3 mt-4">
                                     <ShieldCheck className="text-white/80" size={20} />
                                     <div>
