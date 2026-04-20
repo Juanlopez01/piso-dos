@@ -9,13 +9,15 @@ const client = new MercadoPagoConfig({
 export async function POST(request: Request) {
     try {
         const body = await request.json()
-        // 🚀 1. Agregamos 'precio' para atrapar el valor dinámico que manda la web
         const { userId, productoId, cuponId, tipo_pago, mes, anio, pase_referencia, precio } = body
 
         if (!userId) {
             console.error("❌ MP Preference: Falta userId en el request")
             return NextResponse.json({ error: "Falta el ID del alumno" }, { status: 400 })
         }
+
+        // 🚀 1. Instanciamos Supabase acá arriba para usarlo en todos lados
+        const supabase = await createClient()
 
         let tituloFinal = ""
         let precioFinal = 0
@@ -31,11 +33,33 @@ export async function POST(request: Request) {
         if (tipo_pago === 'cuota_liga') {
             tituloFinal = `Cuota La Liga - Mes ${mes}/${anio}`
 
-            // 🚀 2. Usamos el precio que calculamos automáticamente en el frontend (Base - Beca)
-            precioFinal = Number(precio)
+            // 🚀 2. MAGIA: Buscamos nivel y beca reales en la BD
+            const { data: perfil, error: perfilError } = await supabase
+                .from('profiles')
+                .select('nivel_liga, porcentaje_beca')
+                .eq('id', userId)
+                .single()
+
+            if (perfilError || !perfil || !perfil.nivel_liga) {
+                return NextResponse.json({ error: "El alumno no tiene un nivel de Liga válido." }, { status: 400 })
+            }
+
+            // 🚀 3. Buscamos cuánto sale la cuota para ese nivel en las configuraciones
+            const clavePrecio = `cuota_liga_${perfil.nivel_liga}`
+            const { data: config } = await supabase
+                .from('configuraciones')
+                .select('valor')
+                .eq('clave', clavePrecio)
+                .single()
+
+            const precioBase = config?.valor ? Number(config.valor) : 15000 // Fallback por si no hay config
+            const porcentajeBeca = perfil.porcentaje_beca ? Number(perfil.porcentaje_beca) : 0
+
+            // 🚀 4. Aplicamos el descuento y fijamos el precio final de forma 100% segura
+            precioFinal = precioBase - (precioBase * porcentajeBeca / 100)
 
             if (!precioFinal || precioFinal <= 0) {
-                return NextResponse.json({ error: "El precio calculado es inválido" }, { status: 400 })
+                return NextResponse.json({ error: "El precio calculado es inválido o negativo" }, { status: 400 })
             }
 
             metadataCustom.tipo_pago = 'cuota_liga'
@@ -47,7 +71,6 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: "Falta producto a comprar" }, { status: 400 })
             }
 
-            const supabase = await createClient()
             const { data: pack, error } = await supabase
                 .from('productos')
                 .select('nombre, precio, creditos, tipo_clase')
@@ -67,7 +90,6 @@ export async function POST(request: Request) {
             metadataCustom.tipo_clase = String(pack.tipo_clase)
             metadataCustom.creditos = String(pack.creditos)
             if (cuponId) metadataCustom.cupon_id = String(cuponId)
-            // 🚀 2. Si es exclusivo, le pegamos la llave a la metadata
             if (pase_referencia) metadataCustom.pase_referencia = String(pase_referencia)
         }
 

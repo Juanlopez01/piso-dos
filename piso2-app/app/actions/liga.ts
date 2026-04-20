@@ -77,12 +77,21 @@ export async function cambiarNivelLigaAction(alumnoId: string, nuevoNivel: numbe
     }
 }
 
-export async function actualizarPrecioGlobalAction(clave: string, nuevoValor: number) {
+export async function actualizarPrecioGlobalAction(clave: string, valor: number) {
     const supabase = await createClient()
-    const { error } = await supabase.from('configuraciones').upsert({ clave, valor: nuevoValor })
-    if (error) return { success: false, error: error.message }
-    revalidatePath('/usuarios')
-    return { success: true }
+    try {
+        // El onConflict es clave para que sepa que tiene que sobrescribir si ya existe
+        const { error } = await supabase
+            .from('configuraciones')
+            .upsert({ clave, valor }, { onConflict: 'clave' })
+
+        if (error) throw error;
+
+        return { success: true }
+    } catch (error: any) {
+        console.error("Error BD al actualizar precio:", error)
+        return { success: false, error: error.message }
+    }
 }
 
 export async function getPreciosLigaAction() {

@@ -122,7 +122,7 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
     let preciosLiga: any[] = []
     if (canManage) {
-        const { data: config } = await supabase.from('configuraciones').select('*').like('clave', 'cuota_liga_%')
+        const { data: config } = await supabase.from('configuraciones').select('*').in('clave', ['cuota_liga_1', 'cuota_liga_2'])
         preciosLiga = config || []
     }
 
@@ -231,13 +231,26 @@ function LaLigaContent() {
     const handleGuardarPrecios = async () => {
         setGuardandoPrecios(true)
         try {
-            for (const clave in preciosEdit) {
-                await actualizarPrecioGlobalAction(clave, Number(preciosEdit[clave]))
+            let huboError = false;
+
+            // Forzamos a que guarde específicamente estas dos claves
+            for (const clave of ['cuota_liga_1', 'cuota_liga_2']) {
+                const valor = preciosEdit[clave]
+                if (valor) {
+                    const res = await actualizarPrecioGlobalAction(clave, Number(valor))
+                    if (!res.success) {
+                        toast.error(`Error guardando Nivel ${clave.slice(-1)}: ${res.error}`)
+                        huboError = true;
+                    }
+                }
             }
-            toast.success("Precios de cuotas actualizados")
-            mutate()
+
+            if (!huboError) {
+                toast.success("Precios de cuotas actualizados correctamente")
+                mutate() // Recarga los datos al instante
+            }
         } catch (e) {
-            toast.error("Error al guardar precios")
+            toast.error("Error de conexión al guardar precios")
         } finally {
             setGuardandoPrecios(false)
         }
