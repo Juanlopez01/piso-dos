@@ -116,7 +116,12 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
     let allStudents: any[] = []
     if (isStaff) {
-        const { data: perfiles } = await supabase.from('profiles').select('id, nombre_completo, email, nivel_liga, porcentaje_beca').eq('rol', 'alumno').order('nombre_completo', { ascending: true })
+        const { data: perfiles } = await supabase
+            .from('profiles')
+            .select('id, nombre_completo, email, nivel_liga, porcentaje_beca')
+            .eq('rol', 'alumno')
+            .not('nivel_liga', 'is', null)
+            .order('nombre_completo', { ascending: true })
         if (perfiles) allStudents = perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '')
     }
 
