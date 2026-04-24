@@ -189,7 +189,7 @@ function UsuariosContent() {
         if (!['admin', 'recepcion'].includes(userRole as string)) return toast.error('No tienes permisos')
         setCambiandoLigaId(usuarioId)
         const response = await cambiarLigaAction(usuarioId, nuevoNivel)
-        if (response.success) { toast.success('Nivel actualizado'); mutate() }
+        if (response.success) { toast.success('Nivel de liga actualizado'); mutate() }
         else { toast.error(response.error) }
         setCambiandoLigaId(null)
     }
@@ -238,7 +238,6 @@ function UsuariosContent() {
 
     const handleSaveChanges = async () => {
         if (!selectedUser) return
-        // Guardamos perfil (notas e intereses). Si hiciera falta la beca acá, se puede agregar al action.
         const response = await guardarPerfilAction(selectedUser.id, editForm.obs, editForm.intereses_ritmos)
         if (response.success) { toast.success('Guardado'); setIsEditOpen(false); mutate() }
         else { toast.error(response.error) }
@@ -478,7 +477,7 @@ function UsuariosContent() {
                                     </div>
                                 )}
 
-                                <div className="flex gap-2 w-full">
+                                <div className="flex gap-2 w-full flex-wrap">
                                     <button onClick={() => openEditModal(u)} className={`flex-1 py-2.5 rounded-xl border text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-2 ${u.staff_observations ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20' : 'bg-[#111] text-gray-500 border-white/5 hover:border-white/20 hover:text-white'}`}>
                                         <MessageSquare size={12} /> Notas / Perfil
                                     </button>
@@ -497,6 +496,23 @@ function UsuariosContent() {
                                                 <option value="profesor">Profe</option>
                                                 <option value="alumno">Alumno</option>
                                             </select>
+                                        </div>
+                                    )}
+
+                                    {/* 🚀 SELECTOR DE NIVEL DE LIGA RESTAURADO */}
+                                    {u.rol === 'alumno' && (
+                                        <div className="relative flex-1">
+                                            <select
+                                                disabled={cambiandoLigaId === u.id}
+                                                value={(u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') ? u.nivel_liga : ''}
+                                                onChange={(e) => cambiarNivelLiga(u.id, e.target.value ? Number(e.target.value) : null)}
+                                                className={`w-full h-full py-2.5 px-1 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoLigaId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : (u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/30 hover:border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/5 hover:border-white/20 hover:text-white'}`}
+                                            >
+                                                <option value="">Sin Liga</option>
+                                                <option value="1">Liga Nvl 1</option>
+                                                <option value="2">Liga Nvl 2</option>
+                                            </select>
+                                            {cambiandoLigaId === u.id && <div className="absolute top-0 right-2 h-full flex items-center"><Loader2 size={12} className="animate-spin text-[#D4E655]" /></div>}
                                         </div>
                                     )}
                                 </div>
