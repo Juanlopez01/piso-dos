@@ -27,20 +27,8 @@ import {
 
 // 🚀 IMPORTAMOS LA ACCIÓN "MÁGICA" DE USUARIOS (La que auto-inscribe)
 import {
-
     cambiarLigaAction
 } from '@/app/actions/usuarios'
-
-const CRITERIOS_EVALUACION = [
-    "Puntualidad", "Asistencia / regularidad", "Compromiso con la clase", "Actitud de trabajo",
-    "Disposición para aprender", "Capacidad de recibir correcciones", "Respeto hacia docentes y compañeros",
-    "Responsabilidad con tareas o consignas", "Avance técnico durante el período", "Coordinación corporal",
-    "Control del movimiento", "Alineación corporal", "Uso del peso y del centro", "Claridad en la ejecución del movimiento",
-    "Precisión en secuencias coreográficas", "Memoria corporal / retención de material", "Comprensión del ritmo",
-    "Presencia escénica", "Proyección del movimiento", "Calidad interpretativa", "Búsqueda personal en el movimiento",
-    "Creatividad", "Disponibilidad corporal", "Presentación personal / cuidado del cuerpo", "Concentración durante el trabajo",
-    "Escucha grupal", "Sincronización con compañeros", "Adaptación al trabajo colectivo"
-]
 
 const parseSafeDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return new Date()
@@ -67,6 +55,9 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
     const hoyIso = new Date().toISOString()
     const cuatrimestreActual = '2026-1'
+
+    // 🚀 Traemos los criterios desde la base de datos
+    const { data: criteriosData } = await supabase.from('liga_criterios').select('*').order('nombre');
 
     let queryClases = supabase
         .from('clases')
@@ -133,7 +124,7 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
     const legajoCompleto = isStaff ? true : Boolean(profile.edad && profile.direccion && profile.contacto_emergencia && profile.plan_medico && profile.condiciones_medicas)
 
-    return { profile, isStaff, canManage, legajoCompleto, avisos: avisos || [], materias, deudaCuota, allStudents, preciosLiga }
+    return { profile, isStaff, canManage, legajoCompleto, avisos: avisos || [], materias, deudaCuota, allStudents, preciosLiga, criterios: criteriosData || [] }
 }
 
 function LaLigaContent() {
@@ -155,13 +146,14 @@ function LaLigaContent() {
     const [alumnosList, setAlumnosList] = useState<any[]>([])
     const [loadingAlumnos, setLoadingAlumnos] = useState(false)
 
-    // 🚀 Búsqueda y Filtros
+    // Búsqueda y Filtros
     const [searchStudent, setSearchStudent] = useState('')
-    const [levelFilter, setLevelFilter] = useState<'todos' | '1' | '2'>('todos') // Nuevo estado para los botones
+    const [levelFilter, setLevelFilter] = useState<'todos' | '1' | '2'>('todos')
 
-    // Precios
+    // Precios y Criterios
     const [preciosEdit, setPreciosEdit] = useState<Record<string, string>>({})
     const [guardandoPrecios, setGuardandoPrecios] = useState(false)
+    const [nuevoCriterio, setNuevoCriterio] = useState('') // 🚀 Estado para el nuevo criterio
 
     // Beca Modal
     const [becaModalOpen, setBecaModalOpen] = useState(false)
@@ -223,10 +215,9 @@ function LaLigaContent() {
         )
     }
 
-    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, allStudents } = data
+    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, allStudents, criterios } = data
     const nivelActual = profile.nivel_liga || profile.nivel || 1
 
-    // 🚀 LÓGICA DE FILTRADO (Buscador + Botones)
     const filteredStudents = allStudents.filter((s: any) => {
         const matchesSearch = (s.nombre_completo || '').toLowerCase().includes(searchStudent.toLowerCase())
         const matchesLevel = levelFilter === 'todos' ? true : String(s.nivel_liga) === levelFilter
@@ -237,8 +228,6 @@ function LaLigaContent() {
         setGuardandoPrecios(true)
         try {
             let huboError = false;
-
-            // Forzamos a que guarde específicamente estas dos claves
             for (const clave of ['cuota_liga_1', 'cuota_liga_2']) {
                 const valor = preciosEdit[clave]
                 if (valor) {
@@ -249,10 +238,9 @@ function LaLigaContent() {
                     }
                 }
             }
-
             if (!huboError) {
                 toast.success("Precios de cuotas actualizados correctamente")
-                mutate() // Recarga los datos al instante
+                mutate()
             }
         } catch (e) {
             toast.error("Error de conexión al guardar precios")
@@ -261,12 +249,35 @@ function LaLigaContent() {
         }
     }
 
+    // 🚀 Lógica para cargar y borrar Criterios
+    const handleAddCriterio = async () => {
+        if (!nuevoCriterio.trim()) return;
+        const { error } = await supabase.from('liga_criterios').insert([{ nombre: nuevoCriterio.trim() }]);
+        if (!error) {
+            setNuevoCriterio('');
+            toast.success("Ítem agregado exitosamente");
+            mutate();
+        } else {
+            toast.error("Error al agregar el ítem");
+        }
+    };
+
+    const handleEliminarCriterio = async (id: string) => {
+        if (!confirm("¿Seguro que querés eliminar este ítem? Ya no aparecerá en las nuevas evaluaciones.")) return;
+        const { error } = await supabase.from('liga_criterios').delete().eq('id', id);
+        if (!error) {
+            toast.success("Ítem eliminado");
+            mutate();
+        } else {
+            toast.error("Error al eliminar");
+        }
+    };
+
     const generarLinkPagoLiga = async () => {
         setProcesandoPago(true)
         try {
             const mesActual = new Date().getMonth() + 1
             const anioActual = new Date().getFullYear()
-
             const clavePrecio = `cuota_liga_${nivelActual}`
             const precioBase = data.preciosLiga.find((p: any) => p.clave === clavePrecio)?.valor || 15000
             const porcentajeBeca = profile.porcentaje_beca || 0
@@ -319,7 +330,6 @@ function LaLigaContent() {
         if (response.success) { toast.success("Eliminado"); mutate() }
     }
 
-    // 🚀 AHORA USA LA ACCIÓN MÁGICA CON AUTO-INSCRIPCIÓN
     const cambiarNivelLiga = async (id: string, nuevoNivel: number | null) => {
         const response = await cambiarLigaAction(id, nuevoNivel)
         if (response.success) {
@@ -363,6 +373,7 @@ function LaLigaContent() {
         setSelectedAlumno(alumno)
         setObservaciones('')
         const notasIniciales: Record<string, number> = {}
+
         if (alumno.evaluacion) {
             const { data: evalCompleta } = await supabase.from('liga_evaluaciones').select('criterios_notas, observaciones_docente').eq('alumno_id', alumno.id).eq('clase_id', selectedMateria.id).single()
             if (evalCompleta) {
@@ -372,7 +383,9 @@ function LaLigaContent() {
                 return
             }
         }
-        CRITERIOS_EVALUACION.forEach(crit => notasIniciales[crit] = 0)
+
+        // 🚀 Asignamos los criterios dinámicos
+        criterios.forEach((c: any) => notasIniciales[c.nombre] = 0)
         setNotas(notasIniciales)
         setEvalModalOpen(true)
     }
@@ -425,7 +438,7 @@ function LaLigaContent() {
                     {isStaff && (
                         <div className="flex gap-6 border-b border-white/10 relative z-10 mt-2 overflow-x-auto custom-scrollbar">
                             <button onClick={() => setAdminTab('evaluaciones')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'evaluaciones' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
-                                <ClipboardEdit size={14} className="inline mr-2 -mt-1" /> Evaluaciones
+                                <ClipboardEdit size={14} className="inline mr-2 -mt-1" /> Clases / Asistencia
                             </button>
                             <button onClick={() => setAdminTab('comunicados')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'comunicados' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                 <Megaphone size={14} className="inline mr-2 -mt-1" /> Comunicados
@@ -436,7 +449,7 @@ function LaLigaContent() {
                                         <UserCog size={14} className="inline mr-2 -mt-1" /> Padrón
                                     </button>
                                     <button onClick={() => setAdminTab('precios')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'precios' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
-                                        <Settings2 size={14} className="inline mr-2 -mt-1" /> Precios Cuotas
+                                        <Settings2 size={14} className="inline mr-2 -mt-1" /> Configuración
                                     </button>
                                 </>
                             )}
@@ -462,6 +475,7 @@ function LaLigaContent() {
                     </div>
                 )}
 
+                {/* --- VISTA CONFIGURACIÓN (PRECIOS Y CRITERIOS) --- */}
                 {canManage && adminTab === 'precios' && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-bottom-4">
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-8 shadow-xl">
@@ -489,16 +503,48 @@ function LaLigaContent() {
                                 </button>
                             </div>
                         </div>
-                        <div className="bg-[#111] border border-white/5 rounded-3xl p-8 flex flex-col justify-center text-center">
-                            <TrendingUp className="text-gray-700 w-16 h-16 mx-auto mb-4" />
-                            <h4 className="text-white font-black uppercase text-sm mb-2">Información de Cobro</h4>
-                            <p className="text-gray-500 text-xs leading-relaxed max-w-xs mx-auto">
-                                Estos valores se aplican automáticamente como precio base al alumno. El sistema luego calculará el porcentaje de beca individual (si el alumno lo tiene) antes de efectuar el cobro.
-                            </p>
+
+                        {/* 🚀 NUEVA CAJA PARA ÍTEMS DE EVALUACIÓN */}
+                        <div className="bg-[#09090b] border border-white/5 rounded-3xl p-8 shadow-xl">
+                            <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6">
+                                <ClipboardEdit className="text-[#D4E655]" /> Ítems de Evaluación
+                            </h3>
+                            <p className="text-xs text-gray-500 mb-6">Cargá los criterios que el staff evaluará a fin de cuatrimestre.</p>
+
+                            <div className="flex gap-2 mb-6">
+                                <input
+                                    type="text"
+                                    value={nuevoCriterio}
+                                    onChange={(e) => setNuevoCriterio(e.target.value)}
+                                    placeholder="Ej: Técnica Clásica"
+                                    className="flex-1 bg-[#111] border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-[#D4E655]"
+                                    onKeyDown={(e) => e.key === 'Enter' && handleAddCriterio()}
+                                />
+                                <button onClick={handleAddCriterio} className="bg-[#D4E655] text-black px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white transition-colors">
+                                    Cargar
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                                {criterios.map((c: any) => (
+                                    <div key={c.id} className="bg-[#111] p-3 rounded-xl border border-white/5 flex justify-between items-center group">
+                                        <span className="text-xs text-gray-300 font-bold uppercase">{c.nombre}</span>
+                                        <button
+                                            onClick={() => handleEliminarCriterio(c.id)}
+                                            className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-500 transition-opacity"
+                                            title="Eliminar ítem"
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
+                                    </div>
+                                ))}
+                                {criterios.length === 0 && <p className="text-xs text-gray-600 italic">No hay ítems cargados.</p>}
+                            </div>
                         </div>
                     </div>
                 )}
 
+                {/* --- VISTA PADRÓN --- */}
                 {canManage && adminTab === 'gestion' && (
                     <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl animate-in fade-in">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-6 border-b border-white/5">
@@ -509,7 +555,6 @@ function LaLigaContent() {
                             </div>
                         </div>
 
-                        {/* 🚀 BOTONES DE FILTRO DE NIVEL */}
                         <div className="flex gap-2 mb-6 overflow-x-auto pb-2 custom-scrollbar">
                             <button onClick={() => setLevelFilter('todos')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all whitespace-nowrap ${levelFilter === 'todos' ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>Todos</button>
                             <button onClick={() => setLevelFilter('1')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all whitespace-nowrap ${levelFilter === '1' ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>Nivel 1</button>
@@ -533,7 +578,7 @@ function LaLigaContent() {
                                             <Percent size={12} /> {alumno.porcentaje_beca > 0 ? `${alumno.porcentaje_beca}%` : ''}
                                         </button>
 
-                                        <button onClick={() => cambiarNivelLiga(alumno.id, null)} className="shrink-0 bg-red-500/10 hover:bg-red-500 text-red-500 px-3 py-2 rounded-lg text-[10px] font-black"><UserMinus size={14} /></button>
+                                        <button onClick={() => cambiarNivelLiga(alumno.id, null)} className="shrink-0 bg-red-500/10 hover:bg-red-500 text-red-500 px-3 py-2 rounded-lg text-[10px] font-black" title="Remover de la Liga"><UserMinus size={14} /></button>
                                     </div>
                                 </div>
                             ))}
@@ -593,18 +638,30 @@ function LaLigaContent() {
                     </div>
                 )}
 
-                {/* --- VISTA EVALUACIONES --- */}
+                {/* --- VISTA EVALUACIONES (Ahora con Asistencia) 🚀 --- */}
                 {isStaff && adminTab === 'evaluaciones' && (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
                         <div className="lg:col-span-4 space-y-4">
-                            <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/10 pb-2"><BookOpen size={16} className="text-[#D4E655]" /> Clases Formación</h3>
+                            <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/10 pb-2">
+                                <BookOpen size={16} className="text-[#D4E655]" /> Clases Formación
+                            </h3>
                             {materias.map((mat: any) => (
-                                <div key={mat.id} onClick={() => cargarAlumnos(mat)} className={`bg-[#111] border rounded-xl p-4 cursor-pointer transition-all ${selectedMateria?.id === mat.id ? 'border-[#D4E655]' : 'border-white/5 hover:border-white/20'}`}>
+                                <div key={mat.id} className={`bg-[#111] border rounded-xl p-4 transition-all ${selectedMateria?.id === mat.id ? 'border-[#D4E655]' : 'border-white/5 hover:border-white/20'}`}>
                                     <div className="flex justify-between mb-1">
                                         <span className="text-[9px] font-bold text-gray-500 uppercase">Nivel {mat.liga_nivel}</span>
                                         {mat.proxima_clase && <span className="text-[9px] text-[#D4E655] font-bold uppercase">{format(parseSafeDate(mat.proxima_clase), "d MMM • HH:mm", { locale: es })}</span>}
                                     </div>
-                                    <h4 className="font-black text-white uppercase text-sm truncate">{mat.nombre}</h4>
+                                    <h4 className="font-black text-white uppercase text-sm truncate mb-3">{mat.nombre}</h4>
+
+                                    {/* 🚀 BOTONES SEPARADOS: Evaluar y Asistencia */}
+                                    <div className="flex gap-2">
+                                        <button onClick={() => cargarAlumnos(mat)} className="flex-1 bg-white/5 hover:bg-white/10 text-white text-[10px] font-bold py-2 rounded-lg transition-all text-center">
+                                            Evaluar
+                                        </button>
+                                        <Link href={`/clase/${mat.id}`} className="flex-1 bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black text-[10px] font-bold py-2 rounded-lg transition-all flex items-center justify-center gap-1">
+                                            <Users size={12} /> Asistencia
+                                        </Link>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -621,7 +678,7 @@ function LaLigaContent() {
                                         </div>
                                     ))}
                                 </div>
-                            ) : <div className="flex flex-col items-center justify-center h-full text-gray-600 uppercase font-black text-xs opacity-50"><ClipboardEdit size={48} className="mb-4" /> Seleccioná una materia</div>}
+                            ) : <div className="flex flex-col items-center justify-center h-full text-gray-600 uppercase font-black text-xs opacity-50"><ClipboardEdit size={48} className="mb-4" /> Seleccioná una materia para evaluar</div>}
                         </div>
                     </div>
                 )}
@@ -715,12 +772,26 @@ function LaLigaContent() {
                         </div>
                         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                {CRITERIOS_EVALUACION.map((crit, idx) => (
+                                {/* 🚀 ITERAMOS LOS CRITERIOS DINÁMICOS ACÁ */}
+                                {criterios.map((crit: any, idx: number) => (
                                     <div key={idx} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between gap-3 transition-colors">
-                                        <label className="text-[10px] text-gray-300 font-bold uppercase flex-1">{crit}</label>
-                                        <input type="number" min="0" max="10" value={notas[crit] || 0} onChange={e => { let val = parseInt(e.target.value) || 0; if (val > 10) val = 10; if (val < 0) val = 0; setNotas({ ...notas, [crit]: val }) }} className="w-14 bg-black border border-white/10 rounded p-2 text-center text-white font-black text-sm outline-none focus:border-[#D4E655]" />
+                                        <label className="text-[10px] text-gray-300 font-bold uppercase flex-1">{crit.nombre}</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            max="10"
+                                            value={notas[crit.nombre] || 0}
+                                            onChange={e => {
+                                                let val = parseInt(e.target.value) || 0;
+                                                if (val > 10) val = 10;
+                                                if (val < 0) val = 0;
+                                                setNotas({ ...notas, [crit.nombre]: val })
+                                            }}
+                                            className="w-14 bg-black border border-white/10 rounded p-2 text-center text-white font-black text-sm outline-none focus:border-[#D4E655]"
+                                        />
                                     </div>
                                 ))}
+                                {criterios.length === 0 && <p className="col-span-full text-xs text-gray-500 italic mt-2">No hay ítems de evaluación cargados en el sistema.</p>}
                             </div>
                             <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)} placeholder="Comentarios..." className="w-full mt-8 bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none h-32" />
                         </div>
