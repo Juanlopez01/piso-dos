@@ -7,12 +7,10 @@ import useSWR from 'swr'
 import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
-    Wallet, Trophy, Star, Snowflake, UsersRound, Percent
+    Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
-import { format } from 'date-fns'
-import { es } from 'date-fns/locale'
 
 // 🚀 IMPORTAMOS LAS SERVER ACTIONS
 import {
@@ -26,18 +24,19 @@ import {
 
 // --- TIPOS ESTRICTOS ---
 type Ritmo = { id: string; nombre: string }
-type Producto = { id: string; nombre: string; precio: number; creditos: number; tipo_clase: 'regular' | 'seminario' }
+type Producto = { id: string; nombre: string; precio: number; creditos: number; tipo_clase: 'regular' | 'seminario' | 'exclusivo' }
 type CompaniaBasica = { id: string; nombre: string }
+type PaseExclusivo = { pase_referencia: string; cantidad: number }
 
 type RPCUsuario = {
     id: string
     nombre_completo: string | null
     email: string
     telefono: string | null
+    dni?: string | null
     rol: string
     nivel_liga: number | string | null
     creditos_regulares: number
-    creditos_seminarios: number
     staff_observations: string | null
     intereses_ritmos: string | string[] | null
     is_frio: boolean
@@ -49,11 +48,13 @@ type RPCUsuariosData = {
     productos: Producto[] | null
 }
 
-// Tipo extendido para usar en el frontend con la data procesada
 type UsuarioDirectorio = RPCUsuario & {
     intereses_procesados: string[]
     porcentaje_beca: number
     companias: CompaniaBasica[]
+    creditos_especiales: number
+    pases_exclusivos: PaseExclusivo[]
+    avatar_url: string | null
 }
 
 const getInteresesSeguro = (intereses: string | string[] | null | undefined): string[] => {
@@ -70,30 +71,31 @@ const getInteresesSeguro = (intereses: string | string[] | null | undefined): st
     return []
 }
 
-// 🚀 EL FETCHER FULL TIPADO
+// FETCHER
 const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo[], productos: Producto[] }> => {
     const supabase = createClient()
-
-    // 1. Traemos los usuarios base
     const { data, error } = await supabase.rpc('get_usuarios_completo')
     if (error) throw error
     const typedData = data as unknown as RPCUsuariosData
 
-    // 2. Traemos las compañías a las que pertenecen
     const { data: pcData } = await supabase.from('perfiles_companias').select('perfil_id, compania:companias(id, nombre)')
-
-    // 3. Traemos las becas
-    const { data: becasData } = await supabase.from('profiles').select('id, porcentaje_beca')
+    const { data: extraProfileData } = await supabase.from('profiles').select('id, porcentaje_beca, creditos_especiales, avatar_url, dni')
+    const { data: pasesData } = await supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad')
 
     const usuariosProcesados: UsuarioDirectorio[] = (typedData.usuarios || []).map((u: RPCUsuario) => {
         const misCompanias = pcData?.filter((pc: any) => pc.perfil_id === u.id).map((pc: any) => pc.compania as unknown as CompaniaBasica) || []
-        const miBeca = becasData?.find((b: any) => b.id === u.id)?.porcentaje_beca || 0
+        const extraData = extraProfileData?.find((p: any) => p.id === u.id)
+        const misPases = pasesData?.filter((p: any) => p.usuario_id === u.id) || []
 
         return {
             ...u,
+            dni: extraData?.dni || null,
             intereses_procesados: getInteresesSeguro(u.intereses_ritmos),
             companias: misCompanias,
-            porcentaje_beca: miBeca
+            porcentaje_beca: extraData?.porcentaje_beca || 0,
+            creditos_especiales: extraData?.creditos_especiales || 0,
+            pases_exclusivos: misPases,
+            avatar_url: extraData?.avatar_url || null
         }
     })
 
@@ -111,29 +113,31 @@ function UsuariosContent() {
 
     const { userRole, isLoading: loadingContext } = useCash()
 
-    // Filtros
     const [roleFilter, setRoleFilter] = useState(searchParams.get('ver') || 'todos')
     const [interestFilter, setInterestFilter] = useState('')
     const [statusFilter, setStatusFilter] = useState('todos')
     const [searchTerm, setSearchTerm] = useState('')
 
-    // Modales y Procesos
-    const [isEditOpen, setIsEditOpen] = useState<boolean>(false)
+    const [isDetailOpen, setIsDetailOpen] = useState<boolean>(false)
     const [isCreateOpen, setIsCreateOpen] = useState<boolean>(false)
     const [isPackModalOpen, setIsPackModalOpen] = useState<boolean>(false)
     const [isCobroLigaOpen, setIsCobroLigaOpen] = useState<boolean>(false)
     const [isCobroCompaniaOpen, setIsCobroCompaniaOpen] = useState<boolean>(false)
+    const [uploadingAvatar, setUploadingAvatar] = useState(false)
 
-    // Estados de Formulario y Selección (Tipados)
     const [selectedUser, setSelectedUser] = useState<UsuarioDirectorio | null>(null)
     const [cambiandoRolId, setCambiandoRolId] = useState<string | null>(null)
     const [cambiandoLigaId, setCambiandoLigaId] = useState<string | null>(null)
     const [assigningPack, setAssigningPack] = useState<boolean>(false)
     const [creating, setCreating] = useState<boolean>(false)
 
+    // 🚀 NUEVOS ESTADOS PARA ESTADÍSTICAS
+    const [userStats, setUserStats] = useState<any>(null)
+    const [loadingStats, setLoadingStats] = useState(false)
+
     const [cobroLigaForm, setCobroLigaForm] = useState({ monto: '', metodo: 'efectivo' })
     const [cobroCompaniaForm, setCobroCompaniaForm] = useState({ monto: '', metodo: 'efectivo', companiaId: '' })
-    const [editForm, setEditForm] = useState({ obs: '', intereses_ritmos: [] as string[], beca: 0 })
+    const [editForm, setEditForm] = useState({ obs: '', intereses_ritmos: [] as string[] })
     const [createForm, setCreateForm] = useState({ nombre: '', email: '', dni: '', telefono: '', rol: 'alumno' })
     const [packForm, setPackForm] = useState({ packId: '', monto: '', metodo: 'efectivo' })
 
@@ -218,14 +222,60 @@ function UsuariosContent() {
         }
     }
 
-    const openEditModal = (user: UsuarioDirectorio) => {
+    const handleUploadAvatar = async (e: React.ChangeEvent<HTMLInputElement>, userId: string) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+        setUploadingAvatar(true)
+        try {
+            const fileExt = file.name.split('.').pop()
+            const fileName = `${userId}-${Math.random()}.${fileExt}`
+            const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file)
+            if (uploadError) throw uploadError
+
+            const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName)
+            const { error: updateError } = await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', userId)
+            if (updateError) throw updateError
+
+            toast.success('Foto de perfil actualizada')
+            mutate()
+            if (selectedUser && selectedUser.id === userId) {
+                setSelectedUser({ ...selectedUser, avatar_url: publicUrl })
+            }
+        } catch (err: any) {
+            toast.error(err.message || 'Error al subir foto')
+        } finally {
+            setUploadingAvatar(false)
+        }
+    }
+
+    // 🚀 ABRIR FICHA DETALLADA Y CARGAR MÉTRICAS (BYPASS A LA API 400)
+    // 🚀 ABRIR FICHA DETALLADA Y CARGAR MÉTRICAS (VERSIÓN DEFINITIVA)
+    const openDetailModal = async (user: UsuarioDirectorio) => {
         setSelectedUser(user)
+        setUserStats(null)
         setEditForm({
             obs: user.staff_observations || '',
-            intereses_ritmos: user.intereses_procesados || [],
-            beca: user.porcentaje_beca || 0
+            intereses_ritmos: user.intereses_procesados || []
         })
-        setIsEditOpen(true)
+        setIsDetailOpen(true)
+        setLoadingStats(true)
+
+        try {
+            // 🚀 Llamamos a la función con el NOMBRE NUEVO
+            const { data: stats, error } = await supabase.rpc('get_user_metrics_v2', {
+                p_id: user.id,
+                p_role: user.rol
+            })
+
+            if (error) throw error;
+            if (stats) setUserStats(stats);
+
+        } catch (error: any) {
+            console.error("Error al cargar métricas:", error);
+            toast.error("No se pudieron cargar las estadísticas.");
+        }
+
+        setLoadingStats(false)
     }
 
     const toggleInterest = (ritmoId: string | number) => {
@@ -239,7 +289,7 @@ function UsuariosContent() {
     const handleSaveChanges = async () => {
         if (!selectedUser) return
         const response = await guardarPerfilAction(selectedUser.id, editForm.obs, editForm.intereses_ritmos)
-        if (response.success) { toast.success('Guardado'); setIsEditOpen(false); mutate() }
+        if (response.success) { toast.success('Perfil guardado'); mutate() }
         else { toast.error(response.error) }
     }
 
@@ -388,138 +438,148 @@ function UsuariosContent() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {filteredUsers.map((u: UsuarioDirectorio) => (
-                    <div key={u.id} className="bg-[#09090b] border border-white/10 p-5 rounded-2xl flex flex-col justify-between gap-4 group hover:border-[#D4E655]/30 transition-all relative overflow-hidden shadow-sm">
+                {filteredUsers.map((u: UsuarioDirectorio) => {
+                    const totalPasesExclusivos = u.pases_exclusivos?.reduce((acc, p) => acc + p.cantidad, 0) || 0;
 
-                        {u.is_frio && (
-                            <div className="absolute top-0 left-0 px-3 py-1.5 rounded-br-xl bg-blue-500/10 text-blue-400 text-[8px] font-black uppercase tracking-widest flex items-center gap-1 border-r border-b border-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.1)]">
-                                <Snowflake size={10} className="animate-pulse" /> Frío
-                            </div>
-                        )}
+                    return (
+                        <div key={u.id} className="bg-[#09090b] border border-white/10 p-5 rounded-2xl flex flex-col justify-between gap-4 group hover:border-[#D4E655]/30 transition-all relative overflow-hidden shadow-sm">
 
-                        <div className={`absolute top-0 right-0 px-3 py-1.5 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${u.rol === 'admin' ? 'bg-red-500/20 text-red-500' : u.rol === 'recepcion' ? 'bg-blue-500/20 text-blue-500' : u.rol === 'profesor' ? 'bg-purple-500/20 text-purple-500' : 'bg-white/5 text-gray-500'}`}>
-                            {u.rol}
-                        </div>
-
-                        <div>
-                            <div className="flex items-start gap-4 mb-3 mt-4">
-                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-black uppercase shrink-0 ${u.rol === 'alumno' ? 'bg-white/10 text-white' : 'bg-[#D4E655] text-black'}`}>
-                                    {u.nombre_completo?.[0] || '?'}
-                                </div>
-                                <div className="min-w-0 pr-8">
-                                    <h4 className="font-bold text-white uppercase text-sm truncate">{u.nombre_completo}</h4>
-                                    <p className="text-[10px] text-gray-500 truncate mt-0.5">{u.email}</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-1 mb-2">
-                                {u.telefono ? <div className="flex items-center gap-2 text-xs text-gray-400 bg-[#111] px-2 py-1.5 rounded-lg border border-white/5 w-fit"><Phone size={10} className="text-[#D4E655]" /> {u.telefono}</div> : <div className="text-[10px] text-gray-600 italic px-1">Sin teléfono</div>}
-                            </div>
-
-                            <div className="flex flex-wrap gap-2 mb-3">
-                                {u.rol === 'alumno' && (u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') && (
-                                    <span className="inline-flex items-center gap-1.5 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest">
-                                        <Trophy size={10} className="text-[#D4E655]" /> Liga • NVL {u.nivel_liga}
-                                    </span>
-                                )}
-                                {u.companias && u.companias.length > 0 && (
-                                    <span className="inline-flex items-center gap-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest">
-                                        <UsersRound size={10} /> {u.companias.length} Grupo{u.companias.length > 1 ? 's' : ''}
-                                    </span>
-                                )}
-                                {(u.porcentaje_beca ?? 0) > 0 && (
-                                    <span className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest">
-                                        <Percent size={10} /> Beca {u.porcentaje_beca}%
-                                    </span>
-                                )}
-                            </div>
-
-                            {u.rol === 'alumno' && (
-                                <div className="flex gap-2 mb-3">
-                                    <div className="bg-white/5 px-2 py-1 rounded text-[10px] text-gray-400 uppercase font-bold">Reg: <span className="text-white text-xs">{u.creditos_regulares || 0}</span></div>
-                                    <div className="bg-white/5 px-2 py-1 rounded text-[10px] text-gray-400 uppercase font-bold">Sem: <span className="text-purple-400 text-xs">{u.creditos_seminarios || 0}</span></div>
+                            {u.is_frio && (
+                                <div className="absolute top-0 left-0 px-3 py-1.5 rounded-br-xl bg-blue-500/10 text-blue-400 text-[8px] font-black uppercase tracking-widest flex items-center gap-1 border-r border-b border-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.1)]">
+                                    <Snowflake size={10} className="animate-pulse" /> Frío
                                 </div>
                             )}
 
-                            {u.intereses_procesados.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mb-2">
-                                    {u.intereses_procesados.slice(0, 3).map((ritmoId: string) => (
-                                        <span key={ritmoId} className="text-[8px] bg-white/5 border border-white/5 text-gray-300 px-1.5 py-0.5 rounded uppercase font-bold">
-                                            {getRitmoNombre(ritmoId)}
+                            <div className={`absolute top-0 right-0 px-3 py-1.5 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${u.rol === 'admin' ? 'bg-red-500/20 text-red-500' : u.rol === 'recepcion' ? 'bg-blue-500/20 text-blue-500' : u.rol === 'profesor' ? 'bg-purple-500/20 text-purple-500' : 'bg-white/5 text-gray-500'}`}>
+                                {u.rol}
+                            </div>
+
+                            <div>
+                                <div className="flex items-start gap-4 mb-3 mt-4">
+                                    {u.avatar_url ? (
+                                        <img src={u.avatar_url} alt={u.nombre_completo || ''} className="w-10 h-10 rounded-xl object-cover shrink-0 border border-white/10" />
+                                    ) : (
+                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-black uppercase shrink-0 ${u.rol === 'alumno' ? 'bg-white/10 text-white' : 'bg-[#D4E655] text-black'}`}>
+                                            {u.nombre_completo?.[0] || '?'}
+                                        </div>
+                                    )}
+                                    <div className="min-w-0 pr-8">
+                                        <h4 onClick={() => openDetailModal(u)} className="font-bold text-white uppercase text-sm truncate cursor-pointer hover:text-[#D4E655] transition-colors">{u.nombre_completo}</h4>
+                                        <p className="text-[10px] text-gray-500 truncate mt-0.5">{u.email}</p>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1 mb-2">
+                                    {u.telefono ? <div className="flex items-center gap-2 text-xs text-gray-400 bg-[#111] px-2 py-1.5 rounded-lg border border-white/5 w-fit"><Phone size={10} className="text-[#D4E655]" /> {u.telefono}</div> : <div className="text-[10px] text-gray-600 italic px-1">Sin teléfono</div>}
+                                </div>
+
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                    {u.rol === 'alumno' && (u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') && (
+                                        <span className="inline-flex items-center gap-1.5 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest">
+                                            <Trophy size={10} className="text-[#D4E655]" /> Liga • NVL {u.nivel_liga}
                                         </span>
-                                    ))}
-                                    {u.intereses_procesados.length > 3 && <span className="text-[8px] text-gray-600 px-1 py-0.5 font-bold">+{u.intereses_procesados.length - 3}</span>}
+                                    )}
+                                    {u.companias && u.companias.length > 0 && (
+                                        <span className="inline-flex items-center gap-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest">
+                                            <UsersRound size={10} /> {u.companias.length} Grupo{u.companias.length > 1 ? 's' : ''}
+                                        </span>
+                                    )}
+                                    {(u.porcentaje_beca ?? 0) > 0 && (
+                                        <span className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest">
+                                            <Percent size={10} /> Beca {u.porcentaje_beca}%
+                                        </span>
+                                    )}
                                 </div>
-                            )}
 
-                            {u.staff_observations && canCreate && <div className="bg-yellow-500/5 border border-yellow-500/20 p-2.5 rounded-lg mb-2"><p className="text-[10px] text-yellow-200/70 italic line-clamp-2">"{u.staff_observations}"</p></div>}
-                        </div>
-
-                        {canCreate && (
-                            <div className="flex flex-col gap-2 mt-auto pt-3 border-t border-white/5">
                                 {u.rol === 'alumno' && (
-                                    <div className="flex flex-wrap gap-2 w-full mb-2">
-                                        <button onClick={() => openPackModal(u)} className="flex-1 py-2 rounded-xl border bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500 hover:text-black text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1.5">
-                                            <CreditCard size={12} /> Pack
-                                        </button>
-
-                                        {(u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') && (
-                                            <button onClick={() => openCobroLigaModal(u)} className="flex-1 py-2 rounded-xl border bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20 hover:bg-[#D4E655] hover:text-black text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1.5 shadow-[0_0_10px_rgba(212,230,85,0.05)]">
-                                                <Trophy size={12} /> C. Liga
-                                            </button>
-                                        )}
-
-                                        {u.companias && u.companias.length > 0 && (
-                                            <button onClick={() => openCobroCompaniaModal(u)} className="flex-1 py-2 rounded-xl border bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500 hover:text-white text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1.5">
-                                                <UsersRound size={12} /> C. Grupo
-                                            </button>
+                                    <div className="flex flex-wrap gap-2 mb-3">
+                                        <div className="bg-white/5 px-2 py-1 rounded text-[10px] text-gray-400 uppercase font-bold border border-white/5">Reg: <span className="text-white text-xs">{u.creditos_regulares || 0}</span></div>
+                                        <div className="bg-white/5 px-2 py-1 rounded text-[10px] text-gray-400 uppercase font-bold border border-white/5">Esp: <span className="text-purple-400 text-xs">{u.creditos_especiales || 0}</span></div>
+                                        {totalPasesExclusivos > 0 && (
+                                            <div className="bg-white/5 px-2 py-1 rounded text-[10px] text-gray-400 uppercase font-bold border border-white/5" title="Pases Exclusivos">
+                                                Exc: <span className="text-blue-400 text-xs">{totalPasesExclusivos}</span>
+                                            </div>
                                         )}
                                     </div>
                                 )}
 
-                                <div className="flex gap-2 w-full flex-wrap">
-                                    <button onClick={() => openEditModal(u)} className={`flex-1 py-2.5 rounded-xl border text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-2 ${u.staff_observations ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20' : 'bg-[#111] text-gray-500 border-white/5 hover:border-white/20 hover:text-white'}`}>
-                                        <MessageSquare size={12} /> Notas / Perfil
-                                    </button>
-
-                                    {isAdmin && (
-                                        <div className="relative flex-1">
-                                            <select
-                                                disabled={cambiandoRolId === u.id}
-                                                value={u.rol || ''}
-                                                onChange={(e) => cambiarRol(u.id, e.target.value)}
-                                                className={`w-full h-full py-2.5 px-1 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoRolId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : 'bg-[#111] text-gray-300 border-white/5 hover:border-white/20 hover:text-white'}`}
-                                            >
-                                                <option value="admin">Admin</option>
-                                                <option value="coordinador">Coordinador</option>
-                                                <option value="recepcion">Recep.</option>
-                                                <option value="profesor">Profe</option>
-                                                <option value="alumno">Alumno</option>
-                                            </select>
-                                        </div>
-                                    )}
-
-                                    {/* 🚀 SELECTOR DE NIVEL DE LIGA RESTAURADO */}
-                                    {u.rol === 'alumno' && (
-                                        <div className="relative flex-1">
-                                            <select
-                                                disabled={cambiandoLigaId === u.id}
-                                                value={(u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') ? u.nivel_liga : ''}
-                                                onChange={(e) => cambiarNivelLiga(u.id, e.target.value ? Number(e.target.value) : null)}
-                                                className={`w-full h-full py-2.5 px-1 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoLigaId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : (u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/30 hover:border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/5 hover:border-white/20 hover:text-white'}`}
-                                            >
-                                                <option value="">Sin Liga</option>
-                                                <option value="1">Liga Nvl 1</option>
-                                                <option value="2">Liga Nvl 2</option>
-                                            </select>
-                                            {cambiandoLigaId === u.id && <div className="absolute top-0 right-2 h-full flex items-center"><Loader2 size={12} className="animate-spin text-[#D4E655]" /></div>}
-                                        </div>
-                                    )}
-                                </div>
+                                {u.intereses_procesados.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mb-2">
+                                        {u.intereses_procesados.slice(0, 3).map((ritmoId: string) => (
+                                            <span key={ritmoId} className="text-[8px] bg-[#111] border border-white/10 text-gray-400 px-1.5 py-0.5 rounded uppercase font-bold">
+                                                {getRitmoNombre(ritmoId)}
+                                            </span>
+                                        ))}
+                                        {u.intereses_procesados.length > 3 && <span className="text-[8px] text-gray-600 px-1 py-0.5 font-bold">+{u.intereses_procesados.length - 3}</span>}
+                                    </div>
+                                )}
                             </div>
-                        )}
-                    </div>
-                ))}
+
+                            {canCreate && (
+                                <div className="flex flex-col gap-2 mt-auto pt-3 border-t border-white/5">
+                                    {u.rol === 'alumno' && (
+                                        <div className="flex flex-wrap gap-2 w-full mb-2">
+                                            <button onClick={() => openPackModal(u)} className="flex-1 py-2 rounded-xl border bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500 hover:text-black text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1.5">
+                                                <CreditCard size={12} /> Pack
+                                            </button>
+
+                                            {(u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') && (
+                                                <button onClick={() => openCobroLigaModal(u)} className="flex-1 py-2 rounded-xl border bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20 hover:bg-[#D4E655] hover:text-black text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1.5 shadow-[0_0_10px_rgba(212,230,85,0.05)]">
+                                                    <Trophy size={12} /> C. Liga
+                                                </button>
+                                            )}
+
+                                            {u.companias && u.companias.length > 0 && (
+                                                <button onClick={() => openCobroCompaniaModal(u)} className="flex-1 py-2 rounded-xl border bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500 hover:text-white text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1.5">
+                                                    <UsersRound size={12} /> C. Grupo
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    <div className="flex gap-2 w-full flex-wrap">
+                                        <button onClick={() => openDetailModal(u)} className={`flex-1 py-2.5 rounded-xl border text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-2 ${u.staff_observations ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20' : 'bg-[#111] text-gray-400 border-white/5 hover:border-white/20 hover:text-white'}`}>
+                                            <IdCard size={14} /> Ficha Completa
+                                        </button>
+
+                                        {isAdmin && (
+                                            <div className="relative flex-1">
+                                                <select
+                                                    disabled={cambiandoRolId === u.id}
+                                                    value={u.rol || ''}
+                                                    onChange={(e) => cambiarRol(u.id, e.target.value)}
+                                                    className={`w-full h-full py-2.5 px-1 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoRolId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : 'bg-[#111] text-gray-300 border-white/5 hover:border-white/20 hover:text-white'}`}
+                                                >
+                                                    <option value="admin">Admin</option>
+                                                    <option value="coordinador">Coordinador</option>
+                                                    <option value="recepcion">Recep.</option>
+                                                    <option value="profesor">Profe</option>
+                                                    <option value="alumno">Alumno</option>
+                                                </select>
+                                            </div>
+                                        )}
+
+                                        {u.rol === 'alumno' && (
+                                            <div className="relative flex-1">
+                                                <select
+                                                    disabled={cambiandoLigaId === u.id}
+                                                    value={(u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') ? u.nivel_liga : ''}
+                                                    onChange={(e) => cambiarNivelLiga(u.id, e.target.value ? Number(e.target.value) : null)}
+                                                    className={`w-full h-full py-2.5 px-1 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoLigaId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : (u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/30 hover:border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/5 hover:border-white/20 hover:text-white'}`}
+                                                >
+                                                    <option value="">Sin Liga</option>
+                                                    <option value="1">Liga Nvl 1</option>
+                                                    <option value="2">Liga Nvl 2</option>
+                                                </select>
+                                                {cambiandoLigaId === u.id && <div className="absolute top-0 right-2 h-full flex items-center"><Loader2 size={12} className="animate-spin text-[#D4E655]" /></div>}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
 
                 {filteredUsers.length === 0 && (
                     <div className="col-span-full py-20 text-center border-2 border-dashed border-white/10 rounded-2xl">
@@ -528,35 +588,168 @@ function UsuariosContent() {
                 )}
             </div>
 
-            {/* MODALES */}
-            {isEditOpen && selectedUser && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
-                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-6 shadow-2xl relative">
-                        <div className="flex justify-between items-start mb-6 pb-4 border-b border-white/10">
-                            <div><h3 className="text-xl font-black text-white uppercase flex items-center gap-2 truncate pr-4">{selectedUser.nombre_completo}</h3><p className="text-[10px] font-bold text-gray-500 uppercase mt-1">{selectedUser.email}</p></div>
-                            <button onClick={() => setIsEditOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
-                        </div>
-                        {selectedUser.rol === 'alumno' && (
-                            <div className="mb-6">
-                                <label className="text-[10px] font-bold text-[#D4E655] uppercase block mb-3 flex items-center gap-1"><Tag size={12} /> Intereses (Ritmos)</label>
-                                <div className="flex flex-wrap gap-2">
-                                    {ritmosDisponibles.map(ritmo => {
-                                        const isActive = editForm.intereses_ritmos.includes(String(ritmo.id));
-                                        return (
-                                            <button key={ritmo.id} onClick={() => toggleInterest(ritmo.id)} className={`px-3 py-2 rounded-lg text-[9px] font-black uppercase border transition-all ${isActive ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-500 border-white/10 hover:border-white/30'}`}>
-                                                {ritmo.nombre}
-                                            </button>
-                                        )
-                                    })}
+            {/* 🚀 FICHA DETALLADA DEL ALUMNO/PROFESOR CON MÉTRICAS */}
+            {isDetailOpen && selectedUser && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in overflow-y-auto">
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-4xl rounded-3xl overflow-hidden shadow-2xl relative my-auto flex flex-col md:flex-row">
+
+                        <button onClick={() => setIsDetailOpen(false)} className="absolute top-6 right-6 z-10 p-2 bg-black/50 backdrop-blur-md rounded-full text-gray-400 hover:text-white transition-colors">
+                            <X size={20} />
+                        </button>
+
+                        {/* COLUMNA IZQUIERDA: PERFIL BÁSICO Y FOTO */}
+                        <div className="w-full md:w-1/3 bg-[#111] border-r border-white/5 p-8 flex flex-col items-center border-b md:border-b-0">
+
+                            <div className="relative group mb-6">
+                                <div className={`w-32 h-32 rounded-3xl overflow-hidden bg-white/5 border-2 border-white/10 flex items-center justify-center text-4xl font-black uppercase text-gray-500 shadow-xl transition-all ${uploadingAvatar ? 'opacity-50' : 'group-hover:border-[#D4E655]'}`}>
+                                    {selectedUser.avatar_url ? (
+                                        <img src={selectedUser.avatar_url} alt="" className="w-full h-full object-cover" />
+                                    ) : (
+                                        selectedUser.nombre_completo?.[0] || '?'
+                                    )}
+                                </div>
+
+                                <label className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-3xl text-[#D4E655]">
+                                    {uploadingAvatar ? <Loader2 className="animate-spin" /> : <><Camera size={24} className="mb-2" /><span className="text-[10px] font-black uppercase tracking-widest">Cambiar</span></>}
+                                    <input type="file" accept="image/*" className="hidden" disabled={uploadingAvatar} onChange={(e) => handleUploadAvatar(e, selectedUser.id)} />
+                                </label>
+                            </div>
+
+                            <h3 className="text-xl font-black text-white uppercase text-center mb-1 leading-tight">{selectedUser.nombre_completo}</h3>
+                            <span className="bg-[#D4E655]/10 text-[#D4E655] px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest mb-6">
+                                Rol: {selectedUser.rol}
+                            </span>
+
+                            <div className="w-full space-y-4">
+                                <div className="bg-white/5 rounded-xl p-3 flex items-center gap-3">
+                                    <IdCard size={16} className="text-gray-500" />
+                                    <div><p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">DNI / Documento</p><p className="text-xs text-white font-bold">{selectedUser.dni || 'No registrado'}</p></div>
+                                </div>
+                                <div className="bg-white/5 rounded-xl p-3 flex items-center gap-3">
+                                    <Mail size={16} className="text-gray-500" />
+                                    <div className="overflow-hidden"><p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Email</p><p className="text-xs text-white font-bold truncate">{selectedUser.email}</p></div>
+                                </div>
+                                <div className="bg-white/5 rounded-xl p-3 flex items-center gap-3">
+                                    <Phone size={16} className="text-gray-500" />
+                                    <div><p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Teléfono</p><p className="text-xs text-white font-bold">{selectedUser.telefono || 'No registrado'}</p></div>
                                 </div>
                             </div>
-                        )}
-                        <div className="mb-6"><label className="text-[10px] font-bold text-[#D4E655] uppercase block mb-3 flex items-center gap-1"><Shield size={12} /> Observaciones Internas</label><textarea className="w-full h-32 bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-[#D4E655] resize-none" placeholder="Escribir nota secreta..." value={editForm.obs} onChange={(e) => setEditForm({ ...editForm, obs: e.target.value })} /></div>
-                        <button onClick={handleSaveChanges} className="w-full bg-white text-black font-black uppercase py-4 rounded-xl hover:bg-gray-200 transition-all text-xs tracking-widest flex items-center justify-center gap-2"><Save size={16} /> Guardar Cambios</button>
+                        </div>
+
+                        {/* COLUMNA DERECHA: SALDOS, INFO ACADÉMICA Y NOTAS */}
+                        <div className="w-full md:w-2/3 p-8 flex flex-col h-full bg-[#09090b]">
+
+                            {selectedUser.rol === 'alumno' && (
+                                <>
+                                    <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
+                                        <CreditCard size={16} className="text-[#D4E655]" /> Estado de Cuenta
+                                    </h4>
+
+                                    <div className="grid grid-cols-3 gap-3 mb-6">
+                                        <div className="bg-orange-500/10 border border-orange-500/20 rounded-2xl p-4 flex flex-col items-center justify-center text-center">
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-orange-500 mb-1">Regulares</span>
+                                            <span className="text-3xl font-black text-white">{selectedUser.creditos_regulares}</span>
+                                        </div>
+                                        <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-4 flex flex-col items-center justify-center text-center">
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-400 mb-1">Especiales</span>
+                                            <span className="text-3xl font-black text-white">{selectedUser.creditos_especiales}</span>
+                                        </div>
+                                        <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4 flex flex-col items-center justify-center text-center">
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-blue-400 mb-1">Exclusivos</span>
+                                            <span className="text-3xl font-black text-white">{selectedUser.pases_exclusivos.reduce((a, p) => a + p.cantidad, 0)}</span>
+                                            {selectedUser.pases_exclusivos.length > 0 && (
+                                                <div className="w-full mt-2 pt-2 border-t border-blue-500/20">
+                                                    {selectedUser.pases_exclusivos.map((p, i) => (
+                                                        <p key={i} className="text-[8px] text-blue-300 font-bold truncate" title={p.pase_referencia}>
+                                                            {p.cantidad}x {p.pase_referencia.split(' ')[0]}
+                                                        </p>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+
+                            {/* 🚀 NUEVA SECCIÓN DE MÉTRICAS DE RENDIMIENTO */}
+                            <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2 mt-2">
+                                <Activity size={16} className="text-[#D4E655]" /> Métricas de Rendimiento
+                            </h4>
+
+                            <div className="mb-8">
+                                {loadingStats ? (
+                                    <div className="flex items-center justify-center py-6 border border-dashed border-white/10 rounded-2xl">
+                                        <Loader2 className="animate-spin text-[#D4E655]" />
+                                    </div>
+                                ) : userStats ? (
+                                    selectedUser.rol === 'profesor' ? (
+                                        <div className="bg-[#111] border border-white/10 rounded-2xl p-6 flex items-center justify-between">
+                                            <div>
+                                                <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mb-1">Total Clases Dictadas</p>
+                                                <p className="text-sm text-gray-500 font-bold">Histórico registrado en sistema</p>
+                                            </div>
+                                            <div className="text-4xl font-black text-[#D4E655]">{userStats.clases_dadas_historico || 0}</div>
+                                        </div>
+                                    ) : selectedUser.rol === 'alumno' ? (
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                            <div className="bg-[#111] border border-white/10 rounded-2xl p-4">
+                                                <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mb-1">Anotadas</p>
+                                                <div className="text-2xl font-black text-white">{userStats.total_anotadas || 0}</div>
+                                            </div>
+                                            <div className="bg-[#111] border border-white/10 rounded-2xl p-4">
+                                                <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mb-1">Asistencias</p>
+                                                <div className="text-2xl font-black text-white">{userStats.asistencias || 0}</div>
+                                            </div>
+                                            <div className="col-span-2 md:col-span-1 bg-[#D4E655]/10 border border-[#D4E655]/30 rounded-2xl p-4 flex flex-col items-center justify-center">
+                                                <p className="text-[10px] text-[#D4E655] font-black uppercase tracking-widest mb-1">Presentismo</p>
+                                                <div className="text-2xl font-black text-[#D4E655]">{userStats.porcentaje_presentismo || 0}%</div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-gray-500 italic">No hay métricas disponibles para este rol.</p>
+                                    )
+                                ) : (
+                                    <p className="text-xs text-gray-500">Error al cargar estadísticas.</p>
+                                )}
+                            </div>
+
+                            {selectedUser.rol === 'alumno' && (
+                                <>
+                                    <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
+                                        <Tag size={16} className="text-[#D4E655]" /> Intereses Coreográficos
+                                    </h4>
+                                    <div className="flex flex-wrap gap-2 mb-8">
+                                        {ritmosDisponibles.map(ritmo => {
+                                            const isActive = editForm.intereses_ritmos.includes(String(ritmo.id));
+                                            return (
+                                                <button key={ritmo.id} onClick={() => toggleInterest(ritmo.id)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase border transition-all ${isActive ? 'bg-[#D4E655] text-black border-[#D4E655] shadow-lg shadow-[#D4E655]/20' : 'bg-[#111] text-gray-500 border-white/5 hover:border-white/30'}`}>
+                                                    {ritmo.nombre}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </>
+                            )}
+
+                            <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2 mt-auto">
+                                <Shield size={16} className="text-yellow-500" /> Notas Confidenciales (Staff)
+                            </h4>
+                            <textarea
+                                className="w-full flex-1 min-h-[120px] bg-[#111] border border-white/10 rounded-2xl p-5 text-white text-sm outline-none focus:border-yellow-500/50 resize-none transition-colors"
+                                placeholder="Escribir observaciones internas, lesiones, consideraciones..."
+                                value={editForm.obs}
+                                onChange={(e) => setEditForm({ ...editForm, obs: e.target.value })}
+                            />
+
+                            <button onClick={handleSaveChanges} className="w-full mt-6 bg-white text-black font-black uppercase py-4 rounded-xl hover:bg-gray-200 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-xl shrink-0">
+                                <Save size={16} /> Guardar Cambios en Ficha
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
 
+            {/* MODALES VIEJOS SE MANTIENEN (Create, Pack, Cobros) */}
             {isCreateOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-6 shadow-2xl relative">
@@ -648,7 +841,6 @@ function UsuariosContent() {
                 </div>
             )}
 
-            {/* MODAL COBRAR LIGA */}
             {isCobroLigaOpen && selectedUser && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-8 shadow-2xl relative">
@@ -695,7 +887,6 @@ function UsuariosContent() {
                 </div>
             )}
 
-            {/* MODAL COBRAR COMPAÑIA */}
             {isCobroCompaniaOpen && selectedUser && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-8 shadow-2xl relative">
