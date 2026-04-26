@@ -127,23 +127,27 @@ export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | 
     }
 }
 
-export async function guardarPerfilAction(usuarioId: string, obs: string, intereses: string[]) {
+export async function guardarPerfilAction(userId: string, observaciones: string, intereses: string[], becaLiga: number, becaCompania: number) {
     const supabase = await createClient()
-    try {
-        // 🔒 SEGURIDAD
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!session?.user) throw new Error('No autorizado')
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
 
-        const { error } = await supabase.from('profiles').update({
-            staff_observations: obs,
-            intereses_ritmos: intereses
-        }).eq('id', usuarioId)
-        if (error) throw new Error(error.message)
-        revalidatePath('/usuarios')
-        return { success: true }
-    } catch (error: any) {
-        return { success: false, error: error.message }
-    }
+    // Asegurarnos de que las becas no superen el 100% ni sean negativas
+    const bLiga = Math.max(0, Math.min(100, becaLiga || 0));
+    const bCompania = Math.max(0, Math.min(100, becaCompania || 0));
+
+    const { error } = await supabase
+        .from('profiles')
+        .update({
+            staff_observations: observaciones,
+            intereses_ritmos: intereses,
+            porcentaje_beca_liga: bLiga,
+            porcentaje_beca_compania: bCompania
+        })
+        .eq('id', userId)
+
+    if (error) return { success: false, error: error.message }
+    return { success: true }
 }
 
 export async function asignarPackAction(usuarioId: string, tipoClase: string, creditos: number, monto: number, metodoPago: string) {

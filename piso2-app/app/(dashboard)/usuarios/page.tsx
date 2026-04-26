@@ -12,7 +12,6 @@ import {
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
 
-// 🚀 IMPORTAMOS LAS SERVER ACTIONS
 import {
     cambiarRolAction,
     cambiarLigaAction,
@@ -22,7 +21,6 @@ import {
     cobrarCompaniaAction
 } from '@/app/actions/usuarios'
 
-// --- TIPOS ESTRICTOS ---
 type Ritmo = { id: string; nombre: string }
 type Producto = { id: string; nombre: string; precio: number; creditos: number; tipo_clase: 'regular' | 'seminario' | 'exclusivo' }
 type CompaniaBasica = { id: string; nombre: string }
@@ -50,7 +48,8 @@ type RPCUsuariosData = {
 
 type UsuarioDirectorio = RPCUsuario & {
     intereses_procesados: string[]
-    porcentaje_beca: number
+    porcentaje_beca_liga: number
+    porcentaje_beca_compania: number
     companias: CompaniaBasica[]
     creditos_especiales: number
     pases_exclusivos: PaseExclusivo[]
@@ -71,7 +70,6 @@ const getInteresesSeguro = (intereses: string | string[] | null | undefined): st
     return []
 }
 
-// FETCHER
 const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo[], productos: Producto[] }> => {
     const supabase = createClient()
     const { data, error } = await supabase.rpc('get_usuarios_completo')
@@ -79,7 +77,9 @@ const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo
     const typedData = data as unknown as RPCUsuariosData
 
     const { data: pcData } = await supabase.from('perfiles_companias').select('perfil_id, compania:companias(id, nombre)')
-    const { data: extraProfileData } = await supabase.from('profiles').select('id, porcentaje_beca, creditos_especiales, avatar_url, dni')
+
+    // 🚀 AHORA PEDIMOS LAS DOS BECAS POR SEPARADO
+    const { data: extraProfileData } = await supabase.from('profiles').select('id, porcentaje_beca_liga, porcentaje_beca_compania, creditos_especiales, avatar_url, dni')
     const { data: pasesData } = await supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad')
 
     const usuariosProcesados: UsuarioDirectorio[] = (typedData.usuarios || []).map((u: RPCUsuario) => {
@@ -92,7 +92,8 @@ const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo
             dni: extraData?.dni || null,
             intereses_procesados: getInteresesSeguro(u.intereses_ritmos),
             companias: misCompanias,
-            porcentaje_beca: extraData?.porcentaje_beca || 0,
+            porcentaje_beca_liga: extraData?.porcentaje_beca_liga || 0,
+            porcentaje_beca_compania: extraData?.porcentaje_beca_compania || 0,
             creditos_especiales: extraData?.creditos_especiales || 0,
             pases_exclusivos: misPases,
             avatar_url: extraData?.avatar_url || null
@@ -131,13 +132,15 @@ function UsuariosContent() {
     const [assigningPack, setAssigningPack] = useState<boolean>(false)
     const [creating, setCreating] = useState<boolean>(false)
 
-    // 🚀 NUEVOS ESTADOS PARA ESTADÍSTICAS
     const [userStats, setUserStats] = useState<any>(null)
     const [loadingStats, setLoadingStats] = useState(false)
 
     const [cobroLigaForm, setCobroLigaForm] = useState({ monto: '', metodo: 'efectivo' })
     const [cobroCompaniaForm, setCobroCompaniaForm] = useState({ monto: '', metodo: 'efectivo', companiaId: '' })
-    const [editForm, setEditForm] = useState({ obs: '', intereses_ritmos: [] as string[] })
+
+    // 🚀 FORMULARIO DE EDICIÓN ACTUALIZADO CON LAS DOS BECAS
+    const [editForm, setEditForm] = useState({ obs: '', intereses_ritmos: [] as string[], becaLiga: 0, becaCompania: 0 })
+
     const [createForm, setCreateForm] = useState({ nombre: '', email: '', dni: '', telefono: '', rol: 'alumno' })
     const [packForm, setPackForm] = useState({ packId: '', monto: '', metodo: 'efectivo' })
 
@@ -248,20 +251,19 @@ function UsuariosContent() {
         }
     }
 
-    // 🚀 ABRIR FICHA DETALLADA Y CARGAR MÉTRICAS (BYPASS A LA API 400)
-    // 🚀 ABRIR FICHA DETALLADA Y CARGAR MÉTRICAS (VERSIÓN DEFINITIVA)
     const openDetailModal = async (user: UsuarioDirectorio) => {
         setSelectedUser(user)
         setUserStats(null)
         setEditForm({
             obs: user.staff_observations || '',
-            intereses_ritmos: user.intereses_procesados || []
+            intereses_ritmos: user.intereses_procesados || [],
+            becaLiga: user.porcentaje_beca_liga || 0,
+            becaCompania: user.porcentaje_beca_compania || 0
         })
         setIsDetailOpen(true)
         setLoadingStats(true)
 
         try {
-            // 🚀 Llamamos a la función con el NOMBRE NUEVO
             const { data: stats, error } = await supabase.rpc('get_user_metrics_v2', {
                 p_id: user.id,
                 p_role: user.rol
@@ -288,8 +290,17 @@ function UsuariosContent() {
 
     const handleSaveChanges = async () => {
         if (!selectedUser) return
-        const response = await guardarPerfilAction(selectedUser.id, editForm.obs, editForm.intereses_ritmos)
-        if (response.success) { toast.success('Perfil guardado'); mutate() }
+
+        // 🚀 AHORA MANDAMOS LAS BECAS AL GUARDAR
+        const response = await guardarPerfilAction(
+            selectedUser.id,
+            editForm.obs,
+            editForm.intereses_ritmos,
+            editForm.becaLiga,
+            editForm.becaCompania
+        )
+
+        if (response.success) { toast.success('Ficha guardada'); mutate() }
         else { toast.error(response.error) }
     }
 
@@ -334,7 +345,10 @@ function UsuariosContent() {
         if (!cobroLigaForm.monto || !selectedUser) return toast.error('Ingresá el monto a cobrar')
         setAssigningPack(true)
         try {
-            const montoFinal = Number(cobroLigaForm.monto) - (Number(cobroLigaForm.monto) * (selectedUser.porcentaje_beca || 0) / 100)
+            // 🚀 USA LA BECA DE LIGA Específica
+            const descuentoBeca = (Number(cobroLigaForm.monto) * (selectedUser.porcentaje_beca_liga || 0)) / 100;
+            const montoFinal = Number(cobroLigaForm.monto) - descuentoBeca;
+
             const response = await cobrarLigaAction(selectedUser.id, montoFinal, cobroLigaForm.metodo)
             if (!response.success) throw new Error(response.error)
             toast.success('Cuota cobrada exitosamente')
@@ -362,7 +376,10 @@ function UsuariosContent() {
         if (!cobroCompaniaForm.monto || !cobroCompaniaForm.companiaId || !selectedUser) return toast.error('Completá el monto y la compañía')
         setAssigningPack(true)
         try {
-            const montoFinal = Number(cobroCompaniaForm.monto) - (Number(cobroCompaniaForm.monto) * (selectedUser.porcentaje_beca || 0) / 100)
+            // 🚀 USA LA BECA DE COMPAÑÍA Específica
+            const descuentoBeca = (Number(cobroCompaniaForm.monto) * (selectedUser.porcentaje_beca_compania || 0)) / 100;
+            const montoFinal = Number(cobroCompaniaForm.monto) - descuentoBeca;
+
             const response = await cobrarCompaniaAction(selectedUser.id, cobroCompaniaForm.companiaId, montoFinal, cobroCompaniaForm.metodo)
             if (!response.success) throw new Error(response.error)
             toast.success('Cuota de Compañía cobrada')
@@ -484,9 +501,16 @@ function UsuariosContent() {
                                             <UsersRound size={10} /> {u.companias.length} Grupo{u.companias.length > 1 ? 's' : ''}
                                         </span>
                                     )}
-                                    {(u.porcentaje_beca ?? 0) > 0 && (
+
+                                    {/* 🚀 ETIQUETAS DE BECAS SEPARADAS */}
+                                    {(u.porcentaje_beca_liga ?? 0) > 0 && (
                                         <span className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest">
-                                            <Percent size={10} /> Beca {u.porcentaje_beca}%
+                                            <Percent size={10} /> Beca Liga {u.porcentaje_beca_liga}%
+                                        </span>
+                                    )}
+                                    {(u.porcentaje_beca_compania ?? 0) > 0 && (
+                                        <span className="inline-flex items-center gap-1.5 bg-teal-500/10 text-teal-400 border border-teal-500/20 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest">
+                                            <Percent size={10} /> Beca Grupo {u.porcentaje_beca_compania}%
                                         </span>
                                     )}
                                 </div>
@@ -588,7 +612,7 @@ function UsuariosContent() {
                 )}
             </div>
 
-            {/* 🚀 FICHA DETALLADA DEL ALUMNO/PROFESOR CON MÉTRICAS */}
+            {/* FICHA DETALLADA DEL ALUMNO/PROFESOR */}
             {isDetailOpen && selectedUser && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in overflow-y-auto">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-4xl rounded-3xl overflow-hidden shadow-2xl relative my-auto flex flex-col md:flex-row">
@@ -597,9 +621,7 @@ function UsuariosContent() {
                             <X size={20} />
                         </button>
 
-                        {/* COLUMNA IZQUIERDA: PERFIL BÁSICO Y FOTO */}
                         <div className="w-full md:w-1/3 bg-[#111] border-r border-white/5 p-8 flex flex-col items-center border-b md:border-b-0">
-
                             <div className="relative group mb-6">
                                 <div className={`w-32 h-32 rounded-3xl overflow-hidden bg-white/5 border-2 border-white/10 flex items-center justify-center text-4xl font-black uppercase text-gray-500 shadow-xl transition-all ${uploadingAvatar ? 'opacity-50' : 'group-hover:border-[#D4E655]'}`}>
                                     {selectedUser.avatar_url ? (
@@ -608,7 +630,6 @@ function UsuariosContent() {
                                         selectedUser.nombre_completo?.[0] || '?'
                                     )}
                                 </div>
-
                                 <label className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-3xl text-[#D4E655]">
                                     {uploadingAvatar ? <Loader2 className="animate-spin" /> : <><Camera size={24} className="mb-2" /><span className="text-[10px] font-black uppercase tracking-widest">Cambiar</span></>}
                                     <input type="file" accept="image/*" className="hidden" disabled={uploadingAvatar} onChange={(e) => handleUploadAvatar(e, selectedUser.id)} />
@@ -636,7 +657,6 @@ function UsuariosContent() {
                             </div>
                         </div>
 
-                        {/* COLUMNA DERECHA: SALDOS, INFO ACADÉMICA Y NOTAS */}
                         <div className="w-full md:w-2/3 p-8 flex flex-col h-full bg-[#09090b]">
 
                             {selectedUser.rol === 'alumno' && (
@@ -657,21 +677,23 @@ function UsuariosContent() {
                                         <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-4 flex flex-col items-center justify-center text-center">
                                             <span className="text-[10px] font-black uppercase tracking-widest text-blue-400 mb-1">Exclusivos</span>
                                             <span className="text-3xl font-black text-white">{selectedUser.pases_exclusivos.reduce((a, p) => a + p.cantidad, 0)}</span>
-                                            {selectedUser.pases_exclusivos.length > 0 && (
-                                                <div className="w-full mt-2 pt-2 border-t border-blue-500/20">
-                                                    {selectedUser.pases_exclusivos.map((p, i) => (
-                                                        <p key={i} className="text-[8px] text-blue-300 font-bold truncate" title={p.pase_referencia}>
-                                                            {p.cantidad}x {p.pase_referencia.split(' ')[0]}
-                                                        </p>
-                                                    ))}
-                                                </div>
-                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* 🚀 FORMULARIOS DE BECAS INDEPENDIENTES */}
+                                    <div className="grid grid-cols-2 gap-4 mb-8">
+                                        <div className="bg-[#111] border border-emerald-500/20 rounded-xl p-4">
+                                            <label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest block mb-2">Beca La Liga (%)</label>
+                                            <input type="number" min="0" max="100" value={editForm.becaLiga} onChange={e => setEditForm({ ...editForm, becaLiga: Number(e.target.value) })} className="w-full bg-black border border-white/10 rounded-lg p-2 text-white text-sm font-black outline-none focus:border-emerald-500 text-center" />
+                                        </div>
+                                        <div className="bg-[#111] border border-teal-500/20 rounded-xl p-4">
+                                            <label className="text-[10px] font-bold text-teal-400 uppercase tracking-widest block mb-2">Beca Compañía (%)</label>
+                                            <input type="number" min="0" max="100" value={editForm.becaCompania} onChange={e => setEditForm({ ...editForm, becaCompania: Number(e.target.value) })} className="w-full bg-black border border-white/10 rounded-lg p-2 text-white text-sm font-black outline-none focus:border-teal-500 text-center" />
                                         </div>
                                     </div>
                                 </>
                             )}
 
-                            {/* 🚀 NUEVA SECCIÓN DE MÉTRICAS DE RENDIMIENTO */}
                             <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2 mt-2">
                                 <Activity size={16} className="text-[#D4E655]" /> Métricas de Rendimiento
                             </h4>
@@ -858,12 +880,12 @@ function UsuariosContent() {
                                 <input required type="number" value={cobroLigaForm.monto} onChange={e => setCobroLigaForm({ ...cobroLigaForm, monto: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-[#D4E655]" placeholder="Ej: 15000" />
                             </div>
 
-                            {selectedUser.porcentaje_beca > 0 && cobroLigaForm.monto && (
+                            {selectedUser.porcentaje_beca_liga > 0 && cobroLigaForm.monto && (
                                 <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl flex flex-col gap-2">
                                     <div className="flex justify-between text-xs text-gray-400"><span>Monto Base:</span><span>${Number(cobroLigaForm.monto).toLocaleString()}</span></div>
-                                    <div className="flex justify-between text-xs text-emerald-400 font-bold"><span>Beca ({selectedUser.porcentaje_beca}%):</span><span>- ${((Number(cobroLigaForm.monto) * selectedUser.porcentaje_beca) / 100).toLocaleString()}</span></div>
+                                    <div className="flex justify-between text-xs text-emerald-400 font-bold"><span>Beca Liga ({selectedUser.porcentaje_beca_liga}%):</span><span>- ${((Number(cobroLigaForm.monto) * selectedUser.porcentaje_beca_liga) / 100).toLocaleString()}</span></div>
                                     <div className="h-px bg-white/10 my-1"></div>
-                                    <div className="flex justify-between text-lg text-white font-black"><span>Total a Cobrar:</span><span>${(Number(cobroLigaForm.monto) - ((Number(cobroLigaForm.monto) * selectedUser.porcentaje_beca) / 100)).toLocaleString()}</span></div>
+                                    <div className="flex justify-between text-lg text-white font-black"><span>Total a Cobrar:</span><span>${(Number(cobroLigaForm.monto) - ((Number(cobroLigaForm.monto) * selectedUser.porcentaje_beca_liga) / 100)).toLocaleString()}</span></div>
                                 </div>
                             )}
 
@@ -916,12 +938,12 @@ function UsuariosContent() {
                                 <input required type="number" value={cobroCompaniaForm.monto} onChange={e => setCobroCompaniaForm({ ...cobroCompaniaForm, monto: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-blue-500" placeholder="Ej: 15000" />
                             </div>
 
-                            {selectedUser.porcentaje_beca > 0 && cobroCompaniaForm.monto && (
-                                <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl flex flex-col gap-2">
+                            {selectedUser.porcentaje_beca_compania > 0 && cobroCompaniaForm.monto && (
+                                <div className="bg-teal-500/10 border border-teal-500/20 p-4 rounded-xl flex flex-col gap-2">
                                     <div className="flex justify-between text-xs text-gray-400"><span>Monto Base:</span><span>${Number(cobroCompaniaForm.monto).toLocaleString()}</span></div>
-                                    <div className="flex justify-between text-xs text-emerald-400 font-bold"><span>Beca ({selectedUser.porcentaje_beca}%):</span><span>- ${((Number(cobroCompaniaForm.monto) * selectedUser.porcentaje_beca) / 100).toLocaleString()}</span></div>
+                                    <div className="flex justify-between text-xs text-teal-400 font-bold"><span>Beca Grupo ({selectedUser.porcentaje_beca_compania}%):</span><span>- ${((Number(cobroCompaniaForm.monto) * selectedUser.porcentaje_beca_compania) / 100).toLocaleString()}</span></div>
                                     <div className="h-px bg-white/10 my-1"></div>
-                                    <div className="flex justify-between text-lg text-white font-black"><span>Total a Pagar:</span><span>${(Number(cobroCompaniaForm.monto) - ((Number(cobroCompaniaForm.monto) * selectedUser.porcentaje_beca) / 100)).toLocaleString()}</span></div>
+                                    <div className="flex justify-between text-lg text-white font-black"><span>Total a Pagar:</span><span>${(Number(cobroCompaniaForm.monto) - ((Number(cobroCompaniaForm.monto) * selectedUser.porcentaje_beca_compania) / 100)).toLocaleString()}</span></div>
                                 </div>
                             )}
 
