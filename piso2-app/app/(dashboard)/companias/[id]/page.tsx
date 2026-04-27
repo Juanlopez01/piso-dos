@@ -307,6 +307,9 @@ export default function CompaniaDetallePage() {
     const miPerfilInfo = miembros.find(m => m.id === userId)
     const deboCompania = !miPerfilInfo?.pago_compania_al_dia && userRole === 'alumno'
 
+    // 🚀 Verificamos si es Proyecto Staff (pasamos a minúsculas para evitar errores de tipeo)
+    const esProyectoStaff = compania.nombre.toLowerCase().trim() === 'proyecto staff'
+
     return (
         <div className="min-h-screen bg-[#050505] text-white pb-24 selection:bg-blue-500 selection:text-white animate-in fade-in">
             <Toaster position="top-center" richColors theme="dark" />
@@ -366,19 +369,27 @@ export default function CompaniaDetallePage() {
 
             <div className="max-w-4xl mx-auto px-4 md:px-8 py-8">
 
-                {/* 🚀 CARTEL DE DEUDA COMPAÑÍA (Solo visible para el alumno deudor) */}
+                {/* 🚀 CARTEL DE DEUDA COMPAÑÍA (Adaptado para Proyecto Staff) */}
                 {deboCompania && (
                     <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                         <div className="flex items-start gap-3">
                             <AlertCircle className="text-blue-500 shrink-0 mt-0.5" size={20} />
                             <div>
                                 <h4 className="font-black text-blue-500 uppercase text-xs tracking-widest mb-1">Cuota de Compañía Pendiente</h4>
-                                <p className="text-gray-400 text-[10px] sm:text-xs">Aboná la cuota de este mes para mantener tu lugar en el grupo.</p>
+                                {esProyectoStaff ? (
+                                    <p className="text-gray-400 text-[10px] sm:text-xs">Aboná la cuota de este mes <strong className="text-white">por transferencia o en efectivo en la recepción del estudio</strong>.</p>
+                                ) : (
+                                    <p className="text-gray-400 text-[10px] sm:text-xs">Aboná la cuota de este mes para mantener tu lugar en el grupo.</p>
+                                )}
                             </div>
                         </div>
-                        <button onClick={generarLinkPagoCompania} disabled={procesandoPago} className="shrink-0 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2">
-                            {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : <><Coins size={14} /> Pagar Cuota</>}
-                        </button>
+
+                        {/* 🚀 Botón visible SOLO si NO es Proyecto Staff */}
+                        {!esProyectoStaff && (
+                            <button onClick={generarLinkPagoCompania} disabled={procesandoPago} className="shrink-0 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2">
+                                {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : <><Coins size={14} /> Pagar Cuota</>}
+                            </button>
+                        )}
                     </div>
                 )}
 
