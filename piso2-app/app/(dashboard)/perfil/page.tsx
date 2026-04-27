@@ -251,7 +251,7 @@ function PerfilContent() {
                             {profile.nombre} {profile.apellido}
                         </h2>
                         <span className="text-[#D4E655] font-bold text-xs tracking-widest uppercase bg-[#D4E655]/10 px-2 py-0.5 rounded mt-2 inline-block">
-                            {profile.rol === 'admin' ? 'Administrador' : isProfe ? 'Staff Docente' : 'Alumno'}
+                            {profile.rol === 'admin' || profile.rol === 'recepcion' ? 'Staff' : isProfe ? 'Staff Docente' : 'Alumno'}
                         </span>
                     </div>
                 </div>
