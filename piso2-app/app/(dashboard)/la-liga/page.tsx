@@ -109,7 +109,7 @@ const fetcherLiga = async (uid: string, supabase: any) => {
     if (isStaff) {
         const { data: perfiles } = await supabase
             .from('profiles')
-            .select('id, nombre_completo, email, nivel_liga, porcentaje_beca')
+            .select('id, nombre_completo, email, nivel_liga, porcentaje_beca_liga')
             .eq('rol', 'alumno')
             .not('nivel_liga', 'is', null)
             .order('nombre_completo', { ascending: true })
