@@ -7,7 +7,8 @@ import useSWR from 'swr'
 import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
     AlertTriangle, Calendar, LogOut, CheckCircle2, History,
-    BookOpen, Star, Clock, AlertCircle, HeartPulse, FileUp, X, Lock
+    BookOpen, Star, Clock, AlertCircle, HeartPulse, FileUp, X, Lock,
+    Eye, EyeOff // 🚀 AGREGAMOS LOS ÍCONOS DEL OJITO
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
@@ -35,11 +36,9 @@ type PerfilData = {
     proximoVencimiento: PackVencimiento | null
 }
 
-// 🚀 FETCHER ORDENADO Y APUNTANDO A LA TABLA CORRECTA
 const fetcherPerfil = async (uid: string, supabase: any): Promise<PerfilData> => {
     const [profileReq, historialReq, avisosReq, packsReq] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', uid).single(),
-        // 🚀 FIX: Usamos inscripciones, user_id y la relación estricta del profe
         supabase.from('inscripciones').select(`id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles!clases_profesor_id_fkey(nombre_completo))`).eq('user_id', uid).order('created_at', { ascending: false }),
         supabase.from('avisos').select('*').order('created_at', { ascending: false }),
         supabase.from('alumno_packs').select('*').eq('user_id', uid).eq('estado', 'activo').order('fecha_vencimiento', { ascending: true }).limit(1)
@@ -60,7 +59,6 @@ function PerfilContent() {
     const pagoNotificado = useRef(false)
     const formInicializado = useRef(false)
 
-    // 🛡️ ESPERAMOS AL CONTEXTO (No peleamos por la sesión)
     const { userId, isLoading: contextLoading } = useCash()
 
     const { data, error, isLoading, mutate } = useSWR<PerfilData>(
@@ -81,6 +79,10 @@ function PerfilContent() {
     const [confirmNewPassword, setConfirmNewPassword] = useState('')
     const [changingPassword, setChangingPassword] = useState(false)
 
+    // 🚀 ESTADOS PARA CONTROLAR LOS OJITOS
+    const [showNewPassword, setShowNewPassword] = useState(false)
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+
     const [formData, setFormData] = useState({
         nombre: '', apellido: '', email: '', telefono: '', alias_cbu: '', nombre_remplazo: '', contacto_remplazo: '',
         edad: '', direccion: '', contacto_emergencia: '', plan_medico: '', condiciones_medicas: '', apto_fisico_url: ''
@@ -100,7 +102,6 @@ function PerfilContent() {
         }
     }, [profile, userEmail])
 
-    // 🚀 RADAR SILENCIOSO (No toca la URL para no romper Next.js)
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
 
@@ -108,7 +109,6 @@ function PerfilContent() {
             pagoNotificado.current = true
             toast.success('¡Pago aprobado! Sincronizando tus créditos...', { duration: 5000 })
 
-            // Refresca los datos en segundo plano
             setTimeout(() => mutate(), 1500)
             setTimeout(() => mutate(), 4000)
         } else if (pagoStatus === 'error' && !pagoNotificado.current) {
@@ -190,6 +190,8 @@ function PerfilContent() {
             setIsPasswordModalOpen(false)
             setNewPassword('')
             setConfirmNewPassword('')
+            setShowNewPassword(false)
+            setShowConfirmPassword(false)
         } catch (error: any) {
             toast.error(error.message)
         } finally {
@@ -394,7 +396,6 @@ function PerfilContent() {
                                     </div>
                                 ) : (
                                     historialClases.map((historial) => {
-                                        // 🚀 ACÁ USAMOS LA FECHA SEGURA
                                         const fechaClase = parseSafeDate(historial.clase.inicio)
                                         const esPasada = fechaClase < new Date()
                                         return (
@@ -440,7 +441,7 @@ function PerfilContent() {
                 )}
             </div>
 
-            {/* MODAL DE CAMBIO DE CONTRASEÑA */}
+            {/* 🚀 MODAL DE CAMBIO DE CONTRASEÑA CON EL OJITO */}
             {isPasswordModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setIsPasswordModalOpen(false)}>
                     <div className="w-full max-w-md bg-[#09090b] border border-white/10 rounded-3xl p-8 shadow-2xl relative z-10" onClick={e => e.stopPropagation()}>
@@ -455,11 +456,43 @@ function PerfilContent() {
                         <form onSubmit={handlePasswordChange} className="space-y-5">
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nueva Contraseña</label>
-                                <input type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="••••••••" className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest" />
+                                <div className="relative">
+                                    <input
+                                        type={showNewPassword ? "text" : "password"}
+                                        required
+                                        value={newPassword}
+                                        onChange={(e) => setNewPassword(e.target.value)}
+                                        placeholder="••••••••"
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pr-12 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowNewPassword(!showNewPassword)}
+                                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
+                                    >
+                                        {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                    </button>
+                                </div>
                             </div>
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Confirmar Contraseña</label>
-                                <input type="password" required value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} placeholder="••••••••" className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest" />
+                                <div className="relative">
+                                    <input
+                                        type={showConfirmPassword ? "text" : "password"}
+                                        required
+                                        value={confirmNewPassword}
+                                        onChange={(e) => setConfirmNewPassword(e.target.value)}
+                                        placeholder="••••••••"
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pr-12 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
+                                    >
+                                        {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                    </button>
+                                </div>
                             </div>
                             <button type="submit" disabled={changingPassword} className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-4 shadow-lg">
                                 {changingPassword ? <Loader2 size={16} className="animate-spin" /> : 'Actualizar Contraseña'}
