@@ -7,7 +7,8 @@ import useSWR from 'swr'
 import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
-    Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp
+    Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
+    Eye // 🚀 Agregado el ícono Eye para el estado SAF
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
@@ -71,39 +72,67 @@ const getInteresesSeguro = (intereses: string | string[] | null | undefined): st
 }
 
 const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo[], productos: Producto[] }> => {
+    console.log("🚀 Iniciando fetcher... BYPASS ACTIVADO (Sin llamadas RPC)");
     const supabase = createClient()
-    const { data, error } = await supabase.rpc('get_usuarios_completo')
-    if (error) throw error
-    const typedData = data as unknown as RPCUsuariosData
 
-    const { data: pcData } = await supabase.from('perfiles_companias').select('perfil_id, compania:companias(id, nombre)')
+    try {
+        console.log("📦 Pidiendo datos a las 5 tablas en paralelo...");
+        const [
+            { data: perfiles, error: errPerfiles },
+            { data: ritmos, error: errRitmos },
+            { data: productos, error: errProductos },
+            { data: pcData, error: errPc },
+            { data: pasesData, error: errPases }
+        ] = await Promise.all([
+            supabase.from('profiles').select('*').order('nombre_completo', { ascending: true }),
+            supabase.from('ritmos').select('id, nombre').order('nombre', { ascending: true }),
+            supabase.from('productos').select('id, nombre, precio, creditos, tipo_clase').eq('activo', true),
+            supabase.from('perfiles_companias').select('perfil_id, compania:companias(id, nombre)'),
+            supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad')
+        ])
 
-    // 🚀 AHORA PEDIMOS LAS DOS BECAS POR SEPARADO
-    const { data: extraProfileData } = await supabase.from('profiles').select('id, porcentaje_beca_liga, porcentaje_beca_compania, creditos_especiales, avatar_url, dni')
-    const { data: pasesData } = await supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad')
+        console.log("✅ Respuestas recibidas de Supabase:");
+        if (errPerfiles) console.error("❌ Error en la tabla 'profiles':", errPerfiles);
+        if (errRitmos) console.error("❌ Error en la tabla 'ritmos':", errRitmos);
+        if (errProductos) console.error("❌ Error en la tabla 'productos':", errProductos);
+        if (errPc) console.error("❌ Error en la tabla 'perfiles_companias':", errPc);
+        if (errPases) console.error("❌ Error en la tabla 'pases_exclusivos':", errPases);
 
-    const usuariosProcesados: UsuarioDirectorio[] = (typedData.usuarios || []).map((u: RPCUsuario) => {
-        const misCompanias = pcData?.filter((pc: any) => pc.perfil_id === u.id).map((pc: any) => pc.compania as unknown as CompaniaBasica) || []
-        const extraData = extraProfileData?.find((p: any) => p.id === u.id)
-        const misPases = pasesData?.filter((p: any) => p.usuario_id === u.id) || []
+        // Si la tabla principal falla, cortamos todo
+        if (errPerfiles) throw errPerfiles
+
+        console.log(`📊 Armando el padrón con ${perfiles?.length || 0} perfiles encontrados...`);
+
+        const usuariosProcesados: UsuarioDirectorio[] = (perfiles || []).map((u: any) => {
+            const misCompanias = pcData?.filter((pc: any) => pc.perfil_id === u.id).map((pc: any) => pc.compania as unknown as CompaniaBasica) || []
+            const misPases = pasesData?.filter((p: any) => p.usuario_id === u.id) || []
+
+            return {
+                ...u,
+                dni: u.dni || null,
+                intereses_procesados: getInteresesSeguro(u.intereses_ritmos),
+                companias: misCompanias,
+                porcentaje_beca_liga: u.porcentaje_beca_liga || 0,
+                porcentaje_beca_compania: u.porcentaje_beca_compania || 0,
+                creditos_especiales: u.creditos_especiales || 0,
+                pases_exclusivos: misPases,
+                avatar_url: u.avatar_url || null,
+                is_frio: u.is_frio || false,
+                creditos_regulares: u.creditos_regulares || 0
+            }
+        })
+
+        console.log("🎉 Fetcher terminado correctamente. Usuarios listos para mostrar.");
 
         return {
-            ...u,
-            dni: extraData?.dni || null,
-            intereses_procesados: getInteresesSeguro(u.intereses_ritmos),
-            companias: misCompanias,
-            porcentaje_beca_liga: extraData?.porcentaje_beca_liga || 0,
-            porcentaje_beca_compania: extraData?.porcentaje_beca_compania || 0,
-            creditos_especiales: extraData?.creditos_especiales || 0,
-            pases_exclusivos: misPases,
-            avatar_url: extraData?.avatar_url || null
+            usuarios: usuariosProcesados,
+            ritmos: ritmos || [],
+            productos: productos || []
         }
-    })
 
-    return {
-        usuarios: usuariosProcesados,
-        ritmos: typedData.ritmos || [],
-        productos: typedData.productos || []
+    } catch (error) {
+        console.error("💥 ERROR FATAL EN EL FETCHER:", error);
+        throw error;
     }
 }
 
@@ -135,10 +164,14 @@ function UsuariosContent() {
     const [userStats, setUserStats] = useState<any>(null)
     const [loadingStats, setLoadingStats] = useState(false)
 
+    // 🚀 ESTADOS PARA MÉTRICAS DE LA LIGA (Filtro por fecha y SAF)
+    const [ligaStatsRango, setLigaStatsRango] = useState('mes')
+    const [ligaStats, setLigaStats] = useState<any>(null)
+    const [loadingLigaStats, setLoadingLigaStats] = useState(false)
+
     const [cobroLigaForm, setCobroLigaForm] = useState({ monto: '', metodo: 'efectivo' })
     const [cobroCompaniaForm, setCobroCompaniaForm] = useState({ monto: '', metodo: 'efectivo', companiaId: '' })
 
-    // 🚀 FORMULARIO DE EDICIÓN ACTUALIZADO CON LAS DOS BECAS
     const [editForm, setEditForm] = useState({ obs: '', intereses_ritmos: [] as string[], becaLiga: 0, becaCompania: 0 })
 
     const [createForm, setCreateForm] = useState({ nombre: '', email: '', dni: '', telefono: '', rol: 'alumno' })
@@ -251,9 +284,24 @@ function UsuariosContent() {
         }
     }
 
+    // 🚀 LÓGICA PARA BUSCAR ESTADÍSTICAS ESPECÍFICAS DE LA LIGA
+    const fetchLigaStats = async (userId: string, rango: string) => {
+        setLoadingLigaStats(true)
+        const { data } = await supabase.rpc('get_metricas_liga', { p_user_id: userId, p_rango: rango })
+        if (data) setLigaStats(data)
+        setLoadingLigaStats(false)
+    }
+
+    const handleLigaRangoChange = (newRango: string) => {
+        if (!selectedUser) return
+        setLigaStatsRango(newRango)
+        fetchLigaStats(selectedUser.id, newRango)
+    }
+
     const openDetailModal = async (user: UsuarioDirectorio) => {
         setSelectedUser(user)
         setUserStats(null)
+        setLigaStats(null) // Limpiamos las stats de liga viejas
         setEditForm({
             obs: user.staff_observations || '',
             intereses_ritmos: user.intereses_procesados || [],
@@ -264,6 +312,7 @@ function UsuariosContent() {
         setLoadingStats(true)
 
         try {
+            // Traemos métricas generales
             const { data: stats, error } = await supabase.rpc('get_user_metrics_v2', {
                 p_id: user.id,
                 p_role: user.rol
@@ -271,6 +320,12 @@ function UsuariosContent() {
 
             if (error) throw error;
             if (stats) setUserStats(stats);
+
+            // 🚀 Si el alumno está en La Liga, disparamos la búsqueda de métricas detalladas
+            if (user.rol === 'alumno' && (user.nivel_liga === 1 || user.nivel_liga === 2 || user.nivel_liga === '1' || user.nivel_liga === '2')) {
+                setLigaStatsRango('mes') // Por defecto le mostramos el último mes
+                fetchLigaStats(user.id, 'mes')
+            }
 
         } catch (error: any) {
             console.error("Error al cargar métricas:", error);
@@ -290,8 +345,6 @@ function UsuariosContent() {
 
     const handleSaveChanges = async () => {
         if (!selectedUser) return
-
-        // 🚀 AHORA MANDAMOS LAS BECAS AL GUARDAR
         const response = await guardarPerfilAction(
             selectedUser.id,
             editForm.obs,
@@ -345,7 +398,6 @@ function UsuariosContent() {
         if (!cobroLigaForm.monto || !selectedUser) return toast.error('Ingresá el monto a cobrar')
         setAssigningPack(true)
         try {
-            // 🚀 USA LA BECA DE LIGA Específica
             const descuentoBeca = (Number(cobroLigaForm.monto) * (selectedUser.porcentaje_beca_liga || 0)) / 100;
             const montoFinal = Number(cobroLigaForm.monto) - descuentoBeca;
 
@@ -376,7 +428,6 @@ function UsuariosContent() {
         if (!cobroCompaniaForm.monto || !cobroCompaniaForm.companiaId || !selectedUser) return toast.error('Completá el monto y la compañía')
         setAssigningPack(true)
         try {
-            // 🚀 USA LA BECA DE COMPAÑÍA Específica
             const descuentoBeca = (Number(cobroCompaniaForm.monto) * (selectedUser.porcentaje_beca_compania || 0)) / 100;
             const montoFinal = Number(cobroCompaniaForm.monto) - descuentoBeca;
 
@@ -502,7 +553,6 @@ function UsuariosContent() {
                                         </span>
                                     )}
 
-                                    {/* 🚀 ETIQUETAS DE BECAS SEPARADAS */}
                                     {(u.porcentaje_beca_liga ?? 0) > 0 && (
                                         <span className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest">
                                             <Percent size={10} /> Beca Liga {u.porcentaje_beca_liga}%
@@ -614,15 +664,18 @@ function UsuariosContent() {
 
             {/* FICHA DETALLADA DEL ALUMNO/PROFESOR */}
             {isDetailOpen && selectedUser && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in overflow-y-auto">
-                    <div className="bg-[#09090b] border border-white/10 w-full max-w-4xl rounded-3xl overflow-hidden shadow-2xl relative my-auto flex flex-col md:flex-row">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in">
 
-                        <button onClick={() => setIsDetailOpen(false)} className="absolute top-6 right-6 z-10 p-2 bg-black/50 backdrop-blur-md rounded-full text-gray-400 hover:text-white transition-colors">
+                    {/* 🚀 ACÁ ESTÁ LA MAGIA: max-h-[90vh] para que no se pase del alto de la pantalla */}
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-4xl rounded-3xl overflow-hidden shadow-2xl relative flex flex-col md:flex-row max-h-[90vh]">
+
+                        <button onClick={() => setIsDetailOpen(false)} className="absolute top-6 right-6 z-20 p-2 bg-black/50 backdrop-blur-md rounded-full text-gray-400 hover:text-white transition-colors">
                             <X size={20} />
                         </button>
 
-                        <div className="w-full md:w-1/3 bg-[#111] border-r border-white/5 p-8 flex flex-col items-center border-b md:border-b-0">
-                            <div className="relative group mb-6">
+                        {/* COLUMNA IZQUIERDA: Info estática */}
+                        <div className="w-full md:w-1/3 bg-[#111] border-r border-white/5 p-6 md:p-8 flex flex-col items-center border-b md:border-b-0 shrink-0 overflow-y-auto custom-scrollbar">
+                            <div className="relative group mb-6 mt-4 md:mt-0">
                                 <div className={`w-32 h-32 rounded-3xl overflow-hidden bg-white/5 border-2 border-white/10 flex items-center justify-center text-4xl font-black uppercase text-gray-500 shadow-xl transition-all ${uploadingAvatar ? 'opacity-50' : 'group-hover:border-[#D4E655]'}`}>
                                     {selectedUser.avatar_url ? (
                                         <img src={selectedUser.avatar_url} alt="" className="w-full h-full object-cover" />
@@ -657,7 +710,8 @@ function UsuariosContent() {
                             </div>
                         </div>
 
-                        <div className="w-full md:w-2/3 p-8 flex flex-col h-full bg-[#09090b]">
+                        {/* 🚀 COLUMNA DERECHA: Acá activamos el SCROLL INTERNO (overflow-y-auto) */}
+                        <div className="w-full md:w-2/3 p-6 md:p-8 flex flex-col bg-[#09090b] overflow-y-auto custom-scrollbar">
 
                             {selectedUser.rol === 'alumno' && (
                                 <>
@@ -680,7 +734,6 @@ function UsuariosContent() {
                                         </div>
                                     </div>
 
-                                    {/* 🚀 FORMULARIOS DE BECAS INDEPENDIENTES */}
                                     <div className="grid grid-cols-2 gap-4 mb-8">
                                         <div className="bg-[#111] border border-emerald-500/20 rounded-xl p-4">
                                             <label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest block mb-2">Beca La Liga (%)</label>
@@ -695,7 +748,7 @@ function UsuariosContent() {
                             )}
 
                             <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2 mt-2">
-                                <Activity size={16} className="text-[#D4E655]" /> Métricas de Rendimiento
+                                <Activity size={16} className="text-[#D4E655]" /> Rendimiento General
                             </h4>
 
                             <div className="mb-8">
@@ -735,6 +788,55 @@ function UsuariosContent() {
                                 )}
                             </div>
 
+                            {selectedUser.rol === 'alumno' && (selectedUser.nivel_liga === 1 || selectedUser.nivel_liga === 2 || selectedUser.nivel_liga === '1' || selectedUser.nivel_liga === '2') && (
+                                <div className="mb-8 border-t border-white/5 pt-6">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
+                                        <h4 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                                            <Trophy size={16} className="text-yellow-500" /> Detalle Asistencia (La Liga)
+                                        </h4>
+                                        <select
+                                            value={ligaStatsRango}
+                                            onChange={(e) => handleLigaRangoChange(e.target.value)}
+                                            className="bg-[#111] border border-white/10 text-[10px] font-bold uppercase text-gray-400 p-2.5 rounded-xl outline-none focus:border-yellow-500 transition-colors w-full sm:w-auto shrink-0"
+                                        >
+                                            <option value="mes">Último Mes</option>
+                                            <option value="trimestre">Último Trimestre</option>
+                                            <option value="semestre">Último Semestre</option>
+                                            <option value="historico">Histórico Completo</option>
+                                        </select>
+                                    </div>
+
+                                    {loadingLigaStats ? (
+                                        <div className="flex justify-center py-6"><Loader2 className="animate-spin text-yellow-500" /></div>
+                                    ) : ligaStats ? (
+                                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                                            <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3 flex flex-col items-center justify-center text-center">
+                                                <span className="text-[9px] font-black uppercase text-green-500 mb-1">Presentes</span>
+                                                <span className="text-xl font-black text-white">{ligaStats.presentes}</span>
+                                            </div>
+                                            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 flex flex-col items-center justify-center text-center">
+                                                <span className="text-[9px] font-black uppercase text-red-500 mb-1">Ausentes</span>
+                                                <span className="text-xl font-black text-white">{ligaStats.ausentes}</span>
+                                            </div>
+                                            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 flex flex-col items-center justify-center text-center">
+                                                <span className="text-[9px] font-black uppercase text-yellow-500 mb-1">M. Falta</span>
+                                                <span className="text-xl font-black text-white">{ligaStats.medias_faltas}</span>
+                                            </div>
+                                            <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-3 flex flex-col items-center justify-center text-center" title="Asistió pero no participó">
+                                                <span className="text-[9px] font-black uppercase text-purple-400 mb-1 flex items-center gap-1"><Eye size={10} /> SAF</span>
+                                                <span className="text-xl font-black text-white">{ligaStats.saf}</span>
+                                            </div>
+                                            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex flex-col items-center justify-center text-center sm:col-span-1 col-span-2">
+                                                <span className="text-[9px] font-black uppercase text-blue-400 mb-1">Justific.</span>
+                                                <span className="text-xl font-black text-white">{ligaStats.justificadas}</span>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-gray-500 italic text-center py-4 bg-[#111] rounded-xl border border-white/5">Seleccioná un periodo para ver el desglose.</p>
+                                    )}
+                                </div>
+                            )}
+
                             {selectedUser.rol === 'alumno' && (
                                 <>
                                     <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
@@ -757,21 +859,21 @@ function UsuariosContent() {
                                 <Shield size={16} className="text-yellow-500" /> Notas Confidenciales (Staff)
                             </h4>
                             <textarea
-                                className="w-full flex-1 min-h-[120px] bg-[#111] border border-white/10 rounded-2xl p-5 text-white text-sm outline-none focus:border-yellow-500/50 resize-none transition-colors"
-                                placeholder="Escribir observaciones internas, lesiones, consideraciones..."
+                                className="w-full flex-1 min-h-[120px] bg-[#111] border border-white/10 rounded-2xl p-5 text-white text-sm outline-none focus:border-yellow-500/50 resize-none transition-colors mb-6"
+                                placeholder="Escribir consideraciones..."
                                 value={editForm.obs}
                                 onChange={(e) => setEditForm({ ...editForm, obs: e.target.value })}
                             />
 
-                            <button onClick={handleSaveChanges} className="w-full mt-6 bg-white text-black font-black uppercase py-4 rounded-xl hover:bg-gray-200 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-xl shrink-0">
-                                <Save size={16} /> Guardar Cambios en Ficha
+                            <button onClick={handleSaveChanges} className="w-full bg-white text-black font-black uppercase py-4 rounded-xl hover:bg-gray-200 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-xl shrink-0 mt-auto">
+                                <Save size={16} /> Guardar Ficha
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* MODALES VIEJOS SE MANTIENEN (Create, Pack, Cobros) */}
+            {/* MODALES VIEJOS (Create, Pack, Cobros) */}
             {isCreateOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-6 shadow-2xl relative">

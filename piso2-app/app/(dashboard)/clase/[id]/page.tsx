@@ -10,7 +10,8 @@ import {
     Wallet, CreditCard, Loader2, Users, Star, Ticket, Package,
     BookOpen, BellRing, Send, Sparkles, Download, ShieldAlert,
     Clock4, FileCheck2, // 🚀 IMPORTAMOS ICONOS NUEVOS PARA MEDIA FALTA Y JUSTIFICADA
-    Lock
+    Lock,
+    Eye
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -35,7 +36,7 @@ type Inscripcion = {
     modalidad: string
     valor_credito: number
     presente: boolean
-    estado_asistencia?: 'presente' | 'ausente' | 'media_falta' | 'justificada' | null // 🚀 NUEVO ESTADO
+    estado_asistencia?: 'presente' | 'ausente' | 'media_falta' | 'justificada' | 'saf' | null // 🚀 NUEVO ESTADO
     metodo_pago: string
     es_invitado: boolean
 }
@@ -181,7 +182,7 @@ export default function ClaseDetallePage() {
     const horaText = inicioNormalizado ? inicioNormalizado.split('T')[1].substring(0, 5) : '';
 
     // 🚀 LÓGICA DE ASISTENCIA ACTUALIZADA (Soporta múltiples estados)
-    const handleSetAsistencia = async (insc: Inscripcion, nuevoEstado: 'presente' | 'ausente' | 'media_falta' | 'justificada') => {
+    const handleSetAsistencia = async (insc: Inscripcion, nuevoEstado: 'presente' | 'ausente' | 'media_falta' | 'justificada' | 'saf') => {
         // Actualización optimista en la UI
         const optimisticInscripciones = inscripciones.map(i =>
             i.id === insc.id
@@ -458,7 +459,7 @@ export default function ClaseDetallePage() {
                                             <X size={18} />
                                         </button>
 
-                                        {/* 🚀 Botones Especiales (Solo Liga/Compañía) */}
+                                        {/* 🚀 Botones Especiales (SOLO FORMACIÓN) */}
                                         {esFormacion && (
                                             <>
                                                 <button
@@ -467,6 +468,13 @@ export default function ClaseDetallePage() {
                                                     className={`p-2 rounded-lg transition-all ${insc.estado_asistencia === 'media_falta' ? 'bg-yellow-500 text-black' : 'text-yellow-500/50 hover:text-yellow-500'}`}
                                                 >
                                                     <Clock4 size={18} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleSetAsistencia(insc, 'saf')}
+                                                    title="S.A.F. (Asistió pero no participó)"
+                                                    className={`p-2 rounded-lg transition-all ${insc.estado_asistencia === 'saf' ? 'bg-purple-500 text-white' : 'text-purple-500/50 hover:text-purple-500'}`}
+                                                >
+                                                    <Eye size={18} />
                                                 </button>
                                                 <button
                                                     onClick={() => handleSetAsistencia(insc, 'justificada')}

@@ -14,13 +14,15 @@ export async function toggleAsistenciaAction(inscripcionId: string, presente: bo
     return { success: true }
 }
 
-// 🚀 NUEVA ACCIÓN TODOTERRENO (Soporta media falta y justificada)
-export async function setEstadoAsistenciaAction(inscripcionId: string, estado: 'presente' | 'ausente' | 'media_falta' | 'justificada') {
+// 🚀 NUEVA ACCIÓN TODOTERRENO (Ahora soporta SAF)
+export async function setEstadoAsistenciaAction(inscripcionId: string, estado: 'presente' | 'ausente' | 'media_falta' | 'justificada' | 'saf') {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return { success: false, error: 'No autorizado' }
 
-    // El checkbox clásico de "presente" solo es true si el estado es exactamente 'presente'
+    // Consideramos que si fue pero no hizo la clase (SAF), físicamente estuvo presente (true),
+    // o podés dejarlo false si querés que le cuente como inasistencia. Acá lo dejamos false para el presentismo genérico, 
+    // pero guardado como 'saf' exacto en el detalle.
     const esPresente = estado === 'presente';
 
     const { error } = await supabase.from('inscripciones').update({
