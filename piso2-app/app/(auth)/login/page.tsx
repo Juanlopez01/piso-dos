@@ -106,9 +106,12 @@ export default function LoginPage() {
 
     // --- CHEQUEO INICIAL DE SESIÓN (CON MATA-FANTASMAS Y PATOVICA) ---
     useEffect(() => {
-        // 🚀 INTERCEPTOR SALVAVIDAS: Si el mail de Supabase los tira al login, los atajamos
-        if (window.location.href.includes('type=recovery')) {
-            router.push('/act-password' + window.location.search + window.location.hash)
+        // 🚀 INTERCEPTOR SALVAVIDAS MEJORADO: Ataja tanto el flujo viejo como el nuevo (PKCE)
+        const urlParams = window.location.search;
+        const urlHash = window.location.hash;
+
+        if (urlHash.includes('type=recovery') || urlParams.includes('code=')) {
+            router.push('/act-password' + urlParams + urlHash)
             return
         }
 
