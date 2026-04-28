@@ -106,24 +106,18 @@ export default function LoginPage() {
 
     // --- CHEQUEO INICIAL DE SESIÓN (CON MATA-FANTASMAS Y PATOVICA) ---
     useEffect(() => {
-        // 🚀 INTERCEPTOR SALVAVIDAS MEJORADO: Ataja tanto el flujo viejo como el nuevo (PKCE)
         const urlParams = window.location.search;
-        const urlHash = window.location.hash;
 
-        if (urlHash.includes('type=recovery') || urlParams.includes('code=')) {
-            router.push('/act-password' + urlParams + urlHash)
-            return
+        // 🚀 EL MARTILLAZO: Si detectamos que viene del mail (tiene 'code='), 
+        // lo sacamos de acá a la fuerza sin esperar a Next.js.
+        if (urlParams.includes('code=')) {
+            window.location.replace('/act-password' + urlParams);
+            return;
         }
-
-        // 🚀 También escuchamos en tiempo real por si Supabase dispara el evento ahora mismo
-        const { data: authListener } = supabase.auth.onAuthStateChange((event: any) => {
-            if (event === 'PASSWORD_RECOVERY') {
-                router.push('/act-password')
-            }
-        })
 
         const checkSession = async () => {
             const { data: { session } } = await supabase.auth.getSession()
+
             if (session) {
                 // Buscamos su rol
                 const { data: profile } = await supabase
@@ -153,10 +147,6 @@ export default function LoginPage() {
         }
 
         checkSession()
-
-        return () => {
-            authListener?.subscription.unsubscribe()
-        }
     }, [router, supabase])
 
     if (checkingAuth) {
