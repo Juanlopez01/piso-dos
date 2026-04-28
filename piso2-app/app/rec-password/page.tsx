@@ -24,16 +24,15 @@ export default function RecuperarPasswordPage() {
 
         try {
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                // 🚀 EL TRUCO ACÁ:
-                // Redirigimos AL LOGIN, para que pase por la "Aduana"
-                // El Login interceptará el type=recovery y lo enviará a /act-password
-                redirectTo: `${window.location.origin}/login`,
+                // 🚀 AHORA SÍ: Directo a destino, sin escalas
+                redirectTo: `${window.location.origin}/act-password`,
             })
 
             if (error) throw error
 
             setEnviado(true)
             toast.success('Correo de recuperación enviado')
+
         } catch (error: any) {
             toast.error('Error: No pudimos enviar el correo. Verificá que la dirección sea correcta.')
             console.error(error)

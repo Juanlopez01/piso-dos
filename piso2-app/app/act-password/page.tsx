@@ -22,32 +22,59 @@ export default function ActualizarPasswordPage() {
     const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
     useEffect(() => {
-        // 🚀 APLICAMOS LOS TIPOS ACÁ: event y session
+        let isMounted = true
+
+        const processRecovery = async () => {
+            // 1. Primero nos fijamos si Supabase ya nos abrió la puerta automáticamente
+            const { data: { session } } = await supabase.auth.getSession()
+            if (session) {
+                if (isMounted) setAuthReady(true)
+                return
+            }
+
+            // 2. Si no hay sesión, buscamos el código en la URL y lo canjeamos a mano
+            const queryParams = new URLSearchParams(window.location.search)
+            const code = queryParams.get('code')
+
+            if (code) {
+                try {
+                    const { error } = await supabase.auth.exchangeCodeForSession(code)
+                    if (error) throw error
+                    // ¡Éxito!
+                    if (isMounted) setAuthReady(true)
+                } catch (err) {
+                    console.error("Error al canjear código:", err)
+                    // Failsafe: a veces tira error de expirado porque Supabase lo canjeó un milisegundo antes. Volvemos a chequear.
+                    const { data: { session: checkSession } } = await supabase.auth.getSession()
+                    if (checkSession) {
+                        if (isMounted) setAuthReady(true)
+                    } else {
+                        if (isMounted) {
+                            toast.error('El enlace ya fue usado o expiró. Pedí uno nuevo.')
+                            router.push('/login')
+                        }
+                    }
+                }
+            } else {
+                // Si no hay código ni sesión, lo pateamos
+                if (isMounted) router.push('/login')
+            }
+        }
+
+        processRecovery()
+
+        // Por si acaso, escuchamos los eventos automáticos de Supabase
         const { data: authListener } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
-            if (event === 'PASSWORD_RECOVERY' || session) {
-                setAuthReady(true)
+            if ((event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') && session) {
+                if (isMounted) setAuthReady(true)
             }
         })
-
-        // 2. Por las dudas que haya sido tan rápido que no llegamos a escuchar el evento, chequeamos a mano.
-        supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
-            if (session) setAuthReady(true)
-        })
-
-        // Si pasan 4 segundos y no pasó nada, es porque el link ya se usó o venció.
-        const timeout = setTimeout(() => {
-            if (!authReady) {
-                toast.error('El enlace es inválido o ya expiró. Por favor, pedí uno nuevo.')
-                router.push('/login')
-            }
-        }, 4000)
 
         return () => {
+            isMounted = false
             authListener?.subscription.unsubscribe()
-            clearTimeout(timeout)
         }
-    }, [router, supabase, authReady])
-
+    }, [router, supabase])
     const handleUpdate = async (e: React.FormEvent) => {
         e.preventDefault()
 
