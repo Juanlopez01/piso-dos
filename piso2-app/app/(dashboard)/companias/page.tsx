@@ -73,11 +73,11 @@ export default function CompaniasPage() {
         if (!user) return
         setUserId(user.id)
 
-        // Traemos el rol y la beca
-        const { data: profile } = await supabase.from('profiles').select('rol, porcentaje_beca').eq('id', user.id).single()
-        const rol = profile?.rol || 'alumno'
+        // 🚀 SOLUCIÓN: El nombre correcto de la columna es porcentaje_beca_compania
+        const { data: profile } = await supabase.from('profiles').select('rol, porcentaje_beca_compania').eq('id', user.id).maybeSingle()
+        const rol = (profile?.rol || 'alumno').toLowerCase().trim()
         setUserRole(rol)
-        setPorcentajeBeca(profile?.porcentaje_beca || 0)
+        setPorcentajeBeca(profile?.porcentaje_beca_compania || 0)
 
         let queryCompanias = supabase.from('companias').select('*, coordinador:profiles!coordinador_id(nombre_completo)')
 
@@ -306,6 +306,19 @@ export default function CompaniasPage() {
                                 {userRole === 'alumno' ? 'Volver a Cartelera' : 'Ir a mi Agenda'} <ChevronRight size={16} />
                             </Link>
                         </div>
+                    </div>
+                )}
+
+                {/* 🚀 NUEVO: ESTADO VACÍO EXCLUSIVO PARA EL STAFF */}
+                {['admin', 'recepcion', 'profesor'].includes(userRole) && companias.length === 0 && (
+                    <div className="py-20 flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-3xl bg-[#111]/30">
+                        <UsersRound size={48} className="text-gray-600 mb-4" />
+                        <p className="text-gray-500 font-bold uppercase text-xs">No hay compañías creadas aún.</p>
+                        {['admin', 'recepcion'].includes(userRole) && (
+                            <button onClick={() => setIsCreateModalOpen(true)} className="mt-6 bg-blue-600/20 text-blue-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-colors flex items-center gap-2">
+                                <Plus size={14} /> Crear la primera
+                            </button>
+                        )}
                     </div>
                 )}
 
