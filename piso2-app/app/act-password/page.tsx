@@ -5,6 +5,7 @@ import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Lock, Loader2, CheckCircle2, Eye, EyeOff } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+// 🚀 IMPORTAMOS LOS TIPOS EXACTOS DE SUPABASE
 import { AuthChangeEvent, Session } from '@supabase/supabase-js'
 
 export default function ActualizarPasswordPage() {
@@ -17,76 +18,58 @@ export default function ActualizarPasswordPage() {
     const [actualizado, setActualizado] = useState(false)
     const [authReady, setAuthReady] = useState(false)
 
-    // 🚀 ESTADOS PARA EL OJITO
     const [showPassword, setShowPassword] = useState(false)
     const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
-    // Escuchamos a Supabase para que procese el link del mail
     useEffect(() => {
-        const canjearCodigo = async () => {
-            // Buscamos si viene un hash o código en la URL (Depende cómo lo mande Supabase)
-            const queryParams = new URLSearchParams(window.location.search)
-            const code = queryParams.get('code')
-
-            if (code) {
-                // PKCE flow (El más seguro y actual)
-                await supabase.auth.exchangeCodeForSession(code)
-            }
-
-            // Verificamos si ya hay una sesión activa producto del click en el mail
-            const { data: { session } } = await supabase.auth.getSession()
-            if (session) setAuthReady(true)
-        }
-
-        canjearCodigo()
-
-        // Por si acaso viene por otro método (Implicit flow antiguo o Auth state event)
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
+        // 🚀 APLICAMOS LOS TIPOS ACÁ: event y session
+        const { data: authListener } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
             if (event === 'PASSWORD_RECOVERY' || session) {
                 setAuthReady(true)
             }
         })
 
-        // Failsafe: a los 2.5 segundos liberamos la pantalla igual por si tardó en responder
-        const timeout = setTimeout(() => setAuthReady(true), 2500)
+        // 2. Por las dudas que haya sido tan rápido que no llegamos a escuchar el evento, chequeamos a mano.
+        supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
+            if (session) setAuthReady(true)
+        })
+
+        // Si pasan 4 segundos y no pasó nada, es porque el link ya se usó o venció.
+        const timeout = setTimeout(() => {
+            if (!authReady) {
+                toast.error('El enlace es inválido o ya expiró. Por favor, pedí uno nuevo.')
+                router.push('/login')
+            }
+        }, 4000)
 
         return () => {
-            subscription.unsubscribe()
+            authListener?.subscription.unsubscribe()
             clearTimeout(timeout)
         }
-    }, [])
+    }, [router, supabase, authReady])
 
     const handleUpdate = async (e: React.FormEvent) => {
         e.preventDefault()
 
-        if (password.length < 6) {
-            return toast.error('La contraseña debe tener al menos 6 caracteres')
-        }
-        if (password !== confirmPassword) {
-            return toast.error('Las contraseñas no coinciden')
-        }
+        if (password.length < 6) return toast.error('La contraseña debe tener al menos 6 caracteres')
+        if (password !== confirmPassword) return toast.error('Las contraseñas no coinciden')
 
         setLoading(true)
 
         try {
-            // Intentamos actualizar la contraseña de la sesión activa
-            const { error } = await supabase.auth.updateUser({
-                password: password
-            })
-
+            // Actualizamos la contraseña
+            const { error } = await supabase.auth.updateUser({ password: password })
             if (error) throw error
 
             setActualizado(true)
             toast.success('¡Contraseña actualizada con éxito!')
 
-            // Lo mandamos al login para que entre fresco
-            setTimeout(() => {
-                router.push('/login')
-            }, 3000)
+            // Lo deslogueamos por seguridad y lo mandamos al login para que entre fresco
+            await supabase.auth.signOut()
+            setTimeout(() => router.push('/login'), 3000)
 
         } catch (error: any) {
-            toast.error(error.message || 'Error al actualizar. Es posible que el enlace haya expirado.')
-            console.error("Error completo:", error)
+            toast.error(error.message || 'Error al actualizar. Pedí un enlace nuevo.')
         } finally {
             setLoading(false)
         }
@@ -95,83 +78,45 @@ export default function ActualizarPasswordPage() {
     return (
         <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4 relative overflow-hidden selection:bg-[#D4E655] selection:text-black">
             <Toaster position="top-center" richColors theme="dark" />
-
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#D4E655]/5 rounded-full blur-[100px] pointer-events-none" />
 
             <div className="w-full max-w-md bg-[#09090b] border border-white/10 rounded-3xl p-8 shadow-2xl relative z-10 animate-in zoom-in-95 duration-500">
                 <div className="w-16 h-16 bg-[#D4E655]/10 rounded-full flex items-center justify-center mb-6 border border-[#D4E655]/20">
                     <Lock className="text-[#D4E655]" size={28} />
                 </div>
-
-                <h1 className="text-3xl font-black uppercase tracking-tighter text-white leading-none mb-2">
-                    Crear Nueva <br /><span className="text-[#D4E655]">Contraseña</span>
-                </h1>
+                <h1 className="text-3xl font-black uppercase tracking-tighter text-white leading-none mb-2">Crear Nueva <br /><span className="text-[#D4E655]">Contraseña</span></h1>
 
                 {actualizado ? (
                     <div className="mt-8 text-center animate-in fade-in">
                         <CheckCircle2 size={48} className="text-[#D4E655] mx-auto mb-4" />
                         <h3 className="text-white font-black uppercase tracking-widest text-sm mb-2">¡Todo listo!</h3>
-                        <p className="text-gray-400 text-xs leading-relaxed mb-6">Tu contraseña fue actualizada. Ya podés volver a entrar a tu cuenta.</p>
+                        <p className="text-gray-400 text-xs leading-relaxed mb-6">Tu contraseña fue actualizada.</p>
                         <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest animate-pulse">Redirigiendo al Inicio...</p>
                     </div>
                 ) : !authReady ? (
                     <div className="flex flex-col items-center justify-center py-10">
                         <Loader2 className="animate-spin text-[#D4E655] w-10 h-10 mb-4" />
-                        <p className="text-xs text-gray-500 font-bold uppercase tracking-widest text-center px-4">Validando tu enlace de seguridad...</p>
+                        <p className="text-xs text-gray-500 font-bold uppercase tracking-widest text-center px-4">Validando enlace de seguridad...</p>
                     </div>
                 ) : (
                     <>
-                        <p className="text-gray-400 text-xs font-medium mb-8 leading-relaxed">
-                            Ingresá una contraseña que no hayas usado antes y que tenga al menos 6 caracteres.
-                        </p>
+                        <p className="text-gray-400 text-xs font-medium mb-8 leading-relaxed">Ingresá una contraseña que no hayas usado antes y que tenga al menos 6 caracteres.</p>
                         <form onSubmit={handleUpdate} className="space-y-5">
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nueva Contraseña</label>
                                 <div className="relative">
-                                    <input
-                                        type={showPassword ? "text" : "password"}
-                                        required
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
-                                        placeholder="••••••••"
-                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pr-12 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowPassword(!showPassword)}
-                                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
-                                    >
-                                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                                    </button>
+                                    <input type={showPassword ? "text" : "password"} required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pr-12 text-white text-sm font-bold outline-none focus:border-[#D4E655]" />
+                                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"><Eye size={16} /></button>
                                 </div>
                             </div>
-
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Confirmar Contraseña</label>
                                 <div className="relative">
-                                    <input
-                                        type={showConfirmPassword ? "text" : "password"}
-                                        required
-                                        value={confirmPassword}
-                                        onChange={(e) => setConfirmPassword(e.target.value)}
-                                        placeholder="••••••••"
-                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pr-12 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors tracking-widest"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
-                                    >
-                                        {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                                    </button>
+                                    <input type={showConfirmPassword ? "text" : "password"} required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pr-12 text-white text-sm font-bold outline-none focus:border-[#D4E655]" />
+                                    <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"><Eye size={16} /></button>
                                 </div>
                             </div>
-
-                            <button
-                                type="submit"
-                                disabled={loading}
-                                className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-4 shadow-[0_0_20px_rgba(212,230,85,0.2)]"
-                            >
+                            <button type="submit" disabled={loading} className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white text-xs tracking-widest flex items-center justify-center gap-2 mt-4 shadow-lg">
                                 {loading ? <Loader2 size={18} className="animate-spin" /> : 'Actualizar Contraseña'}
                             </button>
                         </form>
