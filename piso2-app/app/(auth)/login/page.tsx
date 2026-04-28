@@ -104,8 +104,21 @@ export default function LoginPage() {
         }
     }
 
-    // --- CHEQUEO INICIAL DE SESIÓN (CON MATA-FANTASMAS) ---
+    // --- CHEQUEO INICIAL DE SESIÓN (CON MATA-FANTASMAS Y PATOVICA) ---
     useEffect(() => {
+        // 🚀 INTERCEPTOR SALVAVIDAS: Si el mail de Supabase los tira al login, los atajamos
+        if (window.location.href.includes('type=recovery')) {
+            router.push('/act-password' + window.location.search + window.location.hash)
+            return
+        }
+
+        // 🚀 También escuchamos en tiempo real por si Supabase dispara el evento ahora mismo
+        const { data: authListener } = supabase.auth.onAuthStateChange((event: any) => {
+            if (event === 'PASSWORD_RECOVERY') {
+                router.push('/act-password')
+            }
+        })
+
         const checkSession = async () => {
             const { data: { session } } = await supabase.auth.getSession()
             if (session) {
@@ -114,7 +127,7 @@ export default function LoginPage() {
                     .from('profiles')
                     .select('rol')
                     .eq('id', session.user.id)
-                    .maybeSingle() // Usamos maybeSingle para que no tire error si no existe
+                    .maybeSingle()
 
                 // Si hay sesión en el búnker PERO no hay perfil en la DB (usuario fantasma)
                 if (!profile) {
@@ -135,7 +148,12 @@ export default function LoginPage() {
                 setCheckingAuth(false) // Le mostramos el login
             }
         }
+
         checkSession()
+
+        return () => {
+            authListener?.subscription.unsubscribe()
+        }
     }, [router, supabase])
 
     if (checkingAuth) {
@@ -152,9 +170,7 @@ export default function LoginPage() {
 
             {/* --- FONDO --- */}
             <div className="absolute inset-0 z-0">
-                {/* Usamos una imagen de stock de danza en blanco y negro temporalmente */}
                 <div className="absolute inset-0 bg-[url('/banner-piso.png')] bg-cover bg-center grayscale opacity-40"></div>
-                {/* Filtro oscuro para mejorar legibilidad */}
                 <div className="absolute inset-0 bg-gradient-to-b from-black/90 via-black/50 to-black/95"></div>
             </div>
 
@@ -197,7 +213,6 @@ export default function LoginPage() {
                         <form onSubmit={handleLogin} className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Email</label>
-                                {/* Input Blanco como en el diseño */}
                                 <input
                                     type="email"
                                     required
@@ -210,7 +225,6 @@ export default function LoginPage() {
 
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Contraseña</label>
-                                {/* Input Oscuro con borde */}
                                 <input
                                     type="password"
                                     required

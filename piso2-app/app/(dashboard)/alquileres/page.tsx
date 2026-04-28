@@ -7,7 +7,8 @@ import {
     Plus, Calendar, Clock, DollarSign, User, MapPin,
     Trash2, CheckCircle, Loader2, X, MessageCircle,
     Repeat, Settings, ChevronDown, ChevronUp, Layers, Sun, Moon, Zap, Copy, Tag,
-    Banknote, Landmark
+    Banknote, Landmark,
+    ShieldAlert
 } from 'lucide-react'
 import { format, isSunday, isSaturday } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -31,6 +32,7 @@ type ReservaGroup = {
     estado_pago: string
     total_grupo: number
     total_pagado: number
+    notas_recepcion: string // 🚀 AGREGAMOS EL TIPO ACÁ
     items: any[]
 }
 
@@ -74,6 +76,7 @@ const fetcher = async (): Promise<AlquileresData> => {
                     estado_pago: 'pendiente',
                     total_grupo: 0,
                     total_pagado: 0,
+                    notas_recepcion: item.notas_recepcion || '', // 🚀 LAS CARGAMOS ACÁ
                     items: []
                 }
             }
@@ -139,7 +142,8 @@ export default function AlquileresPage() {
         hora_inicio: '18:00',
         hora_fin: '22:00',
         tipo_uso: 'ensayo',
-        descuento: 0
+        descuento: 0,
+        notas_recepcion: '' // 🚀 NUEVO CAMPO
     })
 
     const [priceBreakdown, setPriceBreakdown] = useState({
@@ -301,7 +305,8 @@ export default function AlquileresPage() {
                 monto_pagado: 0,
                 estado_pago: 'pendiente',
                 tipo_uso: form.tipo_uso,
-                estado: 'pendiente'
+                estado: 'pendiente',
+                notas_recepcion: form.notas_recepcion // 🚀 GUARDAMOS LA NOTA
             }))
 
             const res = await crearAlquileresAction(inserts)
@@ -439,7 +444,8 @@ export default function AlquileresPage() {
             hora_inicio: base.hora_inicio || '10:00',
             hora_fin: base.hora_fin || '12:00',
             descuento: 0,
-            fechas: []
+            fechas: [],
+            notas_recepcion: group.notas_recepcion || ''
         })
         setIsModalOpen(true)
         toast.info('Elegí nuevas fechas')
@@ -516,6 +522,15 @@ export default function AlquileresPage() {
                                             </div>
                                         ))}
                                     </div>
+
+                                    {/* 🚀 ACÁ MOSTRAMOS LA NOTA */}
+                                    {group.notas_recepcion && isOpen && (
+                                        <div className="mt-3 bg-yellow-500/10 border border-yellow-500/20 p-2 rounded-lg flex items-start gap-2">
+                                            <ShieldAlert size={12} className="text-yellow-500 shrink-0 mt-0.5" />
+                                            <p className="text-[10px] text-yellow-200/80 leading-tight italic">{group.notas_recepcion}</p>
+                                        </div>
+                                    )}
+
                                     <button onClick={() => setExpandedGroup(isOpen ? null : group.group_id)} className="w-full mt-2 py-1 flex items-center justify-center gap-1 text-[9px] font-bold text-gray-500 uppercase hover:text-white transition-colors">{isOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />} {isOpen ? 'Ocultar' : 'Ver detalle'}</button>
                                 </div>
                                 <div className="p-3 bg-[#111] flex gap-2 border-t border-white/5">
@@ -668,6 +683,15 @@ export default function AlquileresPage() {
                                             placeholder="0"
                                         />
                                     </div>
+                                </div>
+                                <div className="space-y-1 pt-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase flex items-center gap-1"><ShieldAlert size={12} className="text-yellow-500" /> Notas para Recepción</label>
+                                    <textarea
+                                        value={form.notas_recepcion}
+                                        onChange={e => setForm({ ...form, notas_recepcion: e.target.value })}
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-yellow-500 resize-none h-16"
+                                        placeholder="Ej: Ingresan equipos de filmación, sillas extras..."
+                                    />
                                 </div>
 
                                 <div className="bg-[#111] p-4 rounded-xl border border-white/10 mt-2 space-y-2 relative">

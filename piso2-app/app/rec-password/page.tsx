@@ -5,6 +5,12 @@ import { createClient } from '@/utils/supabase/client'
 import Link from 'next/link'
 import { ArrowLeft, Mail, Loader2, CheckCircle2 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { Montserrat } from 'next/font/google'
+
+const montserrat = Montserrat({
+    subsets: ['latin'],
+    weight: ['400', '700', '900']
+})
 
 export default function RecuperarPasswordPage() {
     const supabase = createClient()
@@ -18,7 +24,10 @@ export default function RecuperarPasswordPage() {
 
         try {
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: `${window.location.origin}/act-password`,
+                // 🚀 EL TRUCO ACÁ:
+                // Redirigimos AL LOGIN, para que pase por la "Aduana"
+                // El Login interceptará el type=recovery y lo enviará a /act-password
+                redirectTo: `${window.location.origin}/login`,
             })
 
             if (error) throw error
@@ -34,7 +43,7 @@ export default function RecuperarPasswordPage() {
     }
 
     return (
-        <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4 relative overflow-hidden selection:bg-[#D4E655] selection:text-black">
+        <div className={`min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4 relative overflow-hidden selection:bg-[#D4E655] selection:text-black ${montserrat.className}`}>
             <Toaster position="top-center" richColors theme="dark" />
 
             {/* Fondo con brillo */}
