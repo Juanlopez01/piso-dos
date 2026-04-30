@@ -47,13 +47,13 @@ function MobileNavContent() {
 
         // 🚀 2. EL PATOVICA DE COMPAÑÍAS: Si es profe, lo dejamos pasar siempre. 
         // El CashContext ya determinó en hasCompaniaAccess si tiene poderes.
-        if (item.name === 'Compañías' && !hasCompaniaAccess && userRole !== 'profesor') return false;
+        if (item.name === 'Grupos' && !hasCompaniaAccess && userRole !== 'profesor') return false;
 
         // 3. Ocultar agenda a alumnos y profes
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
         // 4. Permisos por Rol
-        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Liquidaciones', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Liquidaciones', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         // 🚀 5. PERMISOS DEL PROFE: Agregamos Compañías explícitamente acá
@@ -62,8 +62,8 @@ function MobileNavContent() {
         }
 
         if (userRole === 'recepcion') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Compañías'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Compañías'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Grupos'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
         }
 
         return item.roles.includes(userRole || 'visitante')

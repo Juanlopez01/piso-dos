@@ -6,26 +6,25 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import useSWR from 'swr'
 import {
-    Lock, Loader2, AlertTriangle, FileWarning,
+    Lock, Loader2, AlertTriangle,
     Megaphone, BookOpen, GraduationCap, ChevronRight,
-    CheckCircle2, AlertCircle, CalendarX, Users, ClipboardEdit, Save, FileText,
-    Search, UserCog, UserMinus, Star, Send, Trash2, Clock, Settings2, TrendingUp, Percent,
-    X
+    CheckCircle2, AlertCircle, Users, ClipboardEdit, Save, FileText,
+    Search, UserCog, UserMinus, Star, Send, Trash2, Clock, Settings2, Percent,
+    X, Coins
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
 
-// 🚀 IMPORTAMOS LAS SERVER ACTIONS
 import {
     enviarAvisoAction,
     eliminarAvisoAction,
-    guardarEvaluacionAction, actualizarPrecioGlobalAction,
+    guardarEvaluacionAction,
+    actualizarPrecioGlobalAction,
     asignarBecaAction
 } from '@/app/actions/liga'
 
-// 🚀 IMPORTAMOS LA ACCIÓN "MÁGICA" DE USUARIOS (La que auto-inscribe)
 import {
     cambiarLigaAction
 } from '@/app/actions/usuarios'
@@ -55,9 +54,10 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
     const hoyIso = new Date().toISOString()
     const cuatrimestreActual = '2026-1'
+    const mesActual = new Date().getMonth() + 1
+    const anioActual = new Date().getFullYear()
 
-    // 🚀 Traemos los criterios desde la base de datos
-    const { data: criteriosData } = await supabase.from('liga_criterios').select('*').order('nombre');
+    const { data: criteriosData } = await supabase.from('liga_criterios').select('*').order('nombre')
 
     let queryClases = supabase
         .from('clases')
@@ -70,14 +70,31 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
     const { data: dataClases } = await queryClases
 
+    // 🚀 LÓGICA FINANCIERA CENTRALIZADA
+    let preciosLiga: any[] = []
+    const { data: config } = await supabase.from('configuraciones').select('*').in('clave', ['cuota_liga_1', 'cuota_liga_2'])
+    preciosLiga = config || []
+
+    const getPrecioBase = (nivel: number) => {
+        const p = preciosLiga.find(c => c.clave === `cuota_liga_${nivel}`)
+        return p ? Number(p.valor) : 15000
+    }
+
+    const { data: pagosLigaMes } = await supabase.from('liga_pagos').select('alumno_id, monto').eq('mes', mesActual).eq('anio', anioActual)
+
     let misEvaluaciones: any[] = []
     let deudaCuota = false
+    let miSaldoPendiente = 0
 
     if (!isStaff) {
-        const mesActual = new Date().getMonth() + 1
-        const anioActual = new Date().getFullYear()
-        const { data: pagoMes } = await supabase.from('liga_pagos').select('id').eq('alumno_id', uid).eq('mes', mesActual).eq('anio', anioActual).maybeSingle()
-        deudaCuota = !pagoMes
+        const precioBase = getPrecioBase(nivelAlumno)
+        const beca = profile.porcentaje_beca_liga || 0
+        const precioFinal = precioBase - (precioBase * beca / 100)
+
+        const totalAbonado = pagosLigaMes?.filter((p: any) => p.alumno_id === uid).reduce((acc: number, curr: any) => acc + Number(curr.monto), 0) || 0
+
+        miSaldoPendiente = Math.max(0, precioFinal - totalAbonado)
+        deudaCuota = miSaldoPendiente > 0
 
         const { data: evals } = await supabase.from('liga_evaluaciones').select('*').eq('alumno_id', uid).eq('cuatrimestre', cuatrimestreActual)
         if (evals) misEvaluaciones = evals
@@ -107,24 +124,31 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
     let allStudents: any[] = []
     if (isStaff) {
+        // 🚀 CORRECCIÓN: Quitamos porcentaje_beca fantasma para que la consulta no explote
         const { data: perfiles } = await supabase
             .from('profiles')
             .select('id, nombre_completo, email, nivel_liga, porcentaje_beca_liga')
             .eq('rol', 'alumno')
             .not('nivel_liga', 'is', null)
             .order('nombre_completo', { ascending: true })
-        if (perfiles) allStudents = perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '')
-    }
 
-    let preciosLiga: any[] = []
-    if (canManage) {
-        const { data: config } = await supabase.from('configuraciones').select('*').in('clave', ['cuota_liga_1', 'cuota_liga_2'])
-        preciosLiga = config || []
+        if (perfiles) {
+            allStudents = perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '').map((p: any) => {
+                const precioBase = getPrecioBase(p.nivel_liga)
+                const beca = p.porcentaje_beca_liga || 0 // Usamos exclusivamente la de la liga
+                const precioFinal = precioBase - (precioBase * beca / 100)
+
+                const totalAbonado = pagosLigaMes?.filter((pago: any) => pago.alumno_id === p.id).reduce((acc: number, curr: any) => acc + Number(curr.monto), 0) || 0
+                const saldoPendiente = Math.max(0, precioFinal - totalAbonado)
+
+                return { ...p, becaVisual: beca, precioFinal, totalAbonado, saldoPendiente, pago_al_dia: saldoPendiente <= 0 }
+            })
+        }
     }
 
     const legajoCompleto = isStaff ? true : Boolean(profile.edad && profile.direccion && profile.contacto_emergencia && profile.plan_medico && profile.condiciones_medicas)
 
-    return { profile, isStaff, canManage, legajoCompleto, avisos: avisos || [], materias, deudaCuota, allStudents, preciosLiga, criterios: criteriosData || [] }
+    return { profile, isStaff, canManage, legajoCompleto, avisos: avisos || [], materias, deudaCuota, miSaldoPendiente, allStudents, preciosLiga, criterios: criteriosData || [] }
 }
 
 function LaLigaContent() {
@@ -146,26 +170,28 @@ function LaLigaContent() {
     const [alumnosList, setAlumnosList] = useState<any[]>([])
     const [loadingAlumnos, setLoadingAlumnos] = useState(false)
 
-    // Búsqueda y Filtros
     const [searchStudent, setSearchStudent] = useState('')
     const [levelFilter, setLevelFilter] = useState<'todos' | '1' | '2'>('todos')
 
-    // Precios y Criterios
     const [preciosEdit, setPreciosEdit] = useState<Record<string, string>>({})
     const [guardandoPrecios, setGuardandoPrecios] = useState(false)
-    const [nuevoCriterio, setNuevoCriterio] = useState('') // 🚀 Estado para el nuevo criterio
+    const [nuevoCriterio, setNuevoCriterio] = useState('')
 
-    // Beca Modal
     const [becaModalOpen, setBecaModalOpen] = useState(false)
     const [selectedAlumnoBeca, setSelectedAlumnoBeca] = useState<any>(null)
     const [becaValue, setBecaValue] = useState(0)
     const [guardandoBeca, setGuardandoBeca] = useState(false)
 
-    // Forms
+    // 🚀 Estados para Señas/Pagos Parciales
+    const [isPagoModalOpen, setIsPagoModalOpen] = useState(false)
+    const [alumnoPago, setAlumnoPago] = useState<any>(null)
+    const [montoPago, setMontoPago] = useState<number | ''>('')
+    const [metodoPago, setMetodoPago] = useState('efectivo')
+    const [registrandoPago, setRegistrandoPago] = useState(false)
+
     const [avisoForm, setAvisoForm] = useState({ titulo: '', mensaje: '', tipo_destino: 'general', nivel_destino: 1, alumno_id: '' })
     const [enviandoAviso, setEnviandoAviso] = useState(false)
 
-    // Modales
     const [evalModalOpen, setEvalModalOpen] = useState(false)
     const [selectedAlumno, setSelectedAlumno] = useState<any>(null)
     const [notas, setNotas] = useState<Record<string, number>>({})
@@ -196,6 +222,73 @@ function LaLigaContent() {
         }
     }, [data?.preciosLiga])
 
+    // 🚀 LÓGICA DE REGISTRO MANUAL DE SEÑAS + IMPACTO EN CAJA
+    const handleRegistrarPago = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!alumnoPago || !montoPago || Number(montoPago) <= 0) return
+        setRegistrandoPago(true)
+
+        const mesActual = new Date().getMonth() + 1
+        const anioActual = new Date().getFullYear()
+
+        try {
+            // Buscamos si ya abonó algo este mes
+            const { data: pagoExistente, error: errBuscar } = await supabase
+                .from('liga_pagos')
+                .select('id, monto')
+                .eq('alumno_id', alumnoPago.id)
+                .eq('mes', mesActual)
+                .eq('anio', anioActual)
+                .maybeSingle()
+
+            if (errBuscar) throw errBuscar
+
+            if (pagoExistente) {
+                // Sumamos la seña nueva
+                const { error: errUpdate } = await supabase.from('liga_pagos').update({
+                    monto: Number(pagoExistente.monto) + Number(montoPago),
+                    metodo_pago: metodoPago
+                }).eq('id', pagoExistente.id)
+                if (errUpdate) throw errUpdate
+            } else {
+                // Crea registro nuevo
+                const { error: errInsert } = await supabase.from('liga_pagos').insert([{
+                    alumno_id: alumnoPago.id,
+                    mes: mesActual,
+                    anio: anioActual,
+                    monto: Number(montoPago),
+                    metodo_pago: metodoPago
+                }])
+                if (errInsert) throw errInsert
+            }
+
+            // Impacto en caja
+            const { data: turnoActivo } = await supabase.from('caja_turnos').select('id').order('created_at', { ascending: false }).limit(1).maybeSingle()
+
+            if (turnoActivo) {
+                const { error: errCaja } = await supabase.from('caja_movimientos').insert([{
+                    turno_id: turnoActivo.id,
+                    tipo: 'ingreso',
+                    concepto: `Seña/Cuota Liga: ${alumnoPago.nombre_completo}`,
+                    monto: Number(montoPago),
+                    metodo_pago: metodoPago,
+                    origen_referencia: 'liga'
+                }])
+                if (errCaja) throw errCaja
+                toast.success('Pago y movimiento de caja registrados')
+            } else {
+                toast.warning('Pago guardado, pero NO se anotó en caja (no hay turno abierto).')
+            }
+
+            setIsPagoModalOpen(false)
+            mutate()
+        } catch (err: any) {
+            toast.error(`Error DB: ${err.message || 'Desconocido'}`)
+        } finally {
+            setRegistrandoPago(false)
+        }
+    }
+
     if (loadingSWR || loadingContext) {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center">
@@ -215,7 +308,7 @@ function LaLigaContent() {
         )
     }
 
-    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, allStudents, criterios } = data
+    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, allStudents, criterios, miSaldoPendiente } = data
     const nivelActual = profile.nivel_liga || profile.nivel || 1
 
     const filteredStudents = allStudents.filter((s: any) => {
@@ -249,7 +342,6 @@ function LaLigaContent() {
         }
     }
 
-    // 🚀 Lógica para cargar y borrar Criterios
     const handleAddCriterio = async () => {
         if (!nuevoCriterio.trim()) return;
         const { error } = await supabase.from('liga_criterios').insert([{ nombre: nuevoCriterio.trim() }]);
@@ -273,22 +365,19 @@ function LaLigaContent() {
         }
     };
 
+    // 🚀 GENERAR LINK DE MP POR EL SALDO EXACTO
     const generarLinkPagoLiga = async () => {
         setProcesandoPago(true)
         try {
             const mesActual = new Date().getMonth() + 1
             const anioActual = new Date().getFullYear()
-            const clavePrecio = `cuota_liga_${nivelActual}`
-            const precioBase = data.preciosLiga.find((p: any) => p.clave === clavePrecio)?.valor || 15000
-            const porcentajeBeca = profile.porcentaje_beca || 0
-            const precioFinal = precioBase - (precioBase * porcentajeBeca / 100)
 
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    titulo: `Cuota La Liga - Mes ${mesActual}/${anioActual}`,
-                    precio: precioFinal,
+                    titulo: `Cuota/Saldo La Liga - Mes ${mesActual}/${anioActual}`,
+                    precio: miSaldoPendiente, // COBRAMOS EL SALDO MATEMÁTICO QUE CALCULAMOS
                     userId: userId,
                     tipo_pago: 'cuota_liga',
                     mes: mesActual,
@@ -384,7 +473,6 @@ function LaLigaContent() {
             }
         }
 
-        // 🚀 Asignamos los criterios dinámicos
         criterios.forEach((c: any) => notasIniciales[c.nombre] = 0)
         setNotas(notasIniciales)
         setEvalModalOpen(true)
@@ -460,17 +548,18 @@ function LaLigaContent() {
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
 
+                {/* 🚀 CARTEL ROJO DEL ALUMNO (AHORA MUESTRA SALDO PARCIAL) */}
                 {!isStaff && (deudaCuota) && (
                     <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="flex items-start gap-3">
                             <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={20} />
                             <div>
-                                <h4 className="font-black text-red-500 uppercase text-xs tracking-widest mb-1">Cuota Vencida</h4>
-                                <p className="text-gray-400 text-[10px] sm:text-xs">Tenés pendiente la cuota de este mes. Abonala para ver tu boletín.</p>
+                                <h4 className="font-black text-red-500 uppercase text-xs tracking-widest mb-1">Saldo Pendiente</h4>
+                                <p className="text-gray-400 text-[10px] sm:text-xs">Tenés un saldo de <strong className="text-white">${miSaldoPendiente}</strong> en La Liga este mes. Abonalo para ver tu boletín.</p>
                             </div>
                         </div>
                         <button onClick={generarLinkPagoLiga} disabled={procesandoPago} className="shrink-0 bg-red-500/20 hover:bg-red-500/30 text-red-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2">
-                            {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : 'Pagar Online con MP'}
+                            {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : `Pagar $${miSaldoPendiente}`}
                         </button>
                     </div>
                 )}
@@ -504,7 +593,6 @@ function LaLigaContent() {
                             </div>
                         </div>
 
-                        {/* 🚀 NUEVA CAJA PARA ÍTEMS DE EVALUACIÓN */}
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-8 shadow-xl">
                             <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6">
                                 <ClipboardEdit className="text-[#D4E655]" /> Ítems de Evaluación
@@ -544,7 +632,7 @@ function LaLigaContent() {
                     </div>
                 )}
 
-                {/* --- VISTA PADRÓN --- */}
+                {/* --- VISTA PADRÓN (AHORA CON BOTÓN DE PAGOS) --- */}
                 {canManage && adminTab === 'gestion' && (
                     <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl animate-in fade-in">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-6 border-b border-white/5">
@@ -565,17 +653,52 @@ function LaLigaContent() {
                             {filteredStudents.map((alumno: any) => (
                                 <div key={alumno.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex flex-col justify-between gap-4 group hover:border-white/20 transition-all">
                                     <div>
-                                        <h4 className="font-black text-white text-sm capitalize truncate">{alumno.nombre_completo}</h4>
-                                        <span className="mt-1 inline-flex items-center gap-1 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                            <Star size={10} className="fill-[#D4E655]/50" /> Nivel {alumno.nivel_liga || '-'}
-                                        </span>
+                                        <div className="flex items-start justify-between">
+                                            <div>
+                                                <h4 className="font-black text-white text-sm capitalize truncate">{alumno.nombre_completo}</h4>
+                                                <span className="mt-1 inline-flex items-center gap-1 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                    <Star size={10} className="fill-[#D4E655]/50" /> Nivel {alumno.nivel_liga || '-'}
+                                                </span>
+                                            </div>
+
+                                            {/* 🚀 BOTÓN NUEVO: REGISTRAR PAGO/SEÑA */}
+                                            <button
+                                                onClick={() => { setAlumnoPago(alumno); setMontoPago(alumno.saldoPendiente || 0); setMetodoPago('efectivo'); setIsPagoModalOpen(true); }}
+                                                className="shrink-0 bg-white/5 hover:bg-emerald-500 text-gray-400 hover:text-black px-3 py-2 rounded-lg text-[10px] font-black transition-all flex items-center justify-center"
+                                                title="Anotar pago"
+                                            >
+                                                <Coins size={14} />
+                                            </button>
+                                        </div>
+
+                                        {/* 🚀 INFO FINANCIERA (INFILTRADA ACÁ ABAJO) */}
+                                        <div className="flex flex-wrap gap-2 pt-2 mt-2">
+                                            {alumno.becaVisual > 0 && (
+                                                <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                    <Percent size={10} /> Beca {alumno.becaVisual}%
+                                                </span>
+                                            )}
+                                            <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${alumno.pago_al_dia ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20' : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}>
+                                                <Coins size={10} /> Abonó ${alumno.totalAbonado} / ${alumno.precioFinal}
+                                            </span>
+                                            {!alumno.pago_al_dia ? (
+                                                <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                    <AlertCircle size={10} /> Debe ${alumno.saldoPendiente}
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-1 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                    <CheckCircle2 size={10} /> Al Día
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
+
                                     <div className="flex items-center gap-2 border-t border-white/5 pt-3">
                                         <button onClick={() => cambiarNivelLiga(alumno.id, 1)} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase transition-colors ${alumno.nivel_liga == 1 ? 'bg-white/20 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>Nivel 1</button>
                                         <button onClick={() => cambiarNivelLiga(alumno.id, 2)} className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase transition-colors ${alumno.nivel_liga == 2 ? 'bg-white/20 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>Nivel 2</button>
 
-                                        <button onClick={() => { setSelectedAlumnoBeca(alumno); setBecaValue(alumno.porcentaje_beca || 0); setBecaModalOpen(true); }} className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1 transition-colors ${alumno.porcentaje_beca > 0 ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-black' : 'bg-white/5 text-gray-400 hover:bg-emerald-500 hover:text-black'}`}>
-                                            <Percent size={12} /> {alumno.porcentaje_beca > 0 ? `${alumno.porcentaje_beca}%` : ''}
+                                        <button onClick={() => { setSelectedAlumnoBeca(alumno); setBecaValue(alumno.becaVisual); setBecaModalOpen(true); }} className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1 transition-colors ${alumno.becaVisual > 0 ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-black' : 'bg-white/5 text-gray-400 hover:bg-emerald-500 hover:text-black'}`}>
+                                            <Percent size={12} /> {alumno.becaVisual > 0 ? `${alumno.becaVisual}%` : ''}
                                         </button>
 
                                         <button onClick={() => cambiarNivelLiga(alumno.id, null)} className="shrink-0 bg-red-500/10 hover:bg-red-500 text-red-500 px-3 py-2 rounded-lg text-[10px] font-black" title="Remover de la Liga"><UserMinus size={14} /></button>
@@ -638,7 +761,7 @@ function LaLigaContent() {
                     </div>
                 )}
 
-                {/* --- VISTA EVALUACIONES (Ahora con Asistencia) 🚀 --- */}
+                {/* --- VISTA EVALUACIONES --- */}
                 {isStaff && adminTab === 'evaluaciones' && (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
                         <div className="lg:col-span-4 space-y-4">
@@ -653,7 +776,6 @@ function LaLigaContent() {
                                     </div>
                                     <h4 className="font-black text-white uppercase text-sm truncate mb-3">{mat.nombre}</h4>
 
-                                    {/* 🚀 BOTONES SEPARADOS: Evaluar y Asistencia */}
                                     <div className="flex gap-2">
                                         <button onClick={() => cargarAlumnos(mat)} className="flex-1 bg-white/5 hover:bg-white/10 text-white text-[10px] font-bold py-2 rounded-lg transition-all text-center">
                                             Evaluar
@@ -692,7 +814,7 @@ function LaLigaContent() {
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     {materias.map((materia: any) => (
                                         <div key={materia.id} onClick={() => {
-                                            if (deudaCuota) return toast.error('Tenés que abonar para ver tu boletín.')
+                                            if (deudaCuota) return toast.error('Tenés que abonar tu saldo para ver tu boletín.')
                                             if (materia.evaluacion) { setSelectedBoletin(materia); setBoletinModalOpen(true) }
                                             else toast.info('Evaluación pendiente.')
                                         }} className={`bg-[#111] border ${materia.evaluacion ? 'border-[#D4E655]/30 cursor-pointer hover:border-[#D4E655]' : 'border-white/5'} rounded-2xl p-5 flex flex-col relative overflow-hidden`}>
@@ -723,6 +845,57 @@ function LaLigaContent() {
                     </div>
                 )}
             </div>
+
+            {/* MODAL: REGISTRAR PAGO/SEÑA (NUEVO) */}
+            {isPagoModalOpen && alumnoPago && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsPagoModalOpen(false)}>
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-start mb-6 border-b border-white/10 pb-4">
+                            <div>
+                                <h3 className="text-lg font-black text-white uppercase flex items-center gap-2"><Coins className="text-emerald-500" size={18} /> Registrar Pago La Liga</h3>
+                                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-1">Alumno: {alumnoPago.nombre_completo}</p>
+                            </div>
+                            <button onClick={() => setIsPagoModalOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
+                        </div>
+
+                        <form onSubmit={handleRegistrarPago} className="space-y-4">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Monto a Registrar ($)</label>
+                                <div className="relative">
+                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                    <input
+                                        type="number"
+                                        required
+                                        min="1"
+                                        value={montoPago}
+                                        onChange={e => setMontoPago(e.target.value === '' ? '' : Number(e.target.value))}
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white font-black outline-none focus:border-emerald-500 transition-colors"
+                                    />
+                                </div>
+                                <p className="text-[10px] text-gray-500 text-right mt-1">Saldo restante sugerido: ${alumnoPago.saldoPendiente}</p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
+                                <select
+                                    value={metodoPago}
+                                    onChange={e => setMetodoPago(e.target.value)}
+                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors appearance-none"
+                                >
+                                    <option value="efectivo">Efectivo (Recepción)</option>
+                                    <option value="transferencia">Transferencia Bancaria</option>
+                                    <option value="mercadopago_manual">Mercado Pago (QR Físico)</option>
+                                    <option value="otro">Otro</option>
+                                </select>
+                            </div>
+
+                            <button disabled={registrandoPago} type="submit" className="w-full bg-emerald-600 text-white font-black uppercase py-4 rounded-xl hover:bg-emerald-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg mt-4">
+                                {registrandoPago ? <Loader2 className="animate-spin" /> : <><CheckCircle2 size={16} /> Guardar Registro</>}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL ASIGNAR BECA */}
             {canManage && becaModalOpen && selectedAlumnoBeca && (
@@ -772,7 +945,6 @@ function LaLigaContent() {
                         </div>
                         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                {/* 🚀 ITERAMOS LOS CRITERIOS DINÁMICOS ACÁ */}
                                 {criterios.map((crit: any, idx: number) => (
                                     <div key={idx} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between gap-3 transition-colors">
                                         <label className="text-[10px] text-gray-300 font-bold uppercase flex-1">{crit.nombre}</label>

@@ -28,8 +28,11 @@ type Miembro = {
     id: string
     nombre_completo: string
     email: string
-    porcentaje_beca?: number
+    porcentaje_beca_compania?: number
     pago_compania_al_dia?: boolean
+    totalAbonado?: number
+    saldoPendiente?: number
+    precioFinal?: number
 }
 
 type ClaseCompania = {
@@ -65,6 +68,13 @@ export default function CompaniaDetallePage() {
     const [selectedAlumno, setSelectedAlumno] = useState<Miembro | null>(null)
     const [individualMessage, setIndividualMessage] = useState('')
 
+    // 🚀 Estados para Registrar Pagos/Señas
+    const [isPagoModalOpen, setIsPagoModalOpen] = useState(false)
+    const [alumnoPago, setAlumnoPago] = useState<Miembro | null>(null)
+    const [montoPago, setMontoPago] = useState<number | ''>('')
+    const [metodoPago, setMetodoPago] = useState('efectivo')
+    const [registrandoPago, setRegistrandoPago] = useState(false)
+
     const [procesandoPago, setProcesandoPago] = useState(false)
 
     useEffect(() => {
@@ -94,7 +104,7 @@ export default function CompaniaDetallePage() {
             .single()
 
         if (error || !dataCompania) {
-            toast.error('La compañía no existe')
+            toast.error('El grupo no existe')
             router.replace('/companias')
             return
         }
@@ -118,18 +128,20 @@ export default function CompaniaDetallePage() {
         }
 
         if (!tienePermiso) {
-            toast.error('Acceso denegado. No perteneces a esta compañía.')
+            toast.error('Acceso denegado. No perteneces a este grupo.')
             router.replace('/companias')
             return
         }
 
-        // 🚀 Traemos los miembros CON su beca (quitamos lo de la liga)
+        // 🚀 1. ARREGLO DE PADRÓN: Corregimos porcentaje_beca_compania
         const { data: dataMiembros } = await supabase
             .from('perfiles_companias')
-            .select('perfil:profiles(id, nombre_completo, email, porcentaje_beca)')
+            .select('perfil:profiles(id, nombre_completo, email, porcentaje_beca_compania)')
             .eq('compania_id', companiaId)
 
-        let deudaCompania = false
+        // Buscamos el precio base de la compañía en las configuraciones
+        const { data: config } = await supabase.from('configuraciones').select('valor').eq('clave', `cuota_compania_${companiaId}`).maybeSingle()
+        const precioBase = config?.valor ? Number(config.valor) : 15000
 
         if (dataMiembros) {
             let miembrosData = dataMiembros.map((m: any) => m.perfil).filter(Boolean)
@@ -137,29 +149,36 @@ export default function CompaniaDetallePage() {
             const mesActual = new Date().getMonth() + 1
             const anioActual = new Date().getFullYear()
 
-            // Pagos exclusivos de ESTA Compañía
+            // 🚀 2. TRAEMOS LOS MONTOS ABONADOS
             const { data: pagosCia } = await supabase
                 .from('companias_pagos')
-                .select('alumno_id')
+                .select('alumno_id, monto')
                 .eq('compania_id', companiaId)
                 .eq('mes', mesActual)
                 .eq('anio', anioActual)
 
-            const pagosCiaIds = new Set(pagosCia?.map((p: any) => p.alumno_id) || [])
+            // Armamos el objeto final calculando señas y saldos
+            const miembrosCompletos = miembrosData.map((m: any) => {
+                // Sumamos todo lo que pagó este mes
+                const totalAbonado = pagosCia?.filter((p: { alumno_id: string; monto: number | string }) => p.alumno_id === m.id).reduce((acc: number, curr: { monto: number | string }) => acc + Number(curr.monto), 0) || 0
+                const beca = m.porcentaje_beca_compania || 0
+                const precioFinal = precioBase - (precioBase * beca / 100)
 
-            // Armamos el objeto final del miembro
-            const miembrosCompletos = miembrosData.map((m: any) => ({
-                ...m,
-                pago_compania_al_dia: pagosCiaIds.has(m.id)
-            }))
+                // Calculamos cuánto debe
+                const saldoPendiente = Math.max(0, precioFinal - totalAbonado)
+                const alDia = saldoPendiente <= 0
+
+                return {
+                    ...m,
+                    totalAbonado,
+                    saldoPendiente,
+                    precioFinal,
+                    pago_compania_al_dia: alDia
+                }
+            })
 
             miembrosCompletos.sort((a: any, b: any) => (a.nombre_completo || '').localeCompare(b.nombre_completo || ''))
             setMiembros(miembrosCompletos)
-
-            // VERIFICAMOS SI EL USUARIO ACTUAL DEBE ALGO EN ESTA COMPAÑÍA
-            if (userRole === 'alumno') {
-                deudaCompania = !pagosCiaIds.has(user.id)
-            }
         }
 
         const hoy = new Date().toISOString()
@@ -259,23 +278,121 @@ export default function CompaniaDetallePage() {
         }
     }
 
-    // Link de Pago Compañía
+    // 🚀 LÓGICA PARA REGISTRAR SEÑA / PAGO MANUAL (ADMIN/STAFF)
+    const openPagoModal = (alumno: Miembro) => {
+        setAlumnoPago(alumno)
+        setMontoPago(alumno.saldoPendiente || 0) // Por defecto sugerimos cancelar lo que debe
+        setMetodoPago('efectivo')
+        setIsPagoModalOpen(true)
+    }
+
+    // 🚀 LÓGICA PARA REGISTRAR SEÑA / PAGO MANUAL (CON UPSERT INTELIGENTE Y CAJA)
+    const handleRegistrarPago = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!alumnoPago || !montoPago || Number(montoPago) <= 0) return
+        setRegistrandoPago(true)
+
+        const mesActual = new Date().getMonth() + 1
+        const anioActual = new Date().getFullYear()
+
+        try {
+            // 1. Verificamos si ya existe un registro de pago para este mes
+            const { data: pagoExistente, error: errorBusqueda } = await supabase
+                .from('companias_pagos')
+                .select('id, monto')
+                .eq('alumno_id', alumnoPago.id)
+                .eq('compania_id', compania?.id)
+                .eq('mes', mesActual)
+                .eq('anio', anioActual)
+                .maybeSingle()
+
+            if (errorBusqueda) throw errorBusqueda
+
+            if (pagoExistente) {
+                // YA TIENE UN PAGO PREVIO -> Le SUMAMOS la seña nueva
+                const { error: errorUpdate } = await supabase
+                    .from('companias_pagos')
+                    .update({
+                        monto: Number(pagoExistente.monto) + Number(montoPago),
+                        metodo_pago: metodoPago // Actualizamos al último método usado
+                    })
+                    .eq('id', pagoExistente.id)
+
+                if (errorUpdate) throw errorUpdate
+            } else {
+                // NO TIENE PAGOS -> Creamos el registro de cero
+                const { error: errorInsert } = await supabase.from('companias_pagos').insert([{
+                    alumno_id: alumnoPago.id,
+                    compania_id: compania?.id,
+                    mes: mesActual,
+                    anio: anioActual,
+                    monto: Number(montoPago),
+                    metodo_pago: metodoPago
+                }])
+
+                if (errorInsert) throw errorInsert
+            }
+
+            // 🚀 2. IMPACTO EN CAJA: Buscamos el turno de caja activo
+            const { data: turnoActivo, error: errorTurno } = await supabase
+                .from('caja_turnos')
+                .select('id')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+
+            if (errorTurno) throw errorTurno
+
+            if (turnoActivo) {
+                // 3. Metemos la plata en la caja registradora
+                const { error: errorCaja } = await supabase.from('caja_movimientos').insert([{
+                    turno_id: turnoActivo.id,
+                    tipo: 'ingreso',
+                    concepto: `Seña/Cuota Grupo: ${compania?.nombre} - ${alumnoPago.nombre_completo}`,
+                    monto: Number(montoPago),
+                    metodo_pago: metodoPago,
+                    origen_referencia: 'grupo'
+                }])
+
+                if (errorCaja) throw errorCaja
+
+                toast.success('Pago y movimiento de caja registrados correctamente')
+            } else {
+                toast.warning('Pago guardado al alumno, pero NO se anotó en caja (no hay turno abierto).')
+            }
+
+            setIsPagoModalOpen(false)
+            verificarAccesoYCargar()
+        } catch (err: any) {
+            console.error("🕵️‍♂️ DETALLE DEL ERROR:", err)
+            toast.error(`Error DB: ${err.message || 'Desconocido'}`)
+        } finally {
+            setRegistrandoPago(false)
+        }
+    }
+
+    // 🚀 LINK DE PAGO INTELIGENTE PARA EL ALUMNO
     const generarLinkPagoCompania = async () => {
         setProcesandoPago(true)
         try {
             const mesActual = new Date().getMonth() + 1
             const anioActual = new Date().getFullYear()
 
+            // Agarramos a este alumno de la lista que acabamos de traer (que ya calculó todo)
+            const miPerfilCalculado = miembros.find(m => m.id === userId)
+            const saldoACobrar = miPerfilCalculado?.saldoPendiente || 15000 // Fallback de seguridad
+
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                    titulo: `Cuota/Saldo ${compania?.nombre} - Mes ${mesActual}/${anioActual}`,
+                    precio: saldoACobrar, // AHORA LE MANDAMOS EL SALDO PENDIENTE EXACTO
                     userId: userId,
                     tipo_pago: 'cuota_compania',
                     productoId: compania?.id,
                     mes: mesActual,
-                    anio: anioActual,
-                    precio: 1 // El backend recalcula el precio real de forma segura
+                    anio: anioActual
                 })
             })
 
@@ -303,11 +420,10 @@ export default function CompaniaDetallePage() {
 
     const hasCoordinatorPowers = ['admin', 'recepcion'].includes(userRole || '') || (userRole === 'profesor' && compania.coordinador_id === userId)
 
-    // Buscamos si el usuario actual debe la cuota de la compañía para mostrarle el cartel
+    // Buscamos si el usuario actual debe la cuota de la compañía
     const miPerfilInfo = miembros.find(m => m.id === userId)
     const deboCompania = !miPerfilInfo?.pago_compania_al_dia && userRole === 'alumno'
 
-    // 🚀 Verificamos si es Proyecto Staff (pasamos a minúsculas para evitar errores de tipeo)
     const esProyectoStaff = compania.nombre.toLowerCase().trim() === 'proyecto staff'
 
     return (
@@ -320,7 +436,7 @@ export default function CompaniaDetallePage() {
 
                 <div className="max-w-4xl mx-auto px-4 md:px-8">
                     <Link href="/companias" className="inline-flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-widest hover:text-white transition-colors mb-6 relative z-10">
-                        <ArrowLeft size={14} /> Volver a Compañías
+                        <ArrowLeft size={14} /> Volver a Grupos
                     </Link>
 
                     <div className="relative z-10 pb-8">
@@ -369,25 +485,26 @@ export default function CompaniaDetallePage() {
 
             <div className="max-w-4xl mx-auto px-4 md:px-8 py-8">
 
-                {/* 🚀 CARTEL DE DEUDA COMPAÑÍA (Adaptado para Proyecto Staff) */}
+                {/* 🚀 CARTEL DE DEUDA INTELIGENTE */}
                 {deboCompania && (
                     <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                         <div className="flex items-start gap-3">
                             <AlertCircle className="text-blue-500 shrink-0 mt-0.5" size={20} />
                             <div>
-                                <h4 className="font-black text-blue-500 uppercase text-xs tracking-widest mb-1">Cuota de Compañía Pendiente</h4>
+                                <h4 className="font-black text-blue-500 uppercase text-xs tracking-widest mb-1">Cuota de Grupo Pendiente</h4>
                                 {esProyectoStaff ? (
-                                    <p className="text-gray-400 text-[10px] sm:text-xs">Aboná la cuota de este mes <strong className="text-white">por transferencia o en efectivo en la recepción del estudio</strong>.</p>
+                                    <p className="text-gray-400 text-[10px] sm:text-xs">Aboná tu saldo de <strong className="text-white">${miPerfilInfo?.saldoPendiente}</strong> por transferencia o en la recepción.</p>
                                 ) : (
-                                    <p className="text-gray-400 text-[10px] sm:text-xs">Aboná la cuota de este mes para mantener tu lugar en el grupo.</p>
+                                    <p className="text-gray-400 text-[10px] sm:text-xs">
+                                        Tenés un saldo pendiente de <strong className="text-white">${miPerfilInfo?.saldoPendiente}</strong>. Aboná para mantener tu lugar.
+                                    </p>
                                 )}
                             </div>
                         </div>
 
-                        {/* 🚀 Botón visible SOLO si NO es Proyecto Staff */}
                         {!esProyectoStaff && (
                             <button onClick={generarLinkPagoCompania} disabled={procesandoPago} className="shrink-0 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2">
-                                {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : <><Coins size={14} /> Pagar Cuota</>}
+                                {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : <><Coins size={14} /> Pagar ${miPerfilInfo?.saldoPendiente}</>}
                             </button>
                         )}
                     </div>
@@ -399,7 +516,7 @@ export default function CompaniaDetallePage() {
                         <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-6 flex items-start gap-4">
                             <Info className="text-blue-400 shrink-0 mt-1" size={20} />
                             <div>
-                                <h3 className="text-blue-400 font-black uppercase text-xs tracking-widest mb-1">Foco de la Compañía</h3>
+                                <h3 className="text-blue-400 font-black uppercase text-xs tracking-widest mb-1">Foco del Grupo</h3>
                                 <p className="text-sm text-blue-100/70 leading-relaxed">{compania.descripcion || 'Este grupo no tiene una descripción definida aún.'}</p>
                             </div>
                         </div>
@@ -415,7 +532,7 @@ export default function CompaniaDetallePage() {
                                         required
                                         value={notifMessage}
                                         onChange={e => setNotifMessage(e.target.value)}
-                                        placeholder="Escribí un aviso para todos los integrantes de la compañía..."
+                                        placeholder="Escribí un aviso para todos los integrantes..."
                                         className="w-full bg-[#09090b] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-blue-500 min-h-[120px] resize-none transition-colors"
                                     />
                                     <div className="flex justify-end">
@@ -486,8 +603,8 @@ export default function CompaniaDetallePage() {
                                             </div>
 
                                             <div className="p-4 bg-[#09090b] border-t border-white/5 mt-auto">
-                                                <Link href={hasCoordinatorPowers || ['recepcion', 'admin'].includes(userRole || '') ? `/clase/${clase.id}` : `/mis-clases`} className="w-full bg-blue-600/10 text-blue-400 border border-blue-600/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">
-                                                    {hasCoordinatorPowers || ['recepcion', 'admin'].includes(userRole || '') ? 'Gestionar / Lista' : 'Ir a Mis Clases'} <ChevronRight size={14} />
+                                                <Link href={hasCoordinatorPowers ? `/clase/${clase.id}` : `/mis-clases`} className="w-full bg-blue-600/10 text-blue-400 border border-blue-600/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">
+                                                    {hasCoordinatorPowers ? 'Gestionar / Lista' : 'Ir a Mis Clases'} <ChevronRight size={14} />
                                                 </Link>
                                             </div>
                                         </div>
@@ -504,49 +621,70 @@ export default function CompaniaDetallePage() {
                     </div>
                 )}
 
-                {/* 3. PESTAÑA: MIEMBROS (BLINDADA PARA ALUMNOS 🛡️) */}
+                {/* 3. PESTAÑA: MIEMBROS */}
                 {activeTab === 'miembros' && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {miembros.length > 0 ? (
                                 miembros.map((miembro) => (
                                     <div key={miembro.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex flex-col justify-between gap-3 hover:border-blue-500/30 transition-colors">
-                                        <div className="flex items-center justify-between">
+                                        <div className="flex items-start justify-between">
                                             <div className="flex items-center gap-4 overflow-hidden">
                                                 <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 font-black text-sm uppercase shrink-0 border border-blue-500/20">
                                                     {miembro.nombre_completo?.[0] || '?'}
                                                 </div>
                                                 <div className="min-w-0">
                                                     <p className="text-sm font-bold text-white uppercase truncate">{miembro.nombre_completo}</p>
-                                                    {/* El email ahora es privado */}
                                                     {hasCoordinatorPowers && <p className="text-[10px] text-gray-500 truncate">{miembro.email}</p>}
                                                 </div>
                                             </div>
 
                                             {hasCoordinatorPowers && (
-                                                <button
-                                                    onClick={() => openIndividualModal(miembro)}
-                                                    className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-blue-600 rounded-xl transition-all"
-                                                    title={`Enviar aviso a ${miembro.nombre_completo}`}
-                                                >
-                                                    <BellRing size={14} />
-                                                </button>
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                    {/* 🚀 BOTÓN NUEVO: REGISTRAR PAGO/SEÑA */}
+                                                    <button
+                                                        onClick={() => openPagoModal(miembro)}
+                                                        className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-emerald-600 rounded-xl transition-all border border-transparent hover:border-emerald-500/30"
+                                                        title={`Anotar pago de ${miembro.nombre_completo}`}
+                                                    >
+                                                        <Coins size={14} />
+                                                    </button>
+
+                                                    <button
+                                                        onClick={() => openIndividualModal(miembro)}
+                                                        className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-blue-600 rounded-xl transition-all"
+                                                        title={`Enviar aviso a ${miembro.nombre_completo}`}
+                                                    >
+                                                        <BellRing size={14} />
+                                                    </button>
+                                                </div>
                                             )}
                                         </div>
 
-                                        {/* 🚀 Toda la info financiera y de becas ahora es privada y SOLO sobre la compañía */}
+                                        {/* 🚀 INFO FINANCIERA (SOLO PARA STAFF) */}
                                         {hasCoordinatorPowers && (
-                                            <div className="flex flex-wrap gap-2 pt-2 border-t border-white/5">
-                                                {(miembro.porcentaje_beca ?? 0) > 0 && (
+                                            <div className="flex flex-wrap gap-2 pt-2 border-t border-white/5 mt-2">
+                                                {(miembro.porcentaje_beca_compania ?? 0) > 0 && (
                                                     <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                                        <Percent size={10} /> Beca {miembro.porcentaje_beca}%
+                                                        <Percent size={10} /> Beca {miembro.porcentaje_beca_compania}%
                                                     </span>
                                                 )}
 
-                                                <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${miembro.pago_compania_al_dia ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-red-500/10 text-red-500 border-red-500/20'}`}>
-                                                    {miembro.pago_compania_al_dia ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
-                                                    Cía {miembro.pago_compania_al_dia ? 'Al Día' : 'Pendiente'}
+                                                <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${miembro.pago_compania_al_dia ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}>
+                                                    <Coins size={10} /> Abonó ${miembro.totalAbonado} / ${miembro.precioFinal}
                                                 </span>
+
+                                                {!miembro.pago_compania_al_dia && (
+                                                    <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                        <AlertCircle size={10} /> Debe ${miembro.saldoPendiente}
+                                                    </span>
+                                                )}
+
+                                                {miembro.pago_compania_al_dia && (
+                                                    <span className="inline-flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                        <CheckCircle2 size={10} /> Al Día
+                                                    </span>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -561,6 +699,57 @@ export default function CompaniaDetallePage() {
                     </div>
                 )}
             </div>
+
+            {/* MODAL: REGISTRAR PAGO/SEÑA (NUEVO) */}
+            {isPagoModalOpen && alumnoPago && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsPagoModalOpen(false)}>
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-start mb-6 border-b border-white/10 pb-4">
+                            <div>
+                                <h3 className="text-lg font-black text-white uppercase flex items-center gap-2"><Coins className="text-emerald-500" size={18} /> Registrar Pago</h3>
+                                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-1">Alumno: {alumnoPago.nombre_completo}</p>
+                            </div>
+                            <button onClick={() => setIsPagoModalOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
+                        </div>
+
+                        <form onSubmit={handleRegistrarPago} className="space-y-4">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Monto a Registrar ($)</label>
+                                <div className="relative">
+                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                    <input
+                                        type="number"
+                                        required
+                                        min="1"
+                                        value={montoPago}
+                                        onChange={e => setMontoPago(e.target.value === '' ? '' : Number(e.target.value))}
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white font-black outline-none focus:border-emerald-500 transition-colors"
+                                    />
+                                </div>
+                                <p className="text-[10px] text-gray-500 text-right mt-1">Saldo restante sugerido: ${alumnoPago.saldoPendiente}</p>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
+                                <select
+                                    value={metodoPago}
+                                    onChange={e => setMetodoPago(e.target.value)}
+                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors appearance-none"
+                                >
+                                    <option value="efectivo">Efectivo (Recepción)</option>
+                                    <option value="transferencia">Transferencia Bancaria</option>
+                                    <option value="mercadopago_manual">Mercado Pago (QR Físico)</option>
+                                    <option value="otro">Otro</option>
+                                </select>
+                            </div>
+
+                            <button disabled={registrandoPago} type="submit" className="w-full bg-emerald-600 text-white font-black uppercase py-4 rounded-xl hover:bg-emerald-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg mt-4">
+                                {registrandoPago ? <Loader2 className="animate-spin" /> : <><CheckCircle2 size={16} /> Guardar Registro</>}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL: AVISO INDIVIDUAL */}
             {isIndividualNotifOpen && selectedAlumno && (

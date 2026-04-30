@@ -115,7 +115,6 @@ export default function ExplorarClasesPage() {
 
     const { userId, isLoading: contextLoading, userRole } = useCash()
 
-    // 🚀 BLINDAJE DE STAFF (Admin, Recepción, Profe). Forzamos a minúscula por las dudas.
     const safeRole = String(userRole || '').toLowerCase().trim();
     const esStaff = ['admin', 'recepcion', 'profesor'].includes(safeRole);
 
@@ -134,9 +133,10 @@ export default function ExplorarClasesPage() {
     const [filtroTexto, setFiltroTexto] = useState('')
     const [filtroTipo, setFiltroTipo] = useState<string>('Todos')
 
+    // 🚀 CAMBIO VISUAL: Ambos ven "Grupos" ahora en los filtros
     const filtrosDisponibles = esStaff
-        ? ['Todos', 'Regular', 'Especial', 'Intensivo', 'Formacion', 'Compañia']
-        : ['Todos', 'Regular', 'Especial', 'Formacion', 'Compañia'];
+        ? ['Todos', 'Regular', 'Especial', 'Intensivo', 'Formacion', 'Grupos']
+        : ['Todos', 'Regular', 'Especial', 'Formacion', 'Grupos'];
 
     const getEstilos = (tipo: string) => {
         const normalize = (str: string) => str ? str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : "";
@@ -217,7 +217,9 @@ export default function ExplorarClasesPage() {
             let coincideTipo = true;
             if (filtroTipo !== 'Todos') {
                 const normalize = (str: string) => str ? str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : "";
-                coincideTipo = normalize(g.tipo_clase) === normalize(filtroTipo);
+                // 🚀 LÓGICA MANTENIDA: Si busca "Grupos", filtramos por "compania" en la base de datos
+                const tipoFiltro = filtroTipo === 'Grupos' ? 'compania' : filtroTipo;
+                coincideTipo = normalize(g.tipo_clase) === normalize(tipoFiltro);
             }
 
             return coincideTexto && coincideTipo;
@@ -235,7 +237,7 @@ export default function ExplorarClasesPage() {
         { key: 'regular', titulo: 'Clases Regulares' },
         { key: 'especial', titulo: 'Clases Especiales' },
         { key: 'intensivo', titulo: 'Intensivos' },
-        { key: 'compania', titulo: 'Compañías' },
+        { key: 'compania', titulo: 'Grupos' },
         { key: 'formacion', titulo: 'Formación' }
     ];
 
@@ -287,7 +289,7 @@ export default function ExplorarClasesPage() {
                                     case 'Especial': btnStyle = 'bg-purple-500 text-white'; break;
                                     case 'Intensivo': btnStyle = 'bg-fuchsia-600 text-white'; break;
                                     case 'Formacion': btnStyle = 'bg-[#D4E655] text-black'; break;
-                                    case 'Compañia': btnStyle = 'bg-blue-500 text-white'; break;
+                                    case 'Grupos': btnStyle = 'bg-blue-500 text-white'; break;
                                     default: btnStyle = 'bg-white text-black';
                                 }
                             }
@@ -354,7 +356,10 @@ export default function ExplorarClasesPage() {
                                                         <Lock size={10} /> No combinable
                                                     </span>
                                                 ) : <div></div>}
-                                                <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-full backdrop-blur-md shadow-lg ${estilos.bg}`}>{grupo.tipo_clase}</span>
+                                                {/* 🚀 CAMBIO VISUAL: Mostramos 'Grupo' en la etiqueta flotante */}
+                                                <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-full backdrop-blur-md shadow-lg ${estilos.bg}`}>
+                                                    {grupo.tipo_clase.toLowerCase().includes('compa') ? 'Grupo' : grupo.tipo_clase}
+                                                </span>
                                             </div>
 
                                             <div className="relative z-20 mt-auto bg-black/60 backdrop-blur-md border-t border-white/10 p-5 flex flex-col gap-3">
@@ -382,7 +387,6 @@ export default function ExplorarClasesPage() {
                                                     onClick={() => setSelectedGrupo(grupo)}
                                                     className={`w-full mt-2 py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest transition-all shadow-lg ${estadoPrivado.esPrivada && !estadoPrivado.apto && !esStaff ? 'bg-white/10 hover:bg-white/20 text-gray-300' : estilos.btn}`}
                                                 >
-                                                    {/* 🚀 ACÁ ES DONDE SE CONTROLA EL TEXTO DEL BOTÓN */}
                                                     {estadoPrivado.esPrivada && !estadoPrivado.apto && !esStaff ? 'Info / Ingreso' : 'Ver Fechas'} <ArrowRight size={16} />
                                                 </button>
                                             </div>
@@ -440,7 +444,6 @@ export default function ExplorarClasesPage() {
                                         </div>
 
                                         <div className="w-full sm:w-auto">
-                                            {/* 🚀 ACÁ ES DONDE SE OCULTAN LOS BOTONES A LOS ADMINS Y RECEPCIÓN */}
                                             {esStaff ? (
                                                 <div className="w-full sm:w-32 py-2.5 bg-white/5 text-gray-400 border border-white/10 rounded-xl flex items-center justify-center text-[10px] font-black uppercase cursor-default">Modo Vista</div>
                                             ) : (esAutoInscrito || inst.ya_inscrito) ? (

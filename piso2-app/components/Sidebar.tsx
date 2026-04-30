@@ -37,21 +37,21 @@ function SidebarContent() {
 
     const visibleItems = menuItems.filter(item => {
         if (item.name === 'La Liga' && !hasLigaAccess) return false;
-        if (item.name === 'Compañías' && !hasCompaniaAccess) return false;
+        if (item.name === 'Grupos' && !hasCompaniaAccess) return false;
 
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
-        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Compañías', 'Caja', 'Liquidaciones', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Caja', 'Liquidaciones', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         // 🚀 Agregamos "Compañías" al listado base que ven los profes
         if (userRole === 'profesor') {
-            return ['Inicio', 'Mis Clases', 'Mis Pagos', 'Compañías', 'La Liga', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+            return ['Inicio', 'Mis Clases', 'Mis Pagos', 'Grupos', 'La Liga', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         }
 
         if (userRole === 'recepcion') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Compañías'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Compañías'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Grupos'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
         }
 
         return item.roles.includes(userRole || 'visitante')
