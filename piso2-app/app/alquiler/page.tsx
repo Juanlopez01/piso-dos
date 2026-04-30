@@ -59,7 +59,7 @@ export default function AlquileresPage() {
                     <div className="hidden md:flex items-center gap-8 text-[10px] font-bold tracking-[0.2em] text-gray-400 uppercase">
                         <Link href="/" className="hover:text-white transition-colors">Inicio</Link>
                         <Link href="/#nosotros" className="hover:text-white transition-colors">Nosotros</Link>
-                        <Link href="/alquileres" className="text-[#D4E655] cursor-default">Alquileres</Link>
+                        <Link href="/alquiler" className="text-[#D4E655] cursor-default">Alquileres</Link>
                         {loggedUser ? (
                             <Link href={loggedUser.url} className="ml-4 px-6 py-2 rounded-full border border-[#D4E655]/50 bg-[#D4E655]/10 text-[#D4E655] hover:bg-[#D4E655] hover:text-black transition-all duration-300 shadow-[0_0_10px_rgba(212,230,85,0.1)] hover:shadow-[0_0_20px_rgba(212,230,85,0.4)] flex items-center gap-2">
                                 <UserIcon size={14} /> HOLA, {loggedUser.nombre.toUpperCase()}
