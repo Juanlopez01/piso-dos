@@ -41,6 +41,7 @@ export async function proxy(request: NextRequest) {
             request.nextUrl.pathname.startsWith('/rec-password') ||
             request.nextUrl.pathname.startsWith('/api/mercadopago') ||
             request.nextUrl.pathname.startsWith('/act-password') ||
+            request.nextUrl.pathname.startsWith('/alquileres') ||
             request.nextUrl.pathname.startsWith('/instalar') // 🚀 EL PASE VIP PARA MERCADO PAGO
 
         // 3. Si hay un error de token o no hay usuario, y quiere entrar a zona privada -> Al login
