@@ -254,3 +254,48 @@ export async function cobrarCompaniaAction(usuarioId: string, companiaId: string
         return { success: false, error: error.message }
     }
 }
+
+// 🚀 1. Agregá esta importación (fijate que le ponemos un alias para que no choque)
+import { createClient as createAdminClient } from '@supabase/supabase-js'
+
+// 🚀 2. Reemplazá tu función por esta:
+export async function crearAlumnoDesdeRecepcionAction(datos: { nombre: string, apellido: string, email: string, dni: string, telefono: string }) {
+    try {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+        const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+
+        if (!supabaseServiceKey) {
+            return { success: false, error: 'Falta configurar SUPABASE_SERVICE_ROLE_KEY en las variables de entorno' }
+        }
+
+        // Usamos el cliente admin de supabase-js, NO el de SSR
+        const supabaseAdmin = createAdminClient(supabaseUrl, supabaseServiceKey, {
+            auth: {
+                autoRefreshToken: false,
+                persistSession: false // Clave para que no te cierre tu sesión de recepcionista
+            }
+        })
+
+        // Creamos la cuenta oficial en Auth
+        const { data, error } = await supabaseAdmin.auth.admin.createUser({
+            email: datos.email,
+            password: datos.dni, // Usamos el DNI como contraseña
+            email_confirm: true,
+            user_metadata: {
+                nombre: datos.nombre,
+                apellido: datos.apellido,
+                nombre_completo: `${datos.nombre} ${datos.apellido}`.trim(),
+                dni: datos.dni,
+                telefono: datos.telefono,
+                rol: 'alumno'
+            }
+        })
+
+        if (error) return { success: false, error: error.message }
+
+        // Retornamos el ID oficial recién salidito del horno
+        return { success: true, user_id: data.user.id }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}

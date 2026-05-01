@@ -9,7 +9,7 @@ import {
     DollarSign, FileText, UserPlus, Trash2, AlertTriangle,
     Wallet, CreditCard, Loader2, Users, Star, Ticket, Package,
     BookOpen, BellRing, Send, Sparkles, Download, ShieldAlert,
-    Clock4, FileCheck2, // 🚀 IMPORTAMOS ICONOS NUEVOS PARA MEDIA FALTA Y JUSTIFICADA
+    Clock4, FileCheck2,
     Lock,
     Eye
 } from 'lucide-react'
@@ -19,7 +19,6 @@ import { Toaster, toast } from 'sonner'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
-// 🚀 IMPORTAMOS LAS ACTIONS
 import {
     toggleAsistenciaAction,
     eliminarInscripcionAction,
@@ -27,6 +26,9 @@ import {
     enviarNotificacionClaseAction
 } from '@/app/actions/inscripciones'
 
+// 🚀 IMPORTAMOS LAS ACCIONES GLOBALES PARA AUTO-ASIGNAR GRUPOS Y LIGA
+import { toggleMiembroCompaniaAction } from '@/app/actions/companias'
+import { cambiarLigaAction, crearAlumnoDesdeRecepcionAction } from '@/app/actions/usuarios'
 // --- TIPOS ---
 type Inscripcion = {
     id: string
@@ -36,7 +38,7 @@ type Inscripcion = {
     modalidad: string
     valor_credito: number
     presente: boolean
-    estado_asistencia?: 'presente' | 'ausente' | 'media_falta' | 'justificada' | 'saf' | null // 🚀 NUEVO ESTADO
+    estado_asistencia?: 'presente' | 'ausente' | 'media_falta' | 'justificada' | 'saf' | null
     metodo_pago: string
     es_invitado: boolean
 }
@@ -50,12 +52,13 @@ type ClaseDetalle = {
     sala: { nombre: string; sede: { nombre: string } }
     tipo_acuerdo: 'porcentaje' | 'fijo'
     valor_acuerdo: number
-    tipo_clase: 'Regular' | 'Especial'
+    tipo_clase: 'Regular' | 'Especial' | string
     estado: 'activa' | 'cancelada'
     es_audicion: boolean
     es_combinable: boolean
-    es_la_liga: boolean // 🚀 PARA SABER SI ES DE LA LIGA
+    es_la_liga: boolean
     compania_id?: string | null
+    liga_nivel?: number | null // 🚀 Agregado para usarlo en la auto-asignación
 }
 
 type ProductoPack = {
@@ -120,7 +123,6 @@ const fetcher = async ([key, id]: [string, string]) => {
 
     return {
         clase: dataClase as ClaseDetalle,
-        // Adaptamos los datos viejos (boolean) a los nuevos estados si es necesario
         inscripciones: (dataInsc || []).map((i: any) => ({
             ...i,
             estado_asistencia: i.estado_asistencia || (i.presente ? 'presente' : 'ausente')
@@ -155,6 +157,9 @@ export default function ClaseDetallePage() {
     const [notifMessage, setNotifMessage] = useState('')
     const [sendingNotif, setSendingNotif] = useState(false)
 
+    // 🚀 ESTADO: Checkbox para decidir si le creamos cuenta
+    const [crearCuenta, setCrearCuenta] = useState(false)
+
     const [guestForm, setGuestForm] = useState({
         nombre: '', apellido: '', email: '', telefono: '', dni: '',
         tipo: 'usar_credito' as 'suelta' | 'pack' | 'invitado' | 'usar_credito',
@@ -171,9 +176,12 @@ export default function ClaseDetallePage() {
     const financialData = useMemo(() => {
         if (!clase) return { totalRecaudado: 0, pagoDocente: 0 }
         const total = inscripciones.reduce((acc, curr) => acc + (Number(curr.valor_credito) || 0), 0)
+        const valorAcuerdo = Number(clase.valor_acuerdo) || 0
+
         const pago = clase.tipo_acuerdo === 'fijo'
-            ? clase.valor_acuerdo
-            : total * (clase.valor_acuerdo / 100)
+            ? valorAcuerdo
+            : total * (valorAcuerdo / 100)
+
         return { totalRecaudado: total, pagoDocente: pago }
     }, [inscripciones, clase])
 
@@ -181,9 +189,31 @@ export default function ClaseDetallePage() {
     const fechaText = inicioNormalizado ? format(new Date(inicioNormalizado.split('T')[0] + 'T12:00:00'), "EEE d MMM", { locale: es }) : '';
     const horaText = inicioNormalizado ? inicioNormalizado.split('T')[1].substring(0, 5) : '';
 
-    // 🚀 LÓGICA DE ASISTENCIA ACTUALIZADA (Soporta múltiples estados)
+    // 🚀 LÓGICA DE DETECCIÓN INTELIGENTE (Formación/Grupos)
+    const esGrupoOFormacion = clase?.es_la_liga || !!clase?.compania_id || clase?.tipo_clase?.toLowerCase().includes('compa') || clase?.tipo_clase?.toLowerCase().includes('formacion');
+
+    // 🚀 Ajustamos la pestaña por defecto cuando abre el modal si es de Formación/Grupo
+    useEffect(() => {
+        if (isGuestOpen && esGrupoOFormacion) {
+            if (['pack', 'usar_credito'].includes(guestForm.tipo)) {
+                setGuestForm(prev => ({ ...prev, tipo: 'suelta' }))
+            }
+        }
+    }, [isGuestOpen, esGrupoOFormacion])
+
+    const tabsDisponibles = esGrupoOFormacion
+        ? [
+            { id: 'suelta', label: 'Anotar y Pagar' },
+            { id: 'invitado', label: 'Invitado (Sin Cargo)' }
+        ]
+        : [
+            { id: 'usar_credito', label: 'Usar Crédito' },
+            { id: 'suelta', label: 'Clase Suelta' },
+            { id: 'pack', label: 'Vender Pack' },
+            { id: 'invitado', label: 'Invitado' }
+        ];
+
     const handleSetAsistencia = async (insc: Inscripcion, nuevoEstado: 'presente' | 'ausente' | 'media_falta' | 'justificada' | 'saf') => {
-        // Actualización optimista en la UI
         const optimisticInscripciones = inscripciones.map(i =>
             i.id === insc.id
                 ? { ...i, estado_asistencia: nuevoEstado, presente: nuevoEstado === 'presente' }
@@ -191,17 +221,12 @@ export default function ClaseDetallePage() {
         )
         mutate({ ...data!, inscripciones: optimisticInscripciones }, false)
 
-        // ⚠️ ACÁ HAY QUE CAMBIAR LA ACTION LUEGO (Por ahora usamos la vieja)
         const res = await toggleAsistenciaAction(insc.id, nuevoEstado === 'presente')
-
-        // 🚀 Cuando tengamos la nueva action, usaremos esto:
-        // const res = await setEstadoAsistenciaAction(insc.id, nuevoEstado)
 
         if (!res.success) {
             toast.error("Error al guardar asistencia")
             mutate()
         } else {
-            // Mostrar mensajito lindo según el estado
             if (nuevoEstado === 'presente') toast.success('Asistencia marcada')
             if (nuevoEstado === 'ausente') toast.info('Marcado como ausente')
             if (nuevoEstado === 'media_falta') toast.warning('Media falta registrada')
@@ -259,8 +284,12 @@ export default function ClaseDetallePage() {
                 nombreInvitadoStr = `${nomFinal} ${telFinal}`.trim()
             } else {
                 if (guestForm.tipo === 'suelta') {
-                    const precios = PRECIOS_ALUMNO[clase.tipo_clase === 'Especial' ? 'Especial' : 'Regular']
-                    monto = guestForm.pago === 'efectivo' ? precios.efectivo : precios.transferencia
+                    if (esGrupoOFormacion) {
+                        monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : 0;
+                    } else {
+                        const precios = PRECIOS_ALUMNO[clase.tipo_clase === 'Especial' ? 'Especial' : 'Regular'] || PRECIOS_ALUMNO.Regular;
+                        monto = guestForm.pago === 'efectivo' ? precios.efectivo : precios.transferencia;
+                    }
                 } else if (guestForm.tipo === 'pack') {
                     const packSeleccionado = packsDisponibles.find(p => p.id === guestForm.packSeleccionadoId)
                     monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : (packSeleccionado?.precio || 0)
@@ -271,6 +300,31 @@ export default function ClaseDetallePage() {
                 }
             }
 
+            // 🚀 DETECTAMOS SI ES OBLIGATORIO CREAR LA CUENTA
+            const isMandatoryAccount = guestForm.tipo === 'pack' || (esGrupoOFormacion && guestForm.tipo === 'suelta') || crearCuenta;
+
+            // 🚀 1. SI NO HAY ALUMNO SELECCIONADO Y ES OBLIGATORIO, LE CREAMOS LA CUENTA
+            if (isMandatoryAccount && !alumnoIdFinal) {
+                if (!guestForm.email || !guestForm.dni) {
+                    throw new Error("El Email y el DNI son obligatorios para crear la cuenta.");
+                }
+
+                toast.info('Creando cuenta del alumno...');
+                const resCuenta = await crearAlumnoDesdeRecepcionAction({
+                    nombre: guestForm.nombre,
+                    apellido: guestForm.apellido,
+                    email: guestForm.email,
+                    dni: guestForm.dni,
+                    telefono: guestForm.telefono
+                });
+
+                if (!resCuenta.success) throw new Error("Error al crear cuenta: " + resCuenta.error);
+
+                alumnoIdFinal = resCuenta.user_id; // ¡Atrapamos el ID real recién creado!
+                nombreInvitadoStr = null; // Como ya tiene ID oficial, deja de ser un "invitado fantasma"
+            }
+
+            // 🚀 2. INSCRIBIMOS EN LA CLASE
             const rpcPayload = {
                 p_clase_id: clase.id,
                 p_user_id: alumnoIdFinal,
@@ -280,18 +334,56 @@ export default function ClaseDetallePage() {
                 p_monto_caja: monto,
                 p_metodo_pago: guestForm.pago,
                 p_producto_id: guestForm.packSeleccionadoId || null,
-                p_email_comprador: guestForm.email || null,
-                p_telefono_comprador: guestForm.telefono || null
+                p_email_comprador: null, // Lo sacamos para que no explote la función vieja de Supabase
+                p_telefono_comprador: null
             }
 
-            const response = await procesarInscripcionAction(rpcPayload)
+            const response = await procesarInscripcionAction(rpcPayload as any)
             if (!response.success) throw new Error(response.error)
 
-            toast.success('Inscripción registrada en lista y caja')
+            // 🚀 3. LA MAGIA GLOBAL: AUTO-ASIGNACIÓN A GRUPO O LIGA + SEÑA
+            if (esGrupoOFormacion && guestForm.tipo !== 'invitado') {
+                if (alumnoIdFinal) {
+                    const mesActual = new Date().getMonth() + 1;
+                    const anioActual = new Date().getFullYear();
+
+                    // A. Compañías / Grupos Exclusivos
+                    if (clase.compania_id) {
+                        await toggleMiembroCompaniaAction(clase.compania_id, alumnoIdFinal, 'agregar');
+                        if (monto > 0) {
+                            const { data: pagoExistente } = await supabase.from('companias_pagos')
+                                .select('id, monto').eq('alumno_id', alumnoIdFinal).eq('compania_id', clase.compania_id).eq('mes', mesActual).eq('anio', anioActual).maybeSingle();
+
+                            if (pagoExistente) {
+                                await supabase.from('companias_pagos').update({ monto: Number(pagoExistente.monto) + monto, metodo_pago: guestForm.pago }).eq('id', pagoExistente.id);
+                            } else {
+                                await supabase.from('companias_pagos').insert([{ alumno_id: alumnoIdFinal, compania_id: clase.compania_id, mes: mesActual, anio: anioActual, monto: monto, metodo_pago: guestForm.pago }]);
+                            }
+                        }
+                    }
+                    // B. La Liga
+                    else if (clase.es_la_liga && clase.liga_nivel) {
+                        await cambiarLigaAction(alumnoIdFinal, clase.liga_nivel);
+                        if (monto > 0) {
+                            const { data: pagoExistente } = await supabase.from('liga_pagos')
+                                .select('id, monto').eq('alumno_id', alumnoIdFinal).eq('mes', mesActual).eq('anio', anioActual).maybeSingle();
+
+                            if (pagoExistente) {
+                                await supabase.from('liga_pagos').update({ monto: Number(pagoExistente.monto) + monto, metodo_pago: guestForm.pago }).eq('id', pagoExistente.id);
+                            } else {
+                                await supabase.from('liga_pagos').insert([{ alumno_id: alumnoIdFinal, mes: mesActual, anio: anioActual, monto: monto, metodo_pago: guestForm.pago }]);
+                            }
+                        }
+                    }
+                }
+            }
+
+            toast.success(esGrupoOFormacion && guestForm.tipo !== 'invitado' ? 'Alumno asignado al padrón global y pago registrado' : 'Inscripción registrada en lista y caja')
             mutate()
             setIsGuestOpen(false)
             setAlumnoSeleccionado(null)
-            setGuestForm({ ...guestForm, nombre: '', apellido: '', email: '', telefono: '', packSeleccionadoId: '', montoManualPack: '', tipo: 'usar_credito' })
+            setCrearCuenta(false)
+            setGuestForm({ ...guestForm, nombre: '', apellido: '', email: '', telefono: '', dni: '', packSeleccionadoId: '', montoManualPack: '', tipo: esGrupoOFormacion ? 'suelta' : 'usar_credito' })
         } catch (err: any) {
             toast.error(err.message)
         } finally {
@@ -387,9 +479,6 @@ export default function ClaseDetallePage() {
 
     const showFinance = userRole === 'admin' || userRole === 'recepcion'
 
-    // 🚀 LÓGICA PARA MOSTRAR BOTONES EXTRA DE ASISTENCIA
-    const esFormacion = clase?.es_la_liga;
-
     return (
         <div className="min-h-screen bg-[#050505] text-white p-2 md:p-8 pb-32">
             <Toaster position="top-center" richColors theme="dark" />
@@ -434,7 +523,6 @@ export default function ClaseDetallePage() {
                     <div className="bg-[#09090b] border border-white/10 rounded-xl overflow-hidden">
                         {inscripciones.length === 0 && <div className="p-8 text-center text-gray-500 uppercase text-xs">Sin inscriptos.</div>}
                         {inscripciones.map(insc => {
-                            // Definir color de fondo según el estado
                             let bgRowClass = '';
                             if (insc.estado_asistencia === 'presente') bgRowClass = 'bg-[#D4E655]/5 border-l-2 border-[#D4E655]';
                             else if (insc.estado_asistencia === 'media_falta') bgRowClass = 'bg-yellow-500/5 border-l-2 border-yellow-500';
@@ -444,13 +532,13 @@ export default function ClaseDetallePage() {
                                 <div key={insc.id} className={`p-4 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all ${bgRowClass}`}>
                                     <div>
                                         <p className="font-bold text-white text-sm md:text-lg">{insc.user?.nombre_completo || insc.nombre_invitado}</p>
-                                        <p className="text-[10px] text-gray-500 font-bold uppercase mt-1">{insc.modalidad}</p>
+                                        <p className="text-[10px] text-gray-500 font-bold uppercase mt-1">
+                                            {insc.modalidad} {showFinance && Number(insc.valor_credito) > 0 && `• $${Number(insc.valor_credito).toLocaleString()}`}
+                                        </p>
                                     </div>
 
-                                    {/* 🚀 BOTONERA ASISTENCIAS (Normal o Extendida) */}
                                     <div className="flex items-center gap-2 bg-[#111] border border-white/10 p-1 rounded-xl">
 
-                                        {/* Botón Ausente (Resetea estado) */}
                                         <button
                                             onClick={() => handleSetAsistencia(insc, 'ausente')}
                                             title="Ausente"
@@ -459,8 +547,7 @@ export default function ClaseDetallePage() {
                                             <X size={18} />
                                         </button>
 
-                                        {/* 🚀 Botones Especiales (SOLO FORMACIÓN) */}
-                                        {esFormacion && (
+                                        {esGrupoOFormacion && (
                                             <>
                                                 <button
                                                     onClick={() => handleSetAsistencia(insc, 'media_falta')}
@@ -486,7 +573,6 @@ export default function ClaseDetallePage() {
                                             </>
                                         )}
 
-                                        {/* Botón Presente */}
                                         <button
                                             onClick={() => handleSetAsistencia(insc, 'presente')}
                                             title="Presente"
@@ -510,21 +596,41 @@ export default function ClaseDetallePage() {
                 {/* LIQUIDACIÓN CAJA */}
                 {showFinance && !clase?.es_audicion && (
                     <div className="lg:col-span-1">
-                        <div className="bg-[#111] border border-white/10 rounded-2xl p-6 sticky top-8">
-                            <h4 className="text-[10px] font-bold text-gray-500 uppercase mb-6">Liquidación Clase</h4>
-                            <div className="bg-[#D4E655] rounded-2xl p-6 text-center shadow-lg"><p className="text-[9px] font-black uppercase text-black/60 mb-1">Pago Docente</p><div className="text-4xl font-black text-black">${financialData.pagoDocente.toLocaleString()}</div></div>
+                        <div className="bg-[#111] border border-white/10 rounded-2xl p-6 sticky top-8 shadow-xl">
+                            <h4 className="text-[10px] font-bold text-gray-500 uppercase mb-5 tracking-widest">Liquidación Clase</h4>
+
+                            <div className="space-y-4 mb-6">
+                                <div className="flex justify-between items-center pb-3 border-b border-white/5">
+                                    <span className="text-xs text-gray-400 font-bold uppercase">Total Recaudado</span>
+                                    <span className="text-sm font-black text-white">${financialData.totalRecaudado.toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between items-center pb-3 border-b border-white/5">
+                                    <span className="text-xs text-gray-400 font-bold uppercase">Acuerdo Docente</span>
+                                    <span className="text-[10px] font-black text-[#D4E655] uppercase bg-[#D4E655]/10 px-2 py-1 rounded-md border border-[#D4E655]/20">
+                                        {clase?.tipo_acuerdo === 'fijo'
+                                            ? `$${Number(clase?.valor_acuerdo || 0).toLocaleString()} (Fijo)`
+                                            : `${Number(clase?.valor_acuerdo || 0)}% (Porcentaje)`}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="bg-[#D4E655] rounded-2xl p-6 text-center shadow-lg border border-[#D4E655]/50">
+                                <p className="text-[9px] font-black uppercase text-black/60 mb-1 tracking-widest">A Pagar al Docente</p>
+                                <div className="text-4xl font-black text-black">${Math.round(financialData.pagoDocente).toLocaleString()}</div>
+                            </div>
                         </div>
                     </div>
                 )}
             </div>
 
-            {/* MODAL INSCRIPCIÓN */}
+            {/* MODAL INSCRIPCIÓN (INTELIGENTE) */}
             {isGuestOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4" onClick={() => setIsGuestOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-lg rounded-3xl p-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
                         <div className="flex justify-between mb-6"><h3 className="text-2xl font-black uppercase text-white">Inscripción</h3><button onClick={() => setIsGuestOpen(false)}><X size={24} /></button></div>
                         <form onSubmit={handleAddGuest} className="space-y-5">
 
+                            {/* BÚSQUEDA DE ALUMNOS */}
                             {!alumnoSeleccionado ? (
                                 <div className="relative">
                                     <label className="text-[10px] font-bold text-[#D4E655] uppercase ml-1">Buscar Alumno</label>
@@ -536,7 +642,12 @@ export default function ClaseDetallePage() {
                                     {resultadosBusqueda.length > 0 && (
                                         <div className="absolute z-10 w-full mt-2 bg-[#1a1a1c] border border-white/10 rounded-xl overflow-hidden shadow-2xl max-h-48 overflow-y-auto">
                                             {resultadosBusqueda.map(alum => (
-                                                <div key={alum.id} onClick={() => { setAlumnoSeleccionado(alum); setBusquedaAlumno(''); setResultadosBusqueda([]); setGuestForm({ ...guestForm, tipo: alum.creditos_regulares > 0 ? 'usar_credito' : 'suelta' }) }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
+                                                <div key={alum.id} onClick={() => {
+                                                    setAlumnoSeleccionado(alum);
+                                                    setBusquedaAlumno('');
+                                                    setResultadosBusqueda([]);
+                                                    setGuestForm({ ...guestForm, tipo: esGrupoOFormacion ? 'suelta' : (alum.creditos_regulares > 0 ? 'usar_credito' : 'suelta') })
+                                                }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
                                                     <div><p className="text-xs font-bold text-white uppercase">{alum.nombre_completo || alum.nombre}</p><p className="text-[10px] text-gray-500">{alum.email}</p></div>
                                                     <span className="text-[9px] font-black bg-[#D4E655] text-black px-2 py-1 rounded">{alum.creditos_regulares} Cr</span>
                                                 </div>
@@ -551,12 +662,16 @@ export default function ClaseDetallePage() {
                                 </div>
                             )}
 
-                            <div className="grid grid-cols-4 gap-2 mt-4">
-                                {['usar_credito', 'suelta', 'pack', 'invitado'].map(t => (
-                                    <button key={t} type="button" onClick={() => setGuestForm({ ...guestForm, tipo: t as any })} className={`p-3 rounded-2xl border text-[8px] font-black uppercase transition-all ${guestForm.tipo === t ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-500 hover:border-white/20'}`}>{t.replace('_', ' ')}</button>
+                            {/* BOTONERA INTELIGENTE DE OPCIONES */}
+                            <div className={`grid ${tabsDisponibles.length === 2 ? 'grid-cols-2' : 'grid-cols-4'} gap-2 mt-4`}>
+                                {tabsDisponibles.map(tab => (
+                                    <button key={tab.id} type="button" onClick={() => setGuestForm({ ...guestForm, tipo: tab.id as any })} className={`p-3 rounded-2xl border text-[8px] font-black uppercase transition-all ${guestForm.tipo === tab.id ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-500 hover:border-white/20'}`}>
+                                        {tab.label}
+                                    </button>
                                 ))}
                             </div>
 
+                            {/* SI ES VENTA DE PACK (SOLO CLASES NORMALES) */}
                             {guestForm.tipo === 'pack' && (
                                 <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10 mt-4">
                                     <select required value={guestForm.packSeleccionadoId} onChange={e => {
@@ -585,35 +700,75 @@ export default function ClaseDetallePage() {
                                 </div>
                             )}
 
-                            {guestForm.tipo === 'suelta' && !alumnoSeleccionado && (
+                            {/* LÓGICA CONDICIONAL DE CREAR CUENTA PARA SUELTAS O PACKS */}
+                            {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack') && !alumnoSeleccionado && (
                                 <div className="space-y-4 mt-4">
                                     <div className="grid grid-cols-2 gap-4">
                                         <input required placeholder="Nombre" value={guestForm.nombre} onChange={e => setGuestForm({ ...guestForm, nombre: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                         <input required placeholder="Apellido" value={guestForm.apellido} onChange={e => setGuestForm({ ...guestForm, apellido: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <input required placeholder="DNI (Será la contraseña)" type="text" value={guestForm.dni} onChange={e => setGuestForm({ ...guestForm, dni: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
-                                        <input required placeholder="Teléfono" type="tel" value={guestForm.telefono} onChange={e => setGuestForm({ ...guestForm, telefono: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
-                                    </div>
+                                    {/* Mostrar el checkbox de "Crear Cuenta" SOLO si es suelta normal (no grupo/liga) */}
+                                    {guestForm.tipo === 'suelta' && !esGrupoOFormacion && (
+                                        <label className="flex items-center gap-3 cursor-pointer mt-2 bg-white/5 p-4 rounded-xl border border-white/10 hover:border-white/20 transition-all">
+                                            <input type="checkbox" checked={crearCuenta} onChange={e => setCrearCuenta(e.target.checked)} className="accent-[#D4E655] w-5 h-5 cursor-pointer" />
+                                            <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest">Crear cuenta en el sistema para este alumno</span>
+                                        </label>
+                                    )}
 
-                                    <input placeholder="Email (Opcional)" type="email" value={guestForm.email} onChange={e => setGuestForm({ ...guestForm, email: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+                                    {/* SI ES PACK, SI ES GRUPO/LIGA, O SI TILDARON CREAR CUENTA (DATOS OBLIGATORIOS) */}
+                                    {(guestForm.tipo === 'pack' || (esGrupoOFormacion && guestForm.tipo === 'suelta') || crearCuenta) && (
+                                        <div className="space-y-4 pt-2 border-t border-white/10 mt-4 animate-in fade-in">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <input required placeholder="DNI (Será su clave)" type="text" value={guestForm.dni} onChange={e => setGuestForm({ ...guestForm, dni: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+                                                <input required placeholder="Teléfono" type="tel" value={guestForm.telefono} onChange={e => setGuestForm({ ...guestForm, telefono: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+                                            </div>
 
-                                    <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl flex items-start gap-3">
-                                        <ShieldAlert size={20} className="text-yellow-500 shrink-0" />
-                                        <div>
-                                            <p className="text-xs font-bold text-yellow-500 uppercase">Avisale al alumno:</p>
-                                            <p className="text-[10px] text-gray-300 mt-1 leading-relaxed">Se le creará una cuenta automáticamente para que pueda usar la web. Su usuario será su email (si lo pusiste) o su Nombre+Apellido, y <strong className="text-white">su contraseña será el DNI</strong>.</p>
+                                            {/* El email se vuelve obligatorio para que el sistema pueda crearle la cuenta segura */}
+                                            <input required placeholder="Email (Obligatorio)" type="email" value={guestForm.email} onChange={e => setGuestForm({ ...guestForm, email: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+
+                                            <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl flex items-start gap-3">
+                                                <ShieldAlert size={20} className="text-yellow-500 shrink-0" />
+                                                <div>
+                                                    <p className="text-xs font-bold text-yellow-500 uppercase">Cuenta Obligatoria:</p>
+                                                    <p className="text-[10px] text-gray-300 mt-1 leading-relaxed">
+                                                        {esGrupoOFormacion
+                                                            ? "Al ser de un Grupo/La Liga, se le creará cuenta para asignarle todas las clases y registrar sus pagos. Su contraseña será el DNI."
+                                                            : "Para venderle un pack, se le creará cuenta para guardarle los créditos. Su contraseña será el DNI."}
+                                                    </p>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
+                                    )}
+                                </div>
+                            )}
 
-                                    <div className="flex bg-[#111] rounded-xl border border-white/10 p-1">
-                                        <button type="button" onClick={() => setGuestForm({ ...guestForm, pago: 'efectivo' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Efectivo</button>
-                                        <button type="button" onClick={() => setGuestForm({ ...guestForm, pago: 'transferencia' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Transf.</button>
+                            {/* MÉTODOS DE PAGO Y MONTO PARA SUELTA / PAGO MANUAL */}
+                            {guestForm.tipo === 'suelta' && (
+                                <div className="space-y-4 mt-4 bg-white/5 p-4 rounded-2xl border border-white/10">
+                                    {esGrupoOFormacion ? (
+                                        <div>
+                                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Monto a Cobrar ($)</label>
+                                            <input type="number" required value={guestForm.montoManualPack} onChange={e => setGuestForm({ ...guestForm, montoManualPack: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm font-black outline-none focus:border-[#D4E655]" placeholder="Ej: 15000" />
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center justify-between px-1">
+                                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Valor Clase Suelta</span>
+                                            <span className="text-sm font-black text-[#D4E655]">${guestForm.pago === 'efectivo' ? (PRECIOS_ALUMNO[clase?.tipo_clase === 'Especial' ? 'Especial' : 'Regular']?.efectivo) : (PRECIOS_ALUMNO[clase?.tipo_clase === 'Especial' ? 'Especial' : 'Regular']?.transferencia)}</span>
+                                        </div>
+                                    )}
+
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Método de Pago</label>
+                                        <div className="flex bg-[#111] rounded-xl border border-white/10 p-1">
+                                            <button type="button" onClick={() => setGuestForm({ ...guestForm, pago: 'efectivo' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Efectivo</button>
+                                            <button type="button" onClick={() => setGuestForm({ ...guestForm, pago: 'transferencia' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Transf.</button>
+                                        </div>
                                     </div>
                                 </div>
                             )}
 
+                            {/* INVITADO STAFF */}
                             {guestForm.tipo === 'invitado' && (
                                 <div className="space-y-4 mt-4">
                                     {!alumnoSeleccionado && (
