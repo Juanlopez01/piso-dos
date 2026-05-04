@@ -94,11 +94,56 @@ export async function POST(request: Request) {
             tituloFinal = pack.nombre
             precioFinal = pack.precio
 
+            // 🚀 VALIDACIÓN DE CUPÓN 100% EN BACKEND
+            if (cuponId) {
+                // 1. Buscamos el cupón en la BD
+                const { data: cuponDb, error: errCupon } = await supabase
+                    .from('cupones') // ⚠️ Cambiá si tu tabla tiene otro nombre
+                    .select('*')
+                    .eq('id', cuponId)
+                    .eq('activo', true) // Aseguramos que no esté apagado
+                    .single()
+
+                if (errCupon || !cuponDb) {
+                    return NextResponse.json({ error: "El cupón es inválido, venció o no existe." }, { status: 400 })
+                }
+
+                // 2. Verificamos que el usuario no lo haya usado ya
+                // (Asumo que tenés una tabla 'cupones_usados', ajustalo a tu estructura)
+                const { data: yaUsado } = await supabase
+                    .from('cupones_usados')
+                    .select('id')
+                    .eq('cupon_id', cuponId)
+                    .eq('user_id', userId)
+                    .maybeSingle()
+
+                if (yaUsado) {
+                    return NextResponse.json({ error: "Ya utilizaste este cupón anteriormente." }, { status: 400 })
+                }
+
+                // 3. Calculamos la matemática (Adaptá "porcentaje" al nombre real de tu columna)
+                const descuento = cuponDb.porcentaje || cuponDb.descuento || 0
+
+                if (descuento > 0) {
+                    // Si tu cupón es de porcentaje:
+                    precioFinal = precioFinal - (precioFinal * (descuento / 100))
+
+                    // Si tu cupón fuera un monto fijo (ej: $2000 off), sería:
+                    // precioFinal = Math.max(0, precioFinal - descuento)
+                }
+
+                // Mercado Pago no permite crear links de pago por $0. 
+                // Si el cupón cubre el 100%, hay que atajarlo acá.
+                if (precioFinal <= 0) {
+                    return NextResponse.json({ error: "Cupón del 100%. Esta compra debe procesarse sin Mercado Pago." }, { status: 400 })
+                }
+            }
+
             metadataCustom.tipo_pago = String(tipo_pago)
             metadataCustom.producto_id = String(productoId)
             metadataCustom.tipo_clase = String(pack.tipo_clase)
             metadataCustom.creditos = String(pack.creditos)
-            if (cuponId) metadataCustom.cupon_id = String(cuponId)
+            if (cuponId) metadataCustom.cupon_id = String(cuponId) // Viaja a MP para usarlo a la vuelta
             if (pase_referencia) metadataCustom.pase_referencia = String(pase_referencia)
         }
 
