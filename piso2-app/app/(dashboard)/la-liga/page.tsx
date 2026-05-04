@@ -52,7 +52,11 @@ const fetcherLiga = async (uid: string, supabase: any) => {
     }
     const { data: avisos } = await queryAvisos
 
-    const hoyIso = new Date().toISOString()
+    // 🚀 ARREGLO 2: Seteamos el límite de tiempo al inicio del día para que la clase no desaparezca hasta la medianoche
+    const inicioDelDia = new Date();
+    inicioDelDia.setHours(0, 0, 0, 0);
+    const hoyIso = inicioDelDia.toISOString();
+
     const cuatrimestreActual = '2026-1'
     const mesActual = new Date().getMonth() + 1
     const anioActual = new Date().getFullYear()
@@ -103,14 +107,18 @@ const fetcherLiga = async (uid: string, supabase: any) => {
     const disciplinasMap: Record<string, any> = {}
     if (dataClases) {
         dataClases.forEach((clase: any) => {
-            if (!disciplinasMap[clase.nombre]) {
-                disciplinasMap[clase.nombre] = { id: clase.id, nombre: clase.nombre, liga_nivel: clase.liga_nivel, profesor: clase.profesor?.nombre_completo || 'Staff', proxima_clase: null, clases_ids: [] }
+            // 🚀 ARREGLO 1: Armamos una key que combina el Nombre y el Nivel para que no se pisen
+            const keyAgrupacion = `${clase.nombre}_Nivel_${clase.liga_nivel || 1}`;
+
+            if (!disciplinasMap[keyAgrupacion]) {
+                disciplinasMap[keyAgrupacion] = { id: clase.id, nombre: clase.nombre, liga_nivel: clase.liga_nivel, profesor: clase.profesor?.nombre_completo || 'Staff', proxima_clase: null, clases_ids: [] }
             }
-            disciplinasMap[clase.nombre].clases_ids.push(clase.id)
+            disciplinasMap[keyAgrupacion].clases_ids.push(clase.id)
+
             if (clase.inicio >= hoyIso) {
-                if (!disciplinasMap[clase.nombre].proxima_clase || clase.inicio < disciplinasMap[clase.nombre].proxima_clase) {
-                    disciplinasMap[clase.nombre].proxima_clase = clase.inicio
-                    disciplinasMap[clase.nombre].profesor = clase.profesor?.nombre_completo || 'Staff'
+                if (!disciplinasMap[keyAgrupacion].proxima_clase || clase.inicio < disciplinasMap[keyAgrupacion].proxima_clase) {
+                    disciplinasMap[keyAgrupacion].proxima_clase = clase.inicio
+                    disciplinasMap[keyAgrupacion].profesor = clase.profesor?.nombre_completo || 'Staff'
                 }
             }
         })
@@ -124,7 +132,6 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
     let allStudents: any[] = []
     if (isStaff) {
-        // 🚀 CORRECCIÓN: Quitamos porcentaje_beca fantasma para que la consulta no explote
         const { data: perfiles } = await supabase
             .from('profiles')
             .select('id, nombre_completo, email, nivel_liga, porcentaje_beca_liga')
@@ -135,7 +142,7 @@ const fetcherLiga = async (uid: string, supabase: any) => {
         if (perfiles) {
             allStudents = perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '').map((p: any) => {
                 const precioBase = getPrecioBase(p.nivel_liga)
-                const beca = p.porcentaje_beca_liga || 0 // Usamos exclusivamente la de la liga
+                const beca = p.porcentaje_beca_liga || 0
                 const precioFinal = precioBase - (precioBase * beca / 100)
 
                 const totalAbonado = pagosLigaMes?.filter((pago: any) => pago.alumno_id === p.id).reduce((acc: number, curr: any) => acc + Number(curr.monto), 0) || 0
@@ -182,7 +189,6 @@ function LaLigaContent() {
     const [becaValue, setBecaValue] = useState(0)
     const [guardandoBeca, setGuardandoBeca] = useState(false)
 
-    // 🚀 Estados para Señas/Pagos Parciales
     const [isPagoModalOpen, setIsPagoModalOpen] = useState(false)
     const [alumnoPago, setAlumnoPago] = useState<any>(null)
     const [montoPago, setMontoPago] = useState<number | ''>('')
@@ -222,7 +228,6 @@ function LaLigaContent() {
         }
     }, [data?.preciosLiga])
 
-    // 🚀 LÓGICA DE REGISTRO MANUAL DE SEÑAS + IMPACTO EN CAJA
     const handleRegistrarPago = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!alumnoPago || !montoPago || Number(montoPago) <= 0) return
@@ -232,7 +237,6 @@ function LaLigaContent() {
         const anioActual = new Date().getFullYear()
 
         try {
-            // Buscamos si ya abonó algo este mes
             const { data: pagoExistente, error: errBuscar } = await supabase
                 .from('liga_pagos')
                 .select('id, monto')
@@ -244,14 +248,12 @@ function LaLigaContent() {
             if (errBuscar) throw errBuscar
 
             if (pagoExistente) {
-                // Sumamos la seña nueva
                 const { error: errUpdate } = await supabase.from('liga_pagos').update({
                     monto: Number(pagoExistente.monto) + Number(montoPago),
                     metodo_pago: metodoPago
                 }).eq('id', pagoExistente.id)
                 if (errUpdate) throw errUpdate
             } else {
-                // Crea registro nuevo
                 const { error: errInsert } = await supabase.from('liga_pagos').insert([{
                     alumno_id: alumnoPago.id,
                     mes: mesActual,
@@ -262,7 +264,6 @@ function LaLigaContent() {
                 if (errInsert) throw errInsert
             }
 
-            // Impacto en caja
             const { data: turnoActivo } = await supabase.from('caja_turnos').select('id').order('created_at', { ascending: false }).limit(1).maybeSingle()
 
             if (turnoActivo) {
@@ -365,7 +366,6 @@ function LaLigaContent() {
         }
     };
 
-    // 🚀 GENERAR LINK DE MP POR EL SALDO EXACTO
     const generarLinkPagoLiga = async () => {
         setProcesandoPago(true)
         try {
@@ -377,7 +377,7 @@ function LaLigaContent() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     titulo: `Cuota/Saldo La Liga - Mes ${mesActual}/${anioActual}`,
-                    precio: miSaldoPendiente, // COBRAMOS EL SALDO MATEMÁTICO QUE CALCULAMOS
+                    precio: miSaldoPendiente,
                     userId: userId,
                     tipo_pago: 'cuota_liga',
                     mes: mesActual,
@@ -548,7 +548,7 @@ function LaLigaContent() {
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
 
-                {/* 🚀 CARTEL ROJO DEL ALUMNO (AHORA MUESTRA SALDO PARCIAL) */}
+                {/* 🚀 CARTEL ROJO DEL ALUMNO */}
                 {!isStaff && (deudaCuota) && (
                     <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="flex items-start gap-3">
@@ -661,7 +661,6 @@ function LaLigaContent() {
                                                 </span>
                                             </div>
 
-                                            {/* 🚀 BOTÓN NUEVO: REGISTRAR PAGO/SEÑA */}
                                             <button
                                                 onClick={() => { setAlumnoPago(alumno); setMontoPago(alumno.saldoPendiente || 0); setMetodoPago('efectivo'); setIsPagoModalOpen(true); }}
                                                 className="shrink-0 bg-white/5 hover:bg-emerald-500 text-gray-400 hover:text-black px-3 py-2 rounded-lg text-[10px] font-black transition-all flex items-center justify-center"
@@ -671,7 +670,6 @@ function LaLigaContent() {
                                             </button>
                                         </div>
 
-                                        {/* 🚀 INFO FINANCIERA (INFILTRADA ACÁ ABAJO) */}
                                         <div className="flex flex-wrap gap-2 pt-2 mt-2">
                                             {alumno.becaVisual > 0 && (
                                                 <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
