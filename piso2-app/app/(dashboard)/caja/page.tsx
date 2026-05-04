@@ -531,7 +531,7 @@ export default function CajaPage() {
         return (
             <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4 animate-in zoom-in-95 duration-300">
                 <Toaster position="top-center" richColors theme="dark" />
-                {/* 🚀 ENCABEZADO DE SEDE AGREGADO */}
+                {/* 🚀 ENCABEZADO DE SEDE CORREGIDO */}
                 <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8 border-b border-white/10 pb-6">
                     <div>
                         <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white mb-1">
@@ -539,7 +539,7 @@ export default function CajaPage() {
                         </h1>
                         <div className="flex items-center gap-2 mt-2">
                             <span className="flex items-center gap-1.5 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">
-                                <MapPin size={12} /> {turnoActivo.sede?.nombre || 'Sede Desconocida'}
+                                <MapPin size={12} /> {turnoActivo?.sede?.nombre || 'Sede Desconocida'}
                             </span>
                         </div>
                     </div>
