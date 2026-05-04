@@ -46,9 +46,66 @@ export async function eliminarInscripcionAction(inscripcionId: string) {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return { success: false, error: 'No autorizado' }
 
-    const { data: res, error } = await supabase.rpc('reembolsar_inscripcion', { p_inscripcion_id: inscripcionId })
-    if (error || !res?.success) return { success: false, error: res?.message || error?.message || 'Error al procesar baja' }
-    return { success: true }
+    // 1. Antes de hacer nada, ESPIAMOS la clase para ver qué tipo de moneda hay que devolver
+    const { data: inscripcionData, error: errInsc } = await supabase
+        .from('inscripciones')
+        .select(`
+            user_id,
+            clase:clases (
+                nombre,
+                tipo_clase,
+                es_combinable,
+                profesor:profiles!clases_profesor_id_fkey(nombre_completo)
+            )
+        `)
+        .eq('id', inscripcionId)
+        .single()
+
+    if (errInsc || !inscripcionData) return { success: false, error: 'No se encontró la inscripción' }
+
+    // 🚀 MAGIA ANTI-TYPESCRIPT: Forzamos el tipado y sacamos la clase segura
+    const inscripcion = inscripcionData as any;
+    const claseInfo = Array.isArray(inscripcion.clase) ? inscripcion.clase[0] : inscripcion.clase;
+
+    const esExclusiva = claseInfo.es_combinable === false;
+
+    if (esExclusiva) {
+        // 🚀 FLUJO VIP: CANCELACIÓN DE CLASES EXCLUSIVAS
+
+        // A. Borramos la inscripción a mano para liberar el cupo en la sala
+        const { error: errDelete } = await supabase
+            .from('inscripciones')
+            .delete()
+            .eq('id', inscripcionId)
+
+        if (errDelete) return { success: false, error: 'Error al cancelar la reserva en el servidor' }
+
+        // B. Reconstruimos la "llave" del pase usando claseInfo
+        const profeObj = claseInfo.profesor;
+        const nombreProfe = Array.isArray(profeObj) ? profeObj[0]?.nombre_completo : (profeObj?.nombre_completo || 'Staff');
+        const llavePase = `${claseInfo.nombre}-${nombreProfe}-${claseInfo.tipo_clase}`;
+
+        // C. Le devolvemos +1 crédito exclusivo con la función que tiene Poderes de Admin
+        const { error: errPase } = await supabase.rpc('cargar_pase_exclusivo_manual', {
+            p_usuario_id: inscripcion.user_id,
+            p_referencia: llavePase,
+            p_cantidad: 1
+        })
+
+        if (errPase) {
+            console.error("Error devolviendo el pase:", errPase);
+            return { success: false, error: 'Reserva cancelada, pero falló la devolución del pase exclusivo.' }
+        }
+
+        return { success: true }
+
+    } else {
+        // 🚀 FLUJO CLÁSICO: CLASES REGULARES/ESPECIALES (Sigue usando tu función de siempre)
+        const { data: res, error } = await supabase.rpc('reembolsar_inscripcion', { p_inscripcion_id: inscripcionId })
+        if (error || !res?.success) return { success: false, error: res?.message || error?.message || 'Error al procesar baja' }
+
+        return { success: true }
+    }
 }
 
 export async function enviarNotificacionClaseAction(notificaciones: any[]) {
