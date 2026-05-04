@@ -5,9 +5,11 @@ import { useEffect, useState, useMemo } from 'react'
 import useSWR from 'swr'
 import { format, subMonths, addMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { Wallet, Search, Loader2, ChevronDown, ChevronUp, Users, Calendar, DollarSign, Lock, FileSpreadsheet } from 'lucide-react'
+import { Wallet, Search, Loader2, ChevronDown, ChevronUp, Users, Calendar, DollarSign, Lock, FileSpreadsheet, CheckCircle2, X } from 'lucide-react'
 import { useCash } from '@/context/CashContext'
 import Link from 'next/link'
+import { toast, Toaster } from 'sonner'
+import { pagarClaseProfeAction } from '@/app/actions/liquidaciones' // 🚀 Importamos la nueva action
 
 type ClaseLiquidacion = {
     id: string
@@ -18,6 +20,7 @@ type ClaseLiquidacion = {
     cant_alumnos: number
     total_clase: number
     pago_profe: number
+    pagado_profe: boolean // 🚀 Nueva propiedad
 }
 
 type ProfeLiquidacion = {
@@ -28,13 +31,11 @@ type ProfeLiquidacion = {
     total_recaudado: number
 }
 
-// 🚀 FETCHER GLOBAL: Busca todas las clases del mes y las agrupa por profe
 const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) throw new Error("No autenticado")
 
-    // Generamos un margen amplio (mes anterior y siguiente) para evitar problemas de UTC
     const [yyyy, mm] = mesKey.split('-')
     const prevMonth = parseInt(mm) === 1 ? `${parseInt(yyyy) - 1}-12` : `${yyyy}-${String(parseInt(mm) - 1).padStart(2, '0')}`
     const nextMonth = parseInt(mm) === 12 ? `${parseInt(yyyy) + 1}-01` : `${yyyy}-${String(parseInt(mm) + 1).padStart(2, '0')}`
@@ -42,13 +43,13 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     const { data: clasesData, error } = await supabase
         .from('clases')
         .select(`
-            id, nombre, inicio, tipo_acuerdo, valor_acuerdo, estado,
+            id, nombre, inicio, tipo_acuerdo, valor_acuerdo, estado, pagado_profe,
             profesor:profiles!profesor_id(id, nombre_completo),
             inscripciones ( valor_credito, presente )
         `)
         .neq('estado', 'cancelada')
-        .gte('inicio', `${prevMonth}-25`) // Margen seguro
-        .lte('inicio', `${nextMonth}-05`) // Margen seguro
+        .gte('inicio', `${prevMonth}-25`)
+        .lte('inicio', `${nextMonth}-05`)
 
     if (error) throw error
 
@@ -60,10 +61,9 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         clasesData.forEach((clase: any) => {
             if (!clase.inicio) return
 
-            // 🚀 Filtramos EXACTAMENTE por el mes seleccionado usando el string original
             const [fechaParte] = clase.inicio.split('T')
             const [anio, mes] = fechaParte.split('-')
-            if (`${anio}-${mes}` !== mesKey) return // Descartamos si no es del mes pedido
+            if (`${anio}-${mes}` !== mesKey) return
 
             const profId = clase.profesor?.id || 'sin-profe'
             const profNombre = clase.profesor?.nombre_completo || 'Staff Sin Asignar'
@@ -92,12 +92,13 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
             liquidacionesPorProfe[profId].clases.push({
                 id: clase.id,
                 nombre: clase.nombre,
-                inicio: clase.inicio, // Guardamos original
+                inicio: clase.inicio,
                 tipo_acuerdo: clase.tipo_acuerdo,
                 valor_acuerdo: clase.valor_acuerdo,
                 cant_alumnos,
                 total_clase,
-                pago_profe
+                pago_profe,
+                pagado_profe: clase.pagado_profe || false // 🚀 Mapeamos la columna
             })
 
             liquidacionesPorProfe[profId].total_pago += pago_profe
@@ -108,25 +109,15 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         })
     }
 
-    // Convertimos a array y ordenamos alfabéticamente
     const arrayProfes = Object.values(liquidacionesPorProfe).sort((a, b) => a.nombre.localeCompare(b.nombre))
+    arrayProfes.forEach(p => { p.clases.sort((a, b) => a.inicio.localeCompare(b.inicio)) })
 
-    // Ordenamos las clases de cada profe por fecha
-    arrayProfes.forEach(p => {
-        p.clases.sort((a, b) => a.inicio.localeCompare(b.inicio))
-    })
-
-    return {
-        profesores: arrayProfes,
-        totalGeneralPagar,
-        totalGeneralRecaudado
-    }
+    return { profesores: arrayProfes, totalGeneralPagar, totalGeneralRecaudado }
 }
 
 export default function AdminLiquidacionesPage() {
     const { userRole, isLoading: loadingContext } = useCash()
 
-    // Generar opciones de meses (3 atrás, actual, 1 adelante)
     const opcionesMeses = useMemo(() => {
         const hoy = new Date()
         return [
@@ -138,20 +129,44 @@ export default function AdminLiquidacionesPage() {
         ]
     }, [])
 
-    const [selectedMonth, setSelectedMonth] = useState(opcionesMeses[1]) // Por defecto el mes actual
+    const [selectedMonth, setSelectedMonth] = useState(opcionesMeses[1])
     const [searchQuery, setSearchQuery] = useState('')
     const [expandedProf, setExpandedProf] = useState<string | null>(null)
 
-    // 🚀 SWR Fetching
-    const { data, isLoading, error } = useSWR(
+    // 🚀 Estados del Modal de Pago
+    const [modalPago, setModalPago] = useState<{ isOpen: boolean; clase: ClaseLiquidacion | null; nombreProfe: string }>({ isOpen: false, clase: null, nombreProfe: '' })
+    const [procesandoPago, setProcesandoPago] = useState(false)
+
+    const { data, isLoading, error, mutate } = useSWR(
         userRole && ['admin', 'recepcion'].includes(userRole) ? ['liquidaciones-global', selectedMonth] : null,
         fetchLiquidacionesGlobales,
         { revalidateOnFocus: false }
     )
 
+    const handleProcesarPago = async (metodo: 'efectivo' | 'transferencia') => {
+        if (!modalPago.clase) return
+        setProcesandoPago(true)
+
+        const res = await pagarClaseProfeAction(
+            modalPago.clase.id,
+            modalPago.clase.pago_profe,
+            metodo,
+            modalPago.clase.nombre,
+            modalPago.nombreProfe
+        )
+
+        if (res.success) {
+            toast.success(`Pago de $${modalPago.clase.pago_profe} registrado correctamente.`)
+            mutate() // Refrescamos los datos
+            setModalPago({ isOpen: false, clase: null, nombreProfe: '' })
+        } else {
+            toast.error(res.error || 'Error al procesar el pago')
+        }
+        setProcesandoPago(false)
+    }
+
     if (loadingContext || isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
-    // 🛡️ PATOVICA DE ACCESO
     if (!['admin', 'recepcion'].includes(userRole || '')) {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4">
@@ -170,8 +185,8 @@ export default function AdminLiquidacionesPage() {
 
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
+            <Toaster position="top-center" richColors theme="dark" />
 
-            {/* HEADER Y CONTROLES */}
             <div className="mb-8 border-b border-white/10 pb-6 flex flex-col md:flex-row md:items-end justify-between gap-6">
                 <div>
                     <div className="flex items-center gap-2 mb-2">
@@ -186,19 +201,9 @@ export default function AdminLiquidacionesPage() {
                 <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
                     <div className="relative w-full sm:w-64">
                         <Search className="absolute left-3 top-3.5 text-gray-500" size={16} />
-                        <input
-                            type="text"
-                            placeholder="Buscar profesor..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-10 text-white text-sm outline-none focus:border-[#D4E655] transition-colors"
-                        />
+                        <input type="text" placeholder="Buscar profesor..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-10 text-white text-sm outline-none focus:border-[#D4E655] transition-colors" />
                     </div>
-                    <select
-                        value={selectedMonth}
-                        onChange={(e) => { setSelectedMonth(e.target.value); setExpandedProf(null); }}
-                        className="w-full sm:w-auto bg-[#111] border border-[#D4E655]/30 rounded-xl p-3 text-white text-sm font-bold uppercase outline-none focus:border-[#D4E655] appearance-none"
-                    >
+                    <select value={selectedMonth} onChange={(e) => { setSelectedMonth(e.target.value); setExpandedProf(null); }} className="w-full sm:w-auto bg-[#111] border border-[#D4E655]/30 rounded-xl p-3 text-white text-sm font-bold uppercase outline-none focus:border-[#D4E655] appearance-none">
                         {opcionesMeses.map(mes => {
                             const [y, m] = mes.split('-')
                             const date = new Date(parseInt(y), parseInt(m) - 1, 15)
@@ -208,7 +213,6 @@ export default function AdminLiquidacionesPage() {
                 </div>
             </div>
 
-            {/* TARJETAS RESUMEN DEL MES */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                 <div className="bg-[#111] border border-white/5 p-6 rounded-2xl flex items-center justify-between">
                     <div>
@@ -226,7 +230,6 @@ export default function AdminLiquidacionesPage() {
                 </div>
             </div>
 
-            {/* LISTA DE PROFESORES */}
             <div className="space-y-4">
                 {filtrados.length === 0 ? (
                     <div className="text-center py-20 bg-[#111]/50 rounded-3xl border border-dashed border-white/10">
@@ -237,39 +240,25 @@ export default function AdminLiquidacionesPage() {
                 ) : (
                     filtrados.map((profe) => {
                         const isOpen = expandedProf === profe.id
-
                         return (
                             <div key={profe.id} className={`bg-[#09090b] border ${isOpen ? 'border-[#D4E655]/30' : 'border-white/10'} rounded-2xl overflow-hidden transition-all duration-300`}>
-
-                                {/* CABECERA DEL PROFE */}
-                                <button
-                                    onClick={() => setExpandedProf(isOpen ? null : profe.id)}
-                                    className="w-full p-5 flex flex-col md:flex-row justify-between items-start md:items-center bg-[#111]/50 hover:bg-[#111] transition-colors text-left gap-4"
-                                >
+                                <button onClick={() => setExpandedProf(isOpen ? null : profe.id)} className="w-full p-5 flex flex-col md:flex-row justify-between items-start md:items-center bg-[#111]/50 hover:bg-[#111] transition-colors text-left gap-4">
                                     <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-white font-black text-lg border border-white/10">
-                                            {profe.nombre[0]}
-                                        </div>
+                                        <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-white font-black text-lg border border-white/10">{profe.nombre[0]}</div>
                                         <div>
                                             <h3 className="text-lg font-black text-white uppercase">{profe.nombre}</h3>
-                                            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">
-                                                {profe.clases.length} clases dictadas
-                                            </p>
+                                            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">{profe.clases.length} clases dictadas</p>
                                         </div>
                                     </div>
-
                                     <div className="flex items-center gap-6 w-full md:w-auto border-t md:border-t-0 border-white/10 pt-4 md:pt-0">
                                         <div className="text-left md:text-right">
                                             <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Liquidación</p>
-                                            <p className={`text-xl font-black ${isOpen ? 'text-[#D4E655]' : 'text-white'}`}>
-                                                ${profe.total_pago.toLocaleString()}
-                                            </p>
+                                            <p className={`text-xl font-black ${isOpen ? 'text-[#D4E655]' : 'text-white'}`}>${profe.total_pago.toLocaleString()}</p>
                                         </div>
                                         {isOpen ? <ChevronUp className="text-gray-500 shrink-0 hidden md:block" /> : <ChevronDown className="text-gray-500 shrink-0 hidden md:block" />}
                                     </div>
                                 </button>
 
-                                {/* DETALLE DE CLASES (Expandible) */}
                                 <div className={`transition-all duration-300 overflow-hidden ${isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
                                     <div className="p-4 md:p-6 border-t border-white/5 bg-[#09090b]">
 
@@ -284,6 +273,7 @@ export default function AdminLiquidacionesPage() {
                                                         <th className="pb-3 text-center">Pax</th>
                                                         <th className="pb-3 text-right">Recaudado</th>
                                                         <th className="pb-3 text-right text-[#D4E655]">A Pagar</th>
+                                                        <th className="pb-3 text-center w-24">Estado</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-white/5 text-xs">
@@ -300,6 +290,17 @@ export default function AdminLiquidacionesPage() {
                                                                 <td className="py-3 text-center"><span className="bg-white/10 px-2 py-0.5 rounded flex items-center justify-center gap-1 w-fit mx-auto"><Users size={10} /> {clase.cant_alumnos}</span></td>
                                                                 <td className="py-3 text-right text-gray-400">${clase.total_clase.toLocaleString()}</td>
                                                                 <td className="py-3 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
+                                                                <td className="py-3 text-center">
+                                                                    {clase.pagado_profe ? (
+                                                                        <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[9px] font-black flex items-center justify-center gap-1 mx-auto cursor-not-allowed">
+                                                                            <CheckCircle2 size={12} /> PAGADO
+                                                                        </span>
+                                                                    ) : (
+                                                                        <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: profe.nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors mx-auto block">
+                                                                            PAGAR
+                                                                        </button>
+                                                                    )}
+                                                                </td>
                                                             </tr>
                                                         )
                                                     })}
@@ -328,9 +329,20 @@ export default function AdminLiquidacionesPage() {
                                                                 <p className="text-[8px] text-gray-500 uppercase font-bold">Acuerdo: {clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `Fijo`}</p>
                                                                 <p className="text-[9px] text-gray-400 mt-0.5">Recaudado: ${clase.total_clase.toLocaleString()}</p>
                                                             </div>
-                                                            <div className="text-right">
-                                                                <p className="text-[8px] text-[#D4E655]/70 uppercase font-bold">A Pagar</p>
-                                                                <p className="text-sm font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</p>
+                                                            <div className="text-right flex flex-col items-end gap-2">
+                                                                <div>
+                                                                    <p className="text-[8px] text-[#D4E655]/70 uppercase font-bold">A Pagar</p>
+                                                                    <p className="text-sm font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</p>
+                                                                </div>
+                                                                {clase.pagado_profe ? (
+                                                                    <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-0.5 rounded text-[8px] font-black flex items-center justify-center gap-1 cursor-not-allowed">
+                                                                        <CheckCircle2 size={10} /> PAGADO
+                                                                    </span>
+                                                                ) : (
+                                                                    <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: profe.nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors">
+                                                                        PAGAR CLASE
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -345,6 +357,36 @@ export default function AdminLiquidacionesPage() {
                     })
                 )}
             </div>
+
+            {/* 🚀 MODAL DE PAGO FLOTANTE */}
+            {modalPago.isOpen && modalPago.clase && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => !procesandoPago && setModalPago({ isOpen: false, clase: null, nombreProfe: '' })}>
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-sm rounded-3xl p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => !procesandoPago && setModalPago({ isOpen: false, clase: null, nombreProfe: '' })} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                            <X size={20} />
+                        </button>
+
+                        <div className="text-center mb-6">
+                            <div className="w-12 h-12 bg-[#D4E655]/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-[#D4E655]/30">
+                                <DollarSign className="text-[#D4E655]" size={24} />
+                            </div>
+                            <h3 className="text-xl font-black text-white uppercase tracking-tighter">Pagar a Profe</h3>
+                            <p className="text-xs text-gray-400 mt-2 font-medium">Vas a registrar el pago de <strong className="text-white">{modalPago.clase.nombre}</strong> a <strong className="text-white">{modalPago.nombreProfe}</strong>.</p>
+                            <p className="text-3xl font-black text-[#D4E655] mt-4">${modalPago.clase.pago_profe.toLocaleString()}</p>
+                        </div>
+
+                        <div className="space-y-3">
+                            <p className="text-[10px] font-black uppercase text-gray-500 tracking-widest text-center">¿Cómo le pagaste?</p>
+                            <button onClick={() => handleProcesarPago('efectivo')} disabled={procesandoPago} className="w-full bg-[#111] hover:bg-white/10 border border-white/10 text-white font-black uppercase py-4 rounded-xl transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : '💵 Aboné en Efectivo'}
+                            </button>
+                            <button onClick={() => handleProcesarPago('transferencia')} disabled={procesandoPago} className="w-full bg-[#D4E655] hover:bg-white text-black font-black uppercase py-4 rounded-xl transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : '📱 Hice Transferencia'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
