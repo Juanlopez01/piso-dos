@@ -191,6 +191,11 @@ function TiendaContent() {
             }
 
             if (responseData.url) {
+                // 🚀 ARREGLO: Antes de redirigir, reseteamos el estado visual
+                setGenerandoPago(false)
+                setIsCheckoutOpen(false)
+
+                // Ahora sí lo mandamos a MP
                 window.location.href = responseData.url
             }
 
@@ -376,7 +381,7 @@ function TiendaContent() {
                             </div>
 
                             <a
-                                href={`https://wa.me/5491122334455?text=${getMensajeWhatsApp()}`}
+                                href={`https://wa.me/5491171190301?text=${getMensajeWhatsApp()}`}
                                 target="_blank"
                                 className="w-full bg-[#111] border border-white/10 text-gray-300 font-bold uppercase py-3.5 rounded-xl text-[10px] tracking-widest text-center flex items-center justify-center gap-2 hover:bg-white hover:text-black transition-all"
                             >
