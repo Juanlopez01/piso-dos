@@ -20,17 +20,24 @@ export async function setEstadoAsistenciaAction(inscripcionId: string, estado: '
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return { success: false, error: 'No autorizado' }
 
-    // Consideramos que si fue pero no hizo la clase (SAF), físicamente estuvo presente (true),
-    // o podés dejarlo false si querés que le cuente como inasistencia. Acá lo dejamos false para el presentismo genérico, 
-    // pero guardado como 'saf' exacto en el detalle.
     const esPresente = estado === 'presente';
 
-    const { error } = await supabase.from('inscripciones').update({
+    // Le agregamos el .select() para obligarlo a responder con la fila actualizada
+    const { data, error } = await supabase.from('inscripciones').update({
         estado_asistencia: estado,
         presente: esPresente
-    }).eq('id', inscripcionId)
+    }).eq('id', inscripcionId).select()
 
-    if (error) return { success: false, error: error.message }
+    if (error) {
+        console.error("❌ ERROR BD:", error.message);
+        return { success: false, error: error.message }
+    }
+
+    if (!data || data.length === 0) {
+        console.error("❌ ERROR: Supabase no actualizó nada. Revisa si la columna 'estado_asistencia' existe o si hay bloqueo de permisos (RLS).");
+        return { success: false, error: 'La base de datos ignoró el cambio' }
+    }
+
     return { success: true }
 }
 

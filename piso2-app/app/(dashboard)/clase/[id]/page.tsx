@@ -23,7 +23,8 @@ import {
     toggleAsistenciaAction,
     eliminarInscripcionAction,
     procesarInscripcionAction,
-    enviarNotificacionClaseAction
+    enviarNotificacionClaseAction,
+    setEstadoAsistenciaAction
 } from '@/app/actions/inscripciones'
 
 // 🚀 IMPORTAMOS LAS ACCIONES GLOBALES PARA AUTO-ASIGNAR GRUPOS Y LIGA
@@ -214,6 +215,7 @@ export default function ClaseDetallePage() {
         ];
 
     const handleSetAsistencia = async (insc: Inscripcion, nuevoEstado: 'presente' | 'ausente' | 'media_falta' | 'justificada' | 'saf') => {
+        // 1. Efecto visual instantáneo
         const optimisticInscripciones = inscripciones.map(i =>
             i.id === insc.id
                 ? { ...i, estado_asistencia: nuevoEstado, presente: nuevoEstado === 'presente' }
@@ -221,16 +223,18 @@ export default function ClaseDetallePage() {
         )
         mutate({ ...data!, inscripciones: optimisticInscripciones }, false)
 
-        const res = await toggleAsistenciaAction(insc.id, nuevoEstado === 'presente')
+        // 2. IMPACTO REAL EN BD
+        const res = await setEstadoAsistenciaAction(insc.id, nuevoEstado)
 
         if (!res.success) {
-            toast.error("Error al guardar asistencia")
-            mutate()
+            toast.error(`No se guardó: ${res.error}`)
+            mutate() // Anulamos el efecto visual si falló
         } else {
             if (nuevoEstado === 'presente') toast.success('Asistencia marcada')
             if (nuevoEstado === 'ausente') toast.info('Marcado como ausente')
             if (nuevoEstado === 'media_falta') toast.warning('Media falta registrada')
             if (nuevoEstado === 'justificada') toast.success('Falta justificada guardada')
+            if (nuevoEstado === 'saf') toast.success('S.A.F. registrado')
         }
     }
 
