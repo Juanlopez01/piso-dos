@@ -42,6 +42,9 @@ type RPCUsuario = {
     staff_observations: string | null
     intereses_ritmos: string | string[] | null
     is_frio: boolean
+    alias_cbu?: string | null
+    nombre_remplazo?: string | null
+    contacto_remplazo?: string | null
 }
 
 type RPCUsuariosData = {
@@ -758,7 +761,27 @@ function UsuariosContent() {
                                     </div>
                                 </>
                             )}
-
+                            {/* 🚀 DATOS EXCLUSIVOS DEL PROFESOR */}
+                            {selectedUser.rol === 'profesor' && (
+                                <>
+                                    <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
+                                        <Briefcase size={16} className="text-[#D4E655]" /> Facturación y Reemplazo
+                                    </h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                                        <div className="bg-[#111] border border-white/10 rounded-xl p-4">
+                                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Alias / CBU</p>
+                                            <p className="text-sm font-black text-[#D4E655] font-mono break-all">{selectedUser.alias_cbu || 'No registrado'}</p>
+                                        </div>
+                                        <div className="bg-[#111] border border-white/10 rounded-xl p-4">
+                                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Profe de Reemplazo</p>
+                                            <p className="text-sm font-black text-white uppercase">{selectedUser.nombre_remplazo || 'No asignado'}</p>
+                                            <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+                                                <Phone size={10} className="text-gray-500" /> {selectedUser.contacto_remplazo || 'Sin contacto'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
                             <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2 mt-2">
                                 <Activity size={16} className="text-[#D4E655]" /> Rendimiento General
                             </h4>
