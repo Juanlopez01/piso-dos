@@ -172,7 +172,7 @@ export async function POST(request: Request) {
                 ],
                 metadata: metadataCustom,
                 back_urls: {
-                    success: `${baseUrl}${rutaDestino}?pago=exito`,
+                    success: `${baseUrl}/pago-exito?destino=${rutaDestino}&pago=exito`,
                     failure: `${baseUrl}${rutaDestino}?pago=error`,
                     pending: `${baseUrl}${rutaDestino}?pago=pendiente`
                 },
