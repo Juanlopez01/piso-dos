@@ -30,6 +30,7 @@ import {
 // 🚀 IMPORTAMOS LAS ACCIONES GLOBALES PARA AUTO-ASIGNAR GRUPOS Y LIGA
 import { toggleMiembroCompaniaAction } from '@/app/actions/companias'
 import { cambiarLigaAction, crearAlumnoDesdeRecepcionAction } from '@/app/actions/usuarios'
+
 // --- TIPOS ---
 type Inscripcion = {
     id: string
@@ -59,7 +60,7 @@ type ClaseDetalle = {
     es_combinable: boolean
     es_la_liga: boolean
     compania_id?: string | null
-    liga_nivel?: number | null // 🚀 Agregado para usarlo en la auto-asignación
+    liga_nivel?: number | null
 }
 
 type ProductoPack = {
@@ -157,8 +158,6 @@ export default function ClaseDetallePage() {
     const [isNotifModalOpen, setIsNotifModalOpen] = useState(false)
     const [notifMessage, setNotifMessage] = useState('')
     const [sendingNotif, setSendingNotif] = useState(false)
-
-    // 🚀 ESTADO: Checkbox para decidir si le creamos cuenta
     const [crearCuenta, setCrearCuenta] = useState(false)
 
     const [guestForm, setGuestForm] = useState({
@@ -190,10 +189,16 @@ export default function ClaseDetallePage() {
     const fechaText = inicioNormalizado ? format(new Date(inicioNormalizado.split('T')[0] + 'T12:00:00'), "EEE d MMM", { locale: es }) : '';
     const horaText = inicioNormalizado ? inicioNormalizado.split('T')[1].substring(0, 5) : '';
 
-    // 🚀 LÓGICA DE DETECCIÓN INTELIGENTE (Formación/Grupos)
     const esGrupoOFormacion = clase?.es_la_liga || !!clase?.compania_id || clase?.tipo_clase?.toLowerCase().includes('compa') || clase?.tipo_clase?.toLowerCase().includes('formacion');
 
-    // 🚀 Ajustamos la pestaña por defecto cuando abre el modal si es de Formación/Grupo
+    // 🚀 LÓGICA DE PRECIO PARA CLASES EXCLUSIVAS (Busca el pase de 1 clase de esta clase)
+    const packSueltaExclusiva = useMemo(() => {
+        if (!clase?.es_combinable) {
+            return packsDisponibles.find(p => p.creditos === 1);
+        }
+        return null;
+    }, [clase, packsDisponibles]);
+
     useEffect(() => {
         if (isGuestOpen && esGrupoOFormacion) {
             if (['pack', 'usar_credito'].includes(guestForm.tipo)) {
@@ -215,7 +220,6 @@ export default function ClaseDetallePage() {
         ];
 
     const handleSetAsistencia = async (insc: Inscripcion, nuevoEstado: 'presente' | 'ausente' | 'media_falta' | 'justificada' | 'saf') => {
-        // 1. Efecto visual instantáneo
         const optimisticInscripciones = inscripciones.map(i =>
             i.id === insc.id
                 ? { ...i, estado_asistencia: nuevoEstado, presente: nuevoEstado === 'presente' }
@@ -223,12 +227,11 @@ export default function ClaseDetallePage() {
         )
         mutate({ ...data!, inscripciones: optimisticInscripciones }, false)
 
-        // 2. IMPACTO REAL EN BD
         const res = await setEstadoAsistenciaAction(insc.id, nuevoEstado)
 
         if (!res.success) {
             toast.error(`No se guardó: ${res.error}`)
-            mutate() // Anulamos el efecto visual si falló
+            mutate()
         } else {
             if (nuevoEstado === 'presente') toast.success('Asistencia marcada')
             if (nuevoEstado === 'ausente') toast.info('Marcado como ausente')
@@ -290,6 +293,9 @@ export default function ClaseDetallePage() {
                 if (guestForm.tipo === 'suelta') {
                     if (esGrupoOFormacion) {
                         monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : 0;
+                        // 🚀 ACÁ COBRAMOS EL PRECIO DE LA EXCLUSIVA SI ES NO COMBINABLE
+                    } else if (!clase.es_combinable) {
+                        monto = packSueltaExclusiva ? packSueltaExclusiva.precio : 0;
                     } else {
                         const precios = PRECIOS_ALUMNO[clase.tipo_clase === 'Especial' ? 'Especial' : 'Regular'] || PRECIOS_ALUMNO.Regular;
                         monto = guestForm.pago === 'efectivo' ? precios.efectivo : precios.transferencia;
@@ -304,10 +310,8 @@ export default function ClaseDetallePage() {
                 }
             }
 
-            // 🚀 DETECTAMOS SI ES OBLIGATORIO CREAR LA CUENTA
             const isMandatoryAccount = guestForm.tipo === 'pack' || (esGrupoOFormacion && guestForm.tipo === 'suelta') || crearCuenta;
 
-            // 🚀 1. SI NO HAY ALUMNO SELECCIONADO Y ES OBLIGATORIO, LE CREAMOS LA CUENTA
             if (isMandatoryAccount && !alumnoIdFinal) {
                 if (!guestForm.email || !guestForm.dni) {
                     throw new Error("El Email y el DNI son obligatorios para crear la cuenta.");
@@ -324,11 +328,10 @@ export default function ClaseDetallePage() {
 
                 if (!resCuenta.success) throw new Error("Error al crear cuenta: " + resCuenta.error);
 
-                alumnoIdFinal = resCuenta.user_id; // ¡Atrapamos el ID real recién creado!
-                nombreInvitadoStr = null; // Como ya tiene ID oficial, deja de ser un "invitado fantasma"
+                alumnoIdFinal = resCuenta.user_id;
+                nombreInvitadoStr = null;
             }
 
-            // 🚀 2. INSCRIBIMOS EN LA CLASE
             const rpcPayload = {
                 p_clase_id: clase.id,
                 p_user_id: alumnoIdFinal,
@@ -338,20 +341,18 @@ export default function ClaseDetallePage() {
                 p_monto_caja: monto,
                 p_metodo_pago: guestForm.pago,
                 p_producto_id: guestForm.packSeleccionadoId || null,
-                p_email_comprador: null, // Lo sacamos para que no explote la función vieja de Supabase
+                p_email_comprador: null,
                 p_telefono_comprador: null
             }
 
             const response = await procesarInscripcionAction(rpcPayload as any)
             if (!response.success) throw new Error(response.error)
 
-            // 🚀 3. LA MAGIA GLOBAL: AUTO-ASIGNACIÓN A GRUPO O LIGA + SEÑA
             if (esGrupoOFormacion && guestForm.tipo !== 'invitado') {
                 if (alumnoIdFinal) {
                     const mesActual = new Date().getMonth() + 1;
                     const anioActual = new Date().getFullYear();
 
-                    // A. Compañías / Grupos Exclusivos
                     if (clase.compania_id) {
                         await toggleMiembroCompaniaAction(clase.compania_id, alumnoIdFinal, 'agregar');
                         if (monto > 0) {
@@ -365,7 +366,6 @@ export default function ClaseDetallePage() {
                             }
                         }
                     }
-                    // B. La Liga
                     else if (clase.es_la_liga && clase.liga_nivel) {
                         await cambiarLigaAction(alumnoIdFinal, clase.liga_nivel);
                         if (monto > 0) {
@@ -712,7 +712,6 @@ export default function ClaseDetallePage() {
                                         <input required placeholder="Apellido" value={guestForm.apellido} onChange={e => setGuestForm({ ...guestForm, apellido: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                     </div>
 
-                                    {/* Mostrar el checkbox de "Crear Cuenta" SOLO si es suelta normal (no grupo/liga) */}
                                     {guestForm.tipo === 'suelta' && !esGrupoOFormacion && (
                                         <label className="flex items-center gap-3 cursor-pointer mt-2 bg-white/5 p-4 rounded-xl border border-white/10 hover:border-white/20 transition-all">
                                             <input type="checkbox" checked={crearCuenta} onChange={e => setCrearCuenta(e.target.checked)} className="accent-[#D4E655] w-5 h-5 cursor-pointer" />
@@ -720,15 +719,12 @@ export default function ClaseDetallePage() {
                                         </label>
                                     )}
 
-                                    {/* SI ES PACK, SI ES GRUPO/LIGA, O SI TILDARON CREAR CUENTA (DATOS OBLIGATORIOS) */}
                                     {(guestForm.tipo === 'pack' || (esGrupoOFormacion && guestForm.tipo === 'suelta') || crearCuenta) && (
                                         <div className="space-y-4 pt-2 border-t border-white/10 mt-4 animate-in fade-in">
                                             <div className="grid grid-cols-2 gap-4">
                                                 <input required placeholder="DNI (Será su clave)" type="text" value={guestForm.dni} onChange={e => setGuestForm({ ...guestForm, dni: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                                 <input required placeholder="Teléfono" type="tel" value={guestForm.telefono} onChange={e => setGuestForm({ ...guestForm, telefono: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                             </div>
-
-                                            {/* El email se vuelve obligatorio para que el sistema pueda crearle la cuenta segura */}
                                             <input required placeholder="Email (Obligatorio)" type="email" value={guestForm.email} onChange={e => setGuestForm({ ...guestForm, email: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
 
                                             <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl flex items-start gap-3">
@@ -747,13 +743,20 @@ export default function ClaseDetallePage() {
                                 </div>
                             )}
 
-                            {/* MÉTODOS DE PAGO Y MONTO PARA SUELTA / PAGO MANUAL */}
+                            {/* 🚀 MÉTODOS DE PAGO Y MONTO PARA SUELTA (CORREGIDO PARA EXCLUSIVAS) */}
                             {guestForm.tipo === 'suelta' && (
                                 <div className="space-y-4 mt-4 bg-white/5 p-4 rounded-2xl border border-white/10">
                                     {esGrupoOFormacion ? (
                                         <div>
                                             <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Monto a Cobrar ($)</label>
                                             <input type="number" required value={guestForm.montoManualPack} onChange={e => setGuestForm({ ...guestForm, montoManualPack: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm font-black outline-none focus:border-[#D4E655]" placeholder="Ej: 15000" />
+                                        </div>
+                                    ) : !clase?.es_combinable ? (
+                                        <div className="flex items-center justify-between px-1">
+                                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Valor Clase Suelta Exclusiva</span>
+                                            <span className="text-sm font-black text-[#D4E655]">
+                                                {packSueltaExclusiva ? `$${packSueltaExclusiva.precio.toLocaleString()}` : 'No hay pack x1 configurado'}
+                                            </span>
                                         </div>
                                     ) : (
                                         <div className="flex items-center justify-between px-1">
