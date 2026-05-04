@@ -23,7 +23,10 @@ import {
 } from '@/app/actions/usuarios'
 
 type Ritmo = { id: string; nombre: string }
-type Producto = { id: string; nombre: string; precio: number; creditos: number; tipo_clase: 'regular' | 'seminario' | 'exclusivo' }
+type Producto = {
+    id: string; nombre: string; precio: number; creditos: number; tipo_clase: 'regular' | 'seminario' | 'exclusivo';
+    pase_referencia?: string
+}
 type CompaniaBasica = { id: string; nombre: string }
 type PaseExclusivo = { pase_referencia: string; cantidad: number }
 
@@ -86,7 +89,7 @@ const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo
         ] = await Promise.all([
             supabase.from('profiles').select('*').order('nombre_completo', { ascending: true }),
             supabase.from('ritmos').select('id, nombre').order('nombre', { ascending: true }),
-            supabase.from('productos').select('id, nombre, precio, creditos, tipo_clase').eq('activo', true),
+            supabase.from('productos').select('id, nombre, precio, creditos, tipo_clase, pase_referencia').eq('activo', true),
             supabase.from('perfiles_companias').select('perfil_id, compania:companias(id, nombre)'),
             supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad')
         ])
@@ -375,7 +378,16 @@ function UsuariosContent() {
         if (!prod) return toast.error('Producto no encontrado')
         setAssigningPack(true)
         try {
-            const response = await asignarPackAction(selectedUser!.id, prod.tipo_clase, prod.creditos, Number(packForm.monto), packForm.metodo)
+            // 🚀 ARREGLO 2: Ahora le pasamos el prod.id y el prod.pase_referencia
+            const response = await asignarPackAction(
+                selectedUser!.id,
+                prod.tipo_clase,
+                prod.creditos,
+                Number(packForm.monto),
+                packForm.metodo,
+                prod.id,               // Nuevo
+                prod.pase_referencia   // Nuevo
+            )
             if (!response.success) throw new Error(response.error)
             toast.success(`Pack asignado.`)
             setIsPackModalOpen(false)

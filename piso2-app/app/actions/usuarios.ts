@@ -150,7 +150,15 @@ export async function guardarPerfilAction(userId: string, observaciones: string,
     return { success: true }
 }
 
-export async function asignarPackAction(usuarioId: string, tipoClase: string, creditos: number, monto: number, metodoPago: string) {
+export async function asignarPackAction(
+    usuarioId: string,
+    tipoClase: string,
+    creditos: number,
+    monto: number,
+    metodoPago: string,
+    productoId?: string,
+    pase_referencia?: string | null
+) {
     const supabase = await createClient()
     try {
         // 🚀 BLINDAJE: getSession() en lugar de getUser()
@@ -166,17 +174,56 @@ export async function asignarPackAction(usuarioId: string, tipoClase: string, cr
             turnoActivoId = turno.id
         }
 
-        const { data, error } = await supabase.rpc('asignar_pack_manual', {
-            p_user_id: usuarioId,
-            p_turno_caja_id: turnoActivoId,
-            p_tipo_clase: tipoClase,
-            p_cantidad: creditos,
-            p_monto: monto,
-            p_metodo_pago: metodoPago
-        })
+        // 🚀 DESVÍO INTELIGENTE: Pases Exclusivos vs Packs Normales
+        if (tipoClase === 'exclusivo') {
 
-        if (error) throw new Error('Error de conexión al cargar el pack.')
-        if (!data.success) throw new Error(data.message)
+            // 1. Ingreso de Caja (si cobró plata)
+            if (monto > 0 && turnoActivoId) {
+                const { error: errCaja } = await supabase.from('caja_movimientos').insert({
+                    turno_id: turnoActivoId,
+                    tipo: 'ingreso',
+                    concepto: `Venta Pase Exclusivo (Manual)`,
+                    monto: monto,
+                    metodo_pago: metodoPago,
+                    origen_referencia: 'manual'
+                })
+                if (errCaja) throw new Error('Error al registrar en la caja.')
+            }
+
+            // 2. Guardar en el historial de compras del alumno
+            const { error: errPack } = await supabase.from('alumno_packs').insert({
+                user_id: usuarioId,
+                producto_id: productoId || null,
+                tipo_clase: 'exclusivo',
+                cantidad_inicial: creditos,
+                creditos_restantes: creditos,
+                monto_abonado: monto,
+                estado: 'activo'
+            })
+            if (errPack) throw new Error('Error al guardar el historial del pase.')
+
+            // 3. Asignar la llave del pase en la cuenta del alumno (Usando tu función perfecta)
+            const { error: errPase } = await supabase.rpc('cargar_pase_exclusivo_manual', {
+                p_usuario_id: usuarioId,
+                p_referencia: pase_referencia,
+                p_cantidad: creditos
+            })
+            if (errPase) throw new Error('Error al habilitar el acceso al pase exclusivo.')
+
+        } else {
+            // 🚀 FLUJO ORIGINAL para Clases Regulares / Especiales
+            const { data, error } = await supabase.rpc('asignar_pack_manual', {
+                p_user_id: usuarioId,
+                p_turno_caja_id: turnoActivoId,
+                p_tipo_clase: tipoClase,
+                p_cantidad: creditos,
+                p_monto: monto,
+                p_metodo_pago: metodoPago
+            })
+
+            if (error) throw new Error('Error de conexión al cargar el pack regular.')
+            if (!data.success) throw new Error(data.message)
+        }
 
         revalidatePath('/usuarios')
         return { success: true }
