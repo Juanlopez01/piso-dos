@@ -33,6 +33,17 @@ type CarteleraData = {
     pasesExclusivos: Record<string, number>;
 }
 
+// 🚀 FUNCIÓN DETECTIVE: Busca la coincidencia exacta o parcial del pase
+const obtenerReferenciaPase = (grupo: ClaseAgrupada, pases: Record<string, number>) => {
+    const refs = Object.keys(pases);
+    const coincidencia = refs.find(ref =>
+        ref === grupo.key_grupo ||
+        ref.toLowerCase().trim() === grupo.nombre.toLowerCase().trim() ||
+        grupo.key_grupo.toLowerCase().includes(ref.toLowerCase().trim())
+    );
+    return coincidencia || grupo.key_grupo; // Devuelve la que encontró, o usa la default
+}
+
 const fetcherCartelera = async (uid: string | null, supabase: any): Promise<CarteleraData> => {
     let profile = null
     let pasesExclusivos: Record<string, number> = {}
@@ -133,7 +144,6 @@ export default function ExplorarClasesPage() {
     const [filtroTexto, setFiltroTexto] = useState('')
     const [filtroTipo, setFiltroTipo] = useState<string>('Todos')
 
-    // 🚀 CAMBIO VISUAL: Ambos ven "Grupos" ahora en los filtros
     const filtrosDisponibles = esStaff
         ? ['Todos', 'Regular', 'Especial', 'Intensivo', 'Formacion', 'Grupos']
         : ['Todos', 'Regular', 'Especial', 'Formacion', 'Grupos'];
@@ -183,8 +193,11 @@ export default function ExplorarClasesPage() {
             return router.push('/login')
         }
 
+        // 🚀 Buscamos el nombre correcto del pase para este grupo
+        const refCorrecta = obtenerReferenciaPase(grupo, pasesExclusivos)
+
         if (!grupo.es_combinable) {
-            const pasesDisponibles = pasesExclusivos[grupo.key_grupo] || 0
+            const pasesDisponibles = pasesExclusivos[refCorrecta] || 0
             if (pasesDisponibles <= 0) return toast.error("Clase Exclusiva. Necesitás el pase de este grupo.")
         } else {
             const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(grupo.tipo_clase)
@@ -193,7 +206,9 @@ export default function ExplorarClasesPage() {
         }
 
         setProcesandoId(instancia.id)
-        const response = await inscribirAlumnoAction(instancia.id, grupo.tipo_clase, grupo.key_grupo)
+
+        // 🚀 Mandamos el nombre correcto del pase al backend (para que sepa cuál descontar)
+        const response = await inscribirAlumnoAction(instancia.id, grupo.tipo_clase, refCorrecta)
 
         if (response.success) {
             toast.success(response.message)
@@ -217,7 +232,6 @@ export default function ExplorarClasesPage() {
             let coincideTipo = true;
             if (filtroTipo !== 'Todos') {
                 const normalize = (str: string) => str ? str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : "";
-                // 🚀 LÓGICA MANTENIDA: Si busca "Grupos", filtramos por "compania" en la base de datos
                 const tipoFiltro = filtroTipo === 'Grupos' ? 'compania' : filtroTipo;
                 coincideTipo = normalize(g.tipo_clase) === normalize(tipoFiltro);
             }
@@ -356,7 +370,6 @@ export default function ExplorarClasesPage() {
                                                         <Lock size={10} /> No combinable
                                                     </span>
                                                 ) : <div></div>}
-                                                {/* 🚀 CAMBIO VISUAL: Mostramos 'Grupo' en la etiqueta flotante */}
                                                 <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-full backdrop-blur-md shadow-lg ${estilos.bg}`}>
                                                     {grupo.tipo_clase.toLowerCase().includes('compa') ? 'Grupo' : grupo.tipo_clase}
                                                 </span>
@@ -419,9 +432,12 @@ export default function ExplorarClasesPage() {
 
                                 const esAutoInscrito = estadoPrivado.esPrivada && estadoPrivado.apto;
 
+                                // 🚀 Chequeamos el saldo usando la llave que descubrió la función detective
+                                const refCorrecta = obtenerReferenciaPase(selectedGrupo, pasesExclusivos)
+
                                 let tieneSaldo = false
                                 if (esExclusivaModal) {
-                                    tieneSaldo = (pasesExclusivos[selectedGrupo.key_grupo] || 0) > 0
+                                    tieneSaldo = (pasesExclusivos[refCorrecta] || 0) > 0
                                 } else {
                                     const esEspecial = ['Especial', 'Seminario', 'Intensivo'].includes(selectedGrupo.tipo_clase)
                                     tieneSaldo = (perfil ? (esEspecial ? perfil.creditos_especiales : perfil.creditos_regulares) : 0) > 0
@@ -473,7 +489,8 @@ export default function ExplorarClasesPage() {
                                     <ShieldCheck className="text-white/80" size={20} />
                                     <div>
                                         <p className="text-[10px] text-gray-400 font-black uppercase">Tu Saldo No Combinable</p>
-                                        <p className="text-sm font-bold text-white">{pasesExclusivos[selectedGrupo.key_grupo] || 0} créditos disponibles para esta clase</p>
+                                        {/* 🚀 Mostramos el saldo con la referencia corregida */}
+                                        <p className="text-sm font-bold text-white">{pasesExclusivos[obtenerReferenciaPase(selectedGrupo, pasesExclusivos)] || 0} créditos disponibles para esta clase</p>
                                     </div>
                                 </div>
                             )}

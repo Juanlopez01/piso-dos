@@ -179,15 +179,17 @@ export async function POST(request: Request) {
 
             if (pagoExistente) return NextResponse.json({ message: 'Pago ya procesado' }, { status: 200 });
 
-            // 2. Registrar el pack en el historial
-            await supabase.from('alumno_packs').insert({
-                user_id, producto_id, tipo_clase,
-                cantidad_inicial: Number(creditos),
-                creditos_restantes: Number(creditos),
-                monto_abonado: montoAbonado,
-                estado: 'activo',
-                mp_payment_id: paymentIdToProcess.toString()
-            });
+            // 2. Registrar el pack en el historial (SOLO SI NO ES EXCLUSIVO)
+            if (String(tipo_clase) !== 'exclusivo') {
+                await supabase.from('alumno_packs').insert({
+                    user_id, producto_id, tipo_clase,
+                    cantidad_inicial: Number(creditos),
+                    creditos_restantes: Number(creditos),
+                    monto_abonado: montoAbonado,
+                    estado: 'activo',
+                    mp_payment_id: paymentIdToProcess.toString()
+                });
+            }
 
             // 3. CARGA DE SALDO INTELIGENTE
             if (String(tipo_clase) === 'exclusivo') {

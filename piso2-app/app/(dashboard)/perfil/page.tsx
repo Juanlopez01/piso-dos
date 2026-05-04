@@ -8,7 +8,7 @@ import {
     User, Phone, CreditCard, Users, Save, Megaphone, Loader2,
     AlertTriangle, Calendar, LogOut, CheckCircle2, History,
     BookOpen, Star, Clock, AlertCircle, HeartPulse, FileUp, X, Lock,
-    Eye, EyeOff // 🚀 AGREGAMOS LOS ÍCONOS DEL OJITO
+    Eye, EyeOff
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format, differenceInDays } from 'date-fns'
@@ -28,27 +28,31 @@ const parseSafeDate = (dateStr: string | null | undefined) => {
 
 type HistorialClase = { id: string; presente: boolean; clase: { nombre: string; inicio: string; tipo_clase: string; profesor: { nombre_completo: string } } }
 type PackVencimiento = { fecha_vencimiento: string; creditos_restantes: number; tipo_clase: string }
+type PaseExclusivo = { pase_referencia: string; cantidad: number } // 🚀 Nuevo
 
 type PerfilData = {
     profile: any
     historialClases: HistorialClase[]
     avisos: any[]
     proximoVencimiento: PackVencimiento | null
+    pasesExclusivos: PaseExclusivo[] // 🚀 Nuevo
 }
 
 const fetcherPerfil = async (uid: string, supabase: any): Promise<PerfilData> => {
-    const [profileReq, historialReq, avisosReq, packsReq] = await Promise.all([
+    const [profileReq, historialReq, avisosReq, packsReq, pasesReq] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', uid).single(),
         supabase.from('inscripciones').select(`id, presente, clase:clases(nombre, inicio, tipo_clase, profesor:profiles!clases_profesor_id_fkey(nombre_completo))`).eq('user_id', uid).order('created_at', { ascending: false }),
         supabase.from('avisos').select('*').order('created_at', { ascending: false }),
-        supabase.from('alumno_packs').select('*').eq('user_id', uid).eq('estado', 'activo').order('fecha_vencimiento', { ascending: true }).limit(1)
+        supabase.from('alumno_packs').select('*').eq('user_id', uid).eq('estado', 'activo').order('fecha_vencimiento', { ascending: true }).limit(1),
+        supabase.from('pases_exclusivos').select('pase_referencia, cantidad').eq('usuario_id', uid) // 🚀 Buscamos pases exclusivos
     ])
 
     return {
         profile: profileReq.data,
         historialClases: historialReq.data || [],
         avisos: avisosReq.data || [],
-        proximoVencimiento: packsReq.data?.[0] || null
+        proximoVencimiento: packsReq.data?.[0] || null,
+        pasesExclusivos: pasesReq.data || [] // 🚀 Lo mandamos al frontend
     }
 }
 
@@ -70,7 +74,10 @@ function PerfilContent() {
     const historialClases = data?.historialClases || []
     const avisos = data?.avisos || []
     const proximoVencimiento = data?.proximoVencimiento || null
+    const pasesExclusivos = data?.pasesExclusivos || [] // 🚀 Extraemos los pases
     const userEmail = profile?.email || ''
+
+    const totalExclusivos = pasesExclusivos.reduce((acc, p) => acc + p.cantidad, 0) // 🚀 Sumamos el total
 
     const [saving, setSaving] = useState(false)
     const [uploadingFile, setUploadingFile] = useState(false)
@@ -79,7 +86,6 @@ function PerfilContent() {
     const [confirmNewPassword, setConfirmNewPassword] = useState('')
     const [changingPassword, setChangingPassword] = useState(false)
 
-    // 🚀 ESTADOS PARA CONTROLAR LOS OJITOS
     const [showNewPassword, setShowNewPassword] = useState(false)
     const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
@@ -357,7 +363,8 @@ function PerfilContent() {
                     <div className="lg:col-span-2 space-y-6">
                         <div className="bg-[#09090b] border border-white/10 rounded-2xl p-5 sm:p-6 shadow-xl">
                             <h3 className="text-base sm:text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6"><CreditCard size={20} className="text-[#D4E655]" /> Mis Créditos Disponibles</h3>
-                            <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-4">
+
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 mb-4">
                                 <div className="bg-[#111] border border-white/5 p-4 rounded-xl flex flex-col items-center justify-center text-center relative overflow-hidden group hover:border-white/20 transition-all">
                                     <BookOpen size={24} className="text-gray-500 mb-2 opacity-50 group-hover:opacity-100 transition-opacity" />
                                     <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">Regulares</p>
@@ -368,7 +375,30 @@ function PerfilContent() {
                                     <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-purple-400 mb-1">Especiales</p>
                                     <p className="text-3xl sm:text-4xl font-black text-white">{profile.creditos_seminarios || 0}</p>
                                 </div>
+                                <div className="bg-[#111] border border-white/5 p-4 rounded-xl flex flex-col items-center justify-center text-center relative overflow-hidden group hover:border-blue-500/30 transition-all col-span-2 sm:col-span-1">
+                                    <Lock size={24} className="text-blue-500 mb-2 opacity-50 group-hover:opacity-100 transition-opacity" />
+                                    <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest text-blue-400 mb-1">Exclusivos</p>
+                                    <p className="text-3xl sm:text-4xl font-black text-white">{totalExclusivos}</p>
+                                </div>
                             </div>
+
+                            {pasesExclusivos.length > 0 && (
+                                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 mb-4">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-blue-400 mb-3 flex items-center gap-1">
+                                        <Eye size={12} /> Detalle de Pases Exclusivos:
+                                    </p>
+                                    <ul className="space-y-2">
+                                        {pasesExclusivos.map((pase, index) => (
+                                            <li key={index} className="flex justify-between items-center bg-black/40 border border-blue-500/10 p-2.5 rounded-lg">
+                                                <span className="text-xs text-white font-bold uppercase truncate pr-4">{pase.pase_referencia}</span>
+                                                <span className="bg-blue-500/20 text-blue-400 px-2.5 py-1 rounded text-[10px] font-black shrink-0">
+                                                    {pase.cantidad} CLASE{pase.cantidad !== 1 && 'S'}
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
 
                             {proximoVencimiento && (
                                 <div className={`border rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 ${colorVencimiento}`}>

@@ -190,25 +190,13 @@ export async function asignarPackAction(
                 if (errCaja) throw new Error('Error al registrar en la caja.')
             }
 
-            // 2. Guardar en el historial de compras del alumno
-            const { error: errPack } = await supabase.from('alumno_packs').insert({
-                user_id: usuarioId,
-                producto_id: productoId || null,
-                tipo_clase: 'exclusivo',
-                cantidad_inicial: creditos,
-                creditos_restantes: creditos,
-                monto_abonado: monto,
-                estado: 'activo'
-            })
-            if (errPack) throw new Error('Error al guardar el historial del pase.')
-
-            // 3. Asignar la llave del pase en la cuenta del alumno (Usando tu función perfecta)
+            // 2. Asignar la llave del pase en la cuenta del alumno (Directo a pases_exclusivos)
             const { error: errPase } = await supabase.rpc('cargar_pase_exclusivo_manual', {
                 p_usuario_id: usuarioId,
                 p_referencia: pase_referencia,
                 p_cantidad: creditos
             })
-            if (errPase) throw new Error('Error al habilitar el acceso al pase exclusivo.')
+            if (errPase) throw new Error(`Error al habilitar el acceso: ${errPase.message}`)
 
         } else {
             // 🚀 FLUJO ORIGINAL para Clases Regulares / Especiales
