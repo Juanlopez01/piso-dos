@@ -7,7 +7,8 @@ import {
     Loader2, UsersRound, Shield, ArrowLeft,
     MessageSquare, Calendar, Users, Info,
     Clock, MapPin, User, ChevronRight, Image as ImageIcon,
-    Send, BellRing, X, Percent, CheckCircle2, AlertCircle, Coins
+    Send, BellRing, X, Percent, CheckCircle2, AlertCircle, Coins,
+    CalendarDays
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
@@ -32,7 +33,9 @@ type Miembro = {
     pago_compania_al_dia?: boolean
     totalAbonado?: number
     saldoPendiente?: number
+    saldoPendienteEfectivo?: number // 🚀 Nuevo
     precioFinal?: number
+    precioEfectivo?: number // 🚀 Nuevo
 }
 
 type ClaseCompania = {
@@ -59,7 +62,11 @@ export default function CompaniaDetallePage() {
 
     const [activeTab, setActiveTab] = useState<'muro' | 'clases' | 'miembros'>('muro')
 
-    // Estados para Muro (Global)
+    // 🚀 ESTADOS MÁQUINA DEL TIEMPO (GLOBAL DEL PADRÓN)
+    const [mesDashboard, setMesDashboard] = useState(new Date().getMonth() + 1)
+    const [anioDashboard, setAnioDashboard] = useState(new Date().getFullYear())
+
+    // Estados para Muro
     const [notifMessage, setNotifMessage] = useState('')
     const [sendingNotif, setSendingNotif] = useState(false)
 
@@ -73,15 +80,18 @@ export default function CompaniaDetallePage() {
     const [alumnoPago, setAlumnoPago] = useState<Miembro | null>(null)
     const [montoPago, setMontoPago] = useState<number | ''>('')
     const [metodoPago, setMetodoPago] = useState('efectivo')
+    const [pagoMes, setPagoMes] = useState(mesDashboard)
+    const [pagoAnio, setPagoAnio] = useState(anioDashboard)
     const [registrandoPago, setRegistrandoPago] = useState(false)
 
     const [procesandoPago, setProcesandoPago] = useState(false)
 
+    // 🚀 RECARGAR CUANDO CAMBIA EL MES
     useEffect(() => {
         if (!loadingContext) {
             verificarAccesoYCargar()
         }
-    }, [loadingContext, params.id])
+    }, [loadingContext, params.id, mesDashboard, anioDashboard])
 
     const verificarAccesoYCargar = async () => {
         setLoading(true)
@@ -133,23 +143,21 @@ export default function CompaniaDetallePage() {
             return
         }
 
-        // 🚀 1. ARREGLO DE PADRÓN: Corregimos porcentaje_beca_compania
         const { data: dataMiembros } = await supabase
             .from('perfiles_companias')
             .select('perfil:profiles(id, nombre_completo, email, porcentaje_beca_compania)')
             .eq('compania_id', companiaId)
 
-        // Buscamos el precio base de la compañía en las configuraciones
         const { data: config } = await supabase.from('configuraciones').select('valor').eq('clave', `cuota_compania_${companiaId}`).maybeSingle()
         const precioBase = config?.valor ? Number(config.valor) : 15000
 
         if (dataMiembros) {
             let miembrosData = dataMiembros.map((m: any) => m.perfil).filter(Boolean)
 
-            const mesActual = new Date().getMonth() + 1
-            const anioActual = new Date().getFullYear()
+            // 🚀 APLICAMOS LA MÁQUINA DEL TIEMPO
+            const mesActual = mesDashboard
+            const anioActual = anioDashboard
 
-            // 🚀 2. TRAEMOS LOS MONTOS ABONADOS
             const { data: pagosCia } = await supabase
                 .from('companias_pagos')
                 .select('alumno_id, monto')
@@ -157,22 +165,28 @@ export default function CompaniaDetallePage() {
                 .eq('mes', mesActual)
                 .eq('anio', anioActual)
 
-            // Armamos el objeto final calculando señas y saldos
             const miembrosCompletos = miembrosData.map((m: any) => {
-                // Sumamos todo lo que pagó este mes
                 const totalAbonado = pagosCia?.filter((p: { alumno_id: string; monto: number | string }) => p.alumno_id === m.id).reduce((acc: number, curr: { monto: number | string }) => acc + Number(curr.monto), 0) || 0
                 const beca = m.porcentaje_beca_compania || 0
-                const precioFinal = precioBase - (precioBase * beca / 100)
 
-                // Calculamos cuánto debe
-                const saldoPendiente = Math.max(0, precioFinal - totalAbonado)
-                const alDia = saldoPendiente <= 0
+                // 🚀 LÓGICA DE PRECIO EFECTIVO (DESCUENTO INVERTIDO 110 -> 100)
+                const precioFinal = precioBase - (precioBase * beca / 100) // Transferencia
+                const precioEfectivo = Math.round(precioFinal / 1.1) // Efectivo (-10% de recargo)
+
+                // 🚀 SALDOS SEPARADOS
+                const saldoPendiente = Math.max(0, precioFinal - totalAbonado) // Deuda Transf
+                const saldoPendienteEfectivo = Math.max(0, precioEfectivo - totalAbonado) // Deuda Efvo
+
+                // Está al día si pagó el total en efectivo o en transferencia
+                const alDia = saldoPendiente <= 0 || saldoPendienteEfectivo <= 0
 
                 return {
                     ...m,
                     totalAbonado,
                     saldoPendiente,
+                    saldoPendienteEfectivo,
                     precioFinal,
+                    precioEfectivo,
                     pago_compania_al_dia: alDia
                 }
             })
@@ -278,54 +292,50 @@ export default function CompaniaDetallePage() {
         }
     }
 
-    // 🚀 LÓGICA PARA REGISTRAR SEÑA / PAGO MANUAL (ADMIN/STAFF)
+    // 🚀 LÓGICA PARA REGISTRAR SEÑA / PAGO MANUAL 
     const openPagoModal = (alumno: Miembro) => {
         setAlumnoPago(alumno)
-        setMontoPago(alumno.saldoPendiente || 0) // Por defecto sugerimos cancelar lo que debe
-        setMetodoPago('efectivo')
+        setMetodoPago('efectivo') // Sugerimos efectivo por defecto
+        setMontoPago(alumno.saldoPendienteEfectivo || 0) // Mostramos deuda de efectivo
+        setPagoMes(mesDashboard)
+        setPagoAnio(anioDashboard)
         setIsPagoModalOpen(true)
     }
 
-    // 🚀 LÓGICA PARA REGISTRAR SEÑA / PAGO MANUAL (CON UPSERT INTELIGENTE Y CAJA)
     const handleRegistrarPago = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!alumnoPago || !montoPago || Number(montoPago) <= 0) return
         setRegistrandoPago(true)
 
-        const mesActual = new Date().getMonth() + 1
-        const anioActual = new Date().getFullYear()
-
         try {
-            // 1. Verificamos si ya existe un registro de pago para este mes
+            // 1. Verificamos si ya existe un registro de pago para este MES (Seleccionado en el modal)
             const { data: pagoExistente, error: errorBusqueda } = await supabase
                 .from('companias_pagos')
                 .select('id, monto')
                 .eq('alumno_id', alumnoPago.id)
                 .eq('compania_id', compania?.id)
-                .eq('mes', mesActual)
-                .eq('anio', anioActual)
+                .eq('mes', pagoMes)
+                .eq('anio', pagoAnio)
                 .maybeSingle()
 
             if (errorBusqueda) throw errorBusqueda
 
             if (pagoExistente) {
-                // YA TIENE UN PAGO PREVIO -> Le SUMAMOS la seña nueva
                 const { error: errorUpdate } = await supabase
                     .from('companias_pagos')
                     .update({
                         monto: Number(pagoExistente.monto) + Number(montoPago),
-                        metodo_pago: metodoPago // Actualizamos al último método usado
+                        metodo_pago: metodoPago
                     })
                     .eq('id', pagoExistente.id)
 
                 if (errorUpdate) throw errorUpdate
             } else {
-                // NO TIENE PAGOS -> Creamos el registro de cero
                 const { error: errorInsert } = await supabase.from('companias_pagos').insert([{
                     alumno_id: alumnoPago.id,
                     compania_id: compania?.id,
-                    mes: mesActual,
-                    anio: anioActual,
+                    mes: pagoMes,
+                    anio: pagoAnio,
                     monto: Number(montoPago),
                     metodo_pago: metodoPago
                 }])
@@ -333,29 +343,20 @@ export default function CompaniaDetallePage() {
                 if (errorInsert) throw errorInsert
             }
 
-            // 🚀 2. IMPACTO EN CAJA: Buscamos el turno de caja activo
-            const { data: turnoActivo, error: errorTurno } = await supabase
-                .from('caja_turnos')
-                .select('id')
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle()
-
-            if (errorTurno) throw errorTurno
+            // 2. Anotamos en caja (solo si el recepcionista tiene una abierta)
+            const { data: turnoActivo } = await supabase.from('caja_turnos').select('id').order('created_at', { ascending: false }).limit(1).maybeSingle()
 
             if (turnoActivo) {
-                // 3. Metemos la plata en la caja registradora
                 const { error: errorCaja } = await supabase.from('caja_movimientos').insert([{
                     turno_id: turnoActivo.id,
                     tipo: 'ingreso',
-                    concepto: `Seña/Cuota Grupo: ${compania?.nombre} - ${alumnoPago.nombre_completo}`,
+                    concepto: `Seña/Cuota Grupo (${pagoMes}/${pagoAnio}): ${compania?.nombre} - ${alumnoPago.nombre_completo}`,
                     monto: Number(montoPago),
                     metodo_pago: metodoPago,
-                    origen_referencia: 'grupo'
+                    origen_referencia: 'compania'
                 }])
 
                 if (errorCaja) throw errorCaja
-
                 toast.success('Pago y movimiento de caja registrados correctamente')
             } else {
                 toast.warning('Pago guardado al alumno, pero NO se anotó en caja (no hay turno abierto).')
@@ -364,35 +365,30 @@ export default function CompaniaDetallePage() {
             setIsPagoModalOpen(false)
             verificarAccesoYCargar()
         } catch (err: any) {
-            console.error("🕵️‍♂️ DETALLE DEL ERROR:", err)
             toast.error(`Error DB: ${err.message || 'Desconocido'}`)
         } finally {
             setRegistrandoPago(false)
         }
     }
 
-    // 🚀 LINK DE PAGO INTELIGENTE PARA EL ALUMNO
     const generarLinkPagoCompania = async () => {
         setProcesandoPago(true)
         try {
-            const mesActual = new Date().getMonth() + 1
-            const anioActual = new Date().getFullYear()
-
-            // Agarramos a este alumno de la lista que acabamos de traer (que ya calculó todo)
+            // El alumno que paga online siempre paga el saldo de transferencia
             const miPerfilCalculado = miembros.find(m => m.id === userId)
-            const saldoACobrar = miPerfilCalculado?.saldoPendiente || 15000 // Fallback de seguridad
+            const saldoACobrar = miPerfilCalculado?.saldoPendiente || 15000
 
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    titulo: `Cuota/Saldo ${compania?.nombre} - Mes ${mesActual}/${anioActual}`,
-                    precio: saldoACobrar, // AHORA LE MANDAMOS EL SALDO PENDIENTE EXACTO
+                    titulo: `Cuota/Saldo ${compania?.nombre} - Mes ${mesDashboard}/${anioDashboard}`,
+                    precio: saldoACobrar,
                     userId: userId,
                     tipo_pago: 'cuota_compania',
                     productoId: compania?.id,
-                    mes: mesActual,
-                    anio: anioActual
+                    mes: mesDashboard,
+                    anio: anioDashboard
                 })
             })
 
@@ -420,10 +416,8 @@ export default function CompaniaDetallePage() {
 
     const hasCoordinatorPowers = ['admin', 'recepcion'].includes(userRole || '') || (userRole === 'profesor' && compania.coordinador_id === userId)
 
-    // Buscamos si el usuario actual debe la cuota de la compañía
     const miPerfilInfo = miembros.find(m => m.id === userId)
     const deboCompania = !miPerfilInfo?.pago_compania_al_dia && userRole === 'alumno'
-
     const esProyectoStaff = compania.nombre.toLowerCase().trim() === 'proyecto staff'
 
     return (
@@ -493,10 +487,10 @@ export default function CompaniaDetallePage() {
                             <div>
                                 <h4 className="font-black text-blue-500 uppercase text-xs tracking-widest mb-1">Cuota de Grupo Pendiente</h4>
                                 {esProyectoStaff ? (
-                                    <p className="text-gray-400 text-[10px] sm:text-xs">Aboná tu saldo de <strong className="text-white">${miPerfilInfo?.saldoPendiente}</strong> por transferencia o en la recepción.</p>
+                                    <p className="text-gray-400 text-[10px] sm:text-xs">Aboná tu saldo de <strong className="text-white">${miPerfilInfo?.saldoPendienteEfectivo} (Efectivo) o ${miPerfilInfo?.saldoPendiente} (Transferencia)</strong> en la recepción.</p>
                                 ) : (
                                     <p className="text-gray-400 text-[10px] sm:text-xs">
-                                        Tenés un saldo pendiente de <strong className="text-white">${miPerfilInfo?.saldoPendiente}</strong>. Aboná para mantener tu lugar.
+                                        Tenés un saldo pendiente de <strong className="text-white">${miPerfilInfo?.saldoPendienteEfectivo} (Efectivo) o ${miPerfilInfo?.saldoPendiente} (Transf)</strong>. Aboná para mantener tu lugar.
                                     </p>
                                 )}
                             </div>
@@ -624,6 +618,27 @@ export default function CompaniaDetallePage() {
                 {/* 3. PESTAÑA: MIEMBROS */}
                 {activeTab === 'miembros' && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        {/* 🚀 MÁQUINA DEL TIEMPO (Solo Staff) */}
+                        {hasCoordinatorPowers && (
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                                <h3 className="text-lg font-black uppercase text-white flex items-center gap-2"><Users size={20} className="text-blue-500" /> Padrón y Cobros</h3>
+                                <div className="flex items-center gap-2 bg-black/40 border border-white/10 p-1.5 rounded-xl shadow-inner w-fit">
+                                    <CalendarDays size={16} className="text-gray-500 ml-2" />
+                                    <select value={mesDashboard} onChange={e => setMesDashboard(Number(e.target.value))} className="bg-transparent text-white text-xs font-bold uppercase outline-none cursor-pointer appearance-none px-2 py-1">
+                                        {['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'].map((m, i) => (
+                                            <option key={i + 1} value={i + 1} className="bg-[#111] text-white">{m}</option>
+                                        ))}
+                                    </select>
+                                    <span className="text-gray-600">/</span>
+                                    <select value={anioDashboard} onChange={e => setAnioDashboard(Number(e.target.value))} className="bg-transparent text-white text-xs font-bold outline-none cursor-pointer appearance-none px-2 py-1">
+                                        {[2025, 2026, 2027].map(y => (
+                                            <option key={y} value={y} className="bg-[#111] text-white">{y}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {miembros.length > 0 ? (
                                 miembros.map((miembro) => (
@@ -671,16 +686,14 @@ export default function CompaniaDetallePage() {
                                                 )}
 
                                                 <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${miembro.pago_compania_al_dia ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}>
-                                                    <Coins size={10} /> Abonó ${miembro.totalAbonado} / ${miembro.precioFinal}
+                                                    <Coins size={10} /> Abonó ${miembro.totalAbonado}
                                                 </span>
 
-                                                {!miembro.pago_compania_al_dia && (
+                                                {!miembro.pago_compania_al_dia ? (
                                                     <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                                        <AlertCircle size={10} /> Debe ${miembro.saldoPendiente}
+                                                        <AlertCircle size={10} /> Debe Efvo: ${miembro.saldoPendienteEfectivo} | Transf: ${miembro.saldoPendiente}
                                                     </span>
-                                                )}
-
-                                                {miembro.pago_compania_al_dia && (
+                                                ) : (
                                                     <span className="inline-flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
                                                         <CheckCircle2 size={10} /> Al Día
                                                     </span>
@@ -700,7 +713,7 @@ export default function CompaniaDetallePage() {
                 )}
             </div>
 
-            {/* MODAL: REGISTRAR PAGO/SEÑA (NUEVO) */}
+            {/* 🚀 MODAL: REGISTRAR PAGO/SEÑA */}
             {isPagoModalOpen && alumnoPago && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsPagoModalOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
@@ -713,6 +726,44 @@ export default function CompaniaDetallePage() {
                         </div>
 
                         <form onSubmit={handleRegistrarPago} className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Mes</label>
+                                    <select value={pagoMes} onChange={e => setPagoMes(Number(e.target.value))} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors cursor-pointer">
+                                        {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map((m, i) => (
+                                            <option key={i + 1} value={i + 1}>{m}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Año</label>
+                                    <select value={pagoAnio} onChange={e => setPagoAnio(Number(e.target.value))} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors cursor-pointer">
+                                        {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
+                                <select
+                                    value={metodoPago}
+                                    onChange={e => {
+                                        const newMethod = e.target.value;
+                                        setMetodoPago(newMethod);
+                                        // 🚀 AUTO-ACTUALIZAR MONTO SUGERIDO
+                                        if (alumnoPago) {
+                                            setMontoPago(newMethod === 'efectivo' ? (alumnoPago.saldoPendienteEfectivo || 0) : (alumnoPago.saldoPendiente || 0));
+                                        }
+                                    }}
+                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors appearance-none"
+                                >
+                                    <option value="efectivo">Efectivo (Recepción)</option>
+                                    <option value="transferencia">Transferencia Bancaria</option>
+                                    <option value="mercadopago_manual">Mercado Pago (QR Físico)</option>
+                                    <option value="otro">Otro</option>
+                                </select>
+                            </div>
+
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Monto a Registrar ($)</label>
                                 <div className="relative">
@@ -726,21 +777,7 @@ export default function CompaniaDetallePage() {
                                         className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white font-black outline-none focus:border-emerald-500 transition-colors"
                                     />
                                 </div>
-                                <p className="text-[10px] text-gray-500 text-right mt-1">Saldo restante sugerido: ${alumnoPago.saldoPendiente}</p>
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
-                                <select
-                                    value={metodoPago}
-                                    onChange={e => setMetodoPago(e.target.value)}
-                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors appearance-none"
-                                >
-                                    <option value="efectivo">Efectivo (Recepción)</option>
-                                    <option value="transferencia">Transferencia Bancaria</option>
-                                    <option value="mercadopago_manual">Mercado Pago (QR Físico)</option>
-                                    <option value="otro">Otro</option>
-                                </select>
+                                <p className="text-[10px] text-gray-500 text-right mt-1">Saldo sugerido: Efvo ${alumnoPago.saldoPendienteEfectivo} / Otros ${alumnoPago.saldoPendiente}</p>
                             </div>
 
                             <button disabled={registrandoPago} type="submit" className="w-full bg-emerald-600 text-white font-black uppercase py-4 rounded-xl hover:bg-emerald-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg mt-4">
@@ -778,7 +815,6 @@ export default function CompaniaDetallePage() {
                     </div>
                 </div>
             )}
-
         </div>
     )
 }
