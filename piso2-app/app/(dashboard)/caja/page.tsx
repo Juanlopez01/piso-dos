@@ -531,19 +531,7 @@ export default function CajaPage() {
         return (
             <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4 animate-in zoom-in-95 duration-300">
                 <Toaster position="top-center" richColors theme="dark" />
-                {/* 🚀 ENCABEZADO DE SEDE CORREGIDO */}
-                <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8 border-b border-white/10 pb-6">
-                    <div>
-                        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white mb-1">
-                            Caja Activa
-                        </h1>
-                        <div className="flex items-center gap-2 mt-2">
-                            <span className="flex items-center gap-1.5 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">
-                                <MapPin size={12} /> {turnoActivo?.sede?.nombre || 'Sede Desconocida'}
-                            </span>
-                        </div>
-                    </div>
-                </div>
+
                 <div className="max-w-md w-full bg-[#09090b] border border-white/10 rounded-2xl p-8 text-center shadow-2xl relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#D4E655] to-transparent opacity-50" />
 
@@ -596,7 +584,19 @@ export default function CajaPage() {
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in duration-500">
             <Toaster position="top-center" richColors theme="dark" />
-
+            {/* 🚀 ENCABEZADO DE SEDE CORREGIDO */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8 border-b border-white/10 pb-6">
+                <div>
+                    <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white mb-1">
+                        Caja Activa
+                    </h1>
+                    <div className="flex items-center gap-2 mt-2">
+                        <span className="flex items-center gap-1.5 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">
+                            <MapPin size={12} /> {turnoActivo?.sede?.nombre || 'Sede Desconocida'}
+                        </span>
+                    </div>
+                </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
                 <div className="bg-[#09090b] border border-[#D4E655]/30 p-6 rounded-2xl relative overflow-hidden group">
                     <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-all"><Wallet size={40} /></div>
