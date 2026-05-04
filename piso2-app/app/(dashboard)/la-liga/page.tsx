@@ -52,7 +52,7 @@ const fetcherLiga = async (uid: string, supabase: any) => {
     }
     const { data: avisos } = await queryAvisos
 
-    // 🚀 ARREGLO 2: Seteamos el límite de tiempo al inicio del día para que la clase no desaparezca hasta la medianoche
+    // Seteamos el límite de tiempo al inicio del día (00:00 hs)
     const inicioDelDia = new Date();
     inicioDelDia.setHours(0, 0, 0, 0);
     const hoyIso = inicioDelDia.toISOString();
@@ -74,7 +74,7 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
     const { data: dataClases } = await queryClases
 
-    // 🚀 LÓGICA FINANCIERA CENTRALIZADA
+    // LÓGICA FINANCIERA CENTRALIZADA
     let preciosLiga: any[] = []
     const { data: config } = await supabase.from('configuraciones').select('*').in('clave', ['cuota_liga_1', 'cuota_liga_2'])
     preciosLiga = config || []
@@ -107,7 +107,6 @@ const fetcherLiga = async (uid: string, supabase: any) => {
     const disciplinasMap: Record<string, any> = {}
     if (dataClases) {
         dataClases.forEach((clase: any) => {
-            // 🚀 ARREGLO 1: Armamos una key que combina el Nombre y el Nivel para que no se pisen
             const keyAgrupacion = `${clase.nombre}_Nivel_${clase.liga_nivel || 1}`;
 
             if (!disciplinasMap[keyAgrupacion]) {
@@ -119,6 +118,8 @@ const fetcherLiga = async (uid: string, supabase: any) => {
                 if (!disciplinasMap[keyAgrupacion].proxima_clase || clase.inicio < disciplinasMap[keyAgrupacion].proxima_clase) {
                     disciplinasMap[keyAgrupacion].proxima_clase = clase.inicio
                     disciplinasMap[keyAgrupacion].profesor = clase.profesor?.nombre_completo || 'Staff'
+                    // 🚀 ACÁ ESTABA EL BUG: Faltaba actualizar el ID para el botón
+                    disciplinasMap[keyAgrupacion].id = clase.id
                 }
             }
         })
