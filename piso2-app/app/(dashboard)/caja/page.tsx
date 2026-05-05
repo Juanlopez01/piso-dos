@@ -7,7 +7,7 @@ import useSWR from 'swr'
 import {
     DollarSign, Lock, Unlock, TrendingUp, TrendingDown,
     Loader2, History, MapPin, Wallet, CreditCard, LayoutDashboard,
-    User, X, Info, AlertOctagon
+    User, X, Info, AlertOctagon, Clock, Users // 🚀 Agregamos Users
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
@@ -22,6 +22,7 @@ type CajaData = {
     admin: {
         cajasActivas: any[]
         historialCajas: any[]
+        reporteHoras: any[] // 🚀 Nuevo campo para las horas trabajadas
     } | null
     recepcion: {
         sedes: any[]
@@ -35,7 +36,6 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
     const supabase = createClient()
 
     if (role === 'admin') {
-        // RECUPERAMOS LA LÓGICA DEL ADMIN QUE SE HABÍA BORRADO
         const { data: activas } = await supabase.from('caja_turnos')
             .select(`*, sede:sedes(nombre), usuario:profiles(nombre_completo), caja_movimientos(*)`)
             .eq('estado', 'abierta')
@@ -70,10 +70,48 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
             ingresos_con_inicial: Number(caja.total_ingresos) + Number(caja.monto_inicial)
         }))
 
-        return { admin: { cajasActivas: activasCalculadas, historialCajas: historialCalculado }, recepcion: null }
+        // 🚀 NUEVA LÓGICA: CALCULAR HORAS TRABAJADAS EN EL MES ACTUAL
+        const hoy = new Date();
+        const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString();
+
+        const { data: turnosMes } = await supabase.from('caja_turnos')
+            .select(`usuario_id, fecha_apertura, fecha_cierre, usuario:profiles(nombre_completo)`)
+            .gte('fecha_apertura', primerDiaMes)
+            .not('fecha_cierre', 'is', null) // Solo contamos los turnos que ya cerraron
+
+        const horasPorRecepcionista: Record<string, any> = {}
+
+        if (turnosMes) {
+            turnosMes.forEach((turno: any) => {
+                if (!turno.fecha_apertura || !turno.fecha_cierre) return;
+
+                const apertura = new Date(turno.fecha_apertura).getTime();
+                const cierre = new Date(turno.fecha_cierre).getTime();
+
+                // Diferencia en milisegundos pasada a horas
+                const diffHoras = (cierre - apertura) / (1000 * 60 * 60);
+                const uid = turno.usuario_id;
+
+                if (!horasPorRecepcionista[uid]) {
+                    const nombreUsuario = Array.isArray(turno.usuario) ? turno.usuario[0]?.nombre_completo : turno.usuario?.nombre_completo;
+                    horasPorRecepcionista[uid] = {
+                        nombre: nombreUsuario || 'Usuario Desconocido',
+                        horas: 0,
+                        cantidad_turnos: 0
+                    };
+                }
+
+                horasPorRecepcionista[uid].horas += diffHoras;
+                horasPorRecepcionista[uid].cantidad_turnos += 1;
+            })
+        }
+
+        // Convertimos el objeto en array y lo ordenamos por quien trabajó más horas
+        const reporteHoras = Object.values(horasPorRecepcionista).sort((a: any, b: any) => b.horas - a.horas);
+
+        return { admin: { cajasActivas: activasCalculadas, historialCajas: historialCalculado, reporteHoras }, recepcion: null }
 
     } else if (role === 'recepcion') {
-        // LÓGICA RECEPCIÓN CON EL UID INYECTADO
         if (!uid) throw new Error("No user ID")
 
         const { data: sedes } = await supabase.from('sedes').select('*').order('nombre')
@@ -96,10 +134,8 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
         return { admin: null, recepcion: { sedes: sedes || [], turnoActivo, movimientos } }
     }
 
-    // RETORNO POR DEFECTO PARA QUE TYPESCRIPT NO LLORE
     return { admin: null, recepcion: null }
 }
-
 
 const fetcherDetalle = async ([key, turnoId]: [string, string]) => {
     const supabase = createClient()
@@ -110,21 +146,26 @@ const fetcherDetalle = async ([key, turnoId]: [string, string]) => {
     return data || []
 }
 
+// 🚀 FUNCIÓN AUXILIAR PARA FORMATEAR HORAS DECIMALES
+const formatHoras = (horasDecimales: number) => {
+    const h = Math.floor(horasDecimales);
+    const m = Math.round((horasDecimales - h) * 60);
+    return `${h}h ${m}m`;
+}
+
 export default function CajaPage() {
     const { checkStatus, userRole, userId, isLoading: loadingContext } = useCash()
     const router = useRouter()
 
-    // 🚀 SWR (Protegido por el Provider Global)
     const { data, isLoading, mutate, error } = useSWR(
         !loadingContext && userRole && userId ? ['caja-dashboard', userRole, userId] : null,
         fetcherCaja,
         {
             refreshInterval: userRole === 'admin' ? 10000 : 0,
-            revalidateOnFocus: userRole === 'recepcion' // 👈 Dejamos esto activado
+            revalidateOnFocus: userRole === 'recepcion'
         }
     )
 
-    // Estados Locales
     const [procesando, setProcesando] = useState(false)
     const [montoInicial, setMontoInicial] = useState('')
     const [sedeSeleccionada, setSedeSeleccionada] = useState('')
@@ -138,12 +179,12 @@ export default function CajaPage() {
         fetcherDetalle
     )
 
-    // --- VARIABLES DERIVADAS ---
     const adminData = data?.admin
     const repData = data?.recepcion
 
     const cajasActivas = adminData?.cajasActivas || []
     const historialCajas = adminData?.historialCajas || []
+    const reporteHoras = adminData?.reporteHoras || [] // 🚀 Traemos las horas
 
     const sedes = repData?.sedes || []
     const turnoActivo = repData?.turnoActivo || null
@@ -162,7 +203,6 @@ export default function CajaPage() {
         saldoDigital = ingresosDig - egresosDig
     }
 
-    // --- ACCIONES DE RECEPCIÓN (SERVER ACTIONS) ---
     const handleAbrirCaja = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!sedeSeleccionada) return toast.error('Seleccioná una sede')
@@ -173,7 +213,7 @@ export default function CajaPage() {
         if (response.success) {
             toast.success('Caja Abierta')
             setRecienCerrada(false)
-            await checkStatus() // Actualiza el contexto global
+            await checkStatus()
             router.refresh()
             setTimeout(() => mutate(), 500)
         } else {
@@ -195,7 +235,7 @@ export default function CajaPage() {
 
         if (response.success) {
             toast.success('Todas las cajas han sido cerradas forzosamente.')
-            mutate() // Refresca las cajas activas
+            mutate()
         } else {
             toast.error(response.error || 'Hubo un error al cerrar las cajas.')
         }
@@ -214,7 +254,7 @@ export default function CajaPage() {
         if (response.success) {
             toast.success(response.message || 'Caja Cerrada Exitosamente')
             setRecienCerrada(true)
-            await checkStatus() // Avisa al sistema que ya no hay caja
+            await checkStatus()
             router.refresh()
             setTimeout(() => mutate(), 500)
         } else {
@@ -237,7 +277,6 @@ export default function CajaPage() {
             origen_referencia: 'manual'
         }
 
-        // 🚀 MUTACIÓN OPTIMISTA: Interfaz a 60fps
         const optimisticMov = { ...payload, id: 'temp-' + Date.now(), created_at: new Date().toISOString() }
         mutate({
             ...data!,
@@ -258,13 +297,12 @@ export default function CajaPage() {
             setTimeout(() => mutate(), 500)
         } else {
             toast.error(response.error || 'Error al registrar')
-            mutate() // Revertimos la mutación optimista si falla
+            mutate()
         }
 
         setProcesando(false)
     }
 
-    // RENDERIZADO DE CARGA GLOBAL
     if (isLoading || loadingContext) return (
         <div className="min-h-screen bg-[#050505] flex items-center justify-center">
             <Loader2 className="animate-spin text-[#D4E655] w-10 h-10" />
@@ -392,6 +430,7 @@ export default function CajaPage() {
                         <p className="text-3xl font-black text-white">{cajasActivas.length}</p>
                     </div>
                 </div>
+
                 {userRole === 'admin' && (
                     <button
                         onClick={handleCierreGlobal}
@@ -407,6 +446,7 @@ export default function CajaPage() {
                         )}
                     </button>
                 )}
+
                 <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2">
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" /> En Vivo
                 </h2>
@@ -466,6 +506,35 @@ export default function CajaPage() {
                         ))}
                     </div>
                 )}
+
+                {/* 🚀 NUEVA SECCIÓN: REPORTE DE HORAS TRABAJADAS */}
+                <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2">
+                    <Clock size={18} className="text-[#D4E655]" /> Horas Trabajadas (Mes Actual)
+                </h2>
+                <div className="bg-[#111] border border-white/10 rounded-2xl overflow-hidden shadow-xl mb-12 p-6">
+                    {reporteHoras.length === 0 ? (
+                        <p className="text-center text-gray-500 font-bold uppercase text-xs py-4">No hay turnos cerrados en este mes aún.</p>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            {reporteHoras.map((rep: any, idx: number) => (
+                                <div key={idx} className="bg-[#09090b] border border-white/5 p-4 rounded-xl flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20 shrink-0 text-blue-400">
+                                            <Users size={18} />
+                                        </div>
+                                        <div>
+                                            <h4 className="font-bold text-white text-sm truncate max-w-[120px]">{rep.nombre}</h4>
+                                            <p className="text-[10px] text-gray-500 uppercase font-bold">{rep.cantidad_turnos} turnos</p>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <span className="text-[#D4E655] font-black text-lg">{formatHoras(rep.horas)}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
 
                 <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2">
                     <History size={18} className="text-gray-500" /> Historial de Cierres
@@ -584,7 +653,7 @@ export default function CajaPage() {
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in duration-500">
             <Toaster position="top-center" richColors theme="dark" />
-            {/* 🚀 ENCABEZADO DE SEDE CORREGIDO */}
+
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8 border-b border-white/10 pb-6">
                 <div>
                     <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white mb-1">

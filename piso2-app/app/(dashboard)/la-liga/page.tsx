@@ -4,15 +4,17 @@ import { createClient } from '@/utils/supabase/client'
 import { useState, useRef, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import useSWR from 'swr'
 import {
     Lock, Loader2, AlertTriangle,
     Megaphone, BookOpen, GraduationCap, ChevronRight,
     CheckCircle2, AlertCircle, Users, ClipboardEdit, Save, FileText,
     Search, UserCog, UserMinus, Star, Send, Trash2, Clock, Settings2, Percent,
-    X, Coins, CalendarDays
+    X, Coins, CalendarDays, Activity, XCircle, Eye, Calendar, MapPin, User,
+    Image as ImageIcon
 } from 'lucide-react'
-import { format } from 'date-fns'
+import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
@@ -34,6 +36,15 @@ const parseSafeDate = (dateStr: string | null | undefined) => {
     const cleanStr = dateStr.replace('+00:00', '').replace('+00', '').replace('Z', '').replace(' ', 'T')
     const parsed = new Date(cleanStr)
     return isNaN(parsed.getTime()) ? new Date() : parsed
+}
+
+type Estadisticas = {
+    presentes: number
+    ausentes: number
+    justificadas: number
+    saf: number
+    medias_faltas: number
+    total: number
 }
 
 const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, supabase: any) => {
@@ -62,18 +73,66 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
 
     const { data: criteriosData } = await supabase.from('liga_criterios').select('*').order('nombre')
 
+    // 🚀 OBTENEMOS LAS CLASES DEL MES EXACTO SELECCIONADO
+    const primerDiaMes = new Date(anioActual, mesActual - 1, 1).toISOString()
+    const ultimoDiaMes = new Date(anioActual, mesActual, 0, 23, 59, 59, 999).toISOString()
+
     let queryClases = supabase
         .from('clases')
-        .select(`id, nombre, inicio, liga_nivel, profesor_id, profesor:profiles!clases_profesor_id_fkey(nombre_completo)`)
+        .select(`id, nombre, inicio, fin, imagen_url, liga_nivel, profesor_id, profesor:profiles!clases_profesor_id_fkey(nombre_completo), sala:salas(nombre, sede:sedes(nombre))`)
         .eq('es_la_liga', true)
+        .gte('inicio', primerDiaMes)
+        .lte('inicio', ultimoDiaMes)
         .neq('estado', 'cancelada')
+        .order('inicio', { ascending: true })
 
     if (profile.rol === 'profesor') queryClases = queryClases.eq('profesor_id', uid)
     else if (!isStaff) queryClases = queryClases.eq('liga_nivel', nivelAlumno)
 
     const { data: dataClases } = await queryClases
 
-    // 🚀 AHORA TRAE LOS 4 PRECIOS MANUALES
+    // 🚀 MAPEO DE CLASES DEL MES PARA LA PESTAÑA
+    const clasesDelMes = (dataClases || []).map((c: any) => {
+        const profNombre = Array.isArray(c.profesor) ? c.profesor[0]?.nombre_completo : c.profesor?.nombre_completo
+        const salaData = Array.isArray(c.sala) ? c.sala[0] : c.sala
+        return {
+            id: c.id,
+            nombre: c.nombre,
+            inicio: c.inicio,
+            fin: c.fin,
+            imagen_url: c.imagen_url,
+            profesor: { nombre_completo: profNombre || 'Staff' },
+            sala: salaData,
+            liga_nivel: c.liga_nivel
+        }
+    })
+
+    // 🚀 ESTADÍSTICAS DE ASISTENCIA DEL MES
+    let statsAsistencia: Record<string, Estadisticas> = {}
+    if (dataClases && dataClases.length > 0) {
+        const clasesIds = dataClases.map((c: any) => c.id)
+        const { data: inscripcionesDelMes } = await supabase
+            .from('inscripciones')
+            .select('user_id, estado_asistencia')
+            .in('clase_id', clasesIds)
+
+        if (inscripcionesDelMes) {
+            inscripcionesDelMes.forEach((insc: any) => {
+                if (!insc.user_id) return
+                if (!statsAsistencia[insc.user_id]) {
+                    statsAsistencia[insc.user_id] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
+                }
+
+                statsAsistencia[insc.user_id].total++
+                if (insc.estado_asistencia === 'presente') statsAsistencia[insc.user_id].presentes++
+                else if (insc.estado_asistencia === 'ausente') statsAsistencia[insc.user_id].ausentes++
+                else if (insc.estado_asistencia === 'justificada') statsAsistencia[insc.user_id].justificadas++
+                else if (insc.estado_asistencia === 'saf') statsAsistencia[insc.user_id].saf++
+                else if (insc.estado_asistencia === 'media_falta') statsAsistencia[insc.user_id].medias_faltas++
+            })
+        }
+    }
+
     let preciosLiga: any[] = []
     const { data: config } = await supabase.from('configuraciones').select('*').in('clave', [
         'cuota_liga_1_transf', 'cuota_liga_1_efvo',
@@ -84,7 +143,7 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
     const getPrecioBase = (nivel: number, metodo: 'efvo' | 'transf') => {
         const p = preciosLiga.find(c => c.clave === `cuota_liga_${nivel}_${metodo}`)
         if (metodo === 'transf') return p ? Number(p.valor) : 15000
-        return p ? Number(p.valor) : 13500 // Fallback efvo
+        return p ? Number(p.valor) : 13500
     }
 
     const { data: pagosLigaMes } = await supabase.from('liga_pagos').select('alumno_id, monto').eq('mes', mesActual).eq('anio', anioActual)
@@ -95,7 +154,6 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
     let miSaldoPendienteEfectivo = 0
 
     if (!isStaff) {
-        // 🚀 CÁLCULO ALUMNO DASHBOARD BASADO EN PRECIOS MANUALES
         const precioBaseTransf = getPrecioBase(nivelAlumno, 'transf')
         const precioBaseEfvo = getPrecioBase(nivelAlumno, 'efvo')
         const beca = profile.porcentaje_beca_liga || 0
@@ -120,14 +178,16 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
             const keyAgrupacion = `${clase.nombre}_Nivel_${clase.liga_nivel || 1}`;
 
             if (!disciplinasMap[keyAgrupacion]) {
-                disciplinasMap[keyAgrupacion] = { id: clase.id, nombre: clase.nombre, liga_nivel: clase.liga_nivel, profesor: clase.profesor?.nombre_completo || 'Staff', proxima_clase: null, clases_ids: [] }
+                const profNombre = Array.isArray(clase.profesor) ? clase.profesor[0]?.nombre_completo : clase.profesor?.nombre_completo;
+                disciplinasMap[keyAgrupacion] = { id: clase.id, nombre: clase.nombre, liga_nivel: clase.liga_nivel, profesor: profNombre || 'Staff', proxima_clase: null, clases_ids: [] }
             }
             disciplinasMap[keyAgrupacion].clases_ids.push(clase.id)
 
             if (clase.inicio >= hoyIso) {
                 if (!disciplinasMap[keyAgrupacion].proxima_clase || clase.inicio < disciplinasMap[keyAgrupacion].proxima_clase) {
                     disciplinasMap[keyAgrupacion].proxima_clase = clase.inicio
-                    disciplinasMap[keyAgrupacion].profesor = clase.profesor?.nombre_completo || 'Staff'
+                    const profNombre = Array.isArray(clase.profesor) ? clase.profesor[0]?.nombre_completo : clase.profesor?.nombre_completo;
+                    disciplinasMap[keyAgrupacion].profesor = profNombre || 'Staff'
                     disciplinasMap[keyAgrupacion].id = clase.id
                 }
             }
@@ -151,7 +211,6 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
 
         if (perfiles) {
             allStudents = perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '').map((p: any) => {
-                // 🚀 CÁLCULO PADRÓN STAFF BASADO EN PRECIOS MANUALES
                 const precioBaseTransf = getPrecioBase(p.nivel_liga, 'transf')
                 const precioBaseEfvo = getPrecioBase(p.nivel_liga, 'efvo')
                 const beca = p.porcentaje_beca_liga || 0
@@ -174,7 +233,8 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
                     totalAbonado,
                     saldoPendiente,
                     saldoPendienteEfectivo,
-                    pago_al_dia
+                    pago_al_dia,
+                    estadisticas: statsAsistencia[p.id] || { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
                 }
             })
         }
@@ -185,7 +245,8 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
     return {
         profile, isStaff, canManage, legajoCompleto, avisos: avisos || [],
         materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo,
-        allStudents, preciosLiga, criterios: criteriosData || []
+        allStudents, preciosLiga, criterios: criteriosData || [],
+        clasesDelMes // 🚀 Devolvemos las clases para renderizar
     }
 }
 
@@ -206,7 +267,7 @@ function LaLigaContent() {
 
     const pagoNotificado = useRef(false)
     const [procesandoPago, setProcesandoPago] = useState(false)
-    const [adminTab, setAdminTab] = useState<'evaluaciones' | 'gestion' | 'comunicados' | 'precios'>('evaluaciones')
+    const [adminTab, setAdminTab] = useState<'evaluaciones' | 'gestion' | 'comunicados' | 'precios' | 'clases' | 'estadisticas'>('evaluaciones')
     const [selectedMateria, setSelectedMateria] = useState<any>(null)
     const [alumnosList, setAlumnosList] = useState<any[]>([])
     const [loadingAlumnos, setLoadingAlumnos] = useState(false)
@@ -344,7 +405,7 @@ function LaLigaContent() {
         )
     }
 
-    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo, allStudents, criterios } = data
+    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo, allStudents, criterios, clasesDelMes } = data
     const nivelActual = profile.nivel_liga || profile.nivel || 1
 
     const filteredStudents = allStudents.filter((s: any) => {
@@ -357,7 +418,6 @@ function LaLigaContent() {
         setGuardandoPrecios(true)
         try {
             let huboError = false;
-            // 🚀 GUARDAMOS LAS 4 CLAVES EXACTAS
             for (const clave of ['cuota_liga_1_transf', 'cuota_liga_1_efvo', 'cuota_liga_2_transf', 'cuota_liga_2_efvo']) {
                 const valor = preciosEdit[clave]
                 if (valor) {
@@ -550,37 +610,51 @@ function LaLigaContent() {
                             </h1>
                         </div>
 
-                        <div className="flex items-center gap-2 bg-black/40 border border-white/10 p-1.5 rounded-xl shadow-inner">
-                            <CalendarDays size={16} className="text-gray-500 ml-2" />
-                            <select value={mesDashboard} onChange={e => setMesDashboard(Number(e.target.value))} className="bg-transparent text-white text-xs font-bold uppercase outline-none focus:ring-0 cursor-pointer appearance-none px-2 py-1">
-                                {['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'].map((m, i) => (
-                                    <option key={i + 1} value={i + 1} className="bg-[#111] text-white">{m}</option>
-                                ))}
-                            </select>
-                            <span className="text-gray-600">/</span>
-                            <select value={anioDashboard} onChange={e => setAnioDashboard(Number(e.target.value))} className="bg-transparent text-white text-xs font-bold outline-none focus:ring-0 cursor-pointer appearance-none px-2 py-1">
-                                {[2025, 2026, 2027].map(y => (
-                                    <option key={y} value={y} className="bg-[#111] text-white">{y}</option>
-                                ))}
-                            </select>
+                        <div className="flex flex-col sm:flex-row items-center gap-3">
+                            <div className="flex items-center gap-2 bg-black/40 border border-white/10 p-1.5 rounded-xl shadow-inner">
+                                <CalendarDays size={16} className="text-gray-500 ml-2" />
+                                <select value={mesDashboard} onChange={e => setMesDashboard(Number(e.target.value))} className="bg-transparent text-white text-xs font-bold uppercase outline-none focus:ring-0 cursor-pointer appearance-none px-2 py-1">
+                                    {['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'].map((m, i) => (
+                                        <option key={i + 1} value={i + 1} className="bg-[#111] text-white">{m}</option>
+                                    ))}
+                                </select>
+                                <span className="text-gray-600">/</span>
+                                <select value={anioDashboard} onChange={e => setAnioDashboard(Number(e.target.value))} className="bg-transparent text-white text-xs font-bold outline-none focus:ring-0 cursor-pointer appearance-none px-2 py-1">
+                                    {[2025, 2026, 2027].map(y => (
+                                        <option key={y} value={y} className="bg-[#111] text-white">{y}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {!isStaff && (
+                                <span className="bg-[#D4E655] text-black px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest shadow-[0_0_15px_rgba(212,230,85,0.2)]">
+                                    Nivel {nivelActual}
+                                </span>
+                            )}
                         </div>
                     </div>
 
                     {isStaff && (
                         <div className="flex gap-6 border-b border-white/10 relative z-10 mt-2 overflow-x-auto custom-scrollbar">
-                            <button onClick={() => setAdminTab('evaluaciones')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'evaluaciones' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
-                                <ClipboardEdit size={14} className="inline mr-2 -mt-1" /> Clases / Asistencia
+                            <button onClick={() => setAdminTab('evaluaciones')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'evaluaciones' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                                <ClipboardEdit size={14} /> Evaluaciones
                             </button>
-                            <button onClick={() => setAdminTab('comunicados')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'comunicados' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
-                                <Megaphone size={14} className="inline mr-2 -mt-1" /> Comunicados
+                            <button onClick={() => setAdminTab('clases')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'clases' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                                <Calendar size={14} /> Clases del Mes
+                            </button>
+                            <button onClick={() => setAdminTab('comunicados')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'comunicados' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                                <Megaphone size={14} /> Comunicados
                             </button>
                             {canManage && (
                                 <>
-                                    <button onClick={() => setAdminTab('gestion')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'gestion' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
-                                        <UserCog size={14} className="inline mr-2 -mt-1" /> Padrón
+                                    <button onClick={() => setAdminTab('gestion')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'gestion' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                                        <UserCog size={14} /> Padrón
                                     </button>
-                                    <button onClick={() => setAdminTab('precios')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${adminTab === 'precios' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
-                                        <Settings2 size={14} className="inline mr-2 -mt-1" /> Configuración
+                                    <button onClick={() => setAdminTab('estadisticas')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'estadisticas' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                                        <Activity size={14} /> Estadísticas
+                                    </button>
+                                    <button onClick={() => setAdminTab('precios')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'precios' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                                        <Settings2 size={14} /> Configuración
                                     </button>
                                 </>
                             )}
@@ -591,7 +665,7 @@ function LaLigaContent() {
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
 
-                {/* 🚀 CARTEL ROJO DEL ALUMNO (ACTUALIZADO) */}
+                {/* 🚀 CARTEL ROJO DEL ALUMNO */}
                 {!isStaff && (deudaCuota) && (
                     <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="flex items-start gap-3">
@@ -618,7 +692,6 @@ function LaLigaContent() {
                             </h3>
 
                             <div className="space-y-6">
-                                {/* 🚀 NIVEL 1: 2 INPUTS */}
                                 <div className="grid grid-cols-2 gap-4 bg-white/5 p-4 rounded-2xl border border-white/10">
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nivel 1 (Transferencia)</label>
@@ -636,7 +709,6 @@ function LaLigaContent() {
                                     </div>
                                 </div>
 
-                                {/* 🚀 NIVEL 2: 2 INPUTS */}
                                 <div className="grid grid-cols-2 gap-4 bg-white/5 p-4 rounded-2xl border border-white/10">
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nivel 2 (Transferencia)</label>
@@ -698,6 +770,152 @@ function LaLigaContent() {
                     </div>
                 )}
 
+                {/* --- 🚀 VISTA ESTADÍSTICAS --- */}
+                {canManage && adminTab === 'estadisticas' && (
+                    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 md:p-8 shadow-xl">
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 border-b border-white/5 pb-6">
+                                <div>
+                                    <h3 className="text-xl font-black uppercase text-white flex items-center gap-2">
+                                        <Activity className="text-[#D4E655]" /> Control de Asistencias
+                                    </h3>
+                                    <p className="text-xs text-gray-500 uppercase tracking-widest mt-1 font-bold">Mes analizado: {mesDashboard}/{anioDashboard}</p>
+                                </div>
+                                <span className="bg-white/5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase text-gray-400 border border-white/10 shrink-0">
+                                    Total Clases Liga: {clasesDelMes.length}
+                                </span>
+                            </div>
+
+                            {clasesDelMes.length === 0 ? (
+                                <div className="text-center py-10 bg-[#111] rounded-2xl border border-white/5">
+                                    <p className="text-gray-500 text-xs font-bold uppercase">No hay clases registradas este mes para analizar.</p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {allStudents.map(m => {
+                                        const total = m.estadisticas?.total || 0;
+                                        const presentes = m.estadisticas?.presentes || 0;
+                                        const saf = m.estadisticas?.saf || 0;
+                                        const asistenciasReales = presentes + saf;
+
+                                        const porcentaje = total > 0 ? Math.round((asistenciasReales / total) * 100) : 0;
+
+                                        if (total === 0) return null; // Solo mostrar si tiene inasistencias en clases del mes
+
+                                        return (
+                                            <div key={m.id} className="bg-[#111] p-4 rounded-xl border border-white/5 flex flex-col gap-4 hover:border-white/20 transition-all group">
+                                                <div className="flex justify-between items-center border-b border-white/5 pb-3">
+                                                    <div>
+                                                        <h4 className="font-bold text-sm uppercase text-white truncate max-w-[200px]">{m.nombre_completo}</h4>
+                                                        <p className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest mt-0.5">Nivel {m.nivel_liga}</p>
+                                                    </div>
+                                                    <span className={`text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest shrink-0 ${porcentaje >= 60 ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
+                                                        {porcentaje}% Asist.
+                                                    </span>
+                                                </div>
+
+                                                <div className="grid grid-cols-5 gap-2 text-[10px] font-black uppercase tracking-widest">
+                                                    <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-green-500/5 text-green-500" title="Presentes">
+                                                        <CheckCircle2 size={14} />
+                                                        <span>{presentes} P</span>
+                                                    </div>
+                                                    <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-red-500/5 text-red-500" title="Ausentes">
+                                                        <XCircle size={14} />
+                                                        <span>{m.estadisticas?.ausentes} A</span>
+                                                    </div>
+                                                    <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-yellow-500/5 text-yellow-500" title="Medias Faltas">
+                                                        <Clock size={14} />
+                                                        <span>{m.estadisticas?.medias_faltas} MF</span>
+                                                    </div>
+                                                    <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-blue-500/5 text-blue-500" title="Justificadas">
+                                                        <FileText size={14} />
+                                                        <span>{m.estadisticas?.justificadas} J</span>
+                                                    </div>
+                                                    <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-purple-500/5 text-purple-500" title="SAF (Asistió pero no bailó)">
+                                                        <Eye size={14} />
+                                                        <span>{saf} SAF</span>
+                                                    </div>
+                                                </div>
+
+                                                <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden mt-1">
+                                                    <div className={`h-full rounded-full transition-all duration-1000 ${porcentaje >= 60 ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${porcentaje}%` }} />
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* --- 🚀 VISTA CLASES DEL MES (STAFF) --- */}
+                {isStaff && adminTab === 'clases' && (
+                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        {clasesDelMes.length > 0 ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {clasesDelMes.map((clase: any) => {
+                                    const [fechaParte, horaParte] = clase.inicio.split('T')
+                                    const horaDisplay = horaParte ? horaParte.substring(0, 5) : ''
+                                    const dateObj = new Date(`${fechaParte}T12:00:00`)
+                                    const esHoy = isToday(dateObj)
+                                    const yaPaso = dateObj < new Date(new Date().setHours(0, 0, 0, 0))
+                                    const [finFecha, finHora] = clase.fin.split('T')
+                                    const finDisplay = finHora ? finHora.substring(0, 5) : ''
+
+                                    return (
+                                        <div key={clase.id} className={`bg-[#111] border border-white/5 rounded-2xl overflow-hidden hover:border-[#D4E655]/30 transition-all group flex flex-col ${yaPaso ? 'opacity-70 hover:opacity-100' : ''}`}>
+                                            <div className="h-32 w-full relative bg-[#1a1a1c] border-b border-white/5 flex items-center justify-center overflow-hidden">
+                                                {clase.imagen_url ? (
+                                                    <Image src={clase.imagen_url} alt={clase.nombre} fill className={`object-cover transition-transform duration-500 ${yaPaso ? 'grayscale-[50%]' : 'group-hover:scale-105'}`} />
+                                                ) : (
+                                                    <ImageIcon size={24} className="text-white/20" />
+                                                )}
+                                                {esHoy && <span className="absolute top-3 left-3 bg-[#D4E655] text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">⚡ Hoy</span>}
+                                                {yaPaso && <span className="absolute top-3 left-3 bg-gray-800 text-gray-400 text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Completada</span>}
+                                            </div>
+
+                                            <div className="p-5 flex-1">
+                                                <h4 className="font-black uppercase text-white mb-1 truncate text-lg">{clase.nombre}</h4>
+                                                <p className="text-[10px] text-gray-400 flex items-center gap-1.5 mb-4">
+                                                    <User size={12} className="text-[#D4E655]" /> {clase.profesor?.nombre_completo}
+                                                </p>
+                                                <div className="space-y-2 border-t border-white/5 pt-4">
+                                                    <p className="text-[10px] uppercase font-bold text-gray-500">Día de Clase:</p>
+                                                    <div className="flex items-center gap-3 text-xs text-gray-300 font-bold">
+                                                        <Calendar size={14} className="text-[#D4E655]" />
+                                                        <span className="capitalize">{format(dateObj, "EEEE d MMMM", { locale: es })}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 text-xs text-gray-400">
+                                                        <Clock size={14} className="text-white/30" />
+                                                        <span>{horaDisplay} a {finDisplay} hs</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 text-xs text-gray-400">
+                                                        <MapPin size={14} className="text-white/30" />
+                                                        <span>{clase.sala?.nombre} <span className="text-[9px] opacity-50 uppercase border border-white/20 px-1 rounded ml-1">Sede {clase.sala?.sede?.nombre}</span></span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="p-4 bg-[#09090b] border-t border-white/5 mt-auto">
+                                                <Link href={`/clase/${clase.id}`} className="w-full bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-[#D4E655] hover:text-black transition-all">
+                                                    Gestionar / Lista <ChevronRight size={14} />
+                                                </Link>
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        ) : (
+                            <div className="text-center py-20 border border-dashed border-white/10 rounded-3xl bg-[#111]/50">
+                                <Calendar size={32} className="mx-auto mb-3 text-gray-600" />
+                                <p className="text-gray-500 font-bold uppercase text-sm">Sin clases en {mesDashboard}/{anioDashboard}</p>
+                                <p className="text-xs text-gray-600 mt-1">Podés buscar clases en otros meses cambiando el selector de arriba.</p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* --- VISTA PADRÓN (AHORA CON BOTÓN DE PAGOS) --- */}
                 {canManage && adminTab === 'gestion' && (
                     <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl animate-in fade-in">
@@ -731,7 +949,7 @@ function LaLigaContent() {
                                                 onClick={() => {
                                                     setAlumnoPago(alumno);
                                                     setMetodoPago('efectivo');
-                                                    setMontoPago(alumno.saldoPendienteEfectivo || 0); // 🚀 Sugiere efectivo
+                                                    setMontoPago(alumno.saldoPendienteEfectivo || 0);
                                                     setPagoMes(mesDashboard);
                                                     setPagoAnio(anioDashboard);
                                                     setIsPagoModalOpen(true);
@@ -880,40 +1098,103 @@ function LaLigaContent() {
 
                 {/* --- VISTA ALUMNO DASHBOARD --- */}
                 {!isStaff && (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in">
-                        <div className="lg:col-span-2 space-y-6">
-                            <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[400px]">
-                                <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6"><BookOpen size={20} className="text-[#D4E655]" /> Mis Disciplinas</h3>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    {materias.map((materia: any) => (
-                                        <div key={materia.id} onClick={() => {
-                                            if (deudaCuota) return toast.error('Tenés que abonar tu saldo para ver tu boletín.')
-                                            if (materia.evaluacion) { setSelectedBoletin(materia); setBoletinModalOpen(true) }
-                                            else toast.info('Evaluación pendiente.')
-                                        }} className={`bg-[#111] border ${materia.evaluacion ? 'border-[#D4E655]/30 cursor-pointer hover:border-[#D4E655]' : 'border-white/5'} rounded-2xl p-5 flex flex-col relative overflow-hidden`}>
-                                            <h4 className="font-black text-xl uppercase tracking-tighter text-white mb-1 truncate">{materia.nombre}</h4>
-                                            <p className="text-[10px] text-gray-400 mb-5 uppercase font-bold tracking-widest">Prof: {materia.profesor}</p>
-                                            <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-center">
-                                                {materia.evaluacion ? <span className="bg-[#D4E655] text-black text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-lg flex items-center gap-2 w-full justify-center"><FileText size={14} /> Boletín</span> : <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">En Proceso</span>}
+                    <div className="space-y-6 animate-in fade-in">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div className="lg:col-span-2 space-y-6">
+                                <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[400px]">
+                                    <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6"><BookOpen size={20} className="text-[#D4E655]" /> Mis Disciplinas</h3>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        {materias.map((materia: any) => (
+                                            <div key={materia.id} onClick={() => {
+                                                if (deudaCuota) return toast.error('Tenés que abonar tu saldo para ver tu boletín.')
+                                                if (materia.evaluacion) { setSelectedBoletin(materia); setBoletinModalOpen(true) }
+                                                else toast.info('Evaluación pendiente.')
+                                            }} className={`bg-[#111] border ${materia.evaluacion ? 'border-[#D4E655]/30 cursor-pointer hover:border-[#D4E655]' : 'border-white/5'} rounded-2xl p-5 flex flex-col relative overflow-hidden`}>
+                                                <h4 className="font-black text-xl uppercase tracking-tighter text-white mb-1 truncate">{materia.nombre}</h4>
+                                                <p className="text-[10px] text-gray-400 mb-5 uppercase font-bold tracking-widest">Prof: {materia.profesor}</p>
+                                                <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-center">
+                                                    {materia.evaluacion ? <span className="bg-[#D4E655] text-black text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-lg flex items-center gap-2 w-full justify-center"><FileText size={14} /> Boletín</span> : <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">En Proceso</span>}
+                                                </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="lg:col-span-1">
+                                <div className="bg-[#111] border border-white/5 rounded-3xl p-6">
+                                    <h3 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-6 text-white"><Megaphone size={18} className="text-[#D4E655]" /> Avisos</h3>
+                                    <div className="space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+                                        {avisos.map((aviso: any) => (
+                                            <div key={aviso.id} className="bg-black/40 border-l-2 border-[#D4E655] p-4 rounded-r-lg">
+                                                <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">{format(new Date(aviso.created_at), 'dd MMM yyyy', { locale: es })}</span>
+                                                <h4 className="font-bold text-white text-xs sm:text-sm uppercase mb-2">{aviso.titulo}</h4>
+                                                <p className="text-[10px] sm:text-xs text-gray-400 leading-relaxed">{aviso.mensaje}</p>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        <div className="lg:col-span-1">
-                            <div className="bg-[#111] border border-white/5 rounded-3xl p-6">
-                                <h3 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-6 text-white"><Megaphone size={18} className="text-[#D4E655]" /> Avisos</h3>
-                                <div className="space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
-                                    {avisos.map((aviso: any) => (
-                                        <div key={aviso.id} className="bg-black/40 border-l-2 border-[#D4E655] p-4 rounded-r-lg">
-                                            <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">{format(new Date(aviso.created_at), 'dd MMM yyyy', { locale: es })}</span>
-                                            <h4 className="font-bold text-white text-xs sm:text-sm uppercase mb-2">{aviso.titulo}</h4>
-                                            <p className="text-[10px] sm:text-xs text-gray-400 leading-relaxed">{aviso.mensaje}</p>
-                                        </div>
-                                    ))}
+
+                        {/* 🚀 CLASES DEL MES PARA EL ALUMNO */}
+                        <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6">
+                            <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6">
+                                <Calendar size={20} className="text-[#D4E655]" /> Clases de este mes
+                            </h3>
+                            {clasesDelMes.length > 0 ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {clasesDelMes.map((clase: any) => {
+                                        const [fechaParte, horaParte] = clase.inicio.split('T')
+                                        const horaDisplay = horaParte ? horaParte.substring(0, 5) : ''
+                                        const dateObj = new Date(`${fechaParte}T12:00:00`)
+                                        const esHoy = isToday(dateObj)
+                                        const yaPaso = dateObj < new Date(new Date().setHours(0, 0, 0, 0))
+                                        const [finFecha, finHora] = clase.fin.split('T')
+                                        const finDisplay = finHora ? finHora.substring(0, 5) : ''
+
+                                        return (
+                                            <div key={clase.id} className={`bg-[#111] border border-white/5 rounded-2xl overflow-hidden hover:border-[#D4E655]/30 transition-all group flex flex-col ${yaPaso ? 'opacity-70 hover:opacity-100' : ''}`}>
+                                                <div className="h-32 w-full relative bg-[#1a1a1c] border-b border-white/5 flex items-center justify-center overflow-hidden">
+                                                    {clase.imagen_url ? (
+                                                        <Image src={clase.imagen_url} alt={clase.nombre} fill className={`object-cover transition-transform duration-500 ${yaPaso ? 'grayscale-[50%]' : 'group-hover:scale-105'}`} />
+                                                    ) : (
+                                                        <ImageIcon size={24} className="text-white/20" />
+                                                    )}
+                                                    {esHoy && <span className="absolute top-3 left-3 bg-[#D4E655] text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">⚡ Hoy</span>}
+                                                    {yaPaso && <span className="absolute top-3 left-3 bg-gray-800 text-gray-400 text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Completada</span>}
+                                                </div>
+
+                                                <div className="p-5 flex-1">
+                                                    <h4 className="font-black uppercase text-white mb-1 truncate text-lg">{clase.nombre}</h4>
+                                                    <p className="text-[10px] text-gray-400 flex items-center gap-1.5 mb-4">
+                                                        <User size={12} className="text-[#D4E655]" /> {clase.profesor?.nombre_completo}
+                                                    </p>
+                                                    <div className="space-y-2 border-t border-white/5 pt-4">
+                                                        <p className="text-[10px] uppercase font-bold text-gray-500">Día de Clase:</p>
+                                                        <div className="flex items-center gap-3 text-xs text-gray-300 font-bold">
+                                                            <Calendar size={14} className="text-[#D4E655]" />
+                                                            <span className="capitalize">{format(dateObj, "EEEE d MMMM", { locale: es })}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-3 text-xs text-gray-400">
+                                                            <Clock size={14} className="text-white/30" />
+                                                            <span>{horaDisplay} a {finDisplay} hs</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-3 text-xs text-gray-400">
+                                                            <MapPin size={14} className="text-white/30" />
+                                                            <span>{clase.sala?.nombre} <span className="text-[9px] opacity-50 uppercase border border-white/20 px-1 rounded ml-1">Sede {clase.sala?.sede?.nombre}</span></span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
                                 </div>
-                            </div>
+                            ) : (
+                                <div className="text-center py-20 border border-dashed border-white/10 rounded-3xl bg-[#111]/50">
+                                    <Calendar size={32} className="mx-auto mb-3 text-gray-600" />
+                                    <p className="text-gray-500 font-bold uppercase text-sm">Sin clases programadas</p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
@@ -956,7 +1237,6 @@ function LaLigaContent() {
                                     onChange={e => {
                                         const newMethod = e.target.value;
                                         setMetodoPago(newMethod);
-                                        // 🚀 AUTO-ACTUALIZAR MONTO SUGERIDO (EFVO / TRANSF)
                                         if (alumnoPago) {
                                             setMontoPago(newMethod === 'efectivo' ? (alumnoPago.saldoPendienteEfectivo || 0) : (alumnoPago.saldoPendiente || 0));
                                         }
