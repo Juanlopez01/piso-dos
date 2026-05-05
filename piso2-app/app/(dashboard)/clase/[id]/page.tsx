@@ -232,7 +232,6 @@ export default function ClaseDetallePage() {
             const next = { ...prev, ...updates };
             if ('tipo' in updates || 'pago' in updates || 'packSeleccionadoId' in updates) {
                 const sugerido = getPrecioSugerido(next.tipo, next.pago, next.packSeleccionadoId);
-                // Si hay sugerencia la aplicamos, sino respetamos lo que estaba tecleado
                 if (sugerido !== '') next.montoManualPack = sugerido;
             }
             return next;
@@ -293,17 +292,47 @@ export default function ClaseDetallePage() {
         }
     }
 
+    // 🚀 LECTURA EXACTA DE CRÉDITOS SEGÚN EL TIPO DE CLASE
+    const getCreditosParaEstaClase = (alum: any) => {
+        if (!clase) return 0;
+        if (!clase.es_combinable) {
+            // Buscamos si tiene el pase exclusivo para el profesor y nombre de esta clase
+            const profeObj = clase.profesor;
+            const nombreProfe = Array.isArray(profeObj) ? profeObj[0]?.nombre_completo : (profeObj?.nombre_completo || 'Staff');
+            const llavePase = `${clase.nombre}-${nombreProfe}-${clase.tipo_clase}`;
+            const miPase = alum.pases?.find((p: any) => p.pase_referencia === llavePase);
+            return miPase ? miPase.cantidad : 0;
+        } else if (clase.tipo_clase === 'Especial') {
+            return alum.creditos_especiales || 0;
+        } else {
+            return alum.creditos_regulares || 0;
+        }
+    }
+
     useEffect(() => {
         const buscar = async () => {
             if (busquedaAlumno.trim().length < 3) return setResultadosBusqueda([])
             setBuscando(true)
             const term = `%${busquedaAlumno.trim()}%`
-            const { data } = await supabase.from('profiles')
+            const { data: perfiles } = await supabase.from('profiles')
                 .select('id, nombre, apellido, nombre_completo, email, dni, creditos_regulares, creditos_especiales')
                 .or(`nombre_completo.ilike.${term},email.ilike.${term}`)
                 .eq('rol', 'alumno')
                 .limit(5)
-            if (data) setResultadosBusqueda(data)
+
+            if (perfiles && perfiles.length > 0) {
+                // Traemos los pases exclusivos de los alumnos encontrados por si es una clase exclusiva
+                const ids = perfiles.map((u: any) => u.id);
+                const { data: pases } = await supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad').in('usuario_id', ids);
+
+                const resultadosCompletos = perfiles.map((u: any) => ({
+                    ...u,
+                    pases: pases?.filter((p: any) => p.usuario_id === u.id) || []
+                }));
+                setResultadosBusqueda(resultadosCompletos)
+            } else {
+                setResultadosBusqueda([])
+            }
             setBuscando(false)
         }
         const t = setTimeout(buscar, 400)
@@ -331,7 +360,6 @@ export default function ClaseDetallePage() {
                 nombreInvitadoStr = `${nomFinal} ${telFinal}`.trim()
             } else {
                 if (['suelta', 'pack'].includes(guestForm.tipo)) {
-                    // 🚀 TODO SE COBRA SEGÚN EL CAMPO MANUAL. Flexibilidad total.
                     monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : 0;
                 }
 
@@ -362,13 +390,12 @@ export default function ClaseDetallePage() {
                 nombreInvitadoStr = null;
             }
 
-            // 🚀 PREPARAMOS EL NOMBRE PARA ENVIAR A LA CAJA
             const alumnoNombreCaja = alumnoIdFinal ? (alumnoSeleccionado?.nombre_completo || '') : `${guestForm.nombre} ${guestForm.apellido}`.trim()
 
             const rpcPayload = {
                 p_clase_id: clase.id,
                 p_user_id: alumnoIdFinal,
-                p_nombre_invitado: nombreInvitadoStr, // Ya no se sobrescribe con el nombre de la clase
+                p_nombre_invitado: nombreInvitadoStr,
                 p_tipo_operacion: guestForm.tipo,
                 p_tipo_clase: tipoClaseRPC,
                 p_monto_caja: monto,
@@ -376,7 +403,7 @@ export default function ClaseDetallePage() {
                 p_producto_id: guestForm.packSeleccionadoId || null,
                 p_email_comprador: null,
                 p_telefono_comprador: null,
-                p_alumno_nombre_real: alumnoNombreCaja // 🚀 ESTE ES EL DATO QUE LA CAJA VA A AGARRAR LUEGO
+                p_alumno_nombre_real: alumnoNombreCaja
             }
 
             const response = await procesarInscripcionAction(rpcPayload as any)
@@ -679,24 +706,40 @@ export default function ClaseDetallePage() {
 
                                     {resultadosBusqueda.length > 0 && (
                                         <div className="absolute z-10 w-full mt-2 bg-[#1a1a1c] border border-white/10 rounded-xl overflow-hidden shadow-2xl max-h-48 overflow-y-auto">
-                                            {resultadosBusqueda.map(alum => (
-                                                <div key={alum.id} onClick={() => {
-                                                    setAlumnoSeleccionado(alum);
-                                                    setBusquedaAlumno('');
-                                                    setResultadosBusqueda([]);
-                                                    const newTipo = esGrupoOFormacion ? 'suelta' : (alum.creditos_regulares > 0 ? 'usar_credito' : 'suelta');
-                                                    updateGuestForm({ tipo: newTipo as any });
-                                                }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
-                                                    <div><p className="text-xs font-bold text-white uppercase">{alum.nombre_completo || alum.nombre}</p><p className="text-[10px] text-gray-500">{alum.email}</p></div>
-                                                    <span className="text-[9px] font-black bg-[#D4E655] text-black px-2 py-1 rounded">{alum.creditos_regulares} Cr</span>
-                                                </div>
-                                            ))}
+                                            {resultadosBusqueda.map(alum => {
+                                                const creditosActivos = getCreditosParaEstaClase(alum);
+                                                return (
+                                                    <div key={alum.id} onClick={() => {
+                                                        setAlumnoSeleccionado({ ...alum, creditosActivos });
+                                                        setBusquedaAlumno('');
+                                                        setResultadosBusqueda([]);
+                                                        const newTipo = esGrupoOFormacion ? 'suelta' : (creditosActivos > 0 ? 'usar_credito' : 'suelta');
+                                                        updateGuestForm({ tipo: newTipo as any });
+                                                    }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
+                                                        <div>
+                                                            <p className="text-xs font-bold text-white uppercase">{alum.nombre_completo || alum.nombre}</p>
+                                                            <p className="text-[10px] text-gray-500">{alum.email}</p>
+                                                        </div>
+                                                        <span className={`text-[9px] font-black px-2 py-1 rounded ${creditosActivos > 0 ? 'bg-[#D4E655] text-black' : 'bg-white/10 text-gray-400'}`}>
+                                                            {creditosActivos} Disp.
+                                                        </span>
+                                                    </div>
+                                                )
+                                            })}
                                         </div>
                                     )}
                                 </div>
                             ) : (
                                 <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 p-4 rounded-xl flex items-center justify-between">
-                                    <div><p className="text-xs font-bold text-white uppercase">{alumnoSeleccionado.nombre_completo}</p><p className="text-[9px] text-gray-500">Saldo: {alumnoSeleccionado.creditos_regulares} Reg / {alumnoSeleccionado.creditos_especiales} Esp</p></div>
+                                    <div>
+                                        <p className="text-xs font-bold text-white uppercase">{alumnoSeleccionado.nombre_completo}</p>
+                                        <p className="text-[9px] text-[#D4E655] uppercase font-bold mt-0.5">
+                                            {!clase?.es_combinable
+                                                ? `Pases Exclusivos: ${alumnoSeleccionado.creditosActivos}`
+                                                : `Créditos Activos: ${alumnoSeleccionado.creditosActivos}`
+                                            }
+                                        </p>
+                                    </div>
                                     <button type="button" onClick={() => setAlumnoSeleccionado(null)}><X size={16} /></button>
                                 </div>
                             )}

@@ -8,9 +8,11 @@ import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
     Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
-    Eye // 🚀 Agregado el ícono Eye para el estado SAF
+    Eye, History // 🚀 Agregado History
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { format } from 'date-fns'
+import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 
 import {
@@ -78,11 +80,9 @@ const getInteresesSeguro = (intereses: string | string[] | null | undefined): st
 }
 
 const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo[], productos: Producto[] }> => {
-    console.log("🚀 Iniciando fetcher... BYPASS ACTIVADO (Sin llamadas RPC)");
     const supabase = createClient()
 
     try {
-        console.log("📦 Pidiendo datos a las 5 tablas en paralelo...");
         const [
             { data: perfiles, error: errPerfiles },
             { data: ritmos, error: errRitmos },
@@ -97,17 +97,7 @@ const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo
             supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad')
         ])
 
-        console.log("✅ Respuestas recibidas de Supabase:");
-        if (errPerfiles) console.error("❌ Error en la tabla 'profiles':", errPerfiles);
-        if (errRitmos) console.error("❌ Error en la tabla 'ritmos':", errRitmos);
-        if (errProductos) console.error("❌ Error en la tabla 'productos':", errProductos);
-        if (errPc) console.error("❌ Error en la tabla 'perfiles_companias':", errPc);
-        if (errPases) console.error("❌ Error en la tabla 'pases_exclusivos':", errPases);
-
-        // Si la tabla principal falla, cortamos todo
         if (errPerfiles) throw errPerfiles
-
-        console.log(`📊 Armando el padrón con ${perfiles?.length || 0} perfiles encontrados...`);
 
         const usuariosProcesados: UsuarioDirectorio[] = (perfiles || []).map((u: any) => {
             const misCompanias = pcData?.filter((pc: any) => pc.perfil_id === u.id).map((pc: any) => pc.compania as unknown as CompaniaBasica) || []
@@ -127,8 +117,6 @@ const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo
                 creditos_regulares: u.creditos_regulares || 0
             }
         })
-
-        console.log("🎉 Fetcher terminado correctamente. Usuarios listos para mostrar.");
 
         return {
             usuarios: usuariosProcesados,
@@ -170,7 +158,10 @@ function UsuariosContent() {
     const [userStats, setUserStats] = useState<any>(null)
     const [loadingStats, setLoadingStats] = useState(false)
 
-    // 🚀 ESTADOS PARA MÉTRICAS DE LA LIGA (Filtro por fecha y SAF)
+    // 🚀 NUEVOS ESTADOS PARA HISTORIAL DE PAGOS
+    const [historialPagos, setHistorialPagos] = useState<any[]>([])
+    const [loadingPagos, setLoadingPagos] = useState(false)
+
     const [ligaStatsRango, setLigaStatsRango] = useState('mes')
     const [ligaStats, setLigaStats] = useState<any>(null)
     const [loadingLigaStats, setLoadingLigaStats] = useState(false)
@@ -290,7 +281,6 @@ function UsuariosContent() {
         }
     }
 
-    // 🚀 LÓGICA PARA BUSCAR ESTADÍSTICAS ESPECÍFICAS DE LA LIGA
     const fetchLigaStats = async (userId: string, rango: string) => {
         setLoadingLigaStats(true)
         const { data } = await supabase.rpc('get_metricas_liga', { p_user_id: userId, p_rango: rango })
@@ -304,10 +294,12 @@ function UsuariosContent() {
         fetchLigaStats(selectedUser.id, newRango)
     }
 
+    // 🚀 SE ACTUALIZÓ PARA TRAER EL HISTORIAL DE COMPRAS/PAGOS DEL ALUMNO
     const openDetailModal = async (user: UsuarioDirectorio) => {
         setSelectedUser(user)
         setUserStats(null)
-        setLigaStats(null) // Limpiamos las stats de liga viejas
+        setLigaStats(null)
+        setHistorialPagos([]) // Limpiamos historial viejo
         setEditForm({
             obs: user.staff_observations || '',
             intereses_ritmos: user.intereses_procesados || [],
@@ -316,9 +308,9 @@ function UsuariosContent() {
         })
         setIsDetailOpen(true)
         setLoadingStats(true)
+        setLoadingPagos(true)
 
         try {
-            // Traemos métricas generales
             const { data: stats, error } = await supabase.rpc('get_user_metrics_v2', {
                 p_id: user.id,
                 p_role: user.rol
@@ -327,11 +319,20 @@ function UsuariosContent() {
             if (error) throw error;
             if (stats) setUserStats(stats);
 
-            // 🚀 Si el alumno está en La Liga, disparamos la búsqueda de métricas detalladas
             if (user.rol === 'alumno' && (user.nivel_liga === 1 || user.nivel_liga === 2 || user.nivel_liga === '1' || user.nivel_liga === '2')) {
-                setLigaStatsRango('mes') // Por defecto le mostramos el último mes
+                setLigaStatsRango('mes')
                 fetchLigaStats(user.id, 'mes')
             }
+
+            // 🚀 BÚSQUEDA DE HISTORIAL EN CAJA: Filtra todos los movimientos que contengan el nombre del alumno
+            const { data: movs } = await supabase
+                .from('caja_movimientos')
+                .select('id, concepto, monto, metodo_pago, created_at, tipo')
+                .ilike('concepto', `%${user.nombre_completo}%`)
+                .order('created_at', { ascending: false })
+                .limit(10)
+
+            if (movs) setHistorialPagos(movs)
 
         } catch (error: any) {
             console.error("Error al cargar métricas:", error);
@@ -339,6 +340,7 @@ function UsuariosContent() {
         }
 
         setLoadingStats(false)
+        setLoadingPagos(false)
     }
 
     const toggleInterest = (ritmoId: string | number) => {
@@ -381,15 +383,14 @@ function UsuariosContent() {
         if (!prod) return toast.error('Producto no encontrado')
         setAssigningPack(true)
         try {
-            // 🚀 ARREGLO 2: Ahora le pasamos el prod.id y el prod.pase_referencia
             const response = await asignarPackAction(
                 selectedUser!.id,
                 prod.tipo_clase,
                 prod.creditos,
                 Number(packForm.monto),
                 packForm.metodo,
-                prod.id,               // Nuevo
-                prod.pase_referencia   // Nuevo
+                prod.id,
+                prod.pase_referencia
             )
             if (!response.success) throw new Error(response.error)
             toast.success(`Pack asignado.`)
@@ -681,7 +682,6 @@ function UsuariosContent() {
             {isDetailOpen && selectedUser && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in">
 
-                    {/* 🚀 ACÁ ESTÁ LA MAGIA: max-h-[90vh] para que no se pase del alto de la pantalla */}
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-4xl rounded-3xl overflow-hidden shadow-2xl relative flex flex-col md:flex-row max-h-[90vh]">
 
                         <button onClick={() => setIsDetailOpen(false)} className="absolute top-6 right-6 z-20 p-2 bg-black/50 backdrop-blur-md rounded-full text-gray-400 hover:text-white transition-colors">
@@ -725,7 +725,7 @@ function UsuariosContent() {
                             </div>
                         </div>
 
-                        {/* 🚀 COLUMNA DERECHA: Acá activamos el SCROLL INTERNO (overflow-y-auto) */}
+                        {/* COLUMNA DERECHA: SCROLL INTERNO */}
                         <div className="w-full md:w-2/3 p-6 md:p-8 flex flex-col bg-[#09090b] overflow-y-auto custom-scrollbar">
 
                             {selectedUser.rol === 'alumno' && (
@@ -749,6 +749,34 @@ function UsuariosContent() {
                                         </div>
                                     </div>
 
+                                    {/* 🚀 NUEVO: HISTORIAL DE PAGOS Y PACKS COMPRADOS */}
+                                    <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2 mt-6">
+                                        <History size={16} className="text-[#D4E655]" /> Historial de Cargas y Pagos
+                                    </h4>
+                                    <div className="space-y-2 mb-8">
+                                        {loadingPagos ? (
+                                            <div className="flex justify-center py-4"><Loader2 className="animate-spin text-[#D4E655]" size={16} /></div>
+                                        ) : historialPagos.length > 0 ? (
+                                            historialPagos.map(mov => (
+                                                <div key={mov.id} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between">
+                                                    <div>
+                                                        <p className="text-xs font-bold text-white uppercase">{mov.concepto}</p>
+                                                        <p className="text-[9px] text-gray-500 uppercase font-bold mt-1">
+                                                            {format(new Date(mov.created_at), "dd MMM yyyy - HH:mm", { locale: es })} • {mov.metodo_pago}
+                                                        </p>
+                                                    </div>
+                                                    <span className={`text-sm font-black ${mov.tipo === 'ingreso' ? 'text-green-500' : 'text-red-500'}`}>
+                                                        {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
+                                                    </span>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="text-center py-6 bg-[#111] rounded-xl border border-white/5">
+                                                <p className="text-[10px] font-bold text-gray-500 uppercase">No hay historial reciente registrado.</p>
+                                            </div>
+                                        )}
+                                    </div>
+
                                     <div className="grid grid-cols-2 gap-4 mb-8">
                                         <div className="bg-[#111] border border-emerald-500/20 rounded-xl p-4">
                                             <label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest block mb-2">Beca La Liga (%)</label>
@@ -761,7 +789,7 @@ function UsuariosContent() {
                                     </div>
                                 </>
                             )}
-                            {/* 🚀 DATOS EXCLUSIVOS DEL PROFESOR */}
+                            {/* DATOS EXCLUSIVOS DEL PROFESOR */}
                             {selectedUser.rol === 'profesor' && (
                                 <>
                                     <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
