@@ -8,7 +8,7 @@ import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
     Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
-    Eye, History // 🚀 Agregado History
+    Eye, History, ShoppingCart, Smartphone
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { format } from 'date-fns'
@@ -158,11 +158,9 @@ function UsuariosContent() {
     const [userStats, setUserStats] = useState<any>(null)
     const [loadingStats, setLoadingStats] = useState(false)
 
-    // 🚀 ESTADOS PARA EL HISTORIAL DE PAGOS
     const [historialPagos, setHistorialPagos] = useState<any[]>([])
     const [loadingPagos, setLoadingPagos] = useState(false)
 
-    // 🚀 ESTADOS PARA MÉTRICAS DE LA LIGA
     const [ligaStatsRango, setLigaStatsRango] = useState('mes')
     const [ligaStats, setLigaStats] = useState<any>(null)
     const [loadingLigaStats, setLoadingLigaStats] = useState(false)
@@ -295,12 +293,11 @@ function UsuariosContent() {
         fetchLigaStats(selectedUser.id, newRango)
     }
 
-    // 🚀 LÓGICA DE APERTURA DEL MODAL CON HISTORIAL DE PAGOS INTEGRADO
     const openDetailModal = async (user: UsuarioDirectorio) => {
         setSelectedUser(user)
         setUserStats(null)
         setLigaStats(null)
-        setHistorialPagos([]) // Limpiamos el historial previo
+        setHistorialPagos([])
         setEditForm({
             obs: user.staff_observations || '',
             intereses_ritmos: user.intereses_procesados || [],
@@ -312,84 +309,101 @@ function UsuariosContent() {
         setLoadingPagos(true)
 
         try {
-            // Traemos métricas generales
-            const { data: stats, error } = await supabase.rpc('get_user_metrics_v2', {
-                p_id: user.id,
-                p_role: user.rol
-            })
+            const { data: stats, error } = await supabase.rpc('get_user_metrics_v2', { p_id: user.id, p_role: user.rol })
+            if (!error && stats) setUserStats(stats);
 
-            if (error) throw error;
-            if (stats) setUserStats(stats);
-
-            // Si está en La Liga, buscamos sus métricas
             if (user.rol === 'alumno' && (user.nivel_liga === 1 || user.nivel_liga === 2 || user.nivel_liga === '1' || user.nivel_liga === '2')) {
                 setLigaStatsRango('mes')
                 fetchLigaStats(user.id, 'mes')
             }
 
-            // 🚀 MEGA-BÚSQUEDA DEL HISTORIAL DE PAGOS (Caja + Liga + Grupos)
+            // 🚀 BÚSQUEDA UNIFICADA DE PAGOS (AHORA INCLUYE pagos_online)
             const nombreBusqueda = user.nombre_completo ? user.nombre_completo.trim() : '';
             let todosLosPagos: any[] = [];
 
             if (nombreBusqueda) {
-                // 1. Movimientos en Caja (Sueltas y Packs nuevos)
                 const { data: movs } = await supabase
                     .from('caja_movimientos')
                     .select('id, concepto, monto, metodo_pago, created_at, tipo')
                     .ilike('concepto', `%${nombreBusqueda}%`)
                     .order('created_at', { ascending: false })
-                    .limit(10)
+                    .limit(15)
 
-                if (movs) todosLosPagos = [...todosLosPagos, ...movs];
+                if (movs) {
+                    const mapeadosCaja = movs.map((m: any) => ({ ...m, source: 'recepcion' }))
+                    todosLosPagos = [...todosLosPagos, ...mapeadosCaja];
+                }
             }
 
-            // 2. Pagos de Liga (Manuales o MP)
             const { data: ligaPagos } = await supabase
                 .from('liga_pagos')
                 .select('id, mes, anio, monto, metodo_pago, created_at')
                 .eq('alumno_id', user.id)
                 .order('created_at', { ascending: false })
-                .limit(10)
+                .limit(15)
 
             if (ligaPagos) {
                 const mapeadosLiga = ligaPagos.map((p: any) => ({
-                    id: p.id,
-                    concepto: `Cuota Liga - Mes ${p.mes}/${p.anio}`,
+                    id: `liga-${p.id}`,
+                    concepto: `Cuota La Liga - Mes ${p.mes}/${p.anio}`,
                     monto: p.monto,
                     metodo_pago: p.metodo_pago,
                     created_at: p.created_at,
-                    tipo: 'ingreso'
+                    tipo: 'ingreso',
+                    source: 'liga'
                 }))
                 todosLosPagos = [...todosLosPagos, ...mapeadosLiga];
             }
 
-            // 3. Pagos de Compañías (Manuales o MP)
             const { data: ciaPagos } = await supabase
                 .from('companias_pagos')
                 .select('id, mes, anio, monto, metodo_pago, created_at, compania:companias(nombre)')
                 .eq('alumno_id', user.id)
                 .order('created_at', { ascending: false })
-                .limit(10)
+                .limit(15)
 
             if (ciaPagos) {
                 const mapeadosCia = ciaPagos.map((p: any) => ({
-                    id: p.id,
+                    id: `cia-${p.id}`,
                     concepto: `Cuota Grupo ${p.compania?.nombre || ''} - Mes ${p.mes}/${p.anio}`,
                     monto: p.monto,
                     metodo_pago: p.metodo_pago,
                     created_at: p.created_at,
-                    tipo: 'ingreso'
+                    tipo: 'ingreso',
+                    source: 'grupo'
                 }))
                 todosLosPagos = [...todosLosPagos, ...mapeadosCia];
             }
 
-            // Ordenamos y mostramos los últimos 15
+            // 🚀 BÚSQUEDA EN LA NUEVA TABLA DE MERCADOPAGO
+            const { data: onlinePagos, error: errOnline } = await supabase
+                .from('pagos_online')
+                .select('id, concepto, monto, created_at')
+                .eq('user_id', user.id)
+                .eq('estado', 'approved')
+                .order('created_at', { ascending: false })
+                .limit(15)
+
+            if (!errOnline && onlinePagos) {
+                const mapeadosOnline = onlinePagos.map((p: any) => ({
+                    id: `online-${p.id}`,
+                    concepto: p.concepto || 'Compra App MercadoPago',
+                    monto: p.monto,
+                    metodo_pago: 'MercadoPago',
+                    created_at: p.created_at,
+                    tipo: 'ingreso',
+                    source: 'app'
+                }))
+                todosLosPagos = [...todosLosPagos, ...mapeadosOnline];
+            }
+
+            // Ordenamos todo de más nuevo a más viejo
             todosLosPagos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-            setHistorialPagos(todosLosPagos.slice(0, 15));
+            setHistorialPagos(todosLosPagos.slice(0, 30));
 
         } catch (error: any) {
-            console.error("Error al cargar datos del usuario:", error);
-            toast.error("No se pudieron cargar algunos datos.");
+            console.error("Error al cargar datos:", error);
+            toast.error("No se pudieron cargar todos los historiales.");
         }
 
         setLoadingStats(false)
@@ -426,7 +440,6 @@ function UsuariosContent() {
 
     const handlePackSelectionChange = (packId: string) => {
         const prod = productos.find(p => p.id === packId)
-        // 🚀 Si hay producto y está en efectivo, auto-descuento inicial
         let suggestedMonto = prod ? prod.precio.toString() : '';
         if (prod && packForm.metodo === 'efectivo') {
             suggestedMonto = Math.round(prod.precio / 1.1).toString();
@@ -434,7 +447,6 @@ function UsuariosContent() {
         setPackForm(prev => ({ ...prev, packId, monto: suggestedMonto }))
     }
 
-    // 🚀 AL CAMBIAR EL MÉTODO DE PAGO, ACTUALIZAMOS EL INPUT DE MONTO
     const changePackMethod = (metodo: 'efectivo' | 'transferencia') => {
         setPackForm(prev => {
             let newMonto = prev.monto;
@@ -833,19 +845,24 @@ function UsuariosContent() {
                                         ) : historialPagos.length > 0 ? (
                                             historialPagos.map(mov => (
                                                 <div key={mov.id} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors">
-                                                    <div>
-                                                        <p className="text-xs font-bold text-white uppercase">{mov.concepto}</p>
-                                                        <div className="flex items-center gap-2 mt-1.5">
-                                                            <span className="text-[9px] text-gray-500 uppercase font-bold">
-                                                                {format(new Date(mov.created_at), "dd MMM yyyy", { locale: es })}
-                                                            </span>
-                                                            <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo_pago === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
-                                                                {mov.metodo_pago}
-                                                            </span>
+                                                    <div className="flex items-center gap-3">
+                                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${mov.source === 'app' ? 'bg-blue-500/10 text-blue-500' : mov.source === 'liga' ? 'bg-yellow-500/10 text-yellow-500' : mov.source === 'grupo' ? 'bg-teal-500/10 text-teal-500' : 'bg-green-500/10 text-green-500'}`}>
+                                                            {mov.source === 'app' ? <Smartphone size={14} /> : mov.source === 'liga' ? <Trophy size={14} /> : mov.source === 'grupo' ? <UsersRound size={14} /> : <Wallet size={14} />}
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-xs font-bold text-white uppercase line-clamp-1">{mov.concepto}</p>
+                                                            <div className="flex items-center gap-2 mt-1.5">
+                                                                <span className="text-[9px] text-gray-500 uppercase font-bold">
+                                                                    {format(new Date(mov.created_at), "dd MMM yyyy", { locale: es })}
+                                                                </span>
+                                                                <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo_pago === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                                                                    {mov.metodo_pago}
+                                                                </span>
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                    <span className={`text-base font-black shrink-0 ${mov.tipo === 'ingreso' ? 'text-[#D4E655]' : 'text-red-500'}`}>
-                                                        ${Number(mov.monto).toLocaleString()}
+                                                    <span className={`text-sm font-black shrink-0 ${mov.tipo === 'ingreso' ? 'text-[#D4E655]' : 'text-red-500'}`}>
+                                                        {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
                                                     </span>
                                                 </div>
                                             ))

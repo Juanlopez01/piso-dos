@@ -3,10 +3,19 @@
 import { createClient } from '@/utils/supabase/server-helper'
 import { revalidatePath } from 'next/cache'
 
+// 🚀 FUNCIÓN ANTI-FANTASMAS: Garantiza que siempre haya un nombre escrito en la caja
+const getNombreSeguro = (perfil: any) => {
+    if (!perfil) return 'Alumno Desconocido';
+    const completo = (perfil.nombre_completo || '').trim();
+    if (completo) return completo;
+    const compuesto = [perfil.nombre, perfil.apellido].filter(Boolean).join(' ').trim();
+    if (compuesto) return compuesto;
+    return 'Alumno Desconocido';
+}
+
 export async function cambiarRolAction(usuarioId: string, nuevoRol: string) {
     const supabase = await createClient()
     try {
-        // 🔒 SEGURIDAD: Chequeamos sesión
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
@@ -22,11 +31,9 @@ export async function cambiarRolAction(usuarioId: string, nuevoRol: string) {
 export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | null) {
     const supabase = await createClient()
     try {
-        // 🔒 SEGURIDAD
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
-        // 1. Buscamos el nivel actual del usuario ANTES de cambiarlo
         const { data: userProfile, error: profileError } = await supabase
             .from('profiles')
             .select('nivel_liga')
@@ -35,11 +42,9 @@ export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | 
 
         if (profileError) throw new Error("Error al obtener perfil actual del usuario.")
 
-        // 🚀 BLINDAJE: Convertimos todo a números exactos para que la BD no se confunda
         const nivelAnterior = userProfile.nivel_liga ? Number(userProfile.nivel_liga) : null
         const nivelNuevoParsed = nuevoNivel ? Number(nuevoNivel) : null
 
-        // 2. Actualizamos el perfil del usuario con el nuevo nivel
         const { error: updateError } = await supabase
             .from('profiles')
             .update({ nivel_liga: nivelNuevoParsed })
@@ -47,12 +52,9 @@ export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | 
 
         if (updateError) throw new Error(updateError.message)
 
-        // --- 🚀 INICIO DE LA AUTOMATIZACIÓN ---
         const hoy = new Date().toISOString()
 
-        // PASO A: BARRER CLASES VIEJAS (Si cambió de nivel o se quedó sin liga)
         if (nivelAnterior !== null && nivelAnterior !== nivelNuevoParsed) {
-            // Buscamos los IDs de las clases futuras del nivel viejo
             const { data: clasesViejas } = await supabase
                 .from('clases')
                 .select('id')
@@ -61,7 +63,6 @@ export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | 
 
             if (clasesViejas && clasesViejas.length > 0) {
                 const idsClasesViejas = clasesViejas.map(c => c.id)
-                // Borramos las inscripciones a esas clases
                 const { error: deleteError } = await supabase
                     .from('inscripciones')
                     .delete()
@@ -72,9 +73,7 @@ export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | 
             }
         }
 
-        // PASO B: ANOTAR EN CLASES NUEVAS (Si le pusimos un nivel válido)
         if (nivelNuevoParsed !== null && nivelAnterior !== nivelNuevoParsed) {
-            // Buscamos todas las clases futuras del nivel nuevo
             const { data: clasesNuevas, error: fetchError } = await supabase
                 .from('clases')
                 .select('id')
@@ -85,7 +84,6 @@ export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | 
             if (fetchError) console.error("Error buscando clases nuevas:", fetchError)
 
             if (clasesNuevas && clasesNuevas.length > 0) {
-                // Primero chequeamos en cuáles ya está para no duplicar inscripciones
                 const idsClasesNuevas = clasesNuevas.map(c => c.id)
                 const { data: inscripcionesExistentes } = await supabase
                     .from('inscripciones')
@@ -95,7 +93,6 @@ export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | 
 
                 const idsYaAnotados = new Set(inscripcionesExistentes?.map(i => i.clase_id) || [])
 
-                // Filtramos y preparamos las que le faltan
                 const nuevasInscripciones = idsClasesNuevas
                     .filter(claseId => !idsYaAnotados.has(claseId))
                     .map(claseId => ({
@@ -103,20 +100,15 @@ export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | 
                         clase_id: claseId
                     }))
 
-                // Insertamos de golpe
                 if (nuevasInscripciones.length > 0) {
                     const { error: insertError } = await supabase
                         .from('inscripciones')
                         .insert(nuevasInscripciones)
 
-                    if (insertError) {
-                        console.error("Error CRÍTICO al insertar inscripciones:", insertError)
-                        throw new Error(`Error al auto-inscribir: ${insertError.message}`)
-                    }
+                    if (insertError) throw new Error(`Error al auto-inscribir: ${insertError.message}`)
                 }
             }
         }
-        // --- FIN DE LA AUTOMATIZACIÓN ---
 
         revalidatePath('/usuarios')
         return { success: true }
@@ -131,7 +123,6 @@ export async function guardarPerfilAction(userId: string, observaciones: string,
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return { success: false, error: 'No autorizado' }
 
-    // Asegurarnos de que las becas no superen el 100% ni sean negativas
     const bLiga = Math.max(0, Math.min(100, becaLiga || 0));
     const bCompania = Math.max(0, Math.min(100, becaCompania || 0));
 
@@ -160,11 +151,14 @@ export async function asignarPackAction(
 ) {
     const supabase = await createClient()
     try {
-        // 🚀 BLINDAJE: getSession() en lugar de getUser()
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
         const user = session.user
+
+        // 🚀 AHORA TRAEMOS NOMBRE Y APELLIDO PARA ARMARLO BIEN
+        const { data: perfilAlumno } = await supabase.from('profiles').select('nombre, apellido, nombre_completo').eq('id', usuarioId).single()
+        const nombreAlumno = getNombreSeguro(perfilAlumno);
 
         let turnoActivoId = null
         if (monto > 0) {
@@ -173,15 +167,12 @@ export async function asignarPackAction(
             turnoActivoId = turno.id
         }
 
-        // 🚀 DESVÍO INTELIGENTE: Pases Exclusivos vs Packs Normales
         if (tipoClase === 'exclusivo') {
-
-            // 1. Ingreso de Caja (si cobró plata)
             if (monto > 0 && turnoActivoId) {
                 const { error: errCaja } = await supabase.from('caja_movimientos').insert({
                     turno_id: turnoActivoId,
                     tipo: 'ingreso',
-                    concepto: `Venta Pase Exclusivo (Manual)`,
+                    concepto: `Venta Pase Exclusivo | Alumno: ${nombreAlumno}`,
                     monto: monto,
                     metodo_pago: metodoPago,
                     origen_referencia: 'manual'
@@ -189,7 +180,6 @@ export async function asignarPackAction(
                 if (errCaja) throw new Error('Error al registrar en la caja.')
             }
 
-            // 2. Asignar la llave del pase en la cuenta del alumno (Directo a pases_exclusivos)
             const { error: errPase } = await supabase.rpc('cargar_pase_exclusivo_manual', {
                 p_usuario_id: usuarioId,
                 p_referencia: pase_referencia,
@@ -198,7 +188,6 @@ export async function asignarPackAction(
             if (errPase) throw new Error(`Error al habilitar el acceso: ${errPase.message}`)
 
         } else {
-            // 🚀 FLUJO ORIGINAL para Clases Regulares / Especiales
             const { data, error } = await supabase.rpc('asignar_pack_manual', {
                 p_user_id: usuarioId,
                 p_turno_caja_id: turnoActivoId,
@@ -210,6 +199,25 @@ export async function asignarPackAction(
 
             if (error) throw new Error('Error de conexión al cargar el pack regular.')
             if (!data.success) throw new Error(data.message)
+
+            if (monto > 0 && turnoActivoId) {
+                const { data: ultimoMovimiento } = await supabase
+                    .from('caja_movimientos')
+                    .select('id, concepto')
+                    .eq('turno_id', turnoActivoId)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle()
+
+                // 🚀 PREVENCIÓN: Solo pegamos el nombre si no lo tiene ya pegado
+                if (ultimoMovimiento && !ultimoMovimiento.concepto.includes('| Alumno:')) {
+                    const nuevoConcepto = `${ultimoMovimiento.concepto} | Alumno: ${nombreAlumno}`
+                    await supabase
+                        .from('caja_movimientos')
+                        .update({ concepto: nuevoConcepto })
+                        .eq('id', ultimoMovimiento.id)
+                }
+            }
         }
 
         revalidatePath('/usuarios')
@@ -234,7 +242,6 @@ export async function cobrarLigaAction(usuarioId: string, monto: number, metodoP
         const mesActual = hoy.getMonth() + 1
         const anioActual = hoy.getFullYear()
 
-        // 1. Buscamos si ya tiene un pago parcial
         const { data: pagoExistente } = await supabase
             .from('liga_pagos')
             .select('id, monto')
@@ -244,14 +251,12 @@ export async function cobrarLigaAction(usuarioId: string, monto: number, metodoP
             .maybeSingle()
 
         if (pagoExistente) {
-            // Sumamos lo que ya pagó más este nuevo pago
             const { error: errUpdate } = await supabase.from('liga_pagos').update({
                 monto: Number(pagoExistente.monto) + monto,
                 metodo_pago: metodoPago
             }).eq('id', pagoExistente.id)
             if (errUpdate) throw new Error(errUpdate.message)
         } else {
-            // Creamos el pago (Le sacamos turno_caja_id que NO va acá)
             const { error: errInsert } = await supabase.from('liga_pagos').insert({
                 alumno_id: usuarioId,
                 mes: mesActual,
@@ -265,10 +270,9 @@ export async function cobrarLigaAction(usuarioId: string, monto: number, metodoP
             }
         }
 
-        // 2. Anotamos la plata en la Caja Registradora (caja_movimientos)
         if (monto > 0 && turno) {
-            const { data: perfilAlumno } = await supabase.from('profiles').select('nombre_completo').eq('id', usuarioId).single()
-            const nombreAlumno = perfilAlumno?.nombre_completo || 'Alumno Desconocido'
+            const { data: perfilAlumno } = await supabase.from('profiles').select('nombre, apellido, nombre_completo').eq('id', usuarioId).single()
+            const nombreAlumno = getNombreSeguro(perfilAlumno);
 
             const { error: errCaja } = await supabase.from('caja_movimientos').insert([{
                 turno_id: turno.id,
@@ -304,7 +308,6 @@ export async function cobrarCompaniaAction(usuarioId: string, companiaId: string
         const mesActual = hoy.getMonth() + 1
         const anioActual = hoy.getFullYear()
 
-        // 1. Buscamos si ya tiene un pago parcial en esta compañía
         const { data: pagoExistente } = await supabase
             .from('companias_pagos')
             .select('id, monto')
@@ -315,14 +318,12 @@ export async function cobrarCompaniaAction(usuarioId: string, companiaId: string
             .maybeSingle()
 
         if (pagoExistente) {
-            // Actualizamos sumando
             const { error: errUpdate } = await supabase.from('companias_pagos').update({
                 monto: Number(pagoExistente.monto) + monto,
                 metodo_pago: metodoPago
             }).eq('id', pagoExistente.id)
             if (errUpdate) throw new Error(errUpdate.message)
         } else {
-            // Creamos el pago (SIN turno_caja_id)
             const { error: errInsert } = await supabase.from('companias_pagos').insert({
                 alumno_id: usuarioId,
                 compania_id: companiaId,
@@ -337,10 +338,9 @@ export async function cobrarCompaniaAction(usuarioId: string, companiaId: string
             }
         }
 
-        // 2. Anotamos la plata en la Caja Registradora
         if (monto > 0 && turno) {
-            const { data: perfilAlumno } = await supabase.from('profiles').select('nombre_completo').eq('id', usuarioId).single()
-            const nombreAlumno = perfilAlumno?.nombre_completo || 'Alumno Desconocido'
+            const { data: perfilAlumno } = await supabase.from('profiles').select('nombre, apellido, nombre_completo').eq('id', usuarioId).single()
+            const nombreAlumno = getNombreSeguro(perfilAlumno);
 
             const { data: dataCompania } = await supabase.from('companias').select('nombre').eq('id', companiaId).single()
             const nombreCia = dataCompania?.nombre || 'Grupo'
@@ -364,10 +364,8 @@ export async function cobrarCompaniaAction(usuarioId: string, companiaId: string
     }
 }
 
-// 🚀 1. Agregá esta importación (fijate que le ponemos un alias para que no choque)
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
-// 🚀 2. Reemplazá tu función por esta:
 export async function crearAlumnoDesdeRecepcionAction(datos: { nombre: string, apellido: string, email: string, dni: string, telefono: string }) {
     try {
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -377,18 +375,16 @@ export async function crearAlumnoDesdeRecepcionAction(datos: { nombre: string, a
             return { success: false, error: 'Falta configurar SUPABASE_SERVICE_ROLE_KEY en las variables de entorno' }
         }
 
-        // Usamos el cliente admin de supabase-js, NO el de SSR
         const supabaseAdmin = createAdminClient(supabaseUrl, supabaseServiceKey, {
             auth: {
                 autoRefreshToken: false,
-                persistSession: false // Clave para que no te cierre tu sesión de recepcionista
+                persistSession: false
             }
         })
 
-        // Creamos la cuenta oficial en Auth
         const { data, error } = await supabaseAdmin.auth.admin.createUser({
             email: datos.email,
-            password: datos.dni, // Usamos el DNI como contraseña
+            password: datos.dni,
             email_confirm: true,
             user_metadata: {
                 nombre: datos.nombre,
@@ -402,7 +398,6 @@ export async function crearAlumnoDesdeRecepcionAction(datos: { nombre: string, a
 
         if (error) return { success: false, error: error.message }
 
-        // Retornamos el ID oficial recién salidito del horno
         return { success: true, user_id: data.user.id }
     } catch (error: any) {
         return { success: false, error: error.message }

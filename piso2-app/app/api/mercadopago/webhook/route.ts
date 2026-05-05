@@ -87,39 +87,47 @@ export async function POST(request: Request) {
                 return NextResponse.json({ message: 'Sin metadata' }, { status: 200 });
             }
 
+            const mpPaymentIdStr = paymentIdToProcess.toString();
+            const montoAbonado = payment.transaction_amount;
+
+            // 🚀 PREVENCIÓN DE DUPLICADOS: Chequeamos si MercadoPago nos está avisando dos veces lo mismo
+            const { data: pagoYaGuardado } = await supabase
+                .from('pagos_online')
+                .select('id')
+                .eq('mp_payment_id', mpPaymentIdStr)
+                .maybeSingle();
+
+            if (pagoYaGuardado) {
+                console.log(`✅ [WEBHOOK] El pago ${mpPaymentIdStr} ya fue procesado anteriormente en el historial.`);
+                return NextResponse.json({ message: 'Pago ya procesado' }, { status: 200 });
+            }
+
             // ==========================================
             // DESVÍO A: PAGO DE CUOTA DE LA LIGA
             // ==========================================
             if (metadata.tipo_pago === 'cuota_liga') {
                 const { usuario_id, mes, anio } = metadata;
-                const montoAbonado = payment.transaction_amount;
                 console.log(`[WEBHOOK LIGA] Cobrando La Liga para Usuario: ${usuario_id}, Mes: ${mes}/${anio}`);
 
-                const { data: pagoExistenteLiga } = await supabase
-                    .from('liga_pagos')
-                    .select('id')
-                    .eq('alumno_id', usuario_id)
-                    .eq('mes', mes)
-                    .eq('anio', anio)
-                    .maybeSingle();
-
-                if (pagoExistenteLiga) {
-                    console.log("✅ [WEBHOOK LIGA] Esta cuota ya estaba paga.");
-                    return NextResponse.json({ message: 'Cuota ya pagada' }, { status: 200 });
+                // 1. Guardar en tabla específica de Liga (Sumamos si ya existe, creamos si no)
+                const { data: pagoExisLiga } = await supabase.from('liga_pagos').select('id, monto').eq('alumno_id', usuario_id).eq('mes', mes).eq('anio', anio).maybeSingle();
+                if (pagoExisLiga) {
+                    await supabase.from('liga_pagos').update({ monto: Number(pagoExisLiga.monto) + montoAbonado }).eq('id', pagoExisLiga.id);
+                } else {
+                    await supabase.from('liga_pagos').insert({ alumno_id: usuario_id, mes: Number(mes), anio: Number(anio), monto: montoAbonado, metodo_pago: 'mercadopago' });
                 }
 
-                const { error: errLiga } = await supabase.from('liga_pagos').insert({
-                    alumno_id: usuario_id,
-                    mes: Number(mes),
-                    anio: Number(anio),
+                // 2. 🚀 GUARDAR EN EL HISTORIAL GENERAL (pagos_online)
+                await supabase.from('pagos_online').insert({
+                    user_id: usuario_id,
+                    mp_payment_id: mpPaymentIdStr,
                     monto: montoAbonado,
-                    metodo_pago: 'mercadopago',
-                    turno_caja_id: null
+                    concepto: `Pago Cuota La Liga (Mes ${mes}/${anio})`,
+                    tipo_pago: 'liga',
+                    estado: 'approved'
                 });
 
-                if (errLiga) throw errLiga;
-
-                console.log("🌟 [WEBHOOK LIGA] ¡Cuota registrada con éxito!");
+                console.log("🌟 [WEBHOOK LIGA] ¡Cuota registrada y guardada en el historial!");
                 return NextResponse.json({ success: true }, { status: 200 });
             }
 
@@ -129,36 +137,29 @@ export async function POST(request: Request) {
             if (metadata.tipo_pago === 'cuota_compania') {
                 const { usuario_id, user_id, producto_id, mes, anio } = metadata;
                 const alumnoId = usuario_id || user_id;
-                const montoAbonado = payment.transaction_amount;
 
                 console.log(`[WEBHOOK COMPAÑIA] Cobrando Compañía ${producto_id} para Usuario: ${alumnoId}, Mes: ${mes}/${anio}`);
 
-                const { data: pagoExistenteCompania } = await supabase
-                    .from('companias_pagos')
-                    .select('id')
-                    .eq('alumno_id', alumnoId)
-                    .eq('compania_id', producto_id)
-                    .eq('mes', mes)
-                    .eq('anio', anio)
-                    .maybeSingle();
-
-                if (pagoExistenteCompania) {
-                    console.log("✅ [WEBHOOK COMPAÑIA] Esta cuota ya estaba paga.");
-                    return NextResponse.json({ message: 'Cuota de compañía ya pagada' }, { status: 200 });
+                // 1. Guardar en tabla específica de Compañias
+                const { data: pagoExisCia } = await supabase.from('companias_pagos').select('id, monto').eq('alumno_id', alumnoId).eq('compania_id', producto_id).eq('mes', mes).eq('anio', anio).maybeSingle();
+                if (pagoExisCia) {
+                    await supabase.from('companias_pagos').update({ monto: Number(pagoExisCia.monto) + montoAbonado }).eq('id', pagoExisCia.id);
+                } else {
+                    await supabase.from('companias_pagos').insert({ alumno_id: alumnoId, compania_id: producto_id, mes: Number(mes), anio: Number(anio), monto: montoAbonado, metodo_pago: 'mercadopago' });
                 }
 
-                const { error: errCompania } = await supabase.from('companias_pagos').insert({
-                    alumno_id: alumnoId,
-                    compania_id: producto_id,
-                    mes: Number(mes),
-                    anio: Number(anio),
+                // 2. 🚀 GUARDAR EN EL HISTORIAL GENERAL (pagos_online)
+                await supabase.from('pagos_online').insert({
+                    user_id: alumnoId,
+                    mp_payment_id: mpPaymentIdStr,
                     monto: montoAbonado,
-                    metodo_pago: 'mercadopago'
+                    concepto: `Pago Cuota Grupo Exclusivo (Mes ${mes}/${anio})`,
+                    tipo_pago: 'compania',
+                    producto_id: producto_id,
+                    estado: 'approved'
                 });
 
-                if (errCompania) throw errCompania;
-
-                console.log("🌟 [WEBHOOK COMPAÑIA] ¡Cuota de Compañía registrada con éxito!");
+                console.log("🌟 [WEBHOOK COMPAÑIA] ¡Cuota de Compañía registrada y guardada en el historial!");
                 return NextResponse.json({ success: true }, { status: 200 });
             }
 
@@ -166,20 +167,10 @@ export async function POST(request: Request) {
             // DESVÍO B: COMPRA DE PACK (Normal o Exclusivo)
             // ==========================================
             const { user_id, producto_id, cupon_id, tipo_clase, creditos, pase_referencia } = metadata;
-            const montoAbonado = payment.transaction_amount;
 
-            console.log(`[WEBHOOK] Procesando carga: User ${user_id}, Tipo ${tipo_clase}, Ref: ${pase_referencia}`);
+            console.log(`[WEBHOOK PACK] Procesando carga: User ${user_id}, Tipo ${tipo_clase}, Ref: ${pase_referencia}`);
 
-            // 1. Evitar duplicados
-            const { data: pagoExistente } = await supabase
-                .from('alumno_packs')
-                .select('id')
-                .eq('mp_payment_id', paymentIdToProcess.toString())
-                .maybeSingle();
-
-            if (pagoExistente) return NextResponse.json({ message: 'Pago ya procesado' }, { status: 200 });
-
-            // 2. Registrar el pack en el historial (SOLO SI NO ES EXCLUSIVO)
+            // 1. Registrar el pack en alumno_packs (SOLO SI NO ES EXCLUSIVO)
             if (String(tipo_clase) !== 'exclusivo') {
                 await supabase.from('alumno_packs').insert({
                     user_id, producto_id, tipo_clase,
@@ -187,11 +178,11 @@ export async function POST(request: Request) {
                     creditos_restantes: Number(creditos),
                     monto_abonado: montoAbonado,
                     estado: 'activo',
-                    mp_payment_id: paymentIdToProcess.toString()
+                    mp_payment_id: mpPaymentIdStr
                 });
             }
 
-            // 3. CARGA DE SALDO INTELIGENTE
+            // 2. CARGA DE SALDO INTELIGENTE
             if (String(tipo_clase) === 'exclusivo') {
                 const { error: errPase } = await supabase.rpc('cargar_pase_exclusivo_manual', {
                     p_usuario_id: user_id,
@@ -210,6 +201,20 @@ export async function POST(request: Request) {
             if (cupon_id) {
                 await supabase.from('cupones_usados').insert({ cupon_id: cupon_id, user_id: user_id });
             }
+
+            // 3. 🚀 GUARDAR EN EL HISTORIAL GENERAL (pagos_online)
+            const nombrePack = String(tipo_clase) === 'exclusivo' ? 'Pase Exclusivo' : `Pack de Clases (${tipo_clase})`;
+            await supabase.from('pagos_online').insert({
+                user_id: user_id,
+                mp_payment_id: mpPaymentIdStr,
+                monto: montoAbonado,
+                concepto: `Compra online: ${nombrePack} - ${creditos} créditos`,
+                tipo_pago: 'pack',
+                producto_id: producto_id,
+                estado: 'approved'
+            });
+
+            console.log("🌟 [WEBHOOK PACK] ¡Pack acreditado y guardado en el historial con éxito!");
         }
 
         return NextResponse.json({ success: true }, { status: 200 });

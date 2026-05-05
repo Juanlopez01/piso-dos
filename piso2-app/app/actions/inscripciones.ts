@@ -140,7 +140,6 @@ export async function procesarInscripcionAction(payload: any) {
         const paseReferencia = payload.p_pase_referencia;
 
         delete payload.p_telefono_comprador;
-        delete payload.p_alumno_nombre_real;
         delete payload.p_pase_referencia; // Esto no va a la DB directamente
 
         // =================================================================
