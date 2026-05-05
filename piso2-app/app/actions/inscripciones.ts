@@ -119,7 +119,7 @@ export async function procesarInscripcionAction(payload: any) {
 
         let turnoId = null;
 
-        // 🚀 SOLO EXIGIMOS CAJA ABIERTA SI EL MONTO ES MAYOR A 0
+        // SOLO EXIGIMOS CAJA ABIERTA SI EL MONTO ES MAYOR A 0
         if (payload.p_monto_caja > 0) {
             const { data: turno } = await supabase
                 .from('caja_turnos')
@@ -132,27 +132,23 @@ export async function procesarInscripcionAction(payload: any) {
             turnoId = turno.id;
         }
 
-        payload.p_turno_caja_id = turnoId
-
-        // Atajamos variables extra
+        // Rescatamos las variables extra
         const telefonoNuevo = payload.p_telefono_comprador;
         const nombreReal = payload.p_alumno_nombre_real;
         const paseReferencia = payload.p_pase_referencia;
 
-        delete payload.p_telefono_comprador;
-        delete payload.p_pase_referencia; // Esto no va a la DB directamente
+        const nombreFinal = (nombreReal || '').trim() || 'Alumno Desconocido';
 
         // =================================================================
-        // 🚀 1. FLUJO VIP PARA CLASES EXCLUSIVAS (Bypass 100% manual y seguro)
+        // 🚀 1. FLUJO VIP PARA CLASES EXCLUSIVAS
         // =================================================================
         if (payload.p_tipo_clase === 'exclusivo') {
 
-            // A. Cobrar en caja (Si vendió una suelta o pack)
             if (payload.p_monto_caja > 0 && turnoId) {
                 const { error: errCaja } = await supabase.from('caja_movimientos').insert({
                     turno_id: turnoId,
                     tipo: 'ingreso',
-                    concepto: `Venta ${payload.p_tipo_operacion === 'pack' ? 'Pack' : 'Clase'} Exclusiva | Alumno: ${nombreReal}`,
+                    concepto: `Venta ${payload.p_tipo_operacion === 'pack' ? 'Pack' : 'Clase'} Exclusiva | Alumno: ${nombreFinal}`,
                     monto: payload.p_monto_caja,
                     metodo_pago: payload.p_metodo_pago,
                     origen_referencia: 'inscripcion'
@@ -160,7 +156,6 @@ export async function procesarInscripcionAction(payload: any) {
                 if (errCaja) throw new Error('Error al cobrar en la caja.')
             }
 
-            // B. Si es pack, damos los créditos restantes (+N - 1)
             if (payload.p_tipo_operacion === 'pack' && payload.p_producto_id && payload.p_user_id) {
                 const { data: prod } = await supabase.from('productos').select('creditos').eq('id', payload.p_producto_id).single()
                 if (prod && prod.creditos > 1) {
@@ -172,7 +167,6 @@ export async function procesarInscripcionAction(payload: any) {
                 }
             }
 
-            // C. Si usó crédito, descontamos 1
             if (payload.p_tipo_operacion === 'usar_credito' && payload.p_user_id) {
                 const { error: errDescuento } = await supabase.rpc('cargar_pase_exclusivo_manual', {
                     p_usuario_id: payload.p_user_id,
@@ -182,7 +176,6 @@ export async function procesarInscripcionAction(payload: any) {
                 if (errDescuento) throw new Error('No se pudo descontar el pase exclusivo.')
             }
 
-            // D. INSCRIBIMOS A LA ALUMNA
             let modalidadInsc = 'Clase Suelta';
             if (payload.p_tipo_operacion === 'pack') modalidadInsc = 'Pase Exclusivo (Pack)';
             if (payload.p_tipo_operacion === 'usar_credito') modalidadInsc = 'Pase Exclusivo';
@@ -209,16 +202,30 @@ export async function procesarInscripcionAction(payload: any) {
         // 🚀 2. FLUJO NORMAL (Clases Regulares y Especiales)
         // =================================================================
         else {
-            const { error } = await supabase.rpc('procesar_inscripcion_recepcion', payload)
+            // 🚨 SOLUCIÓN AL ERROR: Armamos un paquete EXACTO con los 9 datos que la BD pide.
+            const rpcPayloadLimpio = {
+                p_clase_id: payload.p_clase_id,
+                p_user_id: payload.p_user_id,
+                p_nombre_invitado: payload.p_nombre_invitado,
+                p_tipo_operacion: payload.p_tipo_operacion,
+                p_tipo_clase: payload.p_tipo_clase,
+                p_monto_caja: payload.p_monto_caja,
+                p_metodo_pago: payload.p_metodo_pago,
+                p_producto_id: payload.p_producto_id,
+                p_turno_caja_id: turnoId
+            };
+
+            const { error } = await supabase.rpc('procesar_inscripcion_recepcion', rpcPayloadLimpio)
+
             if (error) throw error
 
-            // Si es suelta, guardamos el teléfono
+            // Si es nueva y tiene teléfono, se lo guardamos
             if (payload.p_user_id && telefonoNuevo) {
                 await supabase.from('profiles').update({ telefono: telefonoNuevo }).eq('id', payload.p_user_id)
             }
 
-            // Le pegamos el nombre a la caja si hubo pago
-            if (nombreReal && payload.p_monto_caja > 0 && turnoId) {
+            // Anotamos el nombre en el recibo de la caja
+            if (nombreFinal && payload.p_monto_caja > 0 && turnoId) {
                 const { data: ultimoMovimiento } = await supabase
                     .from('caja_movimientos')
                     .select('id, concepto')
@@ -227,8 +234,8 @@ export async function procesarInscripcionAction(payload: any) {
                     .limit(1)
                     .maybeSingle()
 
-                if (ultimoMovimiento && !ultimoMovimiento.concepto.includes(nombreReal)) {
-                    const nuevoConcepto = `${ultimoMovimiento.concepto} | Alumno: ${nombreReal}`
+                if (ultimoMovimiento && !ultimoMovimiento.concepto.includes('| Alumno:')) {
+                    const nuevoConcepto = `${ultimoMovimiento.concepto} | Alumno: ${nombreFinal}`
                     await supabase
                         .from('caja_movimientos')
                         .update({ concepto: nuevoConcepto })
