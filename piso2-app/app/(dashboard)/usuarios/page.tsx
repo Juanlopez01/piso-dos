@@ -158,10 +158,11 @@ function UsuariosContent() {
     const [userStats, setUserStats] = useState<any>(null)
     const [loadingStats, setLoadingStats] = useState(false)
 
-    // 🚀 NUEVOS ESTADOS PARA HISTORIAL DE PAGOS
+    // 🚀 ESTADOS PARA EL HISTORIAL DE PAGOS
     const [historialPagos, setHistorialPagos] = useState<any[]>([])
     const [loadingPagos, setLoadingPagos] = useState(false)
 
+    // 🚀 ESTADOS PARA MÉTRICAS DE LA LIGA
     const [ligaStatsRango, setLigaStatsRango] = useState('mes')
     const [ligaStats, setLigaStats] = useState<any>(null)
     const [loadingLigaStats, setLoadingLigaStats] = useState(false)
@@ -294,12 +295,12 @@ function UsuariosContent() {
         fetchLigaStats(selectedUser.id, newRango)
     }
 
-    // 🚀 SE ACTUALIZÓ PARA TRAER EL HISTORIAL DE COMPRAS/PAGOS DEL ALUMNO
+    // 🚀 LÓGICA DE APERTURA DEL MODAL CON HISTORIAL DE PAGOS INTEGRADO
     const openDetailModal = async (user: UsuarioDirectorio) => {
         setSelectedUser(user)
         setUserStats(null)
         setLigaStats(null)
-        setHistorialPagos([]) // Limpiamos historial viejo
+        setHistorialPagos([]) // Limpiamos el historial previo
         setEditForm({
             obs: user.staff_observations || '',
             intereses_ritmos: user.intereses_procesados || [],
@@ -311,6 +312,7 @@ function UsuariosContent() {
         setLoadingPagos(true)
 
         try {
+            // Traemos métricas generales
             const { data: stats, error } = await supabase.rpc('get_user_metrics_v2', {
                 p_id: user.id,
                 p_role: user.rol
@@ -319,24 +321,75 @@ function UsuariosContent() {
             if (error) throw error;
             if (stats) setUserStats(stats);
 
+            // Si está en La Liga, buscamos sus métricas
             if (user.rol === 'alumno' && (user.nivel_liga === 1 || user.nivel_liga === 2 || user.nivel_liga === '1' || user.nivel_liga === '2')) {
                 setLigaStatsRango('mes')
                 fetchLigaStats(user.id, 'mes')
             }
 
-            // 🚀 BÚSQUEDA DE HISTORIAL EN CAJA: Filtra todos los movimientos que contengan el nombre del alumno
-            const { data: movs } = await supabase
-                .from('caja_movimientos')
-                .select('id, concepto, monto, metodo_pago, created_at, tipo')
-                .ilike('concepto', `%${user.nombre_completo}%`)
+            // 🚀 MEGA-BÚSQUEDA DEL HISTORIAL DE PAGOS (Caja + Liga + Grupos)
+            const nombreBusqueda = user.nombre_completo ? user.nombre_completo.trim() : '';
+            let todosLosPagos: any[] = [];
+
+            if (nombreBusqueda) {
+                // 1. Movimientos en Caja (Sueltas y Packs nuevos)
+                const { data: movs } = await supabase
+                    .from('caja_movimientos')
+                    .select('id, concepto, monto, metodo_pago, created_at, tipo')
+                    .ilike('concepto', `%${nombreBusqueda}%`)
+                    .order('created_at', { ascending: false })
+                    .limit(10)
+
+                if (movs) todosLosPagos = [...todosLosPagos, ...movs];
+            }
+
+            // 2. Pagos de Liga (Manuales o MP)
+            const { data: ligaPagos } = await supabase
+                .from('liga_pagos')
+                .select('id, mes, anio, monto, metodo_pago, created_at')
+                .eq('alumno_id', user.id)
                 .order('created_at', { ascending: false })
                 .limit(10)
 
-            if (movs) setHistorialPagos(movs)
+            if (ligaPagos) {
+                const mapeadosLiga = ligaPagos.map((p: any) => ({
+                    id: p.id,
+                    concepto: `Cuota Liga - Mes ${p.mes}/${p.anio}`,
+                    monto: p.monto,
+                    metodo_pago: p.metodo_pago,
+                    created_at: p.created_at,
+                    tipo: 'ingreso'
+                }))
+                todosLosPagos = [...todosLosPagos, ...mapeadosLiga];
+            }
+
+            // 3. Pagos de Compañías (Manuales o MP)
+            const { data: ciaPagos } = await supabase
+                .from('companias_pagos')
+                .select('id, mes, anio, monto, metodo_pago, created_at, compania:companias(nombre)')
+                .eq('alumno_id', user.id)
+                .order('created_at', { ascending: false })
+                .limit(10)
+
+            if (ciaPagos) {
+                const mapeadosCia = ciaPagos.map((p: any) => ({
+                    id: p.id,
+                    concepto: `Cuota Grupo ${p.compania?.nombre || ''} - Mes ${p.mes}/${p.anio}`,
+                    monto: p.monto,
+                    metodo_pago: p.metodo_pago,
+                    created_at: p.created_at,
+                    tipo: 'ingreso'
+                }))
+                todosLosPagos = [...todosLosPagos, ...mapeadosCia];
+            }
+
+            // Ordenamos y mostramos los últimos 15
+            todosLosPagos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+            setHistorialPagos(todosLosPagos.slice(0, 15));
 
         } catch (error: any) {
-            console.error("Error al cargar métricas:", error);
-            toast.error("No se pudieron cargar las estadísticas.");
+            console.error("Error al cargar datos del usuario:", error);
+            toast.error("No se pudieron cargar algunos datos.");
         }
 
         setLoadingStats(false)
@@ -373,7 +426,28 @@ function UsuariosContent() {
 
     const handlePackSelectionChange = (packId: string) => {
         const prod = productos.find(p => p.id === packId)
-        setPackForm(prev => ({ ...prev, packId, monto: prod ? prod.precio.toString() : '' }))
+        // 🚀 Si hay producto y está en efectivo, auto-descuento inicial
+        let suggestedMonto = prod ? prod.precio.toString() : '';
+        if (prod && packForm.metodo === 'efectivo') {
+            suggestedMonto = Math.round(prod.precio / 1.1).toString();
+        }
+        setPackForm(prev => ({ ...prev, packId, monto: suggestedMonto }))
+    }
+
+    // 🚀 AL CAMBIAR EL MÉTODO DE PAGO, ACTUALIZAMOS EL INPUT DE MONTO
+    const changePackMethod = (metodo: 'efectivo' | 'transferencia') => {
+        setPackForm(prev => {
+            let newMonto = prev.monto;
+            const prod = productos.find(p => p.id === prev.packId);
+            if (prod) {
+                if (metodo === 'efectivo') {
+                    newMonto = Math.round(prod.precio / 1.1).toString();
+                } else {
+                    newMonto = prod.precio.toString();
+                }
+            }
+            return { ...prev, metodo, monto: newMonto };
+        });
     }
 
     const handleAssignPack = async (e: React.FormEvent) => {
@@ -758,33 +832,41 @@ function UsuariosContent() {
                                             <div className="flex justify-center py-4"><Loader2 className="animate-spin text-[#D4E655]" size={16} /></div>
                                         ) : historialPagos.length > 0 ? (
                                             historialPagos.map(mov => (
-                                                <div key={mov.id} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between">
+                                                <div key={mov.id} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors">
                                                     <div>
                                                         <p className="text-xs font-bold text-white uppercase">{mov.concepto}</p>
-                                                        <p className="text-[9px] text-gray-500 uppercase font-bold mt-1">
-                                                            {format(new Date(mov.created_at), "dd MMM yyyy - HH:mm", { locale: es })} • {mov.metodo_pago}
-                                                        </p>
+                                                        <div className="flex items-center gap-2 mt-1.5">
+                                                            <span className="text-[9px] text-gray-500 uppercase font-bold">
+                                                                {format(new Date(mov.created_at), "dd MMM yyyy", { locale: es })}
+                                                            </span>
+                                                            <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo_pago === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                                                                {mov.metodo_pago}
+                                                            </span>
+                                                        </div>
                                                     </div>
-                                                    <span className={`text-sm font-black ${mov.tipo === 'ingreso' ? 'text-green-500' : 'text-red-500'}`}>
-                                                        {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
+                                                    <span className={`text-base font-black shrink-0 ${mov.tipo === 'ingreso' ? 'text-[#D4E655]' : 'text-red-500'}`}>
+                                                        ${Number(mov.monto).toLocaleString()}
                                                     </span>
                                                 </div>
                                             ))
                                         ) : (
                                             <div className="text-center py-6 bg-[#111] rounded-xl border border-white/5">
-                                                <p className="text-[10px] font-bold text-gray-500 uppercase">No hay historial reciente registrado.</p>
+                                                <p className="text-[10px] font-bold text-gray-500 uppercase">No hay historial de pagos registrado.</p>
                                             </div>
                                         )}
                                     </div>
 
+                                    <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2 mt-6">
+                                        <Percent size={16} className="text-[#D4E655]" /> Beneficios Activos
+                                    </h4>
                                     <div className="grid grid-cols-2 gap-4 mb-8">
                                         <div className="bg-[#111] border border-emerald-500/20 rounded-xl p-4">
                                             <label className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest block mb-2">Beca La Liga (%)</label>
-                                            <input type="number" min="0" max="100" value={editForm.becaLiga} onChange={e => setEditForm({ ...editForm, becaLiga: Number(e.target.value) })} className="w-full bg-black border border-white/10 rounded-lg p-2 text-white text-sm font-black outline-none focus:border-emerald-500 text-center" />
+                                            <input type="number" min="0" max="100" value={editForm.becaLiga} onChange={e => setEditForm({ ...editForm, becaLiga: Number(e.target.value) })} className="w-full bg-black border border-white/10 rounded-lg p-2 text-white text-sm font-black outline-none focus:border-emerald-500 text-center transition-colors" />
                                         </div>
                                         <div className="bg-[#111] border border-teal-500/20 rounded-xl p-4">
                                             <label className="text-[10px] font-bold text-teal-400 uppercase tracking-widest block mb-2">Beca Compañía (%)</label>
-                                            <input type="number" min="0" max="100" value={editForm.becaCompania} onChange={e => setEditForm({ ...editForm, becaCompania: Number(e.target.value) })} className="w-full bg-black border border-white/10 rounded-lg p-2 text-white text-sm font-black outline-none focus:border-teal-500 text-center" />
+                                            <input type="number" min="0" max="100" value={editForm.becaCompania} onChange={e => setEditForm({ ...editForm, becaCompania: Number(e.target.value) })} className="w-full bg-black border border-white/10 rounded-lg p-2 text-white text-sm font-black outline-none focus:border-teal-500 text-center transition-colors" />
                                         </div>
                                     </div>
                                 </>
@@ -1005,11 +1087,20 @@ function UsuariosContent() {
                                 </select>
                             </div>
                             {packForm.packId && (
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <button type="button" onClick={() => setPackForm({ ...packForm, metodo: 'efectivo' })} className={`p-4 rounded-xl border flex items-center justify-center gap-2 transition-all ${packForm.metodo === 'efectivo' ? 'bg-[#D4E655] border-[#D4E655] text-black font-black' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}><Wallet size={16} /> Efectivo</button>
-                                        <button type="button" onClick={() => setPackForm({ ...packForm, metodo: 'transferencia' })} className={`p-4 rounded-xl border flex items-center justify-center gap-2 transition-all ${packForm.metodo === 'transferencia' ? 'bg-[#D4E655] border-[#D4E655] text-black font-black' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}><CreditCard size={16} /> Transferencia</button>
+                                <div className="space-y-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Monto a Cobrar ($)</label>
+                                        <div className="relative">
+                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                            <input type="number" required value={packForm.monto} onChange={e => setPackForm({ ...packForm, monto: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-8 pr-4 text-white text-sm font-black outline-none focus:border-[#D4E655] transition-all" placeholder="Ej: 15000" />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <button type="button" onClick={() => changePackMethod('efectivo')} className={`p-4 rounded-xl border flex items-center justify-center gap-2 transition-all ${packForm.metodo === 'efectivo' ? 'bg-[#D4E655] border-[#D4E655] text-black font-black' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}><Wallet size={16} /> Efectivo</button>
+                                            <button type="button" onClick={() => changePackMethod('transferencia')} className={`p-4 rounded-xl border flex items-center justify-center gap-2 transition-all ${packForm.metodo === 'transferencia' ? 'bg-[#D4E655] border-[#D4E655] text-black font-black' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}><CreditCard size={16} /> Transf.</button>
+                                        </div>
                                     </div>
                                 </div>
                             )}
