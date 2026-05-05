@@ -12,7 +12,7 @@ import Link from 'next/link'
 import {
     crearCompaniaAction,
     eliminarCompaniaAction,
-    toggleMiembroCompaniaAction // 🚀 Faltaba importar la acción
+    toggleMiembroCompaniaAction
 } from '@/app/actions/companias'
 
 import { actualizarPrecioGlobalAction } from '@/app/actions/liga'
@@ -40,12 +40,11 @@ export default function CompaniasPage() {
 
     const [companias, setCompanias] = useState<Compania[]>([])
     const [profesores, setProfesores] = useState<any[]>([])
-    const [allAlumnos, setAllAlumnos] = useState<Alumno[]>([]) // 🚀 Recuperamos la lista de alumnos
+    const [allAlumnos, setAllAlumnos] = useState<Alumno[]>([])
 
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
     const [isConfigPreciosOpen, setIsConfigPreciosOpen] = useState(false)
 
-    // 🚀 Recuperamos los estados de Gestión de Miembros
     const [selectedCompania, setSelectedCompania] = useState<Compania | null>(null)
     const [miembrosActuales, setMiembrosActuales] = useState<string[]>([])
     const [searchAlumno, setSearchAlumno] = useState('')
@@ -97,9 +96,12 @@ export default function CompaniasPage() {
             }))
             setCompanias(companiasConConteo)
 
-            // Cargamos precios solo para el modal de configuración del admin
+            // 🚀 CARGAMOS PRECIOS MANUALES EFVO Y TRANSF
             if (['admin', 'recepcion'].includes(rol)) {
-                const clavesCompanias = dataCompanias.map((c: any) => `cuota_compania_${c.id}`)
+                const clavesCompanias = dataCompanias.flatMap((c: any) => [
+                    `cuota_compania_${c.id}_transf`,
+                    `cuota_compania_${c.id}_efvo`
+                ])
                 const { data: config } = await supabase.from('configuraciones').select('*').in('clave', clavesCompanias)
                 if (config) {
                     const mapPrecios: any = {}
@@ -109,7 +111,6 @@ export default function CompaniasPage() {
             }
         }
 
-        // Cargamos profes y alumnos para el modal de gestión
         if (['admin', 'recepcion'].includes(rol)) {
             const { data: profes } = await supabase.from('profiles').select('id, nombre_completo').eq('rol', 'profesor').order('nombre_completo')
             if (profes) setProfesores(profes)
@@ -131,11 +132,15 @@ export default function CompaniasPage() {
         try {
             let huboError = false;
             for (const compania of companias) {
-                const clave = `cuota_compania_${compania.id}`
-                const valor = preciosEdit[clave]
-                if (valor !== undefined) {
-                    const res = await actualizarPrecioGlobalAction(clave, Number(valor))
-                    if (!res.success) huboError = true;
+                // 🚀 GUARDAMOS LAS 2 CLAVES POR CADA COMPAÑÍA
+                const claves = [`cuota_compania_${compania.id}_transf`, `cuota_compania_${compania.id}_efvo`];
+
+                for (const clave of claves) {
+                    const valor = preciosEdit[clave]
+                    if (valor !== undefined && valor !== '') {
+                        const res = await actualizarPrecioGlobalAction(clave, Number(valor))
+                        if (!res.success) huboError = true;
+                    }
                 }
             }
             if (!huboError) {
@@ -180,7 +185,6 @@ export default function CompaniasPage() {
         setProcesando(false)
     }
 
-    // 🚀 RECUPERAMOS LAS FUNCIONES DE GESTIÓN DE MIEMBROS
     const abrirGestionMiembros = async (compania: Compania) => {
         setSelectedCompania(compania)
         setSearchAlumno('')
@@ -234,7 +238,10 @@ export default function CompaniasPage() {
                             <div className="flex gap-2">
                                 <button onClick={() => {
                                     const obj: any = {}
-                                    companias.forEach(c => obj[`cuota_compania_${c.id}`] = preciosCompania[`cuota_compania_${c.id}`] || 15000)
+                                    companias.forEach(c => {
+                                        obj[`cuota_compania_${c.id}_transf`] = preciosCompania[`cuota_compania_${c.id}_transf`] || 15000
+                                        obj[`cuota_compania_${c.id}_efvo`] = preciosCompania[`cuota_compania_${c.id}_efvo`] || 13500
+                                    })
                                     setPreciosEdit(obj)
                                     setIsConfigPreciosOpen(true)
                                 }} className="bg-white/5 border border-white/10 text-white px-4 py-3 rounded-xl font-black uppercase text-xs hover:bg-white/10 transition-all flex items-center gap-2">
@@ -305,7 +312,6 @@ export default function CompaniasPage() {
                                     Entrar al Espacio <ChevronRight size={16} />
                                 </Link>
 
-                                {/* 🚀 BOTÓN RECUPERADO: GESTIONAR ALUMNOS */}
                                 {puedeGestionarAlumnos(compania.coordinador_id) && (
                                     <button onClick={() => abrirGestionMiembros(compania)} className="w-full bg-white/5 text-white border border-white/10 font-bold uppercase py-3 rounded-xl hover:bg-white/10 transition-all text-xs tracking-widest flex items-center justify-center gap-2">
                                         <UserPlus size={14} /> Gestionar Alumnos
@@ -317,33 +323,54 @@ export default function CompaniasPage() {
                 </div>
             </div>
 
-            {/* MODAL CONFIGURACIÓN DE PRECIOS */}
+            {/* MODAL CONFIGURACIÓN DE PRECIOS MANUALES */}
             {isConfigPreciosOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
-                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative">
-                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/10">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-2xl rounded-3xl p-8 shadow-2xl relative max-h-[90vh] flex flex-col">
+                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/10 shrink-0">
                             <h3 className="text-xl font-black text-white uppercase flex items-center gap-2"><Settings2 className="text-blue-500" /> Precios de Grupos</h3>
                             <button onClick={() => setIsConfigPreciosOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
                         </div>
-                        <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+
+                        <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar flex-1">
                             {companias.map(compania => (
-                                <div key={compania.id} className="space-y-2">
-                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{compania.nombre} ($)</label>
-                                    <div className="relative">
-                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
-                                        <input
-                                            type="number"
-                                            value={preciosEdit[`cuota_compania_${compania.id}`] || ''}
-                                            onChange={e => setPreciosEdit({ ...preciosEdit, [`cuota_compania_${compania.id}`]: e.target.value })}
-                                            className="w-full bg-[#111] border border-white/10 rounded-2xl py-3 pl-10 pr-4 text-white font-black outline-none focus:border-blue-500 transition-all"
-                                        />
+                                <div key={compania.id} className="bg-white/5 border border-white/10 p-5 rounded-2xl space-y-4">
+                                    <h4 className="text-sm font-black text-white uppercase tracking-widest border-b border-white/5 pb-3 mb-2">{compania.nombre}</h4>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Transf / MP ($)</label>
+                                            <div className="relative">
+                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                                <input
+                                                    type="number"
+                                                    value={preciosEdit[`cuota_compania_${compania.id}_transf`] || ''}
+                                                    onChange={e => setPreciosEdit({ ...preciosEdit, [`cuota_compania_${compania.id}_transf`]: e.target.value })}
+                                                    className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-8 pr-3 text-white font-black text-sm outline-none focus:border-blue-500 transition-all"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Efectivo ($)</label>
+                                            <div className="relative">
+                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                                <input
+                                                    type="number"
+                                                    value={preciosEdit[`cuota_compania_${compania.id}_efvo`] || ''}
+                                                    onChange={e => setPreciosEdit({ ...preciosEdit, [`cuota_compania_${compania.id}_efvo`]: e.target.value })}
+                                                    className="w-full bg-[#111] border border-blue-500/30 rounded-xl py-3 pl-8 pr-3 text-blue-400 font-black text-sm outline-none focus:border-blue-500 transition-all"
+                                                />
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
                         </div>
-                        <button onClick={handleGuardarPrecios} disabled={procesando} className="w-full bg-blue-600 text-white font-black uppercase py-4 rounded-xl hover:bg-blue-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-6 shadow-lg shadow-blue-500/20">
-                            {procesando ? <Loader2 className="animate-spin" /> : <><Save size={18} /> Actualizar Precios</>}
-                        </button>
+
+                        <div className="pt-6 border-t border-white/10 shrink-0 mt-4">
+                            <button onClick={handleGuardarPrecios} disabled={procesando} className="w-full bg-blue-600 text-white font-black uppercase py-4 rounded-xl hover:bg-blue-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20">
+                                {procesando ? <Loader2 className="animate-spin" /> : <><Save size={18} /> Actualizar Todos los Precios</>}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
@@ -416,7 +443,7 @@ export default function CompaniasPage() {
                 </div>
             )}
 
-            {/* 🚀 MODAL RECUPERADO: GESTIONAR MIEMBROS */}
+            {/* 🚀 MODAL ACTUALIZADO: GESTIONAR MIEMBROS */}
             {selectedCompania && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setSelectedCompania(null)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-xl rounded-3xl overflow-hidden shadow-2xl relative flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>

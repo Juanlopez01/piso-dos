@@ -10,7 +10,7 @@ import {
     Megaphone, BookOpen, GraduationCap, ChevronRight,
     CheckCircle2, AlertCircle, Users, ClipboardEdit, Save, FileText,
     Search, UserCog, UserMinus, Star, Send, Trash2, Clock, Settings2, Percent,
-    X, Coins
+    X, Coins, CalendarDays
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -36,7 +36,7 @@ const parseSafeDate = (dateStr: string | null | undefined) => {
     return isNaN(parsed.getTime()) ? new Date() : parsed
 }
 
-const fetcherLiga = async (uid: string, supabase: any) => {
+const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, supabase: any) => {
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', uid).single()
     if (!profile) throw new Error("No profile")
 
@@ -52,14 +52,13 @@ const fetcherLiga = async (uid: string, supabase: any) => {
     }
     const { data: avisos } = await queryAvisos
 
-    // Seteamos el límite de tiempo al inicio del día (00:00 hs)
     const inicioDelDia = new Date();
     inicioDelDia.setHours(0, 0, 0, 0);
     const hoyIso = inicioDelDia.toISOString();
 
     const cuatrimestreActual = '2026-1'
-    const mesActual = new Date().getMonth() + 1
-    const anioActual = new Date().getFullYear()
+    const mesActual = paramMes
+    const anioActual = paramAnio
 
     const { data: criteriosData } = await supabase.from('liga_criterios').select('*').order('nombre')
 
@@ -74,14 +73,18 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
     const { data: dataClases } = await queryClases
 
-    // LÓGICA FINANCIERA CENTRALIZADA
+    // 🚀 AHORA TRAE LOS 4 PRECIOS MANUALES
     let preciosLiga: any[] = []
-    const { data: config } = await supabase.from('configuraciones').select('*').in('clave', ['cuota_liga_1', 'cuota_liga_2'])
+    const { data: config } = await supabase.from('configuraciones').select('*').in('clave', [
+        'cuota_liga_1_transf', 'cuota_liga_1_efvo',
+        'cuota_liga_2_transf', 'cuota_liga_2_efvo'
+    ])
     preciosLiga = config || []
 
-    const getPrecioBase = (nivel: number) => {
-        const p = preciosLiga.find(c => c.clave === `cuota_liga_${nivel}`)
-        return p ? Number(p.valor) : 15000
+    const getPrecioBase = (nivel: number, metodo: 'efvo' | 'transf') => {
+        const p = preciosLiga.find(c => c.clave === `cuota_liga_${nivel}_${metodo}`)
+        if (metodo === 'transf') return p ? Number(p.valor) : 15000
+        return p ? Number(p.valor) : 13500 // Fallback efvo
     }
 
     const { data: pagosLigaMes } = await supabase.from('liga_pagos').select('alumno_id, monto').eq('mes', mesActual).eq('anio', anioActual)
@@ -89,16 +92,23 @@ const fetcherLiga = async (uid: string, supabase: any) => {
     let misEvaluaciones: any[] = []
     let deudaCuota = false
     let miSaldoPendiente = 0
+    let miSaldoPendienteEfectivo = 0
 
     if (!isStaff) {
-        const precioBase = getPrecioBase(nivelAlumno)
+        // 🚀 CÁLCULO ALUMNO DASHBOARD BASADO EN PRECIOS MANUALES
+        const precioBaseTransf = getPrecioBase(nivelAlumno, 'transf')
+        const precioBaseEfvo = getPrecioBase(nivelAlumno, 'efvo')
         const beca = profile.porcentaje_beca_liga || 0
-        const precioFinal = precioBase - (precioBase * beca / 100)
+
+        const precioFinal = precioBaseTransf - (precioBaseTransf * beca / 100)
+        const precioEfectivo = precioBaseEfvo - (precioBaseEfvo * beca / 100)
 
         const totalAbonado = pagosLigaMes?.filter((p: any) => p.alumno_id === uid).reduce((acc: number, curr: any) => acc + Number(curr.monto), 0) || 0
 
         miSaldoPendiente = Math.max(0, precioFinal - totalAbonado)
-        deudaCuota = miSaldoPendiente > 0
+        miSaldoPendienteEfectivo = Math.max(0, precioEfectivo - totalAbonado)
+
+        deudaCuota = miSaldoPendiente > 0 && miSaldoPendienteEfectivo > 0
 
         const { data: evals } = await supabase.from('liga_evaluaciones').select('*').eq('alumno_id', uid).eq('cuatrimestre', cuatrimestreActual)
         if (evals) misEvaluaciones = evals
@@ -118,7 +128,6 @@ const fetcherLiga = async (uid: string, supabase: any) => {
                 if (!disciplinasMap[keyAgrupacion].proxima_clase || clase.inicio < disciplinasMap[keyAgrupacion].proxima_clase) {
                     disciplinasMap[keyAgrupacion].proxima_clase = clase.inicio
                     disciplinasMap[keyAgrupacion].profesor = clase.profesor?.nombre_completo || 'Staff'
-                    // 🚀 ACÁ ESTABA EL BUG: Faltaba actualizar el ID para el botón
                     disciplinasMap[keyAgrupacion].id = clase.id
                 }
             }
@@ -142,21 +151,42 @@ const fetcherLiga = async (uid: string, supabase: any) => {
 
         if (perfiles) {
             allStudents = perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '').map((p: any) => {
-                const precioBase = getPrecioBase(p.nivel_liga)
+                // 🚀 CÁLCULO PADRÓN STAFF BASADO EN PRECIOS MANUALES
+                const precioBaseTransf = getPrecioBase(p.nivel_liga, 'transf')
+                const precioBaseEfvo = getPrecioBase(p.nivel_liga, 'efvo')
                 const beca = p.porcentaje_beca_liga || 0
-                const precioFinal = precioBase - (precioBase * beca / 100)
+
+                const precioFinal = precioBaseTransf - (precioBaseTransf * beca / 100)
+                const precioEfectivo = precioBaseEfvo - (precioBaseEfvo * beca / 100)
 
                 const totalAbonado = pagosLigaMes?.filter((pago: any) => pago.alumno_id === p.id).reduce((acc: number, curr: any) => acc + Number(curr.monto), 0) || 0
-                const saldoPendiente = Math.max(0, precioFinal - totalAbonado)
 
-                return { ...p, becaVisual: beca, precioFinal, totalAbonado, saldoPendiente, pago_al_dia: saldoPendiente <= 0 }
+                const saldoPendiente = Math.max(0, precioFinal - totalAbonado)
+                const saldoPendienteEfectivo = Math.max(0, precioEfectivo - totalAbonado)
+
+                const pago_al_dia = saldoPendiente <= 0 || saldoPendienteEfectivo <= 0
+
+                return {
+                    ...p,
+                    becaVisual: beca,
+                    precioFinal,
+                    precioEfectivo,
+                    totalAbonado,
+                    saldoPendiente,
+                    saldoPendienteEfectivo,
+                    pago_al_dia
+                }
             })
         }
     }
 
     const legajoCompleto = isStaff ? true : Boolean(profile.edad && profile.direccion && profile.contacto_emergencia && profile.plan_medico && profile.condiciones_medicas)
 
-    return { profile, isStaff, canManage, legajoCompleto, avisos: avisos || [], materias, deudaCuota, miSaldoPendiente, allStudents, preciosLiga, criterios: criteriosData || [] }
+    return {
+        profile, isStaff, canManage, legajoCompleto, avisos: avisos || [],
+        materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo,
+        allStudents, preciosLiga, criterios: criteriosData || []
+    }
 }
 
 function LaLigaContent() {
@@ -165,9 +195,12 @@ function LaLigaContent() {
     const [supabase] = useState(() => createClient())
     const { userId, isLoading: loadingContext } = useCash()
 
+    const [mesDashboard, setMesDashboard] = useState(new Date().getMonth() + 1)
+    const [anioDashboard, setAnioDashboard] = useState(new Date().getFullYear())
+
     const { data, isLoading: loadingSWR, mutate, error } = useSWR(
-        !loadingContext && userId ? ['liga-data', userId] : null,
-        ([_, uid]) => fetcherLiga(uid as string, supabase),
+        !loadingContext && userId ? ['liga-data', userId, mesDashboard, anioDashboard] : null,
+        ([_, uid, m, a]) => fetcherLiga(uid as string, m as number, a as number, supabase),
         { revalidateOnFocus: false }
     )
 
@@ -194,6 +227,10 @@ function LaLigaContent() {
     const [alumnoPago, setAlumnoPago] = useState<any>(null)
     const [montoPago, setMontoPago] = useState<number | ''>('')
     const [metodoPago, setMetodoPago] = useState('efectivo')
+
+    const [pagoMes, setPagoMes] = useState(mesDashboard)
+    const [pagoAnio, setPagoAnio] = useState(anioDashboard)
+
     const [registrandoPago, setRegistrandoPago] = useState(false)
 
     const [avisoForm, setAvisoForm] = useState({ titulo: '', mensaje: '', tipo_destino: 'general', nivel_destino: 1, alumno_id: '' })
@@ -234,16 +271,13 @@ function LaLigaContent() {
         if (!alumnoPago || !montoPago || Number(montoPago) <= 0) return
         setRegistrandoPago(true)
 
-        const mesActual = new Date().getMonth() + 1
-        const anioActual = new Date().getFullYear()
-
         try {
             const { data: pagoExistente, error: errBuscar } = await supabase
                 .from('liga_pagos')
                 .select('id, monto')
                 .eq('alumno_id', alumnoPago.id)
-                .eq('mes', mesActual)
-                .eq('anio', anioActual)
+                .eq('mes', pagoMes)
+                .eq('anio', pagoAnio)
                 .maybeSingle()
 
             if (errBuscar) throw errBuscar
@@ -257,8 +291,8 @@ function LaLigaContent() {
             } else {
                 const { error: errInsert } = await supabase.from('liga_pagos').insert([{
                     alumno_id: alumnoPago.id,
-                    mes: mesActual,
-                    anio: anioActual,
+                    mes: pagoMes,
+                    anio: pagoAnio,
                     monto: Number(montoPago),
                     metodo_pago: metodoPago
                 }])
@@ -271,7 +305,7 @@ function LaLigaContent() {
                 const { error: errCaja } = await supabase.from('caja_movimientos').insert([{
                     turno_id: turnoActivo.id,
                     tipo: 'ingreso',
-                    concepto: `Seña/Cuota Liga: ${alumnoPago.nombre_completo}`,
+                    concepto: `Seña/Cuota Liga (${pagoMes}/${pagoAnio}): ${alumnoPago.nombre_completo}`,
                     monto: Number(montoPago),
                     metodo_pago: metodoPago,
                     origen_referencia: 'liga'
@@ -310,7 +344,7 @@ function LaLigaContent() {
         )
     }
 
-    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, allStudents, criterios, miSaldoPendiente } = data
+    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo, allStudents, criterios } = data
     const nivelActual = profile.nivel_liga || profile.nivel || 1
 
     const filteredStudents = allStudents.filter((s: any) => {
@@ -323,18 +357,19 @@ function LaLigaContent() {
         setGuardandoPrecios(true)
         try {
             let huboError = false;
-            for (const clave of ['cuota_liga_1', 'cuota_liga_2']) {
+            // 🚀 GUARDAMOS LAS 4 CLAVES EXACTAS
+            for (const clave of ['cuota_liga_1_transf', 'cuota_liga_1_efvo', 'cuota_liga_2_transf', 'cuota_liga_2_efvo']) {
                 const valor = preciosEdit[clave]
                 if (valor) {
                     const res = await actualizarPrecioGlobalAction(clave, Number(valor))
                     if (!res.success) {
-                        toast.error(`Error guardando Nivel ${clave.slice(-1)}: ${res.error}`)
+                        toast.error(`Error guardando ${clave}: ${res.error}`)
                         huboError = true;
                     }
                 }
             }
             if (!huboError) {
-                toast.success("Precios de cuotas actualizados correctamente")
+                toast.success("Precios actualizados exactamente")
                 mutate()
             }
         } catch (e) {
@@ -370,19 +405,16 @@ function LaLigaContent() {
     const generarLinkPagoLiga = async () => {
         setProcesandoPago(true)
         try {
-            const mesActual = new Date().getMonth() + 1
-            const anioActual = new Date().getFullYear()
-
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    titulo: `Cuota/Saldo La Liga - Mes ${mesActual}/${anioActual}`,
-                    precio: miSaldoPendiente,
+                    titulo: `Cuota/Saldo La Liga - Mes ${mesDashboard}/${anioDashboard}`,
+                    precio: miSaldoPendiente, // Online se paga precio de lista
                     userId: userId,
                     tipo_pago: 'cuota_liga',
-                    mes: mesActual,
-                    anio: anioActual
+                    mes: mesDashboard,
+                    anio: anioDashboard
                 })
             })
 
@@ -513,15 +545,25 @@ function LaLigaContent() {
                                 <GraduationCap className="text-[#D4E655]" size={24} />
                                 <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.3em] uppercase">Programa de Formación</span>
                             </div>
-                            <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter text-white leading-none">
+                            <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter text-white leading-none flex flex-wrap items-center gap-3">
                                 La Liga {isStaff && <span className="text-gray-500 text-2xl">/ Staff</span>}
                             </h1>
                         </div>
-                        {!isStaff && (
-                            <span className="bg-[#D4E655] text-black px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest shadow-[0_0_15px_rgba(212,230,85,0.2)]">
-                                Nivel {nivelActual}
-                            </span>
-                        )}
+
+                        <div className="flex items-center gap-2 bg-black/40 border border-white/10 p-1.5 rounded-xl shadow-inner">
+                            <CalendarDays size={16} className="text-gray-500 ml-2" />
+                            <select value={mesDashboard} onChange={e => setMesDashboard(Number(e.target.value))} className="bg-transparent text-white text-xs font-bold uppercase outline-none focus:ring-0 cursor-pointer appearance-none px-2 py-1">
+                                {['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'].map((m, i) => (
+                                    <option key={i + 1} value={i + 1} className="bg-[#111] text-white">{m}</option>
+                                ))}
+                            </select>
+                            <span className="text-gray-600">/</span>
+                            <select value={anioDashboard} onChange={e => setAnioDashboard(Number(e.target.value))} className="bg-transparent text-white text-xs font-bold outline-none focus:ring-0 cursor-pointer appearance-none px-2 py-1">
+                                {[2025, 2026, 2027].map(y => (
+                                    <option key={y} value={y} className="bg-[#111] text-white">{y}</option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
 
                     {isStaff && (
@@ -549,14 +591,16 @@ function LaLigaContent() {
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
 
-                {/* 🚀 CARTEL ROJO DEL ALUMNO */}
+                {/* 🚀 CARTEL ROJO DEL ALUMNO (ACTUALIZADO) */}
                 {!isStaff && (deudaCuota) && (
                     <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="flex items-start gap-3">
                             <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={20} />
                             <div>
                                 <h4 className="font-black text-red-500 uppercase text-xs tracking-widest mb-1">Saldo Pendiente</h4>
-                                <p className="text-gray-400 text-[10px] sm:text-xs">Tenés un saldo de <strong className="text-white">${miSaldoPendiente}</strong> en La Liga este mes. Abonalo para ver tu boletín.</p>
+                                <p className="text-gray-400 text-[10px] sm:text-xs">
+                                    Tenés un saldo de <strong className="text-white">${miSaldoPendienteEfectivo} (Efectivo) o ${miSaldoPendiente} (Transf)</strong> en La Liga para este mes. Abonalo para ver tu boletín.
+                                </p>
                             </div>
                         </div>
                         <button onClick={generarLinkPagoLiga} disabled={procesandoPago} className="shrink-0 bg-red-500/20 hover:bg-red-500/30 text-red-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2">
@@ -574,22 +618,43 @@ function LaLigaContent() {
                             </h3>
 
                             <div className="space-y-6">
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Cuota Liga Nivel 1 ($)</label>
-                                    <div className="relative">
-                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
-                                        <input type="number" value={preciosEdit['cuota_liga_1'] || ''} onChange={e => setPreciosEdit({ ...preciosEdit, cuota_liga_1: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-2xl py-4 pl-10 pr-4 text-white font-black text-lg outline-none focus:border-[#D4E655] transition-all" />
+                                {/* 🚀 NIVEL 1: 2 INPUTS */}
+                                <div className="grid grid-cols-2 gap-4 bg-white/5 p-4 rounded-2xl border border-white/10">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nivel 1 (Transferencia)</label>
+                                        <div className="relative">
+                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                            <input type="number" value={preciosEdit['cuota_liga_1_transf'] || ''} onChange={e => setPreciosEdit({ ...preciosEdit, cuota_liga_1_transf: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-8 pr-3 text-white font-bold text-sm outline-none focus:border-[#D4E655] transition-all" />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-[#D4E655] uppercase tracking-widest">Nivel 1 (Efectivo)</label>
+                                        <div className="relative">
+                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                            <input type="number" value={preciosEdit['cuota_liga_1_efvo'] || ''} onChange={e => setPreciosEdit({ ...preciosEdit, cuota_liga_1_efvo: e.target.value })} className="w-full bg-[#111] border border-[#D4E655]/30 rounded-xl py-3 pl-8 pr-3 text-[#D4E655] font-bold text-sm outline-none focus:border-[#D4E655] transition-all" />
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Cuota Liga Nivel 2 ($)</label>
-                                    <div className="relative">
-                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
-                                        <input type="number" value={preciosEdit['cuota_liga_2'] || ''} onChange={e => setPreciosEdit({ ...preciosEdit, cuota_liga_2: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-2xl py-4 pl-10 pr-4 text-white font-black text-lg outline-none focus:border-[#D4E655] transition-all" />
+
+                                {/* 🚀 NIVEL 2: 2 INPUTS */}
+                                <div className="grid grid-cols-2 gap-4 bg-white/5 p-4 rounded-2xl border border-white/10">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nivel 2 (Transferencia)</label>
+                                        <div className="relative">
+                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                            <input type="number" value={preciosEdit['cuota_liga_2_transf'] || ''} onChange={e => setPreciosEdit({ ...preciosEdit, cuota_liga_2_transf: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-8 pr-3 text-white font-bold text-sm outline-none focus:border-[#D4E655] transition-all" />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-[#D4E655] uppercase tracking-widest">Nivel 2 (Efectivo)</label>
+                                        <div className="relative">
+                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                            <input type="number" value={preciosEdit['cuota_liga_2_efvo'] || ''} onChange={e => setPreciosEdit({ ...preciosEdit, cuota_liga_2_efvo: e.target.value })} className="w-full bg-[#111] border border-[#D4E655]/30 rounded-xl py-3 pl-8 pr-3 text-[#D4E655] font-bold text-sm outline-none focus:border-[#D4E655] transition-all" />
+                                        </div>
                                     </div>
                                 </div>
                                 <button onClick={handleGuardarPrecios} disabled={guardandoPrecios} className="w-full bg-[#D4E655] text-black font-black uppercase py-5 rounded-2xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-[#D4E655]/10 mt-4">
-                                    {guardandoPrecios ? <Loader2 className="animate-spin" /> : <><Save size={18} /> Actualizar Precios</>}
+                                    {guardandoPrecios ? <Loader2 className="animate-spin" /> : <><Save size={18} /> Actualizar Precios Manuales</>}
                                 </button>
                             </div>
                         </div>
@@ -663,7 +728,14 @@ function LaLigaContent() {
                                             </div>
 
                                             <button
-                                                onClick={() => { setAlumnoPago(alumno); setMontoPago(alumno.saldoPendiente || 0); setMetodoPago('efectivo'); setIsPagoModalOpen(true); }}
+                                                onClick={() => {
+                                                    setAlumnoPago(alumno);
+                                                    setMetodoPago('efectivo');
+                                                    setMontoPago(alumno.saldoPendienteEfectivo || 0); // 🚀 Sugiere efectivo
+                                                    setPagoMes(mesDashboard);
+                                                    setPagoAnio(anioDashboard);
+                                                    setIsPagoModalOpen(true);
+                                                }}
                                                 className="shrink-0 bg-white/5 hover:bg-emerald-500 text-gray-400 hover:text-black px-3 py-2 rounded-lg text-[10px] font-black transition-all flex items-center justify-center"
                                                 title="Anotar pago"
                                             >
@@ -677,12 +749,14 @@ function LaLigaContent() {
                                                     <Percent size={10} /> Beca {alumno.becaVisual}%
                                                 </span>
                                             )}
+
                                             <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${alumno.pago_al_dia ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20' : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}>
-                                                <Coins size={10} /> Abonó ${alumno.totalAbonado} / ${alumno.precioFinal}
+                                                <Coins size={10} /> Abonó ${alumno.totalAbonado}
                                             </span>
+
                                             {!alumno.pago_al_dia ? (
                                                 <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                                    <AlertCircle size={10} /> Debe ${alumno.saldoPendiente}
+                                                    <AlertCircle size={10} /> Debe Efvo: ${alumno.saldoPendienteEfectivo} | Transf: ${alumno.saldoPendiente}
                                                 </span>
                                             ) : (
                                                 <span className="inline-flex items-center gap-1 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
@@ -845,7 +919,7 @@ function LaLigaContent() {
                 )}
             </div>
 
-            {/* MODAL: REGISTRAR PAGO/SEÑA (NUEVO) */}
+            {/* MODAL: REGISTRAR PAGO/SEÑA (INTELIGENTE CON MES Y DESCUENTO) */}
             {isPagoModalOpen && alumnoPago && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsPagoModalOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
@@ -858,6 +932,44 @@ function LaLigaContent() {
                         </div>
 
                         <form onSubmit={handleRegistrarPago} className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Mes</label>
+                                    <select value={pagoMes} onChange={e => setPagoMes(Number(e.target.value))} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors cursor-pointer">
+                                        {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map((m, i) => (
+                                            <option key={i + 1} value={i + 1}>{m}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Año</label>
+                                    <select value={pagoAnio} onChange={e => setPagoAnio(Number(e.target.value))} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors cursor-pointer">
+                                        {[2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
+                                <select
+                                    value={metodoPago}
+                                    onChange={e => {
+                                        const newMethod = e.target.value;
+                                        setMetodoPago(newMethod);
+                                        // 🚀 AUTO-ACTUALIZAR MONTO SUGERIDO (EFVO / TRANSF)
+                                        if (alumnoPago) {
+                                            setMontoPago(newMethod === 'efectivo' ? (alumnoPago.saldoPendienteEfectivo || 0) : (alumnoPago.saldoPendiente || 0));
+                                        }
+                                    }}
+                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors appearance-none"
+                                >
+                                    <option value="efectivo">Efectivo (Recepción)</option>
+                                    <option value="transferencia">Transferencia Bancaria</option>
+                                    <option value="mercadopago_manual">Mercado Pago (QR Físico)</option>
+                                    <option value="otro">Otro</option>
+                                </select>
+                            </div>
+
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Monto a Registrar ($)</label>
                                 <div className="relative">
@@ -871,21 +983,7 @@ function LaLigaContent() {
                                         className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white font-black outline-none focus:border-emerald-500 transition-colors"
                                     />
                                 </div>
-                                <p className="text-[10px] text-gray-500 text-right mt-1">Saldo restante sugerido: ${alumnoPago.saldoPendiente}</p>
-                            </div>
-
-                            <div className="space-y-2">
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
-                                <select
-                                    value={metodoPago}
-                                    onChange={e => setMetodoPago(e.target.value)}
-                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors appearance-none"
-                                >
-                                    <option value="efectivo">Efectivo (Recepción)</option>
-                                    <option value="transferencia">Transferencia Bancaria</option>
-                                    <option value="mercadopago_manual">Mercado Pago (QR Físico)</option>
-                                    <option value="otro">Otro</option>
-                                </select>
+                                <p className="text-[10px] text-gray-500 text-right mt-1">Saldo sugerido: Efvo ${alumnoPago.saldoPendienteEfectivo} / Otros ${alumnoPago.saldoPendiente}</p>
                             </div>
 
                             <button disabled={registrandoPago} type="submit" className="w-full bg-emerald-600 text-white font-black uppercase py-4 rounded-xl hover:bg-emerald-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg mt-4">

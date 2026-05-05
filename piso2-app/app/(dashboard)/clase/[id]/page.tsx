@@ -67,6 +67,7 @@ type ProductoPack = {
     id: string
     nombre: string
     precio: number
+    precio_efectivo?: number // Opcional por si lo configuran manual a futuro
     creditos: number
     tipo_clase: string
 }
@@ -104,14 +105,8 @@ const fetcher = async ([key, id]: [string, string]) => {
     let packs: ProductoPack[] = []
     if (dataClase) {
         let tipoPackQuery = 'regular';
-
-        if (dataClase.es_combinable === false) {
-            tipoPackQuery = 'exclusivo';
-        } else if (dataClase.tipo_clase === 'Especial') {
-            tipoPackQuery = 'seminario';
-        } else {
-            tipoPackQuery = 'regular';
-        }
+        if (dataClase.es_combinable === false) tipoPackQuery = 'exclusivo';
+        else if (dataClase.tipo_clase === 'Especial') tipoPackQuery = 'seminario';
 
         const { data: packsData } = await supabase
             .from('productos')
@@ -123,6 +118,12 @@ const fetcher = async ([key, id]: [string, string]) => {
         if (packsData) packs = packsData
     }
 
+    // 🚀 TRAEMOS LOS PRECIOS MANUALES DESDE CONFIGURACIONES
+    const { data: configData } = await supabase.from('configuraciones').select('*').in('clave', [
+        'precio_regular_efvo', 'precio_regular_transf',
+        'precio_especial_efvo', 'precio_especial_transf'
+    ])
+
     return {
         clase: dataClase as ClaseDetalle,
         inscripciones: (dataInsc || []).map((i: any) => ({
@@ -130,7 +131,8 @@ const fetcher = async ([key, id]: [string, string]) => {
             estado_asistencia: i.estado_asistencia || (i.presente ? 'presente' : 'ausente')
         })) as Inscripcion[],
         packsDisponibles: packs,
-        userRole: role
+        userRole: role,
+        configuraciones: configData || []
     }
 }
 
@@ -145,8 +147,8 @@ export default function ClaseDetallePage() {
         { revalidateOnFocus: false }
     )
 
-    const { clase, inscripciones, packsDisponibles, userRole } = data || {
-        clase: null, inscripciones: [], packsDisponibles: [], userRole: 'profesor'
+    const { clase, inscripciones, packsDisponibles, userRole, configuraciones } = data || {
+        clase: null, inscripciones: [], packsDisponibles: [], userRole: 'profesor', configuraciones: []
     }
 
     const [busquedaAlumno, setBusquedaAlumno] = useState('')
@@ -168,10 +170,17 @@ export default function ClaseDetallePage() {
         montoManualPack: ''
     })
 
-    const PRECIOS_ALUMNO = {
-        Regular: { efectivo: 14000, transferencia: 15000 },
-        Especial: { efectivo: 16000, transferencia: 18000 }
-    }
+    // 🚀 MAPEAMOS LOS PRECIOS MANUALES DESDE LA BASE DE DATOS
+    const PRECIOS_ALUMNO = useMemo(() => {
+        const getConf = (key: string, def: number) => {
+            const c = configuraciones.find((x: any) => x.clave === key);
+            return c ? Number(c.valor) : def;
+        };
+        return {
+            Regular: { efectivo: getConf('precio_regular_efvo', 14000), transferencia: getConf('precio_regular_transf', 15000) },
+            Especial: { efectivo: getConf('precio_especial_efvo', 16000), transferencia: getConf('precio_especial_transf', 18000) }
+        }
+    }, [configuraciones])
 
     const financialData = useMemo(() => {
         if (!clase) return { totalRecaudado: 0, pagoDocente: 0 }
@@ -193,35 +202,47 @@ export default function ClaseDetallePage() {
 
     // 🚀 LÓGICA DE PRECIO PARA CLASES EXCLUSIVAS
     const packSueltaExclusiva = useMemo(() => {
-        if (!clase?.es_combinable) {
-            return packsDisponibles.find(p => p.creditos === 1);
-        }
+        if (!clase?.es_combinable) return packsDisponibles.find(p => p.creditos === 1);
         return null;
     }, [clase, packsDisponibles]);
 
-    // 🚀 MOTOR DE CÁLCULO DE EFECTIVO (-10% off invertido)
     const precioExclusivaTransf = packSueltaExclusiva ? packSueltaExclusiva.precio : 0;
-    const precioExclusivaEfvo = Math.round(precioExclusivaTransf / 1.1);
+    const precioExclusivaEfvo = packSueltaExclusiva?.precio_efectivo || Math.round(precioExclusivaTransf / 1.1);
 
-    const handleMetodoPagoChange = (nuevoMetodo: 'efectivo' | 'transferencia') => {
-        setGuestForm(prev => {
-            let nuevoMonto = prev.montoManualPack;
-
-            // Si está vendiendo un pack, recalculamos automáticamente el monto sugerido
-            if (prev.tipo === 'pack' && prev.packSeleccionadoId) {
-                const pack = packsDisponibles.find(p => p.id === prev.packSeleccionadoId);
-                if (pack) {
-                    nuevoMonto = nuevoMetodo === 'efectivo' ? String(Math.round(pack.precio / 1.1)) : String(pack.precio);
-                }
+    // 🚀 MOTOR INTELIGENTE DE CÁLCULO DE MONTO
+    const getPrecioSugerido = (tipo: string, pago: string, packId: string) => {
+        if (tipo === 'suelta') {
+            if (esGrupoOFormacion) return ''; // Manual
+            if (!clase?.es_combinable) return pago === 'efectivo' ? String(precioExclusivaEfvo) : String(precioExclusivaTransf);
+            const p = PRECIOS_ALUMNO[clase?.tipo_clase === 'Especial' ? 'Especial' : 'Regular'] || PRECIOS_ALUMNO.Regular;
+            return pago === 'efectivo' ? String(p.efectivo) : String(p.transferencia);
+        }
+        if (tipo === 'pack' && packId) {
+            const pack = packsDisponibles.find(p => p.id === packId);
+            if (pack) {
+                const pEfvo = pack.precio_efectivo || Math.round(pack.precio / 1.1);
+                return pago === 'efectivo' ? String(pEfvo) : String(pack.precio);
             }
-            return { ...prev, pago: nuevoMetodo, montoManualPack: nuevoMonto };
+        }
+        return '';
+    }
+
+    const updateGuestForm = (updates: Partial<typeof guestForm>) => {
+        setGuestForm(prev => {
+            const next = { ...prev, ...updates };
+            if ('tipo' in updates || 'pago' in updates || 'packSeleccionadoId' in updates) {
+                const sugerido = getPrecioSugerido(next.tipo, next.pago, next.packSeleccionadoId);
+                // Si hay sugerencia la aplicamos, sino respetamos lo que estaba tecleado
+                if (sugerido !== '') next.montoManualPack = sugerido;
+            }
+            return next;
         });
     }
 
     useEffect(() => {
         if (isGuestOpen && esGrupoOFormacion) {
             if (['pack', 'usar_credito'].includes(guestForm.tipo)) {
-                setGuestForm(prev => ({ ...prev, tipo: 'suelta' }))
+                updateGuestForm({ tipo: 'suelta' })
             }
         }
     }, [isGuestOpen, esGrupoOFormacion])
@@ -309,19 +330,9 @@ export default function ClaseDetallePage() {
                 const telFinal = guestForm.telefono ? `(${guestForm.telefono})` : ''
                 nombreInvitadoStr = `${nomFinal} ${telFinal}`.trim()
             } else {
-                if (guestForm.tipo === 'suelta') {
-                    if (esGrupoOFormacion) {
-                        monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : 0;
-                    } else if (!clase.es_combinable) {
-                        // 🚀 APLICAMOS EL DESCUENTO PARA CLASE EXCLUSIVA EN EFECTIVO
-                        monto = guestForm.pago === 'efectivo' ? precioExclusivaEfvo : precioExclusivaTransf;
-                    } else {
-                        const precios = PRECIOS_ALUMNO[clase.tipo_clase === 'Especial' ? 'Especial' : 'Regular'] || PRECIOS_ALUMNO.Regular;
-                        monto = guestForm.pago === 'efectivo' ? precios.efectivo : precios.transferencia;
-                    }
-                } else if (guestForm.tipo === 'pack') {
-                    const packSeleccionado = packsDisponibles.find(p => p.id === guestForm.packSeleccionadoId)
-                    monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : (packSeleccionado?.precio || 0)
+                if (['suelta', 'pack'].includes(guestForm.tipo)) {
+                    // 🚀 TODO SE COBRA SEGÚN EL CAMPO MANUAL. Flexibilidad total.
+                    monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : 0;
                 }
 
                 if (!alumnoIdFinal) {
@@ -365,8 +376,7 @@ export default function ClaseDetallePage() {
                 p_producto_id: guestForm.packSeleccionadoId || null,
                 p_email_comprador: null,
                 p_telefono_comprador: null,
-                // 🚀 ESTE ES EL DATO QUE LA CAJA VA A AGARRAR LUEGO:
-                p_alumno_nombre_real: alumnoNombreCaja
+                p_alumno_nombre_real: alumnoNombreCaja // 🚀 ESTE ES EL DATO QUE LA CAJA VA A AGARRAR LUEGO
             }
 
             const response = await procesarInscripcionAction(rpcPayload as any)
@@ -674,7 +684,8 @@ export default function ClaseDetallePage() {
                                                     setAlumnoSeleccionado(alum);
                                                     setBusquedaAlumno('');
                                                     setResultadosBusqueda([]);
-                                                    setGuestForm({ ...guestForm, tipo: esGrupoOFormacion ? 'suelta' : (alum.creditos_regulares > 0 ? 'usar_credito' : 'suelta') })
+                                                    const newTipo = esGrupoOFormacion ? 'suelta' : (alum.creditos_regulares > 0 ? 'usar_credito' : 'suelta');
+                                                    updateGuestForm({ tipo: newTipo as any });
                                                 }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
                                                     <div><p className="text-xs font-bold text-white uppercase">{alum.nombre_completo || alum.nombre}</p><p className="text-[10px] text-gray-500">{alum.email}</p></div>
                                                     <span className="text-[9px] font-black bg-[#D4E655] text-black px-2 py-1 rounded">{alum.creditos_regulares} Cr</span>
@@ -693,37 +704,37 @@ export default function ClaseDetallePage() {
                             {/* BOTONERA INTELIGENTE DE OPCIONES */}
                             <div className={`grid ${tabsDisponibles.length === 2 ? 'grid-cols-2' : 'grid-cols-4'} gap-2 mt-4`}>
                                 {tabsDisponibles.map(tab => (
-                                    <button key={tab.id} type="button" onClick={() => setGuestForm({ ...guestForm, tipo: tab.id as any })} className={`p-3 rounded-2xl border text-[8px] font-black uppercase transition-all ${guestForm.tipo === tab.id ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-500 hover:border-white/20'}`}>
+                                    <button key={tab.id} type="button" onClick={() => updateGuestForm({ tipo: tab.id as any })} className={`p-3 rounded-2xl border text-[8px] font-black uppercase transition-all ${guestForm.tipo === tab.id ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-500 hover:border-white/20'}`}>
                                         {tab.label}
                                     </button>
                                 ))}
                             </div>
 
-                            {/* SI ES VENTA DE PACK (SOLO CLASES NORMALES) */}
-                            {guestForm.tipo === 'pack' && (
-                                <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10 mt-4">
-                                    <select required value={guestForm.packSeleccionadoId} onChange={e => {
-                                        const packElegido = packsDisponibles.find(p => p.id === e.target.value);
-                                        let precioPack = packElegido ? packElegido.precio : 0;
-                                        if (guestForm.pago === 'efectivo') precioPack = Math.round(precioPack / 1.1);
+                            {/* LÓGICA DE PRECIOS EDITABLE Y SELECTOR DE MÉTODO */}
+                            {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack') && (
+                                <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10 mt-4 animate-in fade-in">
+                                    {guestForm.tipo === 'pack' && (
+                                        <select required value={guestForm.packSeleccionadoId} onChange={e => updateGuestForm({ packSeleccionadoId: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655]">
+                                            <option value="">Seleccionar Pase/Pack...</option>
+                                            {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.creditos} clases) - Lista: ${p.precio.toLocaleString()}</option>)}
+                                        </select>
+                                    )}
 
-                                        setGuestForm({ ...guestForm, packSeleccionadoId: e.target.value, montoManualPack: precioPack ? String(precioPack) : '' })
-                                    }} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655]">
-                                        <option value="">Seleccionar Pase/Pack...</option>
-                                        {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.creditos} clases) - Lista: ${p.precio.toLocaleString()}</option>)}
-                                    </select>
-
-                                    {guestForm.packSeleccionadoId && (
+                                    {/* SOLO MUESTRA MONTO SI ES SUELTA O SI ELIGIÓ UN PACK */}
+                                    {(guestForm.tipo === 'suelta' || (guestForm.tipo === 'pack' && guestForm.packSeleccionadoId)) && (
                                         <div className="flex gap-4">
                                             <div className="flex-1">
                                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Monto a Cobrar ($)</label>
-                                                <input type="number" required value={guestForm.montoManualPack} onChange={e => setGuestForm({ ...guestForm, montoManualPack: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm font-black outline-none focus:border-[#D4E655]" placeholder="Ej: 15000" />
+                                                <div className="relative">
+                                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                                    <input type="number" required value={guestForm.montoManualPack} onChange={e => setGuestForm({ ...guestForm, montoManualPack: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-8 pr-4 text-sm font-black outline-none focus:border-[#D4E655] transition-all" placeholder="Ej: 15000" />
+                                                </div>
                                             </div>
                                             <div className="flex-1">
                                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Método de Pago</label>
                                                 <div className="flex bg-[#111] rounded-xl border border-white/10 p-1">
-                                                    <button type="button" onClick={() => handleMetodoPagoChange('efectivo')} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Efectivo</button>
-                                                    <button type="button" onClick={() => handleMetodoPagoChange('transferencia')} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Transf.</button>
+                                                    <button type="button" onClick={() => updateGuestForm({ pago: 'efectivo' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Efectivo</button>
+                                                    <button type="button" onClick={() => updateGuestForm({ pago: 'transferencia' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Transf.</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -767,38 +778,6 @@ export default function ClaseDetallePage() {
                                             </div>
                                         </div>
                                     )}
-                                </div>
-                            )}
-
-                            {/* 🚀 MÉTODOS DE PAGO Y MONTO PARA SUELTA (CON 10% OFF EN EFECTIVO AUTOMÁTICO) */}
-                            {guestForm.tipo === 'suelta' && (
-                                <div className="space-y-4 mt-4 bg-white/5 p-4 rounded-2xl border border-white/10">
-                                    {esGrupoOFormacion ? (
-                                        <div>
-                                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Monto a Cobrar ($)</label>
-                                            <input type="number" required value={guestForm.montoManualPack} onChange={e => setGuestForm({ ...guestForm, montoManualPack: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm font-black outline-none focus:border-[#D4E655]" placeholder="Ej: 15000" />
-                                        </div>
-                                    ) : !clase?.es_combinable ? (
-                                        <div className="flex items-center justify-between px-1">
-                                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Valor Clase Suelta Exclusiva</span>
-                                            <span className="text-sm font-black text-[#D4E655]">
-                                                {packSueltaExclusiva ? `$${(guestForm.pago === 'efectivo' ? precioExclusivaEfvo : precioExclusivaTransf).toLocaleString()}` : 'No hay pack x1 configurado'}
-                                            </span>
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center justify-between px-1">
-                                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Valor Clase Suelta</span>
-                                            <span className="text-sm font-black text-[#D4E655]">${guestForm.pago === 'efectivo' ? (PRECIOS_ALUMNO[clase?.tipo_clase === 'Especial' ? 'Especial' : 'Regular']?.efectivo) : (PRECIOS_ALUMNO[clase?.tipo_clase === 'Especial' ? 'Especial' : 'Regular']?.transferencia)}</span>
-                                        </div>
-                                    )}
-
-                                    <div>
-                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Método de Pago</label>
-                                        <div className="flex bg-[#111] rounded-xl border border-white/10 p-1">
-                                            <button type="button" onClick={() => handleMetodoPagoChange('efectivo')} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Efectivo</button>
-                                            <button type="button" onClick={() => handleMetodoPagoChange('transferencia')} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Transf.</button>
-                                        </div>
-                                    </div>
                                 </div>
                             )}
 
