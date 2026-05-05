@@ -390,7 +390,13 @@ export default function ClaseDetallePage() {
                 nombreInvitadoStr = null;
             }
 
+            // 🚀 PREPARAMOS EL NOMBRE Y LA REFERENCIA PARA ENVIAR AL SERVIDOR
             const alumnoNombreCaja = alumnoIdFinal ? (alumnoSeleccionado?.nombre_completo || '') : `${guestForm.nombre} ${guestForm.apellido}`.trim()
+
+            // Reconstruimos la llave del pase exclusivo por si es necesario
+            const profeObj = clase.profesor;
+            const nombreProfe = Array.isArray(profeObj) ? profeObj[0]?.nombre_completo : (profeObj?.nombre_completo || 'Staff');
+            const llavePase = `${clase.nombre}-${nombreProfe}-${clase.tipo_clase}`;
 
             const rpcPayload = {
                 p_clase_id: clase.id,
@@ -403,7 +409,8 @@ export default function ClaseDetallePage() {
                 p_producto_id: guestForm.packSeleccionadoId || null,
                 p_email_comprador: null,
                 p_telefono_comprador: null,
-                p_alumno_nombre_real: alumnoNombreCaja
+                p_alumno_nombre_real: alumnoNombreCaja,
+                p_pase_referencia: !clase.es_combinable ? llavePase : null // 🚀 LE MANDAMOS LA REFERENCIA
             }
 
             const response = await procesarInscripcionAction(rpcPayload as any)
