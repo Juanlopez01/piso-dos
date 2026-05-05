@@ -136,11 +136,14 @@ export async function procesarInscripcionAction(payload: any) {
 
         payload.p_turno_caja_id = turno.id
 
-        // 🚀 ATAJAMOS Y BORRAMOS PARA QUE LA DB NO CHILLE
+        // 🚀 ATAJAMOS LOS DATOS NUEVOS PARA QUE LA DB NO CHILLE
         const telefonoNuevo = payload.p_telefono_comprador;
-        delete payload.p_telefono_comprador;
+        const nombreReal = payload.p_alumno_nombre_real; // Atrapamos el nombre del frontend
 
-        // EJECUTAMOS LA INSCRIPCIÓN (Ahora sí va a andar porque tiene la misma firma)
+        delete payload.p_telefono_comprador;
+        delete payload.p_alumno_nombre_real; // Lo borramos del payload para no romper el RPC
+
+        // EJECUTAMOS LA INSCRIPCIÓN (Supabase hace lo suyo)
         const { error } = await supabase.rpc('procesar_inscripcion_recepcion', payload)
 
         if (error) throw error
@@ -148,6 +151,27 @@ export async function procesarInscripcionAction(payload: any) {
         // 🚀 SI ANOTAMOS A UN ALUMNO CON CLASE SUELTA, LE GUARDAMOS EL TELÉFONO
         if (payload.p_user_id && telefonoNuevo) {
             await supabase.from('profiles').update({ telefono: telefonoNuevo }).eq('id', payload.p_user_id)
+        }
+
+        // 🚀 MAGIA PARA LA CAJA: Le pegamos el nombre al movimiento recién creado
+        if (nombreReal && payload.p_monto_caja > 0) {
+            const { data: ultimoMovimiento } = await supabase
+                .from('caja_movimientos')
+                .select('id, concepto')
+                .eq('turno_id', turno.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+
+            if (ultimoMovimiento) {
+                // Modificamos el concepto agregándole el nombre al final
+                const nuevoConcepto = `${ultimoMovimiento.concepto} | Alumno: ${nombreReal}`
+
+                await supabase
+                    .from('caja_movimientos')
+                    .update({ concepto: nuevoConcepto })
+                    .eq('id', ultimoMovimiento.id)
+            }
         }
 
         return { success: true }

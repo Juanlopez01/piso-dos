@@ -191,13 +191,32 @@ export default function ClaseDetallePage() {
 
     const esGrupoOFormacion = clase?.es_la_liga || !!clase?.compania_id || clase?.tipo_clase?.toLowerCase().includes('compa') || clase?.tipo_clase?.toLowerCase().includes('formacion');
 
-    // 🚀 LÓGICA DE PRECIO PARA CLASES EXCLUSIVAS (Busca el pase de 1 clase de esta clase)
+    // 🚀 LÓGICA DE PRECIO PARA CLASES EXCLUSIVAS
     const packSueltaExclusiva = useMemo(() => {
         if (!clase?.es_combinable) {
             return packsDisponibles.find(p => p.creditos === 1);
         }
         return null;
     }, [clase, packsDisponibles]);
+
+    // 🚀 MOTOR DE CÁLCULO DE EFECTIVO (-10% off invertido)
+    const precioExclusivaTransf = packSueltaExclusiva ? packSueltaExclusiva.precio : 0;
+    const precioExclusivaEfvo = Math.round(precioExclusivaTransf / 1.1);
+
+    const handleMetodoPagoChange = (nuevoMetodo: 'efectivo' | 'transferencia') => {
+        setGuestForm(prev => {
+            let nuevoMonto = prev.montoManualPack;
+
+            // Si está vendiendo un pack, recalculamos automáticamente el monto sugerido
+            if (prev.tipo === 'pack' && prev.packSeleccionadoId) {
+                const pack = packsDisponibles.find(p => p.id === prev.packSeleccionadoId);
+                if (pack) {
+                    nuevoMonto = nuevoMetodo === 'efectivo' ? String(Math.round(pack.precio / 1.1)) : String(pack.precio);
+                }
+            }
+            return { ...prev, pago: nuevoMetodo, montoManualPack: nuevoMonto };
+        });
+    }
 
     useEffect(() => {
         if (isGuestOpen && esGrupoOFormacion) {
@@ -293,9 +312,9 @@ export default function ClaseDetallePage() {
                 if (guestForm.tipo === 'suelta') {
                     if (esGrupoOFormacion) {
                         monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : 0;
-                        // 🚀 ACÁ COBRAMOS EL PRECIO DE LA EXCLUSIVA SI ES NO COMBINABLE
                     } else if (!clase.es_combinable) {
-                        monto = packSueltaExclusiva ? packSueltaExclusiva.precio : 0;
+                        // 🚀 APLICAMOS EL DESCUENTO PARA CLASE EXCLUSIVA EN EFECTIVO
+                        monto = guestForm.pago === 'efectivo' ? precioExclusivaEfvo : precioExclusivaTransf;
                     } else {
                         const precios = PRECIOS_ALUMNO[clase.tipo_clase === 'Especial' ? 'Especial' : 'Regular'] || PRECIOS_ALUMNO.Regular;
                         monto = guestForm.pago === 'efectivo' ? precios.efectivo : precios.transferencia;
@@ -332,17 +351,22 @@ export default function ClaseDetallePage() {
                 nombreInvitadoStr = null;
             }
 
+            // 🚀 PREPARAMOS EL NOMBRE PARA ENVIAR A LA CAJA
+            const alumnoNombreCaja = alumnoIdFinal ? (alumnoSeleccionado?.nombre_completo || '') : `${guestForm.nombre} ${guestForm.apellido}`.trim()
+
             const rpcPayload = {
                 p_clase_id: clase.id,
                 p_user_id: alumnoIdFinal,
-                p_nombre_invitado: clase.es_combinable === false ? clase.nombre : nombreInvitadoStr,
+                p_nombre_invitado: nombreInvitadoStr, // Ya no se sobrescribe con el nombre de la clase
                 p_tipo_operacion: guestForm.tipo,
                 p_tipo_clase: tipoClaseRPC,
                 p_monto_caja: monto,
                 p_metodo_pago: guestForm.pago,
                 p_producto_id: guestForm.packSeleccionadoId || null,
                 p_email_comprador: null,
-                p_telefono_comprador: null
+                p_telefono_comprador: null,
+                // 🚀 ESTE ES EL DATO QUE LA CAJA VA A AGARRAR LUEGO:
+                p_alumno_nombre_real: alumnoNombreCaja
             }
 
             const response = await procesarInscripcionAction(rpcPayload as any)
@@ -680,10 +704,13 @@ export default function ClaseDetallePage() {
                                 <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10 mt-4">
                                     <select required value={guestForm.packSeleccionadoId} onChange={e => {
                                         const packElegido = packsDisponibles.find(p => p.id === e.target.value);
-                                        setGuestForm({ ...guestForm, packSeleccionadoId: e.target.value, montoManualPack: packElegido ? String(packElegido.precio) : '' })
+                                        let precioPack = packElegido ? packElegido.precio : 0;
+                                        if (guestForm.pago === 'efectivo') precioPack = Math.round(precioPack / 1.1);
+
+                                        setGuestForm({ ...guestForm, packSeleccionadoId: e.target.value, montoManualPack: precioPack ? String(precioPack) : '' })
                                     }} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655]">
                                         <option value="">Seleccionar Pase/Pack...</option>
-                                        {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.creditos} clases) - Mínimo: ${p.precio.toLocaleString()}</option>)}
+                                        {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.creditos} clases) - Lista: ${p.precio.toLocaleString()}</option>)}
                                     </select>
 
                                     {guestForm.packSeleccionadoId && (
@@ -695,8 +722,8 @@ export default function ClaseDetallePage() {
                                             <div className="flex-1">
                                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Método de Pago</label>
                                                 <div className="flex bg-[#111] rounded-xl border border-white/10 p-1">
-                                                    <button type="button" onClick={() => setGuestForm({ ...guestForm, pago: 'efectivo' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Efectivo</button>
-                                                    <button type="button" onClick={() => setGuestForm({ ...guestForm, pago: 'transferencia' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Transf.</button>
+                                                    <button type="button" onClick={() => handleMetodoPagoChange('efectivo')} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Efectivo</button>
+                                                    <button type="button" onClick={() => handleMetodoPagoChange('transferencia')} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Transf.</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -743,7 +770,7 @@ export default function ClaseDetallePage() {
                                 </div>
                             )}
 
-                            {/* 🚀 MÉTODOS DE PAGO Y MONTO PARA SUELTA (CORREGIDO PARA EXCLUSIVAS) */}
+                            {/* 🚀 MÉTODOS DE PAGO Y MONTO PARA SUELTA (CON 10% OFF EN EFECTIVO AUTOMÁTICO) */}
                             {guestForm.tipo === 'suelta' && (
                                 <div className="space-y-4 mt-4 bg-white/5 p-4 rounded-2xl border border-white/10">
                                     {esGrupoOFormacion ? (
@@ -755,7 +782,7 @@ export default function ClaseDetallePage() {
                                         <div className="flex items-center justify-between px-1">
                                             <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Valor Clase Suelta Exclusiva</span>
                                             <span className="text-sm font-black text-[#D4E655]">
-                                                {packSueltaExclusiva ? `$${packSueltaExclusiva.precio.toLocaleString()}` : 'No hay pack x1 configurado'}
+                                                {packSueltaExclusiva ? `$${(guestForm.pago === 'efectivo' ? precioExclusivaEfvo : precioExclusivaTransf).toLocaleString()}` : 'No hay pack x1 configurado'}
                                             </span>
                                         </div>
                                     ) : (
@@ -768,8 +795,8 @@ export default function ClaseDetallePage() {
                                     <div>
                                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Método de Pago</label>
                                         <div className="flex bg-[#111] rounded-xl border border-white/10 p-1">
-                                            <button type="button" onClick={() => setGuestForm({ ...guestForm, pago: 'efectivo' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Efectivo</button>
-                                            <button type="button" onClick={() => setGuestForm({ ...guestForm, pago: 'transferencia' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Transf.</button>
+                                            <button type="button" onClick={() => handleMetodoPagoChange('efectivo')} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Efectivo</button>
+                                            <button type="button" onClick={() => handleMetodoPagoChange('transferencia')} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500 hover:text-white'}`}>Transf.</button>
                                         </div>
                                     </div>
                                 </div>
