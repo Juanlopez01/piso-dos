@@ -8,7 +8,7 @@ import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
     Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
-    Eye, History, ShoppingCart, Smartphone
+    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { format } from 'date-fns'
@@ -158,8 +158,10 @@ function UsuariosContent() {
     const [userStats, setUserStats] = useState<any>(null)
     const [loadingStats, setLoadingStats] = useState(false)
 
+    // ESTADOS PARA EL HISTORIAL DE PAGOS
     const [historialPagos, setHistorialPagos] = useState<any[]>([])
     const [loadingPagos, setLoadingPagos] = useState(false)
+    const [mostrarMasPagos, setMostrarMasPagos] = useState(false)
 
     const [ligaStatsRango, setLigaStatsRango] = useState('mes')
     const [ligaStats, setLigaStats] = useState<any>(null)
@@ -293,11 +295,13 @@ function UsuariosContent() {
         fetchLigaStats(selectedUser.id, newRango)
     }
 
+    // BÚSQUEDA DEL HISTORIAL SÚPER MEJORADA Y UNIFICADA
     const openDetailModal = async (user: UsuarioDirectorio) => {
         setSelectedUser(user)
         setUserStats(null)
         setLigaStats(null)
         setHistorialPagos([])
+        setMostrarMasPagos(false)
         setEditForm({
             obs: user.staff_observations || '',
             intereses_ritmos: user.intereses_procesados || [],
@@ -317,15 +321,39 @@ function UsuariosContent() {
                 fetchLigaStats(user.id, 'mes')
             }
 
-            // 🚀 BÚSQUEDA UNIFICADA DE PAGOS (AHORA INCLUYE pagos_online)
             const nombreBusqueda = user.nombre_completo ? user.nombre_completo.trim() : '';
             let todosLosPagos: any[] = [];
 
+            // 1. PACKS HISTÓRICOS 
+            const { data: packsPagos } = await supabase
+                .from('alumno_packs')
+                .select('id, monto_abonado, created_at, tipo_clase')
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false })
+                .limit(15)
+
+            if (packsPagos) {
+                const mapeadosPacks = packsPagos.map((p: any) => ({
+                    id: `pack-${p.id}`,
+                    concepto: p.tipo_clase === 'exclusivo' ? 'Pase Exclusivo' : `Pack de Clases (${p.tipo_clase})`,
+                    monto: p.monto_abonado,
+                    metodo_pago: 'Sistema',
+                    created_at: p.created_at,
+                    tipo: 'ingreso',
+                    source: 'pack'
+                }))
+                todosLosPagos = [...todosLosPagos, ...mapeadosPacks];
+            }
+
+            // 2. Recepción (Caja manual)
             if (nombreBusqueda) {
+                const partes = nombreBusqueda.split(' ');
+                const nombreCorto = partes.length > 1 ? `${partes[0]} ${partes[partes.length - 1]}` : nombreBusqueda;
+
                 const { data: movs } = await supabase
                     .from('caja_movimientos')
                     .select('id, concepto, monto, metodo_pago, created_at, tipo')
-                    .ilike('concepto', `%${nombreBusqueda}%`)
+                    .ilike('concepto', `%${nombreCorto}%`)
                     .order('created_at', { ascending: false })
                     .limit(15)
 
@@ -335,6 +363,7 @@ function UsuariosContent() {
                 }
             }
 
+            // 3. La Liga
             const { data: ligaPagos } = await supabase
                 .from('liga_pagos')
                 .select('id, mes, anio, monto, metodo_pago, created_at')
@@ -355,6 +384,7 @@ function UsuariosContent() {
                 todosLosPagos = [...todosLosPagos, ...mapeadosLiga];
             }
 
+            // 4. Grupos Exclusivos
             const { data: ciaPagos } = await supabase
                 .from('companias_pagos')
                 .select('id, mes, anio, monto, metodo_pago, created_at, compania:companias(nombre)')
@@ -375,8 +405,8 @@ function UsuariosContent() {
                 todosLosPagos = [...todosLosPagos, ...mapeadosCia];
             }
 
-            // 🚀 BÚSQUEDA EN LA NUEVA TABLA DE MERCADOPAGO
-            const { data: onlinePagos, error: errOnline } = await supabase
+            // 5. App / Tienda MercadoPago
+            const { data: onlinePagos } = await supabase
                 .from('pagos_online')
                 .select('id, concepto, monto, created_at')
                 .eq('user_id', user.id)
@@ -384,10 +414,10 @@ function UsuariosContent() {
                 .order('created_at', { ascending: false })
                 .limit(15)
 
-            if (!errOnline && onlinePagos) {
+            if (onlinePagos) {
                 const mapeadosOnline = onlinePagos.map((p: any) => ({
                     id: `online-${p.id}`,
-                    concepto: p.concepto || 'Compra App MercadoPago',
+                    concepto: p.concepto || 'Compra App MP',
                     monto: p.monto,
                     metodo_pago: 'MercadoPago',
                     created_at: p.created_at,
@@ -397,9 +427,21 @@ function UsuariosContent() {
                 todosLosPagos = [...todosLosPagos, ...mapeadosOnline];
             }
 
-            // Ordenamos todo de más nuevo a más viejo
-            todosLosPagos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-            setHistorialPagos(todosLosPagos.slice(0, 30));
+            // ALGORITMO ANTI-DUPLICADOS
+            const pagosUnicos = todosLosPagos.reduce((acc: any[], current: any) => {
+                const isDuplicate = acc.find(item =>
+                    Math.abs(new Date(item.created_at).getTime() - new Date(current.created_at).getTime()) < 60000 &&
+                    Number(item.monto) === Number(current.monto) &&
+                    Number(current.monto) > 0
+                );
+                if (!isDuplicate) {
+                    acc.push(current);
+                }
+                return acc;
+            }, []);
+
+            pagosUnicos.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+            setHistorialPagos(pagosUnicos);
 
         } catch (error: any) {
             console.error("Error al cargar datos:", error);
@@ -550,6 +592,8 @@ function UsuariosContent() {
     const canCreate = userRole === 'admin' || userRole === 'recepcion'
     const isAdmin = userRole === 'admin'
 
+    const pagosVisibles = mostrarMasPagos ? historialPagos.slice(0, 15) : historialPagos.slice(0, 4);
+
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32">
             <Toaster position="top-center" richColors theme="dark" />
@@ -696,7 +740,7 @@ function UsuariosContent() {
                                     {u.rol === 'alumno' && (
                                         <div className="flex flex-wrap gap-2 w-full mb-2">
                                             <button onClick={() => openPackModal(u)} className="flex-1 py-2 rounded-xl border bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500 hover:text-black text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1.5">
-                                                <CreditCard size={12} /> Pack
+                                                <Package size={12} /> Pack
                                             </button>
 
                                             {(u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') && (
@@ -835,7 +879,7 @@ function UsuariosContent() {
                                         </div>
                                     </div>
 
-                                    {/* 🚀 NUEVO: HISTORIAL DE PAGOS Y PACKS COMPRADOS */}
+                                    {/* 🚀 NUEVO: HISTORIAL DE PAGOS INTEGRADO CON "VER MÁS" */}
                                     <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2 mt-6">
                                         <History size={16} className="text-[#D4E655]" /> Historial de Cargas y Pagos
                                     </h4>
@@ -843,32 +887,47 @@ function UsuariosContent() {
                                         {loadingPagos ? (
                                             <div className="flex justify-center py-4"><Loader2 className="animate-spin text-[#D4E655]" size={16} /></div>
                                         ) : historialPagos.length > 0 ? (
-                                            historialPagos.map(mov => (
-                                                <div key={mov.id} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${mov.source === 'app' ? 'bg-blue-500/10 text-blue-500' : mov.source === 'liga' ? 'bg-yellow-500/10 text-yellow-500' : mov.source === 'grupo' ? 'bg-teal-500/10 text-teal-500' : 'bg-green-500/10 text-green-500'}`}>
-                                                            {mov.source === 'app' ? <Smartphone size={14} /> : mov.source === 'liga' ? <Trophy size={14} /> : mov.source === 'grupo' ? <UsersRound size={14} /> : <Wallet size={14} />}
-                                                        </div>
-                                                        <div>
-                                                            <p className="text-xs font-bold text-white uppercase line-clamp-1">{mov.concepto}</p>
-                                                            <div className="flex items-center gap-2 mt-1.5">
-                                                                <span className="text-[9px] text-gray-500 uppercase font-bold">
-                                                                    {format(new Date(mov.created_at), "dd MMM yyyy", { locale: es })}
-                                                                </span>
-                                                                <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo_pago === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
-                                                                    {mov.metodo_pago}
-                                                                </span>
+                                            <>
+                                                {pagosVisibles.map(mov => (
+                                                    <div key={mov.id} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${mov.source === 'app' ? 'bg-blue-500/10 text-blue-500' : mov.source === 'liga' ? 'bg-yellow-500/10 text-yellow-500' : mov.source === 'grupo' ? 'bg-teal-500/10 text-teal-500' : mov.source === 'pack' ? 'bg-purple-500/10 text-purple-400' : 'bg-green-500/10 text-green-500'}`}>
+                                                                {mov.source === 'app' ? <Smartphone size={14} /> : mov.source === 'liga' ? <Trophy size={14} /> : mov.source === 'grupo' ? <UsersRound size={14} /> : mov.source === 'pack' ? <Package size={14} /> : <Wallet size={14} />}
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-xs font-bold text-white uppercase line-clamp-1">{mov.concepto}</p>
+                                                                <div className="flex items-center gap-2 mt-1.5">
+                                                                    <span className="text-[9px] text-gray-500 uppercase font-bold">
+                                                                        {format(new Date(mov.created_at), "dd MMM yyyy", { locale: es })}
+                                                                    </span>
+                                                                    <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo_pago?.toLowerCase() === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                                                                        {mov.metodo_pago}
+                                                                    </span>
+                                                                </div>
                                                             </div>
                                                         </div>
+                                                        <span className={`text-sm font-black shrink-0 ${mov.tipo === 'ingreso' ? 'text-[#D4E655]' : 'text-red-500'}`}>
+                                                            {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
+                                                        </span>
                                                     </div>
-                                                    <span className={`text-sm font-black shrink-0 ${mov.tipo === 'ingreso' ? 'text-[#D4E655]' : 'text-red-500'}`}>
-                                                        {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
-                                                    </span>
-                                                </div>
-                                            ))
+                                                ))}
+
+                                                {historialPagos.length > 4 && (
+                                                    <button
+                                                        onClick={() => setMostrarMasPagos(!mostrarMasPagos)}
+                                                        className="w-full py-2.5 mt-2 flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-widest text-gray-500 hover:text-white transition-colors border border-white/5 rounded-xl hover:bg-white/5"
+                                                    >
+                                                        {mostrarMasPagos ? (
+                                                            <><ChevronUp size={14} /> Ver menos</>
+                                                        ) : (
+                                                            <><ChevronDown size={14} /> Ver más ({historialPagos.length - 4})</>
+                                                        )}
+                                                    </button>
+                                                )}
+                                            </>
                                         ) : (
                                             <div className="text-center py-6 bg-[#111] rounded-xl border border-white/5">
-                                                <p className="text-[10px] font-bold text-gray-500 uppercase">No hay historial de pagos registrado.</p>
+                                                <p className="text-[10px] font-bold text-gray-500 uppercase">No hay historial reciente registrado.</p>
                                             </div>
                                         )}
                                     </div>
