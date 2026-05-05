@@ -1,4 +1,3 @@
-// app/actions/usuarios.ts
 'use server'
 
 import { createClient } from '@/utils/supabase/server-helper'
@@ -223,29 +222,64 @@ export async function asignarPackAction(
 export async function cobrarLigaAction(usuarioId: string, monto: number, metodoPago: string) {
     const supabase = await createClient()
     try {
-        // 🚀 BLINDAJE: getSession() en lugar de getUser()
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
         const user = session.user
 
         const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user.id).eq('estado', 'abierta').maybeSingle()
-        if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
+        if (!turno && monto > 0) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
 
         const hoy = new Date()
-        const payload = {
-            alumno_id: usuarioId,
-            mes: hoy.getMonth() + 1,
-            anio: hoy.getFullYear(),
-            monto: monto,
-            metodo_pago: metodoPago,
-            turno_caja_id: turno.id
+        const mesActual = hoy.getMonth() + 1
+        const anioActual = hoy.getFullYear()
+
+        // 1. Buscamos si ya tiene un pago parcial
+        const { data: pagoExistente } = await supabase
+            .from('liga_pagos')
+            .select('id, monto')
+            .eq('alumno_id', usuarioId)
+            .eq('mes', mesActual)
+            .eq('anio', anioActual)
+            .maybeSingle()
+
+        if (pagoExistente) {
+            // Sumamos lo que ya pagó más este nuevo pago
+            const { error: errUpdate } = await supabase.from('liga_pagos').update({
+                monto: Number(pagoExistente.monto) + monto,
+                metodo_pago: metodoPago
+            }).eq('id', pagoExistente.id)
+            if (errUpdate) throw new Error(errUpdate.message)
+        } else {
+            // Creamos el pago (Le sacamos turno_caja_id que NO va acá)
+            const { error: errInsert } = await supabase.from('liga_pagos').insert({
+                alumno_id: usuarioId,
+                mes: mesActual,
+                anio: anioActual,
+                monto: monto,
+                metodo_pago: metodoPago
+            })
+            if (errInsert) {
+                if (errInsert.code === '23505') throw new Error('Este alumno ya tiene pagada la cuota de este mes.')
+                throw new Error(errInsert.message)
+            }
         }
 
-        const { error } = await supabase.from('liga_pagos').insert(payload)
-        if (error) {
-            if (error.code === '23505') throw new Error('Este alumno ya tiene pagada la cuota de este mes.')
-            throw new Error(error.message)
+        // 2. Anotamos la plata en la Caja Registradora (caja_movimientos)
+        if (monto > 0 && turno) {
+            const { data: perfilAlumno } = await supabase.from('profiles').select('nombre_completo').eq('id', usuarioId).single()
+            const nombreAlumno = perfilAlumno?.nombre_completo || 'Alumno Desconocido'
+
+            const { error: errCaja } = await supabase.from('caja_movimientos').insert([{
+                turno_id: turno.id,
+                tipo: 'ingreso',
+                concepto: `Seña/Cuota Liga (${mesActual}/${anioActual}): ${nombreAlumno}`,
+                monto: monto,
+                metodo_pago: metodoPago,
+                origen_referencia: 'liga'
+            }])
+
+            if (errCaja) throw new Error(`Error al registrar en caja: ${errCaja.message}`)
         }
 
         revalidatePath('/usuarios')
@@ -254,6 +288,7 @@ export async function cobrarLigaAction(usuarioId: string, monto: number, metodoP
         return { success: false, error: error.message }
     }
 }
+
 export async function cobrarCompaniaAction(usuarioId: string, companiaId: string, monto: number, metodoPago: string) {
     const supabase = await createClient()
     try {
@@ -262,25 +297,64 @@ export async function cobrarCompaniaAction(usuarioId: string, companiaId: string
 
         const user = session.user
 
-        // Chequeamos que la caja esté abierta
         const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user.id).eq('estado', 'abierta').maybeSingle()
-        if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
+        if (!turno && monto > 0) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
 
         const hoy = new Date()
-        const payload = {
-            alumno_id: usuarioId,
-            compania_id: companiaId,
-            mes: hoy.getMonth() + 1,
-            anio: hoy.getFullYear(),
-            monto: monto,
-            metodo_pago: metodoPago,
-            turno_caja_id: turno.id
+        const mesActual = hoy.getMonth() + 1
+        const anioActual = hoy.getFullYear()
+
+        // 1. Buscamos si ya tiene un pago parcial en esta compañía
+        const { data: pagoExistente } = await supabase
+            .from('companias_pagos')
+            .select('id, monto')
+            .eq('alumno_id', usuarioId)
+            .eq('compania_id', companiaId)
+            .eq('mes', mesActual)
+            .eq('anio', anioActual)
+            .maybeSingle()
+
+        if (pagoExistente) {
+            // Actualizamos sumando
+            const { error: errUpdate } = await supabase.from('companias_pagos').update({
+                monto: Number(pagoExistente.monto) + monto,
+                metodo_pago: metodoPago
+            }).eq('id', pagoExistente.id)
+            if (errUpdate) throw new Error(errUpdate.message)
+        } else {
+            // Creamos el pago (SIN turno_caja_id)
+            const { error: errInsert } = await supabase.from('companias_pagos').insert({
+                alumno_id: usuarioId,
+                compania_id: companiaId,
+                mes: mesActual,
+                anio: anioActual,
+                monto: monto,
+                metodo_pago: metodoPago
+            })
+            if (errInsert) {
+                if (errInsert.code === '23505') throw new Error('Este alumno ya abonó la cuota de esta compañía este mes.')
+                throw new Error(errInsert.message)
+            }
         }
 
-        const { error } = await supabase.from('companias_pagos').insert(payload)
-        if (error) {
-            if (error.code === '23505') throw new Error('Este alumno ya abonó la cuota de esta compañía este mes.')
-            throw new Error(error.message)
+        // 2. Anotamos la plata en la Caja Registradora
+        if (monto > 0 && turno) {
+            const { data: perfilAlumno } = await supabase.from('profiles').select('nombre_completo').eq('id', usuarioId).single()
+            const nombreAlumno = perfilAlumno?.nombre_completo || 'Alumno Desconocido'
+
+            const { data: dataCompania } = await supabase.from('companias').select('nombre').eq('id', companiaId).single()
+            const nombreCia = dataCompania?.nombre || 'Grupo'
+
+            const { error: errCaja } = await supabase.from('caja_movimientos').insert([{
+                turno_id: turno.id,
+                tipo: 'ingreso',
+                concepto: `Seña/Cuota Grupo (${mesActual}/${anioActual}): ${nombreCia} - ${nombreAlumno}`,
+                monto: monto,
+                metodo_pago: metodoPago,
+                origen_referencia: 'compania'
+            }])
+
+            if (errCaja) throw new Error(`Error al registrar en caja: ${errCaja.message}`)
         }
 
         revalidatePath('/usuarios')
