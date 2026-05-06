@@ -7,33 +7,60 @@ import useSWR from 'swr'
 import {
     DollarSign, Lock, Unlock, TrendingUp, TrendingDown,
     Loader2, History, MapPin, Wallet, CreditCard, LayoutDashboard,
-    User, X, Info, AlertOctagon, Clock, Users // 🚀 Agregamos Users
+    User, X, Info, AlertOctagon, Clock, Users, Smartphone
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 
-// 🚀 IMPORTAMOS LAS SERVER ACTIONS
 import { abrirCajaAction, cerrarCajaAction, registrarMovimientoAction, cerrarTodasLasCajasAction } from '@/app/actions/caja'
 
-// --- TIPOS Y ESTRUCTURAS ---
 type CajaData = {
     admin: {
         cajasActivas: any[]
         historialCajas: any[]
-        reporteHoras: any[] // 🚀 Nuevo campo para las horas trabajadas
+        reporteHoras: any[]
     } | null
     recepcion: {
         sedes: any[]
         turnoActivo: any | null
         movimientos: any[]
     } | null
+    pagosOnline: any[]
 }
 
-// 🚀 FETCHER PRINCIPAL CORREGIDO
 const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<CajaData> => {
     const supabase = createClient()
+
+    // 🚀 1. TRAEMOS LOS PAGOS LIMPIOS
+    const { data: pagosOnlineData, error: errPagos } = await supabase
+        .from('pagos_online')
+        .select('*')
+        .eq('estado', 'approved')
+        .order('created_at', { ascending: false })
+        .limit(30) // Aumentamos un poquito el límite para que el historial agrupado luzca mejor
+
+    if (errPagos) console.error("Error leyendo pagos online:", errPagos)
+
+    let pagosOnline = pagosOnlineData || []
+
+    // 🚀 2. LE PEGAMOS LOS NOMBRES MANUALMENTE EN JAVASCRIPT
+    if (pagosOnline.length > 0) {
+        const userIds = [...new Set(pagosOnline.map((p: any) => p.user_id).filter(Boolean))]
+
+        if (userIds.length > 0) {
+            const { data: perfiles } = await supabase
+                .from('profiles')
+                .select('id, nombre_completo')
+                .in('id', userIds)
+
+            pagosOnline = pagosOnline.map((pago: any) => ({
+                ...pago,
+                usuario: perfiles?.find((prof: any) => prof.id === pago.user_id) || { nombre_completo: 'Usuario Desconocido' }
+            }))
+        }
+    }
 
     if (role === 'admin') {
         const { data: activas } = await supabase.from('caja_turnos')
@@ -70,14 +97,13 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
             ingresos_con_inicial: Number(caja.total_ingresos) + Number(caja.monto_inicial)
         }))
 
-        // 🚀 NUEVA LÓGICA: CALCULAR HORAS TRABAJADAS EN EL MES ACTUAL
         const hoy = new Date();
         const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString();
 
         const { data: turnosMes } = await supabase.from('caja_turnos')
             .select(`usuario_id, fecha_apertura, fecha_cierre, usuario:profiles(nombre_completo)`)
             .gte('fecha_apertura', primerDiaMes)
-            .not('fecha_cierre', 'is', null) // Solo contamos los turnos que ya cerraron
+            .not('fecha_cierre', 'is', null)
 
         const horasPorRecepcionista: Record<string, any> = {}
 
@@ -87,8 +113,6 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
 
                 const apertura = new Date(turno.fecha_apertura).getTime();
                 const cierre = new Date(turno.fecha_cierre).getTime();
-
-                // Diferencia en milisegundos pasada a horas
                 const diffHoras = (cierre - apertura) / (1000 * 60 * 60);
                 const uid = turno.usuario_id;
 
@@ -106,10 +130,9 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
             })
         }
 
-        // Convertimos el objeto en array y lo ordenamos por quien trabajó más horas
         const reporteHoras = Object.values(horasPorRecepcionista).sort((a: any, b: any) => b.horas - a.horas);
 
-        return { admin: { cajasActivas: activasCalculadas, historialCajas: historialCalculado, reporteHoras }, recepcion: null }
+        return { admin: { cajasActivas: activasCalculadas, historialCajas: historialCalculado, reporteHoras }, recepcion: null, pagosOnline }
 
     } else if (role === 'recepcion') {
         if (!uid) throw new Error("No user ID")
@@ -131,10 +154,10 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
             movimientos = movs || []
         }
 
-        return { admin: null, recepcion: { sedes: sedes || [], turnoActivo, movimientos } }
+        return { admin: null, recepcion: { sedes: sedes || [], turnoActivo, movimientos }, pagosOnline }
     }
 
-    return { admin: null, recepcion: null }
+    return { admin: null, recepcion: null, pagosOnline: [] }
 }
 
 const fetcherDetalle = async ([key, turnoId]: [string, string]) => {
@@ -146,7 +169,6 @@ const fetcherDetalle = async ([key, turnoId]: [string, string]) => {
     return data || []
 }
 
-// 🚀 FUNCIÓN AUXILIAR PARA FORMATEAR HORAS DECIMALES
 const formatHoras = (horasDecimales: number) => {
     const h = Math.floor(horasDecimales);
     const m = Math.round((horasDecimales - h) * 60);
@@ -181,10 +203,11 @@ export default function CajaPage() {
 
     const adminData = data?.admin
     const repData = data?.recepcion
+    const pagosOnline = data?.pagosOnline || []
 
     const cajasActivas = adminData?.cajasActivas || []
     const historialCajas = adminData?.historialCajas || []
-    const reporteHoras = adminData?.reporteHoras || [] // 🚀 Traemos las horas
+    const reporteHoras = adminData?.reporteHoras || []
 
     const sedes = repData?.sedes || []
     const turnoActivo = repData?.turnoActivo || null
@@ -303,6 +326,93 @@ export default function CajaPage() {
         setProcesando(false)
     }
 
+    // 🚀 LÓGICA DE AGRUPACIÓN POR DÍA
+    const pagosAgrupados = pagosOnline.reduce((acc, pago) => {
+        const fecha = format(new Date(pago.created_at), "yyyy-MM-dd");
+        if (!acc[fecha]) {
+            acc[fecha] = { pagos: [], total: 0 };
+        }
+        acc[fecha].pagos.push(pago);
+        acc[fecha].total += Number(pago.monto);
+        return acc;
+    }, {} as Record<string, { pagos: any[], total: number }>);
+
+    const fechasOrdenadas = Object.keys(pagosAgrupados).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    const totalReciente = pagosOnline.reduce((acc, p) => acc + Number(p.monto), 0);
+
+    const renderPagosOnline = (
+        <div className="mt-12">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+                <h2 className="text-lg font-black uppercase text-white flex items-center gap-2">
+                    <Smartphone size={18} className="text-blue-500" /> Pagos Online (MercadoPago)
+                </h2>
+                {pagosOnline.length > 0 && (
+                    <div className="bg-blue-500/10 border border-blue-500/20 px-4 py-2 rounded-xl flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400">
+                            <DollarSign size={16} />
+                        </div>
+                        <div>
+                            <p className="text-[9px] text-blue-400 font-bold uppercase tracking-widest leading-none mb-1">Total Mostrado</p>
+                            <p className="text-xl font-black text-white leading-none">
+                                ${totalReciente.toLocaleString()}
+                            </p>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            <div className="bg-[#111] border border-white/10 rounded-2xl overflow-hidden shadow-xl p-4 md:p-6">
+                {pagosOnline.length === 0 ? (
+                    <p className="text-center text-gray-500 font-bold uppercase text-xs py-8 border-2 border-dashed border-white/5 rounded-xl">
+                        No hay pagos online recientes.
+                    </p>
+                ) : (
+                    <div className="space-y-8">
+                        {fechasOrdenadas.map(fecha => {
+                            const grupo = pagosAgrupados[fecha];
+                            // Forzamos el parseo a mediodía para evitar saltos de zona horaria al formatear
+                            const fechaParseada = new Date(`${fecha}T12:00:00`);
+                            const fechaDisplay = format(fechaParseada, "EEEE d 'de' MMMM", { locale: es });
+
+                            return (
+                                <div key={fecha} className="space-y-3">
+                                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                                        <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest">
+                                            {fechaDisplay}
+                                        </h3>
+                                        <span className="text-[11px] font-black uppercase text-blue-400 bg-blue-500/10 px-2 py-1 rounded">
+                                            Día: ${grupo.total.toLocaleString()}
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                                        {grupo.pagos.map((pago: any) => (
+                                            <div key={pago.id} className="bg-[#09090b] border border-white/5 p-3 rounded-xl flex items-center justify-between hover:border-white/20 hover:bg-white/5 transition-all">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 shrink-0 border border-blue-500/20">
+                                                        <DollarSign size={16} />
+                                                    </div>
+                                                    <div className="overflow-hidden pr-2">
+                                                        <h4 className="font-bold text-white text-sm truncate">{pago.concepto}</h4>
+                                                        <p className="text-[10px] text-gray-500 font-bold uppercase mt-1">
+                                                            {format(new Date(pago.created_at), "HH:mm")} hs • {pago.usuario?.nombre_completo || 'Usuario Desconocido'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <span className="text-blue-400 font-black text-base shrink-0">
+                                                    +${Number(pago.monto).toLocaleString()}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+
     if (isLoading || loadingContext) return (
         <div className="min-h-screen bg-[#050505] flex items-center justify-center">
             <Loader2 className="animate-spin text-[#D4E655] w-10 h-10" />
@@ -322,7 +432,6 @@ export default function CajaPage() {
         return (
             <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in relative">
 
-                {/* --- MODAL DETALLE DE CAJA --- */}
                 {cajaDetalle && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setCajaDetalle(null)}>
                         <div className="bg-[#09090b] border border-white/10 w-full max-w-4xl rounded-3xl p-6 shadow-2xl relative flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
@@ -399,7 +508,7 @@ export default function CajaPage() {
                                                         <span className="text-[10px] text-gray-500 uppercase font-bold">
                                                             {format(new Date(mov.created_at), "HH:mm", { locale: es })} hs
                                                         </span>
-                                                        <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo_pago === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                                                        <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
                                                             {mov.metodo_pago}
                                                         </span>
                                                         {mov.origen_referencia !== 'manual' && (
@@ -418,7 +527,6 @@ export default function CajaPage() {
                         </div>
                     </div>
                 )}
-                {/* --- FIN MODAL DETALLE --- */}
 
                 <div className="flex justify-between items-end mb-8 border-b border-white/10 pb-6">
                     <div>
@@ -507,7 +615,6 @@ export default function CajaPage() {
                     </div>
                 )}
 
-                {/* 🚀 NUEVA SECCIÓN: REPORTE DE HORAS TRABAJADAS */}
                 <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2">
                     <Clock size={18} className="text-[#D4E655]" /> Horas Trabajadas (Mes Actual)
                 </h2>
@@ -589,6 +696,8 @@ export default function CajaPage() {
                         </div>
                     )}
                 </div>
+
+                {renderPagosOnline}
             </div>
         )
     }
@@ -598,10 +707,10 @@ export default function CajaPage() {
     // =================================================================
     if (!turnoActivo) {
         return (
-            <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4 animate-in zoom-in-95 duration-300">
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4 animate-in zoom-in-95 duration-300">
                 <Toaster position="top-center" richColors theme="dark" />
 
-                <div className="max-w-md w-full bg-[#09090b] border border-white/10 rounded-2xl p-8 text-center shadow-2xl relative overflow-hidden">
+                <div className="max-w-md w-full bg-[#09090b] border border-white/10 rounded-2xl p-8 text-center shadow-2xl relative overflow-hidden mb-8">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#D4E655] to-transparent opacity-50" />
 
                     {recienCerrada ? (
@@ -642,6 +751,10 @@ export default function CajaPage() {
                             </form>
                         </>
                     )}
+                </div>
+
+                <div className="w-full max-w-4xl">
+                    {renderPagosOnline}
                 </div>
             </div>
         )
@@ -776,6 +889,8 @@ export default function CajaPage() {
                     )}
                 </div>
             </div>
+
+            {renderPagosOnline}
         </div>
     )
 }
