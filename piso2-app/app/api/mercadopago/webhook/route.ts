@@ -106,7 +106,7 @@ export async function POST(request: Request) {
             }
 
             // =========================================================================
-            // 🚀 BARRERA ANTI-CLONES (El INSERT choca contra el UNIQUE de la BD si MP avisa doble)
+            // 🚀 BARRERA ANTI-CLONES (El INSERT choca contra el UNIQUE de la BD)
             // =========================================================================
             const { error: errControl } = await supabase.from('pagos_online').insert({
                 user_id: userIdFinal,
@@ -114,70 +114,98 @@ export async function POST(request: Request) {
                 monto: montoAbonado,
                 concepto: conceptoFinal,
                 tipo_pago: tipoPagoFinal,
-                producto_id: metadata.producto_id || null,
+                // Limpieza de UUID: Si MP nos manda un string vacío, lo forzamos a null
+                producto_id: (metadata.producto_id && metadata.producto_id.trim() !== '') ? metadata.producto_id : null,
                 estado: 'approved'
             });
 
             if (errControl) {
-                if (errControl.code === '23505') { // Error 23505 es "Violación de unicidad"
-                    console.log(`✅ [WEBHOOK] Candado activado. El pago ${mpPaymentIdStr} intentó procesarse doble por concurrencia y fue bloqueado.`);
+                if (errControl.code === '23505') { // Violación de unicidad
+                    console.log(`✅ [WEBHOOK] Candado activado. El pago ${mpPaymentIdStr} intentó procesarse doble y fue bloqueado.`);
                     return NextResponse.json({ message: 'Pago ya procesado' }, { status: 200 });
                 }
-                throw errControl;
+                throw new Error(`Fallo al guardar en pagos_online: ${errControl.message}`);
             }
 
             // =========================================================================
-            // 🚀 SI LLEGAMOS ACÁ, SOMOS EL PROCESO ÚNICO Y SEGURO. DAMOS LOS CRÉDITOS.
+            // 🚀 OPERACIONES SEGÚN EL TIPO DE COMPRA
             // =========================================================================
 
             if (tipoPagoFinal === 'cuota_liga') {
                 const { mes, anio } = metadata;
                 const { data: pagoExisLiga } = await supabase.from('liga_pagos').select('id, monto').eq('alumno_id', userIdFinal).eq('mes', mes).eq('anio', anio).maybeSingle();
+
                 if (pagoExisLiga) {
-                    await supabase.from('liga_pagos').update({ monto: Number(pagoExisLiga.monto) + montoAbonado }).eq('id', pagoExisLiga.id);
+                    const { error: e1 } = await supabase.from('liga_pagos').update({ monto: Number(pagoExisLiga.monto) + montoAbonado }).eq('id', pagoExisLiga.id);
+                    if (e1) throw new Error(`Fallo al actualizar pago liga: ${e1.message}`);
                 } else {
-                    await supabase.from('liga_pagos').insert({ alumno_id: userIdFinal, mes: Number(mes), anio: Number(anio), monto: montoAbonado, metodo_pago: 'mercadopago' });
+                    const { error: e2 } = await supabase.from('liga_pagos').insert({ alumno_id: userIdFinal, mes: Number(mes), anio: Number(anio), monto: montoAbonado, metodo_pago: 'mercadopago' });
+                    if (e2) throw new Error(`Fallo al insertar pago liga: ${e2.message}`);
                 }
                 console.log("🌟 [WEBHOOK] Cuota Liga procesada.");
 
             } else if (tipoPagoFinal === 'cuota_compania') {
                 const { producto_id, mes, anio } = metadata;
-                const { data: pagoExisCia } = await supabase.from('companias_pagos').select('id, monto').eq('alumno_id', userIdFinal).eq('compania_id', producto_id).eq('mes', mes).eq('anio', anio).maybeSingle();
+                const ciaIdLimpio = (producto_id && producto_id.trim() !== '') ? producto_id : null;
+
+                const { data: pagoExisCia } = await supabase.from('companias_pagos').select('id, monto').eq('alumno_id', userIdFinal).eq('compania_id', ciaIdLimpio).eq('mes', mes).eq('anio', anio).maybeSingle();
+
                 if (pagoExisCia) {
-                    await supabase.from('companias_pagos').update({ monto: Number(pagoExisCia.monto) + montoAbonado }).eq('id', pagoExisCia.id);
+                    const { error: e1 } = await supabase.from('companias_pagos').update({ monto: Number(pagoExisCia.monto) + montoAbonado }).eq('id', pagoExisCia.id);
+                    if (e1) throw new Error(`Fallo al actualizar pago compañía: ${e1.message}`);
                 } else {
-                    await supabase.from('companias_pagos').insert({ alumno_id: userIdFinal, compania_id: producto_id, mes: Number(mes), anio: Number(anio), monto: montoAbonado, metodo_pago: 'mercadopago' });
+                    const { error: e2 } = await supabase.from('companias_pagos').insert({ alumno_id: userIdFinal, compania_id: ciaIdLimpio, mes: Number(mes), anio: Number(anio), monto: montoAbonado, metodo_pago: 'mercadopago' });
+                    if (e2) throw new Error(`Fallo al insertar pago compañía: ${e2.message}`);
                 }
                 console.log("🌟 [WEBHOOK] Cuota Compañía procesada.");
 
             } else {
+                // FLUJO DE VENTA DE PACKS
                 const { producto_id, cupon_id, tipo_clase, creditos, pase_referencia } = metadata;
 
+                // 🚀 ESTE ES EL LIMPIADOR QUE FALTABA
+                const productoIdLimpio = (producto_id && producto_id.trim() !== '') ? producto_id : null;
+                const tipoClaseSeguro = tipo_clase || 'regular';
+
                 // 1. Guardar info del pack (solo si no es exclusivo)
-                if (String(tipo_clase) !== 'exclusivo') {
-                    await supabase.from('alumno_packs').insert({
-                        user_id: userIdFinal, producto_id, tipo_clase,
+                if (String(tipoClaseSeguro) !== 'exclusivo') {
+                    const { error: errPack } = await supabase.from('alumno_packs').insert({
+                        user_id: userIdFinal,
+                        producto_id: productoIdLimpio,
+                        tipo_clase: tipoClaseSeguro,
                         cantidad_inicial: Number(creditos),
                         creditos_restantes: Number(creditos),
                         monto_abonado: montoAbonado,
                         estado: 'activo',
                         mp_payment_id: mpPaymentIdStr
                     });
+
+                    // 🚀 Y ACÁ ESTÁ EL FRENO DE EMERGENCIA
+                    if (errPack) {
+                        console.error("❌ ERROR CRÍTICO AL INSERTAR ALUMNO_PACKS:", errPack);
+                        throw new Error(`No se pudo guardar el pack en la base de datos: ${errPack.message}`);
+                    }
                 }
 
-                // 2. Cargar créditos a la cuenta
-                if (String(tipo_clase) === 'exclusivo') {
-                    await supabase.rpc('cargar_pase_exclusivo_manual', {
+                // 2. Cargar créditos a la cuenta (SOLO si el paso anterior no tiró error)
+                if (String(tipoClaseSeguro) === 'exclusivo') {
+                    const { error: errEx } = await supabase.rpc('cargar_pase_exclusivo_manual', {
                         p_usuario_id: userIdFinal,
                         p_referencia: pase_referencia,
                         p_cantidad: Number(creditos)
                     });
+                    if (errEx) throw new Error(`Fallo al dar pase exclusivo: ${errEx.message}`);
                 } else {
-                    const field = tipo_clase === 'regular' ? 'creditos_regulares' : 'creditos_especiales';
-                    const { data: prof } = await supabase.from('profiles').select(field).eq('id', userIdFinal).single();
-                    await supabase.from('profiles').update({
-                        [field]: ((prof as any)?.[field] || 0) + Number(creditos)
+                    const field = tipoClaseSeguro === 'regular' ? 'creditos_regulares' : 'creditos_especiales';
+
+                    const { data: prof, error: errProf } = await supabase.from('profiles').select(field).eq('id', userIdFinal).single();
+                    if (errProf || !prof) throw new Error(`Fallo al leer perfil del alumno: ${errProf?.message}`);
+
+                    const { error: errUpd } = await supabase.from('profiles').update({
+                        [field]: ((prof as any)[field] || 0) + Number(creditos)
                     }).eq('id', userIdFinal);
+
+                    if (errUpd) throw new Error(`Fallo al sumar créditos al perfil: ${errUpd.message}`);
                 }
 
                 // 3. Quemar cupón si usó uno
@@ -192,6 +220,7 @@ export async function POST(request: Request) {
 
     } catch (error: any) {
         console.error('❌ [WEBHOOK] Error general:', error);
+        // Si lanzamos status 500, Mercado Pago sabe que falló y lo vuelve a intentar luego
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
