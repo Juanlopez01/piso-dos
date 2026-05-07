@@ -150,3 +150,29 @@ export async function editarMovimientoAction(
         return { success: false, error: error.message }
     }
 }
+
+export async function eliminarMovimientoCajaAction(movimientoId: string) {
+    const supabase = await createClient()
+
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        // 🔒 SEGURIDAD: Solo Admin puede borrar movimientos
+        const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+        if (perfil?.rol !== 'admin') throw new Error('Solo un administrador puede borrar movimientos de caja.')
+
+        // Borramos el movimiento
+        const { error } = await supabase
+            .from('caja_movimientos')
+            .delete()
+            .eq('id', movimientoId)
+
+        if (error) throw error
+
+        revalidatePath('/finanzas') // Ajustá esta ruta a donde tengas la vista de caja
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}

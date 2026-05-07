@@ -411,3 +411,23 @@ export async function crearAlumnoDesdeRecepcionAction(datos: { nombre: string, a
         return { success: false, error: error.message }
     }
 }
+
+export async function eliminarUsuarioCompletoAction(usuarioId: string) {
+    const supabaseAdmin = getAdminClient(); // Usamos el admin client que ya configuramos antes
+
+    try {
+        const { data: { session } } = await supabaseAdmin.auth.getSession()
+        // Aquí podrías chequear si el que ejecuta es Admin nuevamente
+
+        // 1. Borramos el usuario de Auth (esto borra por cascada el Profile si tenés configurado ON DELETE CASCADE)
+        const { error } = await supabaseAdmin.auth.admin.deleteUser(usuarioId)
+
+        if (error) throw error
+
+        revalidatePath('/usuarios')
+        return { success: true }
+    } catch (error: any) {
+        console.error("Error eliminando usuario:", error)
+        return { success: false, error: error.message }
+    }
+}

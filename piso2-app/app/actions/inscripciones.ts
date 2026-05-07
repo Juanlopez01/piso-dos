@@ -228,12 +228,12 @@ export async function procesarInscripcionAction(payload: any) {
 
         let valorInscripcion = 0;
         let modalidadInsc = 'Clase Suelta';
+        let saldoPendienteCalculado = Number(payload.p_saldo_pendiente) || 0; // 🚀 RECIBIMOS EL SALDO
 
         // =================================================================
         // 🚀 1. FLUJO PARA CLASES EXCLUSIVAS
         // =================================================================
         if (esExclusiva) {
-
             if (payload.p_tipo_operacion === 'usar_credito') {
                 modalidadInsc = 'Pase Exclusivo';
                 if (!payload.p_user_id) throw new Error('Falta seleccionar al alumno.');
@@ -249,16 +249,12 @@ export async function procesarInscripcionAction(payload: any) {
 
                 if (packActivo && packActivo.cantidad_inicial > 0) {
                     valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
-
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
                     await supabaseAdmin.from('alumno_packs').update({
                         creditos_restantes: nuevosRestantes,
                         estado: nuevosRestantes === 0 ? 'agotado' : 'activo'
                     }).eq('id', packActivo.id);
-                } else {
-                    valorInscripcion = 0;
                 }
-
                 await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', { p_usuario_id: payload.p_user_id, p_referencia: paseReferencia, p_cantidad: -1 })
             }
             else if (payload.p_tipo_operacion === 'pack') {
@@ -294,7 +290,7 @@ export async function procesarInscripcionAction(payload: any) {
                     estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
                 });
 
-                if (errPackEx) throw new Error(`Fallo al guardar el pack exclusivo: ${errPackEx.message}`);
+                if (errPackEx) throw new Error(`Fallo al guardar el pack: ${errPackEx.message}`);
 
                 if (creditosDelPack > 1) {
                     await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', {
@@ -303,7 +299,6 @@ export async function procesarInscripcionAction(payload: any) {
                         p_cantidad: creditosDelPack - 1
                     })
                 }
-
             }
             else {
                 valorInscripcion = payload.p_monto_caja || 0;
@@ -345,20 +340,14 @@ export async function procesarInscripcionAction(payload: any) {
 
                 if (packActivo && packActivo.cantidad_inicial > 0) {
                     valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
-
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
                     await supabaseAdmin.from('alumno_packs').update({
                         creditos_restantes: nuevosRestantes,
                         estado: nuevosRestantes === 0 ? 'agotado' : 'activo'
                     }).eq('id', packActivo.id);
-                } else {
-                    valorInscripcion = 0;
                 }
 
-                await supabaseAdmin.from('profiles').update({
-                    [campoCredito]: (perfil as any)[campoCredito] - 1
-                }).eq('id', payload.p_user_id);
-
+                await supabaseAdmin.from('profiles').update({ [campoCredito]: (perfil as any)[campoCredito] - 1 }).eq('id', payload.p_user_id);
             }
             else if (payload.p_tipo_operacion === 'pack') {
                 modalidadInsc = 'Pack';
@@ -382,7 +371,7 @@ export async function procesarInscripcionAction(payload: any) {
                 }
 
                 const ahora = new Date();
-                const { error: errPack } = await supabaseAdmin.from('alumno_packs').insert({
+                await supabaseAdmin.from('alumno_packs').insert({
                     user_id: payload.p_user_id,
                     producto_id: productoIdLimpio,
                     tipo_clase: tipoClaseProd,
@@ -394,38 +383,26 @@ export async function procesarInscripcionAction(payload: any) {
                     estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
                 });
 
-                if (errPack) throw new Error(`Fallo al guardar el pack: ${errPack.message}`);
-
                 if (creditosDelPack > 1) {
                     const { data: perfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', payload.p_user_id).single();
-                    await supabaseAdmin.from('profiles').update({
-                        [campoCredito]: ((perfil as any)?.[campoCredito] || 0) + (creditosDelPack - 1)
-                    }).eq('id', payload.p_user_id);
+                    await supabaseAdmin.from('profiles').update({ [campoCredito]: ((perfil as any)?.[campoCredito] || 0) + (creditosDelPack - 1) }).eq('id', payload.p_user_id);
                 }
-
             }
             else if (payload.p_tipo_operacion === 'suelta') {
-                let cajaConcepto = `Venta Clase Suelta`;
-
-                // 🚀 ACÁ ESTÁ EL CAMBIO MÁGICO
-                if (isLiga) {
-                    modalidadInsc = 'La Liga';
-                    cajaConcepto = 'Inscripción La Liga';
-                    valorInscripcion = 0; // La cuota entera va a la caja, a la clase le anota $0
-                } else if (isCompania) {
-                    modalidadInsc = 'Compañía';
-                    cajaConcepto = 'Inscripción Compañía';
-                    valorInscripcion = 0; // La cuota entera va a la caja, a la clase le anota $0
+                if (isLiga || isCompania) {
+                    modalidadInsc = isLiga ? 'La Liga' : 'Compañía';
+                    valorInscripcion = 0;
                 } else {
                     modalidadInsc = 'Clase Suelta';
-                    valorInscripcion = payload.p_monto_caja || 0; // Si es regular/especial, sí suma a la clase
+                    valorInscripcion = payload.p_monto_caja || 0;
                 }
 
                 if (payload.p_monto_caja > 0 && turnoId) {
+                    const concepto = isLiga ? 'Inscripción La Liga' : isCompania ? 'Inscripción Compañía' : 'Venta Clase Suelta';
                     await supabaseAdmin.from('caja_movimientos').insert({
                         turno_id: turnoId,
                         tipo: 'ingreso',
-                        concepto: `${cajaConcepto} | Alumno: ${nombreFinal}`,
+                        concepto: `${concepto} | Alumno: ${nombreFinal}`,
                         monto: payload.p_monto_caja,
                         metodo_pago: payload.p_metodo_pago,
                         origen_referencia: 'inscripcion'
@@ -438,7 +415,7 @@ export async function procesarInscripcionAction(payload: any) {
             }
         }
 
-        // 🚀 GUARDAMOS LA INSCRIPCIÓN PRINCIPAL
+        // 🚀 GUARDAMOS LA INSCRIPCIÓN PRINCIPAL (CON SALDO PENDIENTE)
         const { error: errInsc } = await supabaseAdmin.from('inscripciones').insert({
             user_id: payload.p_user_id || null,
             clase_id: payload.p_clase_id,
@@ -446,6 +423,7 @@ export async function procesarInscripcionAction(payload: any) {
             es_invitado: payload.p_tipo_operacion === 'invitado' || !payload.p_user_id,
             modalidad: modalidadInsc,
             valor_credito: valorInscripcion,
+            saldo_pendiente: saldoPendienteCalculado, // 🚀 GUARDAMOS EL SALDO EN LA DB
             metodo_pago: payload.p_monto_caja > 0 ? payload.p_metodo_pago : 'credito',
             presente: true,
             estado_asistencia: 'presente'
@@ -458,35 +436,23 @@ export async function procesarInscripcionAction(payload: any) {
         }
 
         // =================================================================
-        // 🚀 3. AUTO-MATRICULACIÓN BATCH (RESTO DEL MES PARA LIGA Y COMPAÑÍA)
+        // 🚀 3. AUTO-MATRICULACIÓN BATCH (RESTO DEL MES)
         // =================================================================
         if ((isLiga || isCompania) && payload.p_user_id) {
             try {
                 const fechaClase = new Date(claseDb.inicio);
-
                 const startOfMonth = new Date(fechaClase.getFullYear(), fechaClase.getMonth(), 1).toISOString();
                 const endOfMonth = new Date(fechaClase.getFullYear(), fechaClase.getMonth() + 1, 0, 23, 59, 59).toISOString();
 
-                let query = supabaseAdmin.from('clases')
-                    .select('id')
-                    .eq('tipo_clase', claseDb.tipo_clase)
-                    .gte('inicio', startOfMonth)
-                    .lte('inicio', endOfMonth)
-                    .neq('id', payload.p_clase_id);
-
+                let query = supabaseAdmin.from('clases').select('id').eq('tipo_clase', claseDb.tipo_clase).gte('inicio', startOfMonth).lte('inicio', endOfMonth).neq('id', payload.p_clase_id);
                 if (isLiga) query = query.eq('liga_nivel', claseDb.liga_nivel);
                 if (isCompania) query = query.eq('compania_id', claseDb.compania_id);
 
-                const { data: clasesMes, error: errClasesMes } = await query;
+                const { data: clasesMes } = await query;
 
                 if (clasesMes && clasesMes.length > 0) {
                     const claseIds = clasesMes.map(c => c.id);
-
-                    const { data: inscExistentes } = await supabaseAdmin.from('inscripciones')
-                        .select('clase_id')
-                        .eq('user_id', payload.p_user_id)
-                        .in('clase_id', claseIds);
-
+                    const { data: inscExistentes } = await supabaseAdmin.from('inscripciones').select('clase_id').eq('user_id', payload.p_user_id).in('clase_id', claseIds);
                     const idsExistentes = inscExistentes?.map(i => i.clase_id) || [];
                     const idsAInscribir = claseIds.filter(id => !idsExistentes.includes(id));
 
@@ -494,27 +460,74 @@ export async function procesarInscripcionAction(payload: any) {
                         const batchInscripciones = idsAInscribir.map(id => ({
                             user_id: payload.p_user_id,
                             clase_id: id,
-                            nombre_invitado: null,
-                            es_invitado: false,
                             modalidad: modalidadInsc,
                             valor_credito: 0,
                             metodo_pago: 'credito',
-                            presente: false,
-                            estado_asistencia: null
+                            presente: false
                         }));
-
                         await supabaseAdmin.from('inscripciones').insert(batchInscripciones);
                     }
-                } else if (errClasesMes) {
-                    console.error("Error buscando clases del mes:", errClasesMes);
                 }
-            } catch (errBatch) {
-                console.error("Error silencioso en Auto-Batch:", errBatch);
-            }
+            } catch (errBatch) { console.error("Error silencioso en Auto-Batch:", errBatch); }
         }
 
+        revalidatePath(`/clase/${payload.p_clase_id}`);
         return { success: true }
 
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
+export async function saldarDeudaInscripcionAction(inscripcionId: string, monto: number, metodoPago: string) {
+    const supabase = await createClient()
+    const supabaseAdmin = getAdminClient()
+
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        // 1. Buscamos la inscripción para saber qué clase es y quién es el alumno
+        const { data: insc, error: errInsc } = await supabaseAdmin
+            .from('inscripciones')
+            .select('*, clase:clases(nombre)')
+            .eq('id', inscripcionId)
+            .single()
+
+        if (errInsc || !insc) throw new Error('No se encontró la inscripción')
+
+        // 2. Verificamos caja abierta
+        const { data: turno } = await supabaseAdmin
+            .from('caja_turnos')
+            .select('id')
+            .eq('usuario_id', session.user.id)
+            .eq('estado', 'abierta')
+            .maybeSingle()
+
+        if (!turno) throw new Error("Caja cerrada. Abrí la caja para cobrar el saldo.")
+
+        // 3. Registramos el ingreso en caja
+        const nombreAlumno = insc.nombre_invitado || 'Alumno con cuenta'
+        const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
+            turno_id: turno.id,
+            tipo: 'ingreso',
+            monto: monto,
+            metodo_pago: metodoPago,
+            concepto: `Cobro Saldo Pendiente | Clase: ${insc.clase.nombre} | Alumno: ${nombreAlumno}`,
+            origen_referencia: 'inscripcion'
+        })
+        if (errCaja) throw new Error('Error al registrar en caja')
+
+        // 4. Actualizamos la inscripción: sumamos el valor cobrado y ponemos deuda en 0
+        const { error: errUpd } = await supabaseAdmin.from('inscripciones').update({
+            valor_credito: Number(insc.valor_credito) + monto,
+            saldo_pendiente: 0
+        }).eq('id', inscripcionId)
+
+        if (errUpd) throw new Error('Error al actualizar la deuda')
+
+        revalidatePath(`/clase/${insc.clase_id}`)
+        return { success: true }
     } catch (error: any) {
         return { success: false, error: error.message }
     }
