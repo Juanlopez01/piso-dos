@@ -7,7 +7,10 @@ import useSWR, { mutate as globalMutate } from 'swr'
 import {
     DollarSign, Lock, Unlock, TrendingUp, TrendingDown,
     Loader2, History, MapPin, Wallet, CreditCard, LayoutDashboard,
-    User, X, Info, AlertOctagon, Clock, Users, Smartphone, Pencil
+    User, X, Info, AlertOctagon, Clock, Users, Smartphone, Pencil,
+    ChevronDown,
+    ChevronRight,
+    Trash2
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
@@ -15,7 +18,7 @@ import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 
 // 🚀 IMPORTAMOS LAS SERVER ACTIONS (Incluyendo editarMovimientoAction)
-import { abrirCajaAction, cerrarCajaAction, registrarMovimientoAction, cerrarTodasLasCajasAction, editarMovimientoAction } from '@/app/actions/caja'
+import { abrirCajaAction, cerrarCajaAction, registrarMovimientoAction, cerrarTodasLasCajasAction, editarMovimientoAction, eliminarMovimientoCajaAction } from '@/app/actions/caja'
 
 type CajaData = {
     admin: {
@@ -208,11 +211,15 @@ export default function CajaPage() {
     const [nuevoMovimiento, setNuevoMovimiento] = useState({ tipo: 'ingreso', concepto: '', monto: '', metodo: 'efectivo' })
     const [cajaDetalle, setCajaDetalle] = useState<any>(null)
     const [cerrandoCajas, setCerrandoCajas] = useState(false)
+    const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>(() => {
+        const hoy = format(new Date(), "yyyy-MM-dd");
+        return { [hoy]: true }; // Hoy arranca abierto
+    });
 
     // 🚀 ESTADO PARA EDICIÓN DE MOVIMIENTO
     const [movAEditar, setMovAEditar] = useState<any>(null)
 
-    const { data: movimientosDetalle, isLoading: loadingDetalle } = useSWR(
+    const { data: movimientosDetalle, isLoading: loadingDetalle, mutate: mutateDetalle } = useSWR(
         cajaDetalle ? ['caja-detalle', cajaDetalle.id] : null,
         fetcherDetalle
     )
@@ -280,6 +287,22 @@ export default function CajaPage() {
             toast.error(response.error || 'Hubo un error al cerrar las cajas.')
         }
         setCerrandoCajas(false)
+    }
+
+    const handleEliminarMov = async (id: string) => {
+        if (!confirm('¿Seguro que querés eliminar este movimiento? Esta acción es irreversible.')) return;
+
+        setProcesando(true);
+        const res = await eliminarMovimientoCajaAction(id);
+
+        if (res.success) {
+            toast.success('Movimiento eliminado');
+            mutate(); // Refresca el dashboard
+            if (cajaDetalle) mutateDetalle(); // Refresca el modal si está abierto
+        } else {
+            toast.error(res.error || 'Error al eliminar');
+        }
+        setProcesando(false);
     }
 
     const handleCerrarCaja = async () => {
@@ -394,75 +417,48 @@ export default function CajaPage() {
 
     const renderPagosOnline = (
         <div className="mt-12">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-                <h2 className="text-lg font-black uppercase text-white flex items-center gap-2">
-                    <Smartphone size={18} className="text-blue-500" /> Pagos Online (MercadoPago)
-                </h2>
-                {pagosOnline.length > 0 && (
-                    <div className="bg-blue-500/10 border border-blue-500/20 px-4 py-2 rounded-xl flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400">
-                            <DollarSign size={16} />
-                        </div>
-                        <div>
-                            <p className="text-[9px] text-blue-400 font-bold uppercase tracking-widest leading-none mb-1">Total Mostrado</p>
-                            <p className="text-xl font-black text-white leading-none">
-                                ${totalReciente.toLocaleString()}
-                            </p>
-                        </div>
-                    </div>
-                )}
-            </div>
+            <h2 className="text-lg font-black uppercase text-white flex items-center gap-2 mb-4">
+                <Smartphone size={18} className="text-blue-500" /> MercadoPago (Últimos 5 días)
+            </h2>
+            <div className="space-y-3">
+                {fechasOrdenadas.slice(0, 5).map(fecha => {
+                    const grupo = pagosAgrupados[fecha];
+                    const isExpanded = expandedDays[fecha];
+                    const fechaParseada = new Date(`${fecha}T12:00:00`);
 
-            <div className="bg-[#111] border border-white/10 rounded-2xl overflow-hidden shadow-xl p-4 md:p-6">
-                {pagosOnline.length === 0 ? (
-                    <p className="text-center text-gray-500 font-bold uppercase text-xs py-8 border-2 border-dashed border-white/5 rounded-xl">
-                        No hay pagos online recientes.
-                    </p>
-                ) : (
-                    <div className="space-y-8">
-                        {fechasOrdenadas.map(fecha => {
-                            const grupo = pagosAgrupados[fecha];
-                            const fechaParseada = new Date(`${fecha}T12:00:00`);
-                            const fechaDisplay = format(fechaParseada, "EEEE d 'de' MMMM", { locale: es });
-
-                            return (
-                                <div key={fecha} className="space-y-3">
-                                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                                        <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest">
-                                            {fechaDisplay}
-                                        </h3>
-                                        <span className="text-[11px] font-black uppercase text-blue-400 bg-blue-500/10 px-2 py-1 rounded">
-                                            Día: ${grupo.total.toLocaleString()}
-                                        </span>
-                                    </div>
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                                        {grupo.pagos.map((pago: any) => (
-                                            <div key={pago.id} className="bg-[#09090b] border border-white/5 p-3 rounded-xl flex items-center justify-between gap-3 hover:border-white/20 hover:bg-white/5 transition-all overflow-hidden">
-
-                                                {/* 🚀 ACÁ ESTÁ LA MAGIA DEL FLEX-1 MIN-W-0 */}
-                                                <div className="flex items-center gap-3 flex-1 min-w-0">
-                                                    <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 shrink-0 border border-blue-500/20">
-                                                        <DollarSign size={16} />
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <h4 className="font-bold text-white text-sm truncate">{pago.concepto}</h4>
-                                                        <p className="text-[10px] text-gray-500 font-bold uppercase mt-1 truncate">
-                                                            {format(new Date(pago.created_at), "HH:mm")} hs • {pago.usuario?.nombre_completo || 'Usuario Desconocido'}
-                                                        </p>
-                                                    </div>
-                                                </div>
-
-                                                <span className="text-blue-400 font-black text-base shrink-0 whitespace-nowrap pl-1">
-                                                    +${Number(pago.monto).toLocaleString()}
-                                                </span>
-                                            </div>
-                                        ))}
-                                    </div>
+                    return (
+                        <div key={fecha} className="bg-[#111] border border-white/5 rounded-2xl overflow-hidden shadow-lg">
+                            <button
+                                onClick={() => setExpandedDays(prev => ({ ...prev, [fecha]: !isExpanded }))}
+                                className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-all"
+                            >
+                                <div className="flex items-center gap-3">
+                                    {isExpanded ? <ChevronDown size={16} className="text-blue-400" /> : <ChevronRight size={16} className="text-gray-500" />}
+                                    <span className="text-xs font-black uppercase tracking-widest text-gray-300">
+                                        {format(fechaParseada, "EEEE d 'de' MMMM", { locale: es })}
+                                    </span>
                                 </div>
-                            )
-                        })}
-                    </div>
-                )}
+                                <span className="text-sm font-black text-blue-400">${grupo.total.toLocaleString()}</span>
+                            </button>
+
+                            {isExpanded && (
+                                <div className="p-2 pt-0 space-y-1 animate-in slide-in-from-top-2 duration-200">
+                                    {grupo.pagos.map((p: any) => (
+                                        <div key={p.id} className="bg-black/20 p-3 rounded-xl flex items-center justify-between gap-3">
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-bold text-white text-xs truncate">{p.concepto}</p>
+                                                <p className="text-gray-500 uppercase font-bold text-[9px] mt-0.5">
+                                                    {format(new Date(p.created_at), "HH:mm")} hs • {p.usuario?.nombre_completo}
+                                                </p>
+                                            </div>
+                                            <span className="font-black text-blue-400 text-xs shrink-0">+${Number(p.monto).toLocaleString()}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
             </div>
         </div>
     )
@@ -669,6 +665,14 @@ export default function CajaPage() {
                                                 <button onClick={(e) => { e.stopPropagation(); setMovAEditar(mov); }} className="p-2 bg-white/5 hover:bg-[#D4E655]/20 rounded-lg transition-colors group/btn">
                                                     <Pencil size={14} className="text-gray-400 group-hover/btn:text-[#D4E655]" />
                                                 </button>
+                                                {userRole === 'admin' && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleEliminarMov(mov.id); }}
+                                                        className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 rounded-lg transition-all"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     ))
@@ -1039,6 +1043,14 @@ export default function CajaPage() {
                                         <button onClick={(e) => { e.stopPropagation(); setMovAEditar(mov); }} className="p-2 bg-white/5 hover:bg-[#D4E655]/20 rounded-lg transition-colors group/btn">
                                             <Pencil size={16} className="text-gray-400 group-hover/btn:text-[#D4E655]" />
                                         </button>
+                                        {userRole === 'admin' && (
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleEliminarMov(mov.id); }}
+                                                className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 rounded-lg transition-all"
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ))}
