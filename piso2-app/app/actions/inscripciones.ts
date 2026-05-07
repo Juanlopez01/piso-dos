@@ -4,7 +4,7 @@ import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
 
-// 🚀 CLIENTE DIOS: Bypassea los escudos de seguridad (RLS) para poder modificar créditos de otros usuarios
+// 🚀 CLIENTE DIOS: Bypassea los escudos de seguridad (RLS)
 const getAdminClient = () => {
     return createAdminClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -71,15 +71,19 @@ export async function eliminarInscripcionAction(inscripcionId: string) {
 
     const inscripcion = inscripcionData as any;
     const claseInfo = Array.isArray(inscripcion.clase) ? inscripcion.clase[0] : inscripcion.clase;
-    const esExclusiva = claseInfo.es_combinable === false;
+
+    const tipoClaseStr = (claseInfo.tipo_clase || '').toLowerCase();
+    const esExclusiva = claseInfo.es_combinable === false || tipoClaseStr === 'exclusivo';
 
     if (esExclusiva) {
-        // FLUJO VIP: CANCELACIÓN DE CLASES EXCLUSIVAS
+        // =================================================================
+        // 🚀 DEVOLUCIÓN DE EXCLUSIVAS (LIFO en packs)
+        // =================================================================
         const { error: errDelete } = await supabaseAdmin.from('inscripciones').delete().eq('id', inscripcionId)
         if (errDelete) return { success: false, error: 'Error al cancelar la reserva' }
 
         if (inscripcion.user_id && inscripcion.modalidad !== 'Invitado') {
-            const profeObj = claseInfo.profesor;
+            const profeObj: any = claseInfo.profesor;
             const nombreProfe = Array.isArray(profeObj) ? profeObj[0]?.nombre_completo : (profeObj?.nombre_completo || 'Staff');
             const llavePase = `${claseInfo.nombre}-${nombreProfe}-${claseInfo.tipo_clase}`;
 
@@ -88,24 +92,55 @@ export async function eliminarInscripcionAction(inscripcionId: string) {
                 p_referencia: llavePase,
                 p_cantidad: 1
             })
+
+            const { data: latestPackEx } = await supabaseAdmin.from('alumno_packs')
+                .select('id, creditos_restantes')
+                .eq('user_id', inscripcion.user_id)
+                .eq('tipo_clase', 'exclusivo')
+                .order('fecha_compra', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (latestPackEx) {
+                await supabaseAdmin.from('alumno_packs').update({
+                    creditos_restantes: latestPackEx.creditos_restantes + 1
+                }).eq('id', latestPackEx.id);
+            }
         }
         return { success: true }
 
     } else {
-        // FLUJO CLÁSICO: DEVOLUCIÓN DE CRÉDITOS MANUAL Y 100% SEGURA
-        const isEspecial = claseInfo.tipo_clase === 'Especial' || claseInfo.tipo_clase === 'seminario';
+        // =================================================================
+        // 🚀 DEVOLUCIÓN DE REGULARES / ESPECIALES (LIFO en packs)
+        // =================================================================
+        const isEspecial = tipoClaseStr === 'especial' || tipoClaseStr === 'seminario';
         const campoCredito = isEspecial ? 'creditos_especiales' : 'creditos_regulares';
+        const tipoPack = isEspecial ? 'seminario' : 'regular';
 
         const { error: errDelete } = await supabaseAdmin.from('inscripciones').delete().eq('id', inscripcionId)
         if (errDelete) return { success: false, error: 'Error al cancelar la reserva' }
 
-        if (inscripcion.user_id && inscripcion.modalidad !== 'Invitado') {
-            const { data: perfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', inscripcion.user_id).single();
+        if (inscripcion.user_id && (inscripcion.modalidad === 'Crédito' || inscripcion.modalidad === 'Pack')) {
 
+            const { data: perfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', inscripcion.user_id).single();
             if (perfil) {
                 await supabaseAdmin.from('profiles').update({
                     [campoCredito]: ((perfil as any)[campoCredito] || 0) + 1
                 }).eq('id', inscripcion.user_id);
+            }
+
+            const { data: latestPack } = await supabaseAdmin.from('alumno_packs')
+                .select('id, creditos_restantes')
+                .eq('user_id', inscripcion.user_id)
+                .eq('tipo_clase', tipoPack)
+                .order('fecha_compra', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (latestPack) {
+                await supabaseAdmin.from('alumno_packs').update({
+                    creditos_restantes: latestPack.creditos_restantes + 1
+                }).eq('id', latestPack.id);
             }
         }
 
@@ -126,8 +161,8 @@ export async function enviarNotificacionClaseAction(notificaciones: any[]) {
 }
 
 export async function procesarInscripcionAction(payload: any) {
-    const supabase = await createClient() // Usamos el normal solo para chequear si el que hace click está logueado
-    const supabaseAdmin = getAdminClient() // Usamos el Admin para mover los datos sin que RLS nos bloquee
+    const supabase = await createClient()
+    const supabaseAdmin = getAdminClient()
 
     try {
         const { data: { session } } = await supabase.auth.getSession()
@@ -143,132 +178,223 @@ export async function procesarInscripcionAction(payload: any) {
                 .eq('estado', 'abierta')
                 .maybeSingle()
 
-            if (!turno) throw new Error("Caja cerrada. Abrí la caja en la pestaña Finanzas para poder cobrar.")
+            if (!turno) throw new Error("Caja cerrada. Abrí la caja en Finanzas para cobrar.")
             turnoId = turno.id;
         }
 
+        // =================================================================
+        // 🚀 LA FUENTE DE LA VERDAD: BUSCAMOS LOS DATOS REALES EN LA BD
+        // =================================================================
+        if (!payload.p_clase_id) throw new Error("El sistema no recibió el ID de la clase.");
+
+        const { data: claseDb, error: errClase } = await supabaseAdmin.from('clases')
+            .select(`
+                nombre, 
+                tipo_clase, 
+                es_combinable, 
+                liga_nivel, 
+                compania_id,
+                inicio,
+                profesor:profiles!profesor_id(nombre_completo)
+            `)
+            .eq('id', payload.p_clase_id)
+            .maybeSingle();
+
+        if (errClase) throw new Error(`Fallo en Supabase al buscar clase: ${errClase.message}`);
+        if (!claseDb) throw new Error(`No existe clase con este ID: ${payload.p_clase_id}`);
+
+        const tipoClaseStr = (claseDb.tipo_clase || '').toLowerCase();
+        const esExclusiva = claseDb.es_combinable === false || tipoClaseStr === 'exclusivo';
+        const isEspecial = tipoClaseStr === 'especial' || tipoClaseStr === 'seminario';
+        const isLiga = tipoClaseStr === 'liga';
+        const isCompania = tipoClaseStr === 'compania' || tipoClaseStr === 'compañia';
+
+        const tipoPackBusqueda = isEspecial ? 'seminario' : 'regular';
+
+        const profeObj: any = claseDb.profesor;
+        const nombreProfe = Array.isArray(profeObj) ? profeObj[0]?.nombre_completo : (profeObj?.nombre_completo || 'Staff');
+        const paseReferencia = payload.p_pase_referencia || `${claseDb.nombre}-${nombreProfe}-${claseDb.tipo_clase}`;
+
         const telefonoNuevo = payload.p_telefono_comprador;
-        const nombreReal = payload.p_alumno_nombre_real;
-        const paseReferencia = payload.p_pase_referencia;
-        const nombreFinal = (nombreReal || '').trim() || 'Alumno Desconocido';
+        let nombreFinal = (payload.p_alumno_nombre_real || '').trim();
+
+        if (!nombreFinal && payload.p_user_id) {
+            const { data: prof } = await supabaseAdmin.from('profiles').select('nombre_completo').eq('id', payload.p_user_id).single();
+            if (prof) nombreFinal = prof.nombre_completo;
+        }
+        nombreFinal = nombreFinal || 'Alumno Desconocido';
+
+        const productoIdLimpio = (payload.p_producto_id && payload.p_producto_id.trim() !== '') ? payload.p_producto_id : null;
+
+        let valorInscripcion = 0;
+        let modalidadInsc = 'Clase Suelta';
 
         // =================================================================
         // 🚀 1. FLUJO PARA CLASES EXCLUSIVAS
         // =================================================================
-        if (payload.p_tipo_clase === 'exclusivo') {
+        if (esExclusiva) {
 
-            if (payload.p_monto_caja > 0 && turnoId) {
-                const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
-                    turno_id: turnoId,
-                    tipo: 'ingreso',
-                    concepto: `Venta ${payload.p_tipo_operacion === 'pack' ? 'Pack' : 'Clase'} Exclusiva | Alumno: ${nombreFinal}`,
-                    monto: payload.p_monto_caja,
-                    metodo_pago: payload.p_metodo_pago,
-                    origen_referencia: 'inscripcion'
-                })
-                if (errCaja) throw new Error('Error al cobrar en la caja.')
-            }
-
-            if (payload.p_tipo_operacion === 'pack' && payload.p_producto_id && payload.p_user_id) {
-                const { data: prod } = await supabaseAdmin.from('productos').select('creditos').eq('id', payload.p_producto_id).single()
-                if (prod && prod.creditos > 1) {
-                    await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', {
-                        p_usuario_id: payload.p_user_id,
-                        p_referencia: paseReferencia,
-                        p_cantidad: prod.creditos - 1
-                    })
-                }
-            }
-
-            if (payload.p_tipo_operacion === 'usar_credito' && payload.p_user_id) {
-                const { error: errDescuento } = await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', {
-                    p_usuario_id: payload.p_user_id,
-                    p_referencia: paseReferencia,
-                    p_cantidad: -1
-                })
-                if (errDescuento) throw new Error('No se pudo descontar el pase exclusivo de la alumna.')
-            }
-
-            let modalidadInsc = 'Clase Suelta';
-            if (payload.p_tipo_operacion === 'pack') modalidadInsc = 'Pase Exclusivo (Pack)';
-            if (payload.p_tipo_operacion === 'usar_credito') modalidadInsc = 'Pase Exclusivo';
-            if (payload.p_tipo_operacion === 'invitado') modalidadInsc = 'Invitado';
-
-            const { error: errInsc } = await supabaseAdmin.from('inscripciones').insert({
-                user_id: payload.p_user_id || null,
-                clase_id: payload.p_clase_id,
-                nombre_invitado: payload.p_nombre_invitado || null,
-                es_invitado: payload.p_tipo_operacion === 'invitado' || !payload.p_user_id,
-                modalidad: modalidadInsc,
-                valor_credito: payload.p_monto_caja || 0,
-                metodo_pago: payload.p_monto_caja > 0 ? payload.p_metodo_pago : 'credito',
-                presente: true,
-                estado_asistencia: 'presente'
-            })
-
-            if (errInsc) throw new Error(`Error al anotar a la alumna: ${errInsc.message}`)
-
-            if (payload.p_user_id && telefonoNuevo) {
-                await supabaseAdmin.from('profiles').update({ telefono: telefonoNuevo }).eq('id', payload.p_user_id)
-            }
-
-            return { success: true }
-
-        }
-        // =================================================================
-        // 🚀 2. FLUJO NORMAL (Clases Regulares y Especiales)
-        // =================================================================
-        else {
-            let modalidadInsc = 'Clase Suelta';
-            const isEspecial = payload.p_tipo_clase === 'seminario';
-            const campoCredito = isEspecial ? 'creditos_especiales' : 'creditos_regulares';
-
-            // --- A. USO DE CRÉDITO ---
             if (payload.p_tipo_operacion === 'usar_credito') {
-                modalidadInsc = 'Crédito';
+                modalidadInsc = 'Pase Exclusivo';
                 if (!payload.p_user_id) throw new Error('Falta seleccionar al alumno.');
 
-                const { data: perfil, error: errPerfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', payload.p_user_id).single();
-                if (errPerfil || !perfil) throw new Error('No se pudo verificar el saldo del alumno.');
+                const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
+                    .select('*')
+                    .eq('user_id', payload.p_user_id)
+                    .eq('tipo_clase', 'exclusivo')
+                    .gt('creditos_restantes', 0)
+                    .order('fecha_compra', { ascending: true })
+                    .limit(1)
+                    .maybeSingle();
 
-                if ((perfil as any)[campoCredito] < 1) throw new Error(`El alumno no tiene ${isEspecial ? 'créditos especiales' : 'créditos regulares'} suficientes.`);
+                if (packActivo && packActivo.cantidad_inicial > 0) {
+                    valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
 
-                const { error: errDesc } = await supabaseAdmin.from('profiles').update({
-                    [campoCredito]: (perfil as any)[campoCredito] - 1
-                }).eq('id', payload.p_user_id);
+                    const nuevosRestantes = packActivo.creditos_restantes - 1;
+                    await supabaseAdmin.from('alumno_packs').update({
+                        creditos_restantes: nuevosRestantes,
+                        estado: nuevosRestantes === 0 ? 'agotado' : 'activo'
+                    }).eq('id', packActivo.id);
+                } else {
+                    valorInscripcion = 0;
+                }
 
-                if (errDesc) throw new Error('Fallo en la base de datos al intentar descontar el crédito.');
-
+                await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', { p_usuario_id: payload.p_user_id, p_referencia: paseReferencia, p_cantidad: -1 })
             }
-            // --- B. VENTA DE PACK EN EL MOMENTO ---
             else if (payload.p_tipo_operacion === 'pack') {
-                modalidadInsc = 'Pack';
-                if (!payload.p_user_id || !payload.p_producto_id) throw new Error('Faltan datos del pack o del alumno.');
+                modalidadInsc = 'Pase Exclusivo (Pack)';
+                if (!payload.p_user_id || !productoIdLimpio) throw new Error('Faltan datos del pack.');
+
+                const { data: prod } = await supabaseAdmin.from('productos').select('creditos').eq('id', productoIdLimpio).single();
+                const creditosDelPack = prod ? prod.creditos : 0;
+
+                valorInscripcion = creditosDelPack > 0 ? Math.round(payload.p_monto_caja / creditosDelPack) : payload.p_monto_caja;
 
                 if (payload.p_monto_caja > 0 && turnoId) {
-                    const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
+                    await supabaseAdmin.from('caja_movimientos').insert({
                         turno_id: turnoId,
                         tipo: 'ingreso',
-                        concepto: `Venta Pack | Alumno: ${nombreFinal}`,
+                        concepto: `Venta Pack Exclusivo (${creditosDelPack} clases) | Alumno: ${nombreFinal}`,
                         monto: payload.p_monto_caja,
                         metodo_pago: payload.p_metodo_pago,
                         origen_referencia: 'inscripcion'
                     });
-                    if (errCaja) throw new Error('Error al registrar el cobro en la caja.');
                 }
 
-                const { data: prod } = await supabaseAdmin.from('productos').select('creditos').eq('id', payload.p_producto_id).single();
-                const creditosDelPack = prod ? prod.creditos : 0;
-
-                await supabaseAdmin.from('alumno_packs').insert({
+                const ahora = new Date();
+                const { error: errPackEx } = await supabaseAdmin.from('alumno_packs').insert({
                     user_id: payload.p_user_id,
-                    producto_id: payload.p_producto_id,
-                    tipo_clase: payload.p_tipo_clase,
+                    producto_id: productoIdLimpio,
+                    tipo_clase: 'exclusivo',
                     cantidad_inicial: creditosDelPack,
-                    creditos_restantes: creditosDelPack,
-                    monto_abonado: payload.p_monto_caja,
-                    estado: 'activo'
+                    creditos_restantes: Math.max(0, creditosDelPack - 1),
+                    monto_abonado: payload.p_monto_caja || 0,
+                    fecha_compra: ahora.toISOString(),
+                    fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                    estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
                 });
+
+                if (errPackEx) throw new Error(`Fallo al guardar el pack exclusivo: ${errPackEx.message}`);
+
+                if (creditosDelPack > 1) {
+                    await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', {
+                        p_usuario_id: payload.p_user_id,
+                        p_referencia: paseReferencia,
+                        p_cantidad: creditosDelPack - 1
+                    })
+                }
+
+            }
+            else {
+                valorInscripcion = payload.p_monto_caja || 0;
+                modalidadInsc = payload.p_tipo_operacion === 'invitado' ? 'Invitado' : 'Clase Suelta';
+
+                if (payload.p_tipo_operacion === 'suelta' && payload.p_monto_caja > 0 && turnoId) {
+                    await supabaseAdmin.from('caja_movimientos').insert({
+                        turno_id: turnoId,
+                        tipo: 'ingreso',
+                        concepto: `Venta Clase Exclusiva Suelta | Alumno: ${nombreFinal}`,
+                        monto: payload.p_monto_caja,
+                        metodo_pago: payload.p_metodo_pago,
+                        origen_referencia: 'inscripcion'
+                    })
+                }
+            }
+        }
+        // =================================================================
+        // 🚀 2. FLUJO NORMAL (Regulares, Especiales, Liga, Compañía)
+        // =================================================================
+        else {
+            const campoCredito = isEspecial ? 'creditos_especiales' : 'creditos_regulares';
+
+            if (payload.p_tipo_operacion === 'usar_credito') {
+                modalidadInsc = 'Crédito';
+                if (!payload.p_user_id) throw new Error('Falta seleccionar al alumno.');
+
+                const { data: perfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', payload.p_user_id).single();
+                if (!perfil || (perfil as any)[campoCredito] < 1) throw new Error(`Créditos insuficientes.`);
+
+                const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
+                    .select('*')
+                    .eq('user_id', payload.p_user_id)
+                    .eq('tipo_clase', tipoPackBusqueda)
+                    .gt('creditos_restantes', 0)
+                    .order('fecha_compra', { ascending: true })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (packActivo && packActivo.cantidad_inicial > 0) {
+                    valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
+
+                    const nuevosRestantes = packActivo.creditos_restantes - 1;
+                    await supabaseAdmin.from('alumno_packs').update({
+                        creditos_restantes: nuevosRestantes,
+                        estado: nuevosRestantes === 0 ? 'agotado' : 'activo'
+                    }).eq('id', packActivo.id);
+                } else {
+                    valorInscripcion = 0;
+                }
+
+                await supabaseAdmin.from('profiles').update({
+                    [campoCredito]: (perfil as any)[campoCredito] - 1
+                }).eq('id', payload.p_user_id);
+
+            }
+            else if (payload.p_tipo_operacion === 'pack') {
+                modalidadInsc = 'Pack';
+                if (!payload.p_user_id || !productoIdLimpio) throw new Error('Faltan datos del pack.');
+
+                const { data: prod } = await supabaseAdmin.from('productos').select('creditos, tipo_clase').eq('id', productoIdLimpio).single();
+                const creditosDelPack = prod ? prod.creditos : 0;
+                const tipoClaseProd = prod?.tipo_clase || tipoPackBusqueda;
+
+                valorInscripcion = creditosDelPack > 0 ? Math.round(payload.p_monto_caja / creditosDelPack) : payload.p_monto_caja;
+
+                if (payload.p_monto_caja > 0 && turnoId) {
+                    await supabaseAdmin.from('caja_movimientos').insert({
+                        turno_id: turnoId,
+                        tipo: 'ingreso',
+                        concepto: `Venta Pack (${creditosDelPack} clases) | Alumno: ${nombreFinal}`,
+                        monto: payload.p_monto_caja,
+                        metodo_pago: payload.p_metodo_pago,
+                        origen_referencia: 'inscripcion'
+                    });
+                }
+
+                const ahora = new Date();
+                const { error: errPack } = await supabaseAdmin.from('alumno_packs').insert({
+                    user_id: payload.p_user_id,
+                    producto_id: productoIdLimpio,
+                    tipo_clase: tipoClaseProd,
+                    cantidad_inicial: creditosDelPack,
+                    creditos_restantes: Math.max(0, creditosDelPack - 1),
+                    monto_abonado: payload.p_monto_caja || 0,
+                    fecha_compra: ahora.toISOString(),
+                    fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                    estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
+                });
+
+                if (errPack) throw new Error(`Fallo al guardar el pack: ${errPack.message}`);
 
                 if (creditosDelPack > 1) {
                     const { data: perfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', payload.p_user_id).single();
@@ -278,47 +404,117 @@ export async function procesarInscripcionAction(payload: any) {
                 }
 
             }
-            // --- C. CLASE SUELTA MANUAL ---
             else if (payload.p_tipo_operacion === 'suelta') {
-                modalidadInsc = 'Clase Suelta';
+                let cajaConcepto = `Venta Clase Suelta`;
+
+                // 🚀 ACÁ ESTÁ EL CAMBIO MÁGICO
+                if (isLiga) {
+                    modalidadInsc = 'La Liga';
+                    cajaConcepto = 'Inscripción La Liga';
+                    valorInscripcion = 0; // La cuota entera va a la caja, a la clase le anota $0
+                } else if (isCompania) {
+                    modalidadInsc = 'Compañía';
+                    cajaConcepto = 'Inscripción Compañía';
+                    valorInscripcion = 0; // La cuota entera va a la caja, a la clase le anota $0
+                } else {
+                    modalidadInsc = 'Clase Suelta';
+                    valorInscripcion = payload.p_monto_caja || 0; // Si es regular/especial, sí suma a la clase
+                }
 
                 if (payload.p_monto_caja > 0 && turnoId) {
-                    const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
+                    await supabaseAdmin.from('caja_movimientos').insert({
                         turno_id: turnoId,
                         tipo: 'ingreso',
-                        concepto: `Venta Clase Suelta | Alumno: ${nombreFinal}`,
+                        concepto: `${cajaConcepto} | Alumno: ${nombreFinal}`,
                         monto: payload.p_monto_caja,
                         metodo_pago: payload.p_metodo_pago,
                         origen_referencia: 'inscripcion'
                     });
-                    if (errCaja) throw new Error('Error al registrar la clase suelta en la caja.');
                 }
             }
-            // --- D. INVITADO ---
             else if (payload.p_tipo_operacion === 'invitado') {
                 modalidadInsc = 'Invitado';
+                valorInscripcion = 0;
             }
-
-            const { error: errInsc } = await supabaseAdmin.from('inscripciones').insert({
-                user_id: payload.p_user_id || null,
-                clase_id: payload.p_clase_id,
-                nombre_invitado: payload.p_nombre_invitado || null,
-                es_invitado: payload.p_tipo_operacion === 'invitado' || !payload.p_user_id,
-                modalidad: modalidadInsc,
-                valor_credito: payload.p_monto_caja || 0,
-                metodo_pago: payload.p_monto_caja > 0 ? payload.p_metodo_pago : 'credito',
-                presente: true,
-                estado_asistencia: 'presente'
-            });
-
-            if (errInsc) throw new Error(`Error final al intentar anotar al alumno: ${errInsc.message}`);
-
-            if (payload.p_user_id && telefonoNuevo) {
-                await supabaseAdmin.from('profiles').update({ telefono: telefonoNuevo }).eq('id', payload.p_user_id);
-            }
-
-            return { success: true }
         }
+
+        // 🚀 GUARDAMOS LA INSCRIPCIÓN PRINCIPAL
+        const { error: errInsc } = await supabaseAdmin.from('inscripciones').insert({
+            user_id: payload.p_user_id || null,
+            clase_id: payload.p_clase_id,
+            nombre_invitado: payload.p_nombre_invitado || null,
+            es_invitado: payload.p_tipo_operacion === 'invitado' || !payload.p_user_id,
+            modalidad: modalidadInsc,
+            valor_credito: valorInscripcion,
+            metodo_pago: payload.p_monto_caja > 0 ? payload.p_metodo_pago : 'credito',
+            presente: true,
+            estado_asistencia: 'presente'
+        });
+
+        if (errInsc) throw new Error(`Error al anotar al alumno: ${errInsc.message}`);
+
+        if (payload.p_user_id && telefonoNuevo) {
+            await supabaseAdmin.from('profiles').update({ telefono: telefonoNuevo }).eq('id', payload.p_user_id);
+        }
+
+        // =================================================================
+        // 🚀 3. AUTO-MATRICULACIÓN BATCH (RESTO DEL MES PARA LIGA Y COMPAÑÍA)
+        // =================================================================
+        if ((isLiga || isCompania) && payload.p_user_id) {
+            try {
+                const fechaClase = new Date(claseDb.inicio);
+
+                const startOfMonth = new Date(fechaClase.getFullYear(), fechaClase.getMonth(), 1).toISOString();
+                const endOfMonth = new Date(fechaClase.getFullYear(), fechaClase.getMonth() + 1, 0, 23, 59, 59).toISOString();
+
+                let query = supabaseAdmin.from('clases')
+                    .select('id')
+                    .eq('tipo_clase', claseDb.tipo_clase)
+                    .gte('inicio', startOfMonth)
+                    .lte('inicio', endOfMonth)
+                    .neq('id', payload.p_clase_id);
+
+                if (isLiga) query = query.eq('liga_nivel', claseDb.liga_nivel);
+                if (isCompania) query = query.eq('compania_id', claseDb.compania_id);
+
+                const { data: clasesMes, error: errClasesMes } = await query;
+
+                if (clasesMes && clasesMes.length > 0) {
+                    const claseIds = clasesMes.map(c => c.id);
+
+                    const { data: inscExistentes } = await supabaseAdmin.from('inscripciones')
+                        .select('clase_id')
+                        .eq('user_id', payload.p_user_id)
+                        .in('clase_id', claseIds);
+
+                    const idsExistentes = inscExistentes?.map(i => i.clase_id) || [];
+                    const idsAInscribir = claseIds.filter(id => !idsExistentes.includes(id));
+
+                    if (idsAInscribir.length > 0) {
+                        const batchInscripciones = idsAInscribir.map(id => ({
+                            user_id: payload.p_user_id,
+                            clase_id: id,
+                            nombre_invitado: null,
+                            es_invitado: false,
+                            modalidad: modalidadInsc,
+                            valor_credito: 0,
+                            metodo_pago: 'credito',
+                            presente: false,
+                            estado_asistencia: null
+                        }));
+
+                        await supabaseAdmin.from('inscripciones').insert(batchInscripciones);
+                    }
+                } else if (errClasesMes) {
+                    console.error("Error buscando clases del mes:", errClasesMes);
+                }
+            } catch (errBatch) {
+                console.error("Error silencioso en Auto-Batch:", errBatch);
+            }
+        }
+
+        return { success: true }
+
     } catch (error: any) {
         return { success: false, error: error.message }
     }

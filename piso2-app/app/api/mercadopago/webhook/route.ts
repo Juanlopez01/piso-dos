@@ -160,34 +160,38 @@ export async function POST(request: Request) {
                 console.log("🌟 [WEBHOOK] Cuota Compañía procesada.");
 
             } else {
-                // FLUJO DE VENTA DE PACKS
+                // =========================================================================
+                // 🚀 FLUJO DE VENTA DE PACKS (CON ESTÁNDAR DE ORO)
+                // =========================================================================
                 const { producto_id, cupon_id, tipo_clase, creditos, pase_referencia } = metadata;
 
-                // 🚀 ESTE ES EL LIMPIADOR QUE FALTABA
                 const productoIdLimpio = (producto_id && producto_id.trim() !== '') ? producto_id : null;
                 const tipoClaseSeguro = tipo_clase || 'regular';
 
-                // 1. Guardar info del pack (solo si no es exclusivo)
-                if (String(tipoClaseSeguro) !== 'exclusivo') {
-                    const { error: errPack } = await supabase.from('alumno_packs').insert({
-                        user_id: userIdFinal,
-                        producto_id: productoIdLimpio,
-                        tipo_clase: tipoClaseSeguro,
-                        cantidad_inicial: Number(creditos),
-                        creditos_restantes: Number(creditos),
-                        monto_abonado: montoAbonado,
-                        estado: 'activo',
-                        mp_payment_id: mpPaymentIdStr
-                    });
+                const ahora = new Date();
+                const fechaVencimiento = new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-                    // 🚀 Y ACÁ ESTÁ EL FRENO DE EMERGENCIA
-                    if (errPack) {
-                        console.error("❌ ERROR CRÍTICO AL INSERTAR ALUMNO_PACKS:", errPack);
-                        throw new Error(`No se pudo guardar el pack en la base de datos: ${errPack.message}`);
-                    }
+                // 1. Guardar info del pack (¡AHORA PARA TODOS LOS TIPOS DE PACKS!)
+                const { error: errPack } = await supabase.from('alumno_packs').insert({
+                    user_id: userIdFinal,
+                    producto_id: productoIdLimpio,
+                    tipo_clase: tipoClaseSeguro,
+                    cantidad_inicial: Number(creditos),
+                    creditos_restantes: Number(creditos), // Al comprar, le quedan todos
+                    monto_abonado: montoAbonado,
+                    estado: 'activo',
+                    mp_payment_id: mpPaymentIdStr,
+                    fecha_compra: ahora.toISOString(),
+                    fecha_vencimiento: fechaVencimiento
+                });
+
+                // 🚀 FRENO DE EMERGENCIA
+                if (errPack) {
+                    console.error("❌ ERROR CRÍTICO AL INSERTAR ALUMNO_PACKS:", errPack);
+                    throw new Error(`No se pudo guardar el pack en la base de datos: ${errPack.message}`);
                 }
 
-                // 2. Cargar créditos a la cuenta (SOLO si el paso anterior no tiró error)
+                // 2. Cargar créditos a la cuenta (RPC para exclusivos, Update para regulares/especiales)
                 if (String(tipoClaseSeguro) === 'exclusivo') {
                     const { error: errEx } = await supabase.rpc('cargar_pase_exclusivo_manual', {
                         p_usuario_id: userIdFinal,
@@ -212,7 +216,7 @@ export async function POST(request: Request) {
                 if (cupon_id) {
                     await supabase.from('cupones_usados').insert({ cupon_id: cupon_id, user_id: userIdFinal });
                 }
-                console.log("🌟 [WEBHOOK] Pack de créditos entregado con éxito.");
+                console.log("🌟 [WEBHOOK] Pack de créditos entregado y guardado con éxito.");
             }
         }
 

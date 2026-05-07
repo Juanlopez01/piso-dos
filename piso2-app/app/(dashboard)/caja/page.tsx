@@ -3,18 +3,19 @@
 import { createClient } from '@/utils/supabase/client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import useSWR from 'swr'
+import useSWR, { mutate as globalMutate } from 'swr'
 import {
     DollarSign, Lock, Unlock, TrendingUp, TrendingDown,
     Loader2, History, MapPin, Wallet, CreditCard, LayoutDashboard,
-    User, X, Info, AlertOctagon, Clock, Users, Smartphone
+    User, X, Info, AlertOctagon, Clock, Users, Smartphone, Pencil
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 
-import { abrirCajaAction, cerrarCajaAction, registrarMovimientoAction, cerrarTodasLasCajasAction } from '@/app/actions/caja'
+// 🚀 IMPORTAMOS LAS SERVER ACTIONS (Incluyendo editarMovimientoAction)
+import { abrirCajaAction, cerrarCajaAction, registrarMovimientoAction, cerrarTodasLasCajasAction, editarMovimientoAction } from '@/app/actions/caja'
 
 type CajaData = {
     admin: {
@@ -28,24 +29,36 @@ type CajaData = {
         movimientos: any[]
     } | null
     pagosOnline: any[]
+    turnosDisponibles: any[] // 🚀 Para saber a qué sede podemos mover la plata
 }
 
 const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<CajaData> => {
     const supabase = createClient()
 
-    // 🚀 1. TRAEMOS LOS PAGOS LIMPIOS
+    // 🚀 1. TRAEMOS TURNOS ABIERTOS PARA EL SELECTOR DE REUBICACIÓN
+    const { data: turnosAbiertosData } = await supabase
+        .from('caja_turnos')
+        .select(`id, sede:sedes(id, nombre)`)
+        .eq('estado', 'abierta');
+
+    const turnosDisponibles = (turnosAbiertosData || []).map((t: any) => ({
+        id: t.id,
+        sede_nombre: Array.isArray(t.sede) ? t.sede[0]?.nombre : t.sede?.nombre
+    }));
+
+    // 🚀 2. TRAEMOS LOS PAGOS LIMPIOS
     const { data: pagosOnlineData, error: errPagos } = await supabase
         .from('pagos_online')
         .select('*')
         .eq('estado', 'approved')
         .order('created_at', { ascending: false })
-        .limit(30) // Aumentamos un poquito el límite para que el historial agrupado luzca mejor
+        .limit(30)
 
     if (errPagos) console.error("Error leyendo pagos online:", errPagos)
 
     let pagosOnline = pagosOnlineData || []
 
-    // 🚀 2. LE PEGAMOS LOS NOMBRES MANUALMENTE EN JAVASCRIPT
+    // 🚀 3. LE PEGAMOS LOS NOMBRES MANUALMENTE EN JAVASCRIPT
     if (pagosOnline.length > 0) {
         const userIds = [...new Set(pagosOnline.map((p: any) => p.user_id).filter(Boolean))]
 
@@ -132,7 +145,7 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
 
         const reporteHoras = Object.values(horasPorRecepcionista).sort((a: any, b: any) => b.horas - a.horas);
 
-        return { admin: { cajasActivas: activasCalculadas, historialCajas: historialCalculado, reporteHoras }, recepcion: null, pagosOnline }
+        return { admin: { cajasActivas: activasCalculadas, historialCajas: historialCalculado, reporteHoras }, recepcion: null, pagosOnline, turnosDisponibles }
 
     } else if (role === 'recepcion') {
         if (!uid) throw new Error("No user ID")
@@ -154,10 +167,10 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
             movimientos = movs || []
         }
 
-        return { admin: null, recepcion: { sedes: sedes || [], turnoActivo, movimientos }, pagosOnline }
+        return { admin: null, recepcion: { sedes: sedes || [], turnoActivo, movimientos }, pagosOnline, turnosDisponibles }
     }
 
-    return { admin: null, recepcion: null, pagosOnline: [] }
+    return { admin: null, recepcion: null, pagosOnline: [], turnosDisponibles: [] }
 }
 
 const fetcherDetalle = async ([key, turnoId]: [string, string]) => {
@@ -196,6 +209,9 @@ export default function CajaPage() {
     const [cajaDetalle, setCajaDetalle] = useState<any>(null)
     const [cerrandoCajas, setCerrandoCajas] = useState(false)
 
+    // 🚀 ESTADO PARA EDICIÓN DE MOVIMIENTO
+    const [movAEditar, setMovAEditar] = useState<any>(null)
+
     const { data: movimientosDetalle, isLoading: loadingDetalle } = useSWR(
         cajaDetalle ? ['caja-detalle', cajaDetalle.id] : null,
         fetcherDetalle
@@ -204,6 +220,7 @@ export default function CajaPage() {
     const adminData = data?.admin
     const repData = data?.recepcion
     const pagosOnline = data?.pagosOnline || []
+    const turnosDisponibles = data?.turnosDisponibles || []
 
     const cajasActivas = adminData?.cajasActivas || []
     const historialCajas = adminData?.historialCajas || []
@@ -326,7 +343,42 @@ export default function CajaPage() {
         setProcesando(false)
     }
 
-    // 🚀 LÓGICA DE AGRUPACIÓN POR DÍA
+    // 🚀 LÓGICA DE GUARDAR EDICIÓN DE MOVIMIENTO
+    const handleEditarMovimiento = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setProcesando(true)
+
+        const response = await editarMovimientoAction(movAEditar.id, {
+            concepto: movAEditar.concepto,
+            monto: Number(movAEditar.monto),
+            metodo_pago: movAEditar.metodo_pago,
+            tipo: movAEditar.tipo,
+            turno_id: movAEditar.turno_id
+        })
+
+        if (response.success) {
+            toast.success('Movimiento actualizado y/o reubicado correctamente')
+            setMovAEditar(null)
+            mutate()
+            if (cajaDetalle) {
+                if (response.success) {
+                    toast.success('Movimiento actualizado y/o reubicado correctamente')
+                    setMovAEditar(null)
+                    mutate() // Este actualiza la tabla general (Dashboard)
+                    if (cajaDetalle) {
+                        // Este actualiza el modal de detalle específico usando el global
+                        setTimeout(() => globalMutate(['caja-detalle', cajaDetalle.id]), 500)
+                    }
+                }
+            }
+        } else {
+            toast.error(response.error || 'Error al actualizar el movimiento')
+        }
+
+        setProcesando(false)
+    }
+
+    // LÓGICA DE PAGOS ONLINE
     const pagosAgrupados = pagosOnline.reduce((acc, pago) => {
         const fecha = format(new Date(pago.created_at), "yyyy-MM-dd");
         if (!acc[fecha]) {
@@ -370,7 +422,6 @@ export default function CajaPage() {
                     <div className="space-y-8">
                         {fechasOrdenadas.map(fecha => {
                             const grupo = pagosAgrupados[fecha];
-                            // Forzamos el parseo a mediodía para evitar saltos de zona horaria al formatear
                             const fechaParseada = new Date(`${fecha}T12:00:00`);
                             const fechaDisplay = format(fechaParseada, "EEEE d 'de' MMMM", { locale: es });
 
@@ -386,19 +437,22 @@ export default function CajaPage() {
                                     </div>
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                                         {grupo.pagos.map((pago: any) => (
-                                            <div key={pago.id} className="bg-[#09090b] border border-white/5 p-3 rounded-xl flex items-center justify-between hover:border-white/20 hover:bg-white/5 transition-all">
-                                                <div className="flex items-center gap-4">
+                                            <div key={pago.id} className="bg-[#09090b] border border-white/5 p-3 rounded-xl flex items-center justify-between gap-3 hover:border-white/20 hover:bg-white/5 transition-all overflow-hidden">
+
+                                                {/* 🚀 ACÁ ESTÁ LA MAGIA DEL FLEX-1 MIN-W-0 */}
+                                                <div className="flex items-center gap-3 flex-1 min-w-0">
                                                     <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 shrink-0 border border-blue-500/20">
                                                         <DollarSign size={16} />
                                                     </div>
-                                                    <div className="overflow-hidden pr-2">
+                                                    <div className="flex-1 min-w-0">
                                                         <h4 className="font-bold text-white text-sm truncate">{pago.concepto}</h4>
-                                                        <p className="text-[10px] text-gray-500 font-bold uppercase mt-1">
+                                                        <p className="text-[10px] text-gray-500 font-bold uppercase mt-1 truncate">
                                                             {format(new Date(pago.created_at), "HH:mm")} hs • {pago.usuario?.nombre_completo || 'Usuario Desconocido'}
                                                         </p>
                                                     </div>
                                                 </div>
-                                                <span className="text-blue-400 font-black text-base shrink-0">
+
+                                                <span className="text-blue-400 font-black text-base shrink-0 whitespace-nowrap pl-1">
                                                     +${Number(pago.monto).toLocaleString()}
                                                 </span>
                                             </div>
@@ -412,6 +466,95 @@ export default function CajaPage() {
             </div>
         </div>
     )
+
+    // 🚀 MODAL FLOTANTE DE EDICIÓN DE MOVIMIENTO (Reutilizable para Admin y Recepción)
+    const renderModalEdicion = movAEditar && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-6 shadow-2xl relative">
+                <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
+                    <h3 className="text-xl font-black text-white uppercase flex items-center gap-2">
+                        <Pencil className="text-[#D4E655]" /> Editar Movimiento
+                    </h3>
+                    <button onClick={() => setMovAEditar(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                        <X className="text-gray-500 hover:text-white" />
+                    </button>
+                </div>
+                <form onSubmit={handleEditarMovimiento} className="space-y-5 text-left">
+
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Sede (Turno Destino)</label>
+                        <select
+                            value={movAEditar.turno_id}
+                            onChange={e => setMovAEditar({ ...movAEditar, turno_id: e.target.value })}
+                            className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655] cursor-pointer"
+                        >
+                            {!turnosDisponibles.some(t => t.id === movAEditar.turno_id) && (
+                                <option value={movAEditar.turno_id}>Sede Original (Turno Cerrado)</option>
+                            )}
+                            {turnosDisponibles.map(t => (
+                                <option key={t.id} value={t.id}>{t.sede_nombre} (Turno Abierto)</option>
+                            ))}
+                        </select>
+                        <p className="text-[10px] text-gray-600 mt-1">Si cambiás la sede, la plata se moverá a la caja activa de ese lugar.</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Tipo</label>
+                            <select
+                                value={movAEditar.tipo}
+                                onChange={e => setMovAEditar({ ...movAEditar, tipo: e.target.value })}
+                                className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655] cursor-pointer"
+                            >
+                                <option value="ingreso">Ingreso (+)</option>
+                                <option value="egreso">Egreso (-)</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método</label>
+                            <select
+                                value={movAEditar.metodo_pago}
+                                onChange={e => setMovAEditar({ ...movAEditar, metodo_pago: e.target.value })}
+                                className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655] cursor-pointer"
+                            >
+                                <option value="efectivo">Efectivo</option>
+                                <option value="transferencia">Transferencia</option>
+                                <option value="tarjeta">Tarjeta</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Concepto / Nombre</label>
+                        <input
+                            required
+                            value={movAEditar.concepto}
+                            onChange={e => setMovAEditar({ ...movAEditar, concepto: e.target.value })}
+                            className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]"
+                        />
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Monto ($)</label>
+                        <div className="relative">
+                            <span className="absolute left-3 top-3 text-gray-500 font-bold">$</span>
+                            <input
+                                required
+                                type="number"
+                                value={movAEditar.monto}
+                                onChange={e => setMovAEditar({ ...movAEditar, monto: e.target.value })}
+                                className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-8 text-white text-lg font-bold outline-none focus:border-[#D4E655]"
+                            />
+                        </div>
+                    </div>
+
+                    <button disabled={procesando} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-2 shadow-lg">
+                        {procesando ? <Loader2 className="animate-spin" /> : 'Guardar Cambios'}
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
 
     if (isLoading || loadingContext) return (
         <div className="min-h-screen bg-[#050505] flex items-center justify-center">
@@ -431,6 +574,7 @@ export default function CajaPage() {
     if (userRole === 'admin') {
         return (
             <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in relative">
+                {renderModalEdicion}
 
                 {cajaDetalle && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setCajaDetalle(null)}>
@@ -508,7 +652,7 @@ export default function CajaPage() {
                                                         <span className="text-[10px] text-gray-500 uppercase font-bold">
                                                             {format(new Date(mov.created_at), "HH:mm", { locale: es })} hs
                                                         </span>
-                                                        <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                                                        <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo_pago === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
                                                             {mov.metodo_pago}
                                                         </span>
                                                         {mov.origen_referencia !== 'manual' && (
@@ -517,9 +661,15 @@ export default function CajaPage() {
                                                     </div>
                                                 </div>
                                             </div>
-                                            <span className={`text-base font-black ${mov.tipo === 'ingreso' ? 'text-white' : 'text-red-500'}`}>
-                                                {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
-                                            </span>
+                                            <div className="flex items-center gap-4">
+                                                <span className={`text-base font-black ${mov.tipo === 'ingreso' ? 'text-white' : 'text-red-500'}`}>
+                                                    {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
+                                                </span>
+                                                {/* 🚀 BOTÓN EDITAR EN HISTORIAL (ADMIN) */}
+                                                <button onClick={(e) => { e.stopPropagation(); setMovAEditar(mov); }} className="p-2 bg-white/5 hover:bg-[#D4E655]/20 rounded-lg transition-colors group/btn">
+                                                    <Pencil size={14} className="text-gray-400 group-hover/btn:text-[#D4E655]" />
+                                                </button>
+                                            </div>
                                         </div>
                                     ))
                                 )}
@@ -766,6 +916,7 @@ export default function CajaPage() {
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in duration-500">
             <Toaster position="top-center" richColors theme="dark" />
+            {renderModalEdicion}
 
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8 border-b border-white/10 pb-6">
                 <div>
@@ -880,9 +1031,15 @@ export default function CajaPage() {
                                             </div>
                                         </div>
                                     </div>
-                                    <span className={`text-lg font-black ${mov.tipo === 'ingreso' ? 'text-white' : 'text-red-500'}`}>
-                                        {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
-                                    </span>
+                                    <div className="flex items-center gap-4">
+                                        <span className={`text-lg font-black ${mov.tipo === 'ingreso' ? 'text-white' : 'text-red-500'}`}>
+                                            {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
+                                        </span>
+                                        {/* 🚀 BOTÓN EDITAR EN RECEPCIÓN (Turno Activo) */}
+                                        <button onClick={(e) => { e.stopPropagation(); setMovAEditar(mov); }} className="p-2 bg-white/5 hover:bg-[#D4E655]/20 rounded-lg transition-colors group/btn">
+                                            <Pencil size={16} className="text-gray-400 group-hover/btn:text-[#D4E655]" />
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>

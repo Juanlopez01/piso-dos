@@ -8,7 +8,7 @@ import {
     MessageSquare, Calendar, Users, Info,
     Clock, MapPin, User, ChevronRight, Image as ImageIcon,
     Send, BellRing, X, Percent, CheckCircle2, AlertCircle, Coins,
-    CalendarDays, Activity, XCircle, FileText, Eye // 🚀 Nuevos iconos
+    CalendarDays, Activity, XCircle, FileText, Eye, CheckSquare
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
@@ -16,6 +16,7 @@ import Image from 'next/image'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
+import { inscribirPadronCompaniaAction, obtenerPreciosCompaniaAction } from '@/app/actions/companias'
 
 type Compania = {
     id: string
@@ -45,7 +46,7 @@ type Miembro = {
     saldoPendienteEfectivo?: number
     precioFinal?: number
     precioEfectivo?: number
-    estadisticas?: Estadisticas // 🚀 Nuevo campo para las stats
+    estadisticas?: Estadisticas
 }
 
 type ClaseCompania = {
@@ -70,10 +71,9 @@ export default function CompaniaDetallePage() {
     const [loading, setLoading] = useState(true)
     const [userId, setUserId] = useState('')
 
-    // 🚀 AGREGAMOS ESTADÍSTICAS A LOS TABS
     const [activeTab, setActiveTab] = useState<'muro' | 'clases' | 'miembros' | 'estadisticas'>('muro')
 
-    // ESTADOS MÁQUINA DEL TIEMPO (GLOBAL DEL PADRÓN)
+    // ESTADOS MÁQUINA DEL TIEMPO 
     const [mesDashboard, setMesDashboard] = useState(new Date().getMonth() + 1)
     const [anioDashboard, setAnioDashboard] = useState(new Date().getFullYear())
 
@@ -93,8 +93,8 @@ export default function CompaniaDetallePage() {
     const [registrandoPago, setRegistrandoPago] = useState(false)
 
     const [procesandoPago, setProcesandoPago] = useState(false)
+    const [inscribiendoMasivo, setInscribiendoMasivo] = useState(false)
 
-    // RECARGAR CUANDO CAMBIA EL MES O EL AÑO
     useEffect(() => {
         if (!loadingContext) {
             verificarAccesoYCargar()
@@ -154,7 +154,6 @@ export default function CompaniaDetallePage() {
         const mesActual = mesDashboard
         const anioActual = anioDashboard
 
-        // 🚀 BÚSQUEDA DE CLASES DEL MES EXACTO SELECCIONADO (Ya no se ocultan las pasadas)
         const primerDiaMes = new Date(anioActual, mesActual - 1, 1).toISOString()
         const ultimoDiaMes = new Date(anioActual, mesActual, 0, 23, 59, 59, 999).toISOString()
 
@@ -176,11 +175,12 @@ export default function CompaniaDetallePage() {
         if (dataClases && dataClases.length > 0) {
             const clasesUnicas: ClaseCompania[] = []
             const materiasVistas = new Set<string>()
+            const ahoraMs = new Date().getTime()
 
             dataClases.forEach((c: any) => {
                 const profNombre = Array.isArray(c.profesor) ? c.profesor[0]?.nombre_completo : c.profesor?.nombre_completo
                 const salaData = Array.isArray(c.sala) ? c.sala[0] : c.sala
-                const keyMateria = `${c.nombre}-${profNombre}-${c.inicio}` // Usamos inicio para no pisar la misma clase de distintos días
+                const keyMateria = `${c.nombre}-${profNombre}-${c.inicio}`
 
                 if (!materiasVistas.has(keyMateria)) {
                     materiasVistas.add(keyMateria)
@@ -198,27 +198,29 @@ export default function CompaniaDetallePage() {
 
             setClases(clasesUnicas)
 
-            // 🚀 BÚSQUEDA DE ASISTENCIAS DEL MES PARA LAS ESTADÍSTICAS
-            const clasesIds = dataClases.map((c: any) => c.id)
-            const { data: inscripcionesDelMes } = await supabase
-                .from('inscripciones')
-                .select('user_id, estado_asistencia')
-                .in('clase_id', clasesIds)
+            const clasesIdsPasadas = dataClases.filter((c: any) => new Date(c.inicio).getTime() <= ahoraMs).map((c: any) => c.id)
 
-            if (inscripcionesDelMes) {
-                inscripcionesDelMes.forEach((insc: any) => {
-                    if (!insc.user_id) return
-                    if (!statsAsistencia[insc.user_id]) {
-                        statsAsistencia[insc.user_id] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
-                    }
+            if (clasesIdsPasadas.length > 0) {
+                const { data: inscripcionesDelMes } = await supabase
+                    .from('inscripciones')
+                    .select('user_id, estado_asistencia')
+                    .in('clase_id', clasesIdsPasadas)
 
-                    statsAsistencia[insc.user_id].total++
-                    if (insc.estado_asistencia === 'presente') statsAsistencia[insc.user_id].presentes++
-                    else if (insc.estado_asistencia === 'ausente') statsAsistencia[insc.user_id].ausentes++
-                    else if (insc.estado_asistencia === 'justificada') statsAsistencia[insc.user_id].justificadas++
-                    else if (insc.estado_asistencia === 'saf') statsAsistencia[insc.user_id].saf++
-                    else if (insc.estado_asistencia === 'media_falta') statsAsistencia[insc.user_id].medias_faltas++
-                })
+                if (inscripcionesDelMes) {
+                    inscripcionesDelMes.forEach((insc: any) => {
+                        if (!insc.user_id) return
+                        if (!statsAsistencia[insc.user_id]) {
+                            statsAsistencia[insc.user_id] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
+                        }
+
+                        statsAsistencia[insc.user_id].total++
+                        if (insc.estado_asistencia === 'presente') statsAsistencia[insc.user_id].presentes++
+                        else if (insc.estado_asistencia === 'ausente') statsAsistencia[insc.user_id].ausentes++
+                        else if (insc.estado_asistencia === 'justificada') statsAsistencia[insc.user_id].justificadas++
+                        else if (insc.estado_asistencia === 'saf') statsAsistencia[insc.user_id].saf++
+                        else if (insc.estado_asistencia === 'media_falta') statsAsistencia[insc.user_id].medias_faltas++
+                    })
+                }
             }
         } else {
             setClases([])
@@ -229,19 +231,23 @@ export default function CompaniaDetallePage() {
             .select('perfil:profiles(id, nombre_completo, email, porcentaje_beca_compania)')
             .eq('compania_id', companiaId)
 
-        // 🚀 LECTURA DE PRECIOS MANUALES DESDE CONFIGURACIONES
-        const { data: configData } = await supabase.from('configuraciones').select('clave, valor').in('clave', [
-            `cuota_compania_${companiaId}_transf`,
-            `cuota_compania_${companiaId}_efvo`
-        ])
+        // 🚀 BÚSQUEDA SEGURA DE PRECIOS DESDE EL SERVIDOR (Bypass RLS)
+        const configData = await obtenerPreciosCompaniaAction(companiaId);
 
-        let precioBaseTransf = 15000;
-        let precioBaseEfvo = 13500;
+        let precioBase = 15000;
+        let precioBaseTransf: number | null = null;
+        let precioBaseEfvo: number | null = null;
 
         configData?.forEach((c: any) => {
-            if (c.clave === `cuota_compania_${companiaId}_transf`) precioBaseTransf = Number(c.valor);
-            if (c.clave === `cuota_compania_${companiaId}_efvo`) precioBaseEfvo = Number(c.valor);
+            // Limpiamos los puntos por si alguien guardó "70.000" en lugar de "70000"
+            const valorLimpio = String(c.valor).replace(/\./g, '').trim();
+            if (c.clave === `cuota_compania_${companiaId}`) precioBase = Number(valorLimpio);
+            if (c.clave === `cuota_compania_${companiaId}_transf`) precioBaseTransf = Number(valorLimpio);
+            if (c.clave === `cuota_compania_${companiaId}_efvo`) precioBaseEfvo = Number(valorLimpio);
         })
+
+        const finalPrecioTransf = precioBaseTransf !== null ? precioBaseTransf : precioBase;
+        const finalPrecioEfvo = precioBaseEfvo !== null ? precioBaseEfvo : precioBase;
 
         if (dataMiembros) {
             let miembrosData = dataMiembros.map((m: any) => m.perfil).filter(Boolean)
@@ -257,9 +263,9 @@ export default function CompaniaDetallePage() {
                 const totalAbonado = pagosCia?.filter((p: { alumno_id: string; monto: number | string }) => p.alumno_id === m.id).reduce((acc: number, curr: { monto: number | string }) => acc + Number(curr.monto), 0) || 0
                 const beca = m.porcentaje_beca_compania || 0
 
-                // 🚀 CÁLCULO SEPARADO CON PRECIOS INDEPENDIENTES
-                const precioFinal = precioBaseTransf - (precioBaseTransf * beca / 100)
-                const precioEfectivo = precioBaseEfvo - (precioBaseEfvo * beca / 100)
+                // 🚀 MATEMÁTICA REAL DE PAGOS
+                const precioFinal = finalPrecioTransf - (finalPrecioTransf * beca / 100)
+                const precioEfectivo = finalPrecioEfvo - (finalPrecioEfvo * beca / 100)
 
                 const saldoPendiente = Math.max(0, precioFinal - totalAbonado)
                 const saldoPendienteEfectivo = Math.max(0, precioEfectivo - totalAbonado)
@@ -284,6 +290,24 @@ export default function CompaniaDetallePage() {
 
         setLoading(false)
     }
+
+    const handleInscripcionMasiva = async () => {
+        if (!compania) return;
+        setInscribiendoMasivo(true);
+        try {
+            const res = await inscribirPadronCompaniaAction(compania.id, mesDashboard, anioDashboard);
+            if (res.success) {
+                toast.success(res.message || 'Padrón inscripto con éxito a las clases del mes.');
+                verificarAccesoYCargar();
+            } else {
+                throw new Error(res.error);
+            }
+        } catch (error: any) {
+            toast.error(error.message || 'Error al realizar la inscripción masiva.');
+        } finally {
+            setInscribiendoMasivo(false);
+        }
+    };
 
     const handleSendGlobalNotif = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -341,8 +365,8 @@ export default function CompaniaDetallePage() {
 
     const openPagoModal = (alumno: Miembro) => {
         setAlumnoPago(alumno)
-        setMetodoPago('efectivo') // Sugerimos efectivo por defecto
-        setMontoPago(alumno.saldoPendienteEfectivo || 0) // Mostramos deuda de efectivo
+        setMetodoPago('efectivo')
+        setMontoPago(alumno.saldoPendienteEfectivo || 0)
         setPagoMes(mesDashboard)
         setPagoAnio(anioDashboard)
         setIsPagoModalOpen(true)
@@ -431,7 +455,7 @@ export default function CompaniaDetallePage() {
             const anioActual = anioDashboard
 
             const miPerfilCalculado = miembros.find(m => m.id === userId)
-            const saldoACobrar = miPerfilCalculado?.saldoPendiente || 15000 // MP paga precio de lista
+            const saldoACobrar = miPerfilCalculado?.saldoPendiente || miPerfilCalculado?.precioFinal || 15000
 
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
@@ -508,7 +532,7 @@ export default function CompaniaDetallePage() {
                             </div>
                         </div>
 
-                        {/* 🚀 SELECTOR DE MES Y AÑO (MÁQUINA DEL TIEMPO) */}
+                        {/* 🚀 SELECTOR DE MES Y AÑO */}
                         {hasCoordinatorPowers && (
                             <div className="flex items-center gap-2 bg-black/40 border border-white/10 p-1.5 rounded-xl shadow-inner w-fit">
                                 <CalendarDays size={16} className="text-gray-500 ml-2" />
@@ -546,7 +570,6 @@ export default function CompaniaDetallePage() {
                         >
                             <Users size={14} /> Padrón y Cobros
                         </button>
-                        {/* 🚀 NUEVA PESTAÑA: ESTADÍSTICAS */}
                         {hasCoordinatorPowers && (
                             <button
                                 onClick={() => setActiveTab('estadisticas')}
@@ -631,7 +654,7 @@ export default function CompaniaDetallePage() {
                     </div>
                 )}
 
-                {/* 2. PESTAÑA: CLASES (AHORA MUESTRA TODAS LAS DEL MES) */}
+                {/* 2. PESTAÑA: CLASES */}
                 {activeTab === 'clases' && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                         {clases.length > 0 ? (
@@ -701,6 +724,23 @@ export default function CompaniaDetallePage() {
                 {/* 3. PESTAÑA: MIEMBROS */}
                 {activeTab === 'miembros' && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        {/* 🚀 BOTÓN MÁGICO DE INSCRIPCIÓN MASIVA AL PADRÓN */}
+                        {hasCoordinatorPowers && miembros.length > 0 && (
+                            <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 shadow-lg shadow-blue-500/5">
+                                <div>
+                                    <h4 className="text-white font-black uppercase text-sm flex items-center gap-2"><CheckSquare size={16} className="text-blue-500" /> Asignación de Clases</h4>
+                                    <p className="text-gray-400 text-[10px] sm:text-xs mt-1">Inscribir a todos los alumnos del padrón a las clases del mes {mesDashboard}/{anioDashboard}</p>
+                                </div>
+                                <button
+                                    onClick={handleInscripcionMasiva}
+                                    disabled={inscribiendoMasivo || clases.length === 0}
+                                    className={`shrink-0 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${clases.length === 0 ? 'bg-gray-800 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
+                                >
+                                    {inscribiendoMasivo ? <Loader2 size={16} className="animate-spin" /> : <><CalendarDays size={16} /> Inscribir al Mes</>}
+                                </button>
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {miembros.length > 0 ? (
                                 miembros.map((miembro) => (
@@ -745,8 +785,9 @@ export default function CompaniaDetallePage() {
                                                     </span>
                                                 )}
 
+                                                {/* 🚀 ACÁ LE AGREGUÉ EL PRECIO ESPERADO ASÍ VES QUÉ CÁLCULO HACE */}
                                                 <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${miembro.pago_compania_al_dia ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}>
-                                                    <Coins size={10} /> Abonó ${miembro.totalAbonado}
+                                                    <Coins size={10} /> Abonó ${miembro.totalAbonado} / ${miembro.precioEfectivo}
                                                 </span>
 
                                                 {!miembro.pago_compania_al_dia ? (
@@ -772,7 +813,7 @@ export default function CompaniaDetallePage() {
                     </div>
                 )}
 
-                {/* 🚀 4. NUEVA PESTAÑA: ESTADÍSTICAS (SOLO STAFF) */}
+                {/* 4. PESTAÑA: ESTADÍSTICAS */}
                 {hasCoordinatorPowers && activeTab === 'estadisticas' && (
                     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 md:p-8 shadow-xl">
@@ -784,23 +825,21 @@ export default function CompaniaDetallePage() {
                                     <p className="text-xs text-gray-500 uppercase tracking-widest mt-1 font-bold">Mes analizado: {mesDashboard}/{anioDashboard}</p>
                                 </div>
                                 <span className="bg-white/5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase text-gray-400 border border-white/10 shrink-0">
-                                    Total Clases: {clases.length}
+                                    Clases Pasadas: {clases.filter(c => new Date(c.inicio).getTime() <= new Date().getTime()).length}
                                 </span>
                             </div>
 
-                            {clases.length === 0 ? (
+                            {clases.filter(c => new Date(c.inicio).getTime() <= new Date().getTime()).length === 0 ? (
                                 <div className="text-center py-10 bg-[#111] rounded-2xl border border-white/5">
-                                    <p className="text-xs font-bold text-gray-500 uppercase">No hay clases este mes para analizar.</p>
+                                    <p className="text-xs font-bold text-gray-500 uppercase">Aún no hay clases dictadas en este mes.</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {miembros.map(m => {
                                         const total = m.estadisticas?.total || 0;
                                         const presentes = m.estadisticas?.presentes || 0;
-                                        // 🚀 SAF también cuenta como presente a nivel estadístico? Sí, lo contamos.
                                         const saf = m.estadisticas?.saf || 0;
                                         const asistenciasReales = presentes + saf;
-
                                         const porcentaje = total > 0 ? Math.round((asistenciasReales / total) * 100) : 0;
 
                                         return (
@@ -846,10 +885,9 @@ export default function CompaniaDetallePage() {
                         </div>
                     </div>
                 )}
-
             </div>
 
-            {/* MODAL: REGISTRAR PAGO/SEÑA (INTELIGENTE CON MES Y DESCUENTO) */}
+            {/* MODAL: REGISTRAR PAGO/SEÑA */}
             {isPagoModalOpen && alumnoPago && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsPagoModalOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>

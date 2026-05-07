@@ -12,7 +12,7 @@ import {
     CheckCircle2, AlertCircle, Users, ClipboardEdit, Save, FileText,
     Search, UserCog, UserMinus, Star, Send, Trash2, Clock, Settings2, Percent,
     X, Coins, CalendarDays, Activity, XCircle, Eye, Calendar, MapPin, User,
-    Image as ImageIcon
+    Image as ImageIcon, CheckSquare
 } from 'lucide-react'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -24,7 +24,8 @@ import {
     eliminarAvisoAction,
     guardarEvaluacionAction,
     actualizarPrecioGlobalAction,
-    asignarBecaAction
+    asignarBecaAction,
+    inscribirPadronLigaAction // 🚀 IMPORTACIÓN DE LA NUEVA ACCIÓN
 } from '@/app/actions/liga'
 
 import {
@@ -107,29 +108,33 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
         }
     })
 
-    // 🚀 ESTADÍSTICAS DE ASISTENCIA DEL MES
+    // 🚀 ESTADÍSTICAS DE ASISTENCIA DEL MES (FILTRADAS SOLO HASTA HOY)
     let statsAsistencia: Record<string, Estadisticas> = {}
     if (dataClases && dataClases.length > 0) {
-        const clasesIds = dataClases.map((c: any) => c.id)
-        const { data: inscripcionesDelMes } = await supabase
-            .from('inscripciones')
-            .select('user_id, estado_asistencia')
-            .in('clase_id', clasesIds)
+        const ahoraMs = new Date().getTime()
+        const clasesIdsPasadas = dataClases.filter((c: any) => new Date(c.inicio).getTime() <= ahoraMs).map((c: any) => c.id)
 
-        if (inscripcionesDelMes) {
-            inscripcionesDelMes.forEach((insc: any) => {
-                if (!insc.user_id) return
-                if (!statsAsistencia[insc.user_id]) {
-                    statsAsistencia[insc.user_id] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
-                }
+        if (clasesIdsPasadas.length > 0) {
+            const { data: inscripcionesDelMes } = await supabase
+                .from('inscripciones')
+                .select('user_id, estado_asistencia')
+                .in('clase_id', clasesIdsPasadas)
 
-                statsAsistencia[insc.user_id].total++
-                if (insc.estado_asistencia === 'presente') statsAsistencia[insc.user_id].presentes++
-                else if (insc.estado_asistencia === 'ausente') statsAsistencia[insc.user_id].ausentes++
-                else if (insc.estado_asistencia === 'justificada') statsAsistencia[insc.user_id].justificadas++
-                else if (insc.estado_asistencia === 'saf') statsAsistencia[insc.user_id].saf++
-                else if (insc.estado_asistencia === 'media_falta') statsAsistencia[insc.user_id].medias_faltas++
-            })
+            if (inscripcionesDelMes) {
+                inscripcionesDelMes.forEach((insc: any) => {
+                    if (!insc.user_id) return
+                    if (!statsAsistencia[insc.user_id]) {
+                        statsAsistencia[insc.user_id] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
+                    }
+
+                    statsAsistencia[insc.user_id].total++
+                    if (insc.estado_asistencia === 'presente') statsAsistencia[insc.user_id].presentes++
+                    else if (insc.estado_asistencia === 'ausente') statsAsistencia[insc.user_id].ausentes++
+                    else if (insc.estado_asistencia === 'justificada') statsAsistencia[insc.user_id].justificadas++
+                    else if (insc.estado_asistencia === 'saf') statsAsistencia[insc.user_id].saf++
+                    else if (insc.estado_asistencia === 'media_falta') statsAsistencia[insc.user_id].medias_faltas++
+                })
+            }
         }
     }
 
@@ -246,7 +251,7 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
         profile, isStaff, canManage, legajoCompleto, avisos: avisos || [],
         materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo,
         allStudents, preciosLiga, criterios: criteriosData || [],
-        clasesDelMes // 🚀 Devolvemos las clases para renderizar
+        clasesDelMes
     }
 }
 
@@ -304,6 +309,8 @@ function LaLigaContent() {
     const [guardandoEval, setGuardandoEval] = useState(false)
     const [boletinModalOpen, setBoletinModalOpen] = useState(false)
     const [selectedBoletin, setSelectedBoletin] = useState<any>(null)
+
+    const [inscribiendoNivel, setInscribiendoNivel] = useState<number | null>(null) // 🚀 ESTADO BOTÓN MÁGICO
 
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
@@ -385,6 +392,24 @@ function LaLigaContent() {
             setRegistrandoPago(false)
         }
     }
+
+    // 🚀 LA ACCIÓN DEL BOTÓN MÁGICO DE LIGA
+    const handleInscripcionMasivaLiga = async (nivel: number) => {
+        setInscribiendoNivel(nivel);
+        try {
+            const res = await inscribirPadronLigaAction(nivel, mesDashboard, anioDashboard);
+            if (res.success) {
+                toast.success(res.message || `Padrón Nivel ${nivel} inscripto con éxito.`);
+                mutate();
+            } else {
+                throw new Error(res.error);
+            }
+        } catch (error: any) {
+            toast.error(error.message || 'Error al realizar la inscripción masiva.');
+        } finally {
+            setInscribiendoNivel(null);
+        }
+    };
 
     if (loadingSWR || loadingContext) {
         return (
@@ -470,7 +495,7 @@ function LaLigaContent() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     titulo: `Cuota/Saldo La Liga - Mes ${mesDashboard}/${anioDashboard}`,
-                    precio: miSaldoPendiente, // Online se paga precio de lista
+                    precio: miSaldoPendiente,
                     userId: userId,
                     tipo_pago: 'cuota_liga',
                     mes: mesDashboard,
@@ -611,6 +636,7 @@ function LaLigaContent() {
                         </div>
 
                         <div className="flex flex-col sm:flex-row items-center gap-3">
+                            {/* 🚀 SELECTOR DE MES Y AÑO */}
                             <div className="flex items-center gap-2 bg-black/40 border border-white/10 p-1.5 rounded-xl shadow-inner">
                                 <CalendarDays size={16} className="text-gray-500 ml-2" />
                                 <select value={mesDashboard} onChange={e => setMesDashboard(Number(e.target.value))} className="bg-transparent text-white text-xs font-bold uppercase outline-none focus:ring-0 cursor-pointer appearance-none px-2 py-1">
@@ -782,13 +808,13 @@ function LaLigaContent() {
                                     <p className="text-xs text-gray-500 uppercase tracking-widest mt-1 font-bold">Mes analizado: {mesDashboard}/{anioDashboard}</p>
                                 </div>
                                 <span className="bg-white/5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase text-gray-400 border border-white/10 shrink-0">
-                                    Total Clases Liga: {clasesDelMes.length}
+                                    Clases Pasadas: {clasesDelMes.filter((c: any) => new Date(c.inicio).getTime() <= new Date().getTime()).length}
                                 </span>
                             </div>
 
-                            {clasesDelMes.length === 0 ? (
+                            {clasesDelMes.filter((c: any) => new Date(c.inicio).getTime() <= new Date().getTime()).length === 0 ? (
                                 <div className="text-center py-10 bg-[#111] rounded-2xl border border-white/5">
-                                    <p className="text-gray-500 text-xs font-bold uppercase">No hay clases registradas este mes para analizar.</p>
+                                    <p className="text-gray-500 text-xs font-bold uppercase">No hay clases dictadas este mes para analizar.</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -797,10 +823,9 @@ function LaLigaContent() {
                                         const presentes = m.estadisticas?.presentes || 0;
                                         const saf = m.estadisticas?.saf || 0;
                                         const asistenciasReales = presentes + saf;
-
                                         const porcentaje = total > 0 ? Math.round((asistenciasReales / total) * 100) : 0;
 
-                                        if (total === 0) return null; // Solo mostrar si tiene inasistencias en clases del mes
+                                        if (total === 0) return null;
 
                                         return (
                                             <div key={m.id} className="bg-[#111] p-4 rounded-xl border border-white/5 flex flex-col gap-4 hover:border-white/20 transition-all group">
@@ -871,6 +896,10 @@ function LaLigaContent() {
                                                 ) : (
                                                     <ImageIcon size={24} className="text-white/20" />
                                                 )}
+
+                                                {/* 🚀 ETIQUETA DE NIVEL APLICADA */}
+                                                <span className="absolute top-3 right-3 bg-[#D4E655] text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Nivel {clase.liga_nivel}</span>
+
                                                 {esHoy && <span className="absolute top-3 left-3 bg-[#D4E655] text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">⚡ Hoy</span>}
                                                 {yaPaso && <span className="absolute top-3 left-3 bg-gray-800 text-gray-400 text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Completada</span>}
                                             </div>
@@ -909,14 +938,13 @@ function LaLigaContent() {
                         ) : (
                             <div className="text-center py-20 border border-dashed border-white/10 rounded-3xl bg-[#111]/50">
                                 <Calendar size={32} className="mx-auto mb-3 text-gray-600" />
-                                <p className="text-gray-500 font-bold uppercase text-sm">Sin clases en {mesDashboard}/{anioDashboard}</p>
-                                <p className="text-xs text-gray-600 mt-1">Podés buscar clases en otros meses cambiando el selector de arriba.</p>
+                                <p className="text-gray-500 font-bold uppercase text-sm">Sin clases programadas en {mesDashboard}/{anioDashboard}</p>
                             </div>
                         )}
                     </div>
                 )}
 
-                {/* --- VISTA PADRÓN (AHORA CON BOTÓN DE PAGOS) --- */}
+                {/* --- VISTA PADRÓN (AHORA CON BOTÓN MÁGICO) --- */}
                 {canManage && adminTab === 'gestion' && (
                     <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl animate-in fade-in">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-6 border-b border-white/5">
@@ -924,6 +952,36 @@ function LaLigaContent() {
                             <div className="relative w-full md:w-72">
                                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                                 <input type="text" placeholder="Buscar..." value={searchStudent} onChange={(e) => setSearchStudent(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white text-xs font-bold outline-none focus:border-[#D4E655]" />
+                            </div>
+                        </div>
+
+                        {/* 🚀 BOTONES MÁGICOS DE INSCRIPCIÓN POR NIVEL */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                            <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 rounded-2xl p-4 flex flex-col justify-between gap-4 shadow-lg shadow-[#D4E655]/5">
+                                <div>
+                                    <h4 className="text-white font-black uppercase text-sm flex items-center gap-2"><CheckSquare size={16} className="text-[#D4E655]" /> Asignación Nivel 1</h4>
+                                    <p className="text-gray-400 text-[10px] sm:text-xs mt-1">Inscribir a todos los alumnos del Nivel 1 a sus clases de {mesDashboard}/{anioDashboard}</p>
+                                </div>
+                                <button
+                                    onClick={() => handleInscripcionMasivaLiga(1)}
+                                    disabled={inscribiendoNivel !== null || allStudents.filter(s => s.nivel_liga == 1).length === 0}
+                                    className={`w-full py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${allStudents.filter(s => s.nivel_liga == 1).length === 0 ? 'bg-gray-800 text-gray-500 cursor-not-allowed' : 'bg-[#D4E655] text-black hover:bg-white'}`}
+                                >
+                                    {inscribiendoNivel === 1 ? <Loader2 size={16} className="animate-spin" /> : <><CalendarDays size={16} /> Inscribir Nivel 1</>}
+                                </button>
+                            </div>
+                            <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 rounded-2xl p-4 flex flex-col justify-between gap-4 shadow-lg shadow-[#D4E655]/5">
+                                <div>
+                                    <h4 className="text-white font-black uppercase text-sm flex items-center gap-2"><CheckSquare size={16} className="text-[#D4E655]" /> Asignación Nivel 2</h4>
+                                    <p className="text-gray-400 text-[10px] sm:text-xs mt-1">Inscribir a todos los alumnos del Nivel 2 a sus clases de {mesDashboard}/{anioDashboard}</p>
+                                </div>
+                                <button
+                                    onClick={() => handleInscripcionMasivaLiga(2)}
+                                    disabled={inscribiendoNivel !== null || allStudents.filter(s => s.nivel_liga == 2).length === 0}
+                                    className={`w-full py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${allStudents.filter(s => s.nivel_liga == 2).length === 0 ? 'bg-gray-800 text-gray-500 cursor-not-allowed' : 'bg-[#D4E655] text-black hover:bg-white'}`}
+                                >
+                                    {inscribiendoNivel === 2 ? <Loader2 size={16} className="animate-spin" /> : <><CalendarDays size={16} /> Inscribir Nivel 2</>}
+                                </button>
                             </div>
                         </div>
 
@@ -1096,7 +1154,7 @@ function LaLigaContent() {
                     </div>
                 )}
 
-                {/* --- VISTA ALUMNO DASHBOARD --- */}
+                {/* --- 🚀 VISTA ALUMNO DASHBOARD --- */}
                 {!isStaff && (
                     <div className="space-y-6 animate-in fade-in">
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1139,7 +1197,7 @@ function LaLigaContent() {
                         {/* 🚀 CLASES DEL MES PARA EL ALUMNO */}
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6">
                             <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6">
-                                <Calendar size={20} className="text-[#D4E655]" /> Clases de este mes
+                                <Calendar size={20} className="text-[#D4E655]" /> Mis clases del mes
                             </h3>
                             {clasesDelMes.length > 0 ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1160,6 +1218,10 @@ function LaLigaContent() {
                                                     ) : (
                                                         <ImageIcon size={24} className="text-white/20" />
                                                     )}
+
+                                                    {/* 🚀 ETIQUETA DE NIVEL APLICADA */}
+                                                    <span className="absolute top-3 right-3 bg-[#D4E655] text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Nivel {clase.liga_nivel}</span>
+
                                                     {esHoy && <span className="absolute top-3 left-3 bg-[#D4E655] text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">⚡ Hoy</span>}
                                                     {yaPaso && <span className="absolute top-3 left-3 bg-gray-800 text-gray-400 text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Completada</span>}
                                                 </div>
@@ -1192,7 +1254,7 @@ function LaLigaContent() {
                             ) : (
                                 <div className="text-center py-20 border border-dashed border-white/10 rounded-3xl bg-[#111]/50">
                                     <Calendar size={32} className="mx-auto mb-3 text-gray-600" />
-                                    <p className="text-gray-500 font-bold uppercase text-sm">Sin clases programadas</p>
+                                    <p className="text-gray-500 font-bold uppercase text-sm">Sin clases programadas en {mesDashboard}/{anioDashboard}</p>
                                 </div>
                             )}
                         </div>
@@ -1200,7 +1262,7 @@ function LaLigaContent() {
                 )}
             </div>
 
-            {/* MODAL: REGISTRAR PAGO/SEÑA (INTELIGENTE CON MES Y DESCUENTO) */}
+            {/* MODAL: REGISTRAR PAGO/SEÑA */}
             {isPagoModalOpen && alumnoPago && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsPagoModalOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>

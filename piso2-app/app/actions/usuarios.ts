@@ -1,7 +1,17 @@
 'use server'
 
 import { createClient } from '@/utils/supabase/server-helper'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
+
+// 🚀 CLIENTE DIOS: Para operaciones que requieren bypass de RLS
+const getAdminClient = () => {
+    return createAdminClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        { auth: { persistSession: false, autoRefreshToken: false } }
+    )
+}
 
 // 🚀 FUNCIÓN ANTI-FANTASMAS: Garantiza que siempre haya un nombre escrito en la caja
 const getNombreSeguro = (perfil: any) => {
@@ -149,80 +159,80 @@ export async function asignarPackAction(
     productoId?: string,
     pase_referencia?: string | null
 ) {
-    const supabase = await createClient()
+    const supabase = await createClient(); // 🚀 El cliente normal para ver quién está logueado
+    const supabaseAdmin = getAdminClient(); // 🚀 El cliente Dios para guardar en la BD
+
     try {
+        // 🚀 AHORA SÍ LE PREGUNTAMOS AL CLIENTE NORMAL
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
-        const user = session.user
+        const operadoraId = session.user.id;
 
-        // 🚀 AHORA TRAEMOS NOMBRE Y APELLIDO PARA ARMARLO BIEN
-        const { data: perfilAlumno } = await supabase.from('profiles').select('nombre, apellido, nombre_completo').eq('id', usuarioId).single()
+        // 1. Limpieza de datos
+        const productoIdLimpio = (productoId && productoId.trim() !== '') ? productoId : null;
+        const { data: perfilAlumno } = await supabaseAdmin.from('profiles').select('nombre, apellido, nombre_completo, creditos_regulares, creditos_especiales').eq('id', usuarioId).single()
         const nombreAlumno = getNombreSeguro(perfilAlumno);
 
+        // 2. Control de Caja
         let turnoActivoId = null
         if (monto > 0) {
-            const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user.id).eq('estado', 'abierta').maybeSingle()
+            const { data: turno } = await supabaseAdmin.from('caja_turnos').select('id').eq('usuario_id', operadoraId).eq('estado', 'abierta').maybeSingle()
             if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
             turnoActivoId = turno.id
         }
 
-        if (tipoClase === 'exclusivo') {
-            if (monto > 0 && turnoActivoId) {
-                const { error: errCaja } = await supabase.from('caja_movimientos').insert({
-                    turno_id: turnoActivoId,
-                    tipo: 'ingreso',
-                    concepto: `Venta Pase Exclusivo | Alumno: ${nombreAlumno}`,
-                    monto: monto,
-                    metodo_pago: metodoPago,
-                    origen_referencia: 'manual'
-                })
-                if (errCaja) throw new Error('Error al registrar en la caja.')
-            }
+        // 3. Registro en Caja
+        if (monto > 0 && turnoActivoId) {
+            const conceptoCaja = tipoClase === 'exclusivo' ? 'Venta Pase Exclusivo' : `Venta Pack ${tipoClase.toUpperCase()}`;
+            const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
+                turno_id: turnoActivoId,
+                tipo: 'ingreso',
+                concepto: `${conceptoCaja} | Alumno: ${nombreAlumno}`,
+                monto: monto,
+                metodo_pago: metodoPago,
+                origen_referencia: 'manual'
+            })
+            if (errCaja) throw new Error('Error al registrar movimiento en la caja.')
+        }
 
-            const { error: errPase } = await supabase.rpc('cargar_pase_exclusivo_manual', {
+        // 🚀 4. EL ESTÁNDAR DE ORO: Registro en alumno_packs (FIFO Ready)
+        const ahora = new Date();
+        const { error: errPack } = await supabaseAdmin.from('alumno_packs').insert({
+            user_id: usuarioId,
+            producto_id: productoIdLimpio,
+            tipo_clase: tipoClase, // 'regular', 'seminario' o 'exclusivo'
+            cantidad_inicial: creditos,
+            creditos_restantes: creditos,
+            monto_abonado: monto,
+            fecha_compra: ahora.toISOString(),
+            fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 días default
+            estado: 'activo'
+        });
+
+        if (errPack) throw new Error(`Fallo crítico al guardar el pack: ${errPack.message}`);
+
+        // 5. Actualización de créditos en tiempo real
+        if (tipoClase === 'exclusivo') {
+            const { error: errPase } = await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', {
                 p_usuario_id: usuarioId,
                 p_referencia: pase_referencia,
                 p_cantidad: creditos
             })
-            if (errPase) throw new Error(`Error al habilitar el acceso: ${errPase.message}`)
-
+            if (errPase) throw new Error(`Error al habilitar el pase exclusivo: ${errPase.message}`)
         } else {
-            const { data, error } = await supabase.rpc('asignar_pack_manual', {
-                p_user_id: usuarioId,
-                p_turno_caja_id: turnoActivoId,
-                p_tipo_clase: tipoClase,
-                p_cantidad: creditos,
-                p_monto: monto,
-                p_metodo_pago: metodoPago
-            })
+            const campo = tipoClase === 'seminario' ? 'creditos_especiales' : 'creditos_regulares';
+            const { error: errProf } = await supabaseAdmin.from('profiles').update({
+                [campo]: ((perfilAlumno as any)[campo] || 0) + creditos
+            }).eq('id', usuarioId);
 
-            if (error) throw new Error('Error de conexión al cargar el pack regular.')
-            if (!data.success) throw new Error(data.message)
-
-            if (monto > 0 && turnoActivoId) {
-                const { data: ultimoMovimiento } = await supabase
-                    .from('caja_movimientos')
-                    .select('id, concepto')
-                    .eq('turno_id', turnoActivoId)
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle()
-
-                // 🚀 PREVENCIÓN: Solo pegamos el nombre si no lo tiene ya pegado
-                if (ultimoMovimiento && !ultimoMovimiento.concepto.includes('| Alumno:')) {
-                    const nuevoConcepto = `${ultimoMovimiento.concepto} | Alumno: ${nombreAlumno}`
-                    await supabase
-                        .from('caja_movimientos')
-                        .update({ concepto: nuevoConcepto })
-                        .eq('id', ultimoMovimiento.id)
-                }
-            }
+            if (errProf) throw new Error(`Error al sumar los créditos al perfil: ${errProf.message}`);
         }
 
         revalidatePath('/usuarios')
         return { success: true }
     } catch (error: any) {
+        console.error("Error en asignarPackAction:", error);
         return { success: false, error: error.message }
     }
 }
@@ -363,8 +373,6 @@ export async function cobrarCompaniaAction(usuarioId: string, companiaId: string
         return { success: false, error: error.message }
     }
 }
-
-import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 export async function crearAlumnoDesdeRecepcionAction(datos: { nombre: string, apellido: string, email: string, dni: string, telefono: string }) {
     try {
