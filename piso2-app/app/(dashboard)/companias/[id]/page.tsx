@@ -17,6 +17,7 @@ import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 import { inscribirPadronCompaniaAction, obtenerPreciosCompaniaAction } from '@/app/actions/companias'
+import { cobrarCompaniaAction } from '@/app/actions/usuarios'
 
 type Compania = {
     id: string
@@ -374,75 +375,31 @@ export default function CompaniaDetallePage() {
 
     const handleRegistrarPago = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!alumnoPago || !montoPago || Number(montoPago) <= 0) return
+        if (!alumnoPago || !montoPago || Number(montoPago) <= 0 || !compania?.id) return
+
         setRegistrandoPago(true)
 
         try {
-            const { data: pagoExistente, error: errorBusqueda } = await supabase
-                .from('companias_pagos')
-                .select('id, monto')
-                .eq('alumno_id', alumnoPago.id)
-                .eq('compania_id', compania?.id)
-                .eq('mes', pagoMes)
-                .eq('anio', pagoAnio)
-                .maybeSingle()
+            // 🚀 LE PASAMOS LA PELOTA A LA ACTION SEGURA (incluyendo mes y año)
+            const res = await cobrarCompaniaAction(
+                alumnoPago.id,
+                compania.id,
+                Number(montoPago),
+                metodoPago,
+                pagoMes,   // <-- ESTO ES CLAVE
+                pagoAnio   // <-- ESTO ES CLAVE
+            );
 
-            if (errorBusqueda) throw errorBusqueda
-
-            if (pagoExistente) {
-                const { error: errorUpdate } = await supabase
-                    .from('companias_pagos')
-                    .update({
-                        monto: Number(pagoExistente.monto) + Number(montoPago),
-                        metodo_pago: metodoPago
-                    })
-                    .eq('id', pagoExistente.id)
-
-                if (errorUpdate) throw errorUpdate
-            } else {
-                const { error: errorInsert } = await supabase.from('companias_pagos').insert([{
-                    alumno_id: alumnoPago.id,
-                    compania_id: compania?.id,
-                    mes: pagoMes,
-                    anio: pagoAnio,
-                    monto: Number(montoPago),
-                    metodo_pago: metodoPago
-                }])
-
-                if (errorInsert) throw errorInsert
+            if (!res.success) {
+                throw new Error(res.error);
             }
 
-            const { data: turnoActivo, error: errorTurno } = await supabase
-                .from('caja_turnos')
-                .select('id')
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle()
-
-            if (errorTurno) throw errorTurno
-
-            if (turnoActivo) {
-                const { error: errorCaja } = await supabase.from('caja_movimientos').insert([{
-                    turno_id: turnoActivo.id,
-                    tipo: 'ingreso',
-                    concepto: `Seña/Cuota Grupo (${pagoMes}/${pagoAnio}): ${compania?.nombre} - ${alumnoPago.nombre_completo}`,
-                    monto: Number(montoPago),
-                    metodo_pago: metodoPago,
-                    origen_referencia: 'compania'
-                }])
-
-                if (errorCaja) throw errorCaja
-
-                toast.success('Pago y movimiento de caja registrados correctamente')
-            } else {
-                toast.warning('Pago guardado al alumno, pero NO se anotó en caja (no hay turno abierto).')
-            }
-
-            setIsPagoModalOpen(false)
-            verificarAccesoYCargar()
+            toast.success('Pago y movimiento de caja registrados correctamente');
+            setIsPagoModalOpen(false);
+            verificarAccesoYCargar(); // Acá usamos tu función de recarga
         } catch (err: any) {
             console.error("🕵️‍♂️ DETALLE DEL ERROR:", err)
-            toast.error(`Error DB: ${err.message || 'Desconocido'}`)
+            toast.error(`Error: ${err.message || 'Desconocido'}`)
         } finally {
             setRegistrandoPago(false)
         }

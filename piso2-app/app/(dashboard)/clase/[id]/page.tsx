@@ -26,7 +26,7 @@ import {
     procesarInscripcionAction,
     enviarNotificacionClaseAction,
     setEstadoAsistenciaAction,
-    saldarDeudaInscripcionAction
+    agregarPagoInscripcionAction
 } from '@/app/actions/inscripciones'
 
 import { toggleMiembroCompaniaAction } from '@/app/actions/companias'
@@ -459,28 +459,33 @@ export default function ClaseDetallePage() {
                                             {(Number(insc.saldo_pendiente) > 0) && (
                                                 <button
                                                     onClick={async () => {
-                                                        const monto = prompt(`¿Cuánto va a abonar? (Deuda: $${insc.saldo_pendiente})`, String(insc.saldo_pendiente));
-                                                        if (!monto || isNaN(Number(monto))) return;
+                                                        // 1. Preguntamos CUÁNTA plata está entrando ahora
+                                                        const montoStr = prompt(`¿Cuánta plata está entregando ahora el alumno?`);
+                                                        if (!montoStr) return;
 
-                                                        // 🚀 Mini selector de método de pago
-                                                        const metodo = confirm(`Presiona ACEPTAR para cobrar en EFECTIVO\nPresiona CANCELAR para cobrar por TRANSFERENCIA`);
+                                                        const monto = Number(montoStr);
+                                                        if (isNaN(monto) || monto <= 0) return toast.error("Monto inválido");
+
+                                                        // 2. Método de pago
+                                                        const metodo = confirm(`Aceptar = EFECTIVO\nCancelar = TRANSFERENCIA`);
                                                         const metodoFinal = metodo ? 'efectivo' : 'transferencia';
 
-                                                        const confirmacionFinal = confirm(`¿Confirmas el cobro de $${monto} vía ${metodoFinal.toUpperCase()}?`);
-                                                        if (!confirmacionFinal) return;
+                                                        // 3. 🚀 LA PREGUNTA CLAVE: ¿Terminó de pagar?
+                                                        const liquidarDeuda = confirm(`¿Con este pago de $${monto} termina de saldar la deuda?\n\nACEPTAR: Sí, ya no debe nada.\nCANCELAR: No, va a seguir debiendo plata.`);
 
-                                                        toast.promise(saldarDeudaInscripcionAction(insc.id, Number(monto), metodoFinal), {
-                                                            loading: 'Registrando pago...',
+                                                        toast.promise(agregarPagoInscripcionAction(insc.id, monto, metodoFinal, liquidarDeuda), {
+                                                            loading: 'Registrando cobro...',
                                                             success: () => {
                                                                 mutate();
-                                                                return `Saldo cobrado en ${metodoFinal}`;
+                                                                return `Se sumaron $${monto} a la inscripción.`;
                                                             },
                                                             error: (err) => `Error: ${err}`
                                                         });
                                                     }}
                                                     className="bg-red-500 text-white text-[8px] font-black uppercase px-2 py-0.5 rounded flex items-center gap-1 animate-pulse hover:scale-105 transition-transform"
+                                                    title="Cobrar deuda parcial o total"
                                                 >
-                                                    <AlertTriangle size={10} /> Cobrar ${insc.saldo_pendiente}
+                                                    <AlertTriangle size={10} /> Adeuda / Cobrar
                                                 </button>
                                             )}
                                         </div>

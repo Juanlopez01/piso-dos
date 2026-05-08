@@ -1,7 +1,9 @@
 'use server'
 
+// 👇 IMPORTAMOS EL LECTOR DE COOKIES
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { v4 as uuidv4 } from 'uuid'
 import { revalidatePath } from 'next/cache'
 
 // 🚀 CLIENTE DIOS: Para operaciones que requieren bypass de RLS
@@ -174,10 +176,18 @@ export async function asignarPackAction(
         const { data: perfilAlumno } = await supabaseAdmin.from('profiles').select('nombre, apellido, nombre_completo, creditos_regulares, creditos_especiales').eq('id', usuarioId).single()
         const nombreAlumno = getNombreSeguro(perfilAlumno);
 
-        // 2. Control de Caja
+        // 2. Control de Caja (🚀 FILTRO CRÍTICO APLICADO)
         let turnoActivoId = null
         if (monto > 0) {
-            const { data: turno } = await supabaseAdmin.from('caja_turnos').select('id').eq('usuario_id', operadoraId).eq('estado', 'abierta').maybeSingle()
+            const { data: turno } = await supabaseAdmin
+                .from('caja_turnos')
+                .select('id')
+                .eq('usuario_id', operadoraId) // <--- Filtro del usuario logueado
+                .eq('estado', 'abierta')
+                .order('fecha_apertura', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+
             if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
             turnoActivoId = turno.id
         }
@@ -237,7 +247,7 @@ export async function asignarPackAction(
     }
 }
 
-export async function cobrarLigaAction(usuarioId: string, monto: number, metodoPago: string) {
+export async function cobrarLigaAction(usuarioId: string, monto: number, metodoPago: string, mes?: number, anio?: number) {
     const supabase = await createClient()
     try {
         const { data: { session } } = await supabase.auth.getSession()
@@ -245,19 +255,29 @@ export async function cobrarLigaAction(usuarioId: string, monto: number, metodoP
 
         const user = session.user
 
-        const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user.id).eq('estado', 'abierta').maybeSingle()
+        // 🚀 FILTRO CRÍTICO APLICADO (Solo la caja de ESTE usuario)
+        const { data: turno } = await supabase
+            .from('caja_turnos')
+            .select('id')
+            .eq('usuario_id', user.id)
+            .eq('estado', 'abierta')
+            .order('fecha_apertura', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
         if (!turno && monto > 0) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
 
+        // 🚀 ACA ESTÁ EL FIX: Usamos el mes/año que manda el frontend, o el actual por defecto
         const hoy = new Date()
-        const mesActual = hoy.getMonth() + 1
-        const anioActual = hoy.getFullYear()
+        const mesCobro = mes || hoy.getMonth() + 1
+        const anioCobro = anio || hoy.getFullYear()
 
         const { data: pagoExistente } = await supabase
             .from('liga_pagos')
             .select('id, monto')
             .eq('alumno_id', usuarioId)
-            .eq('mes', mesActual)
-            .eq('anio', anioActual)
+            .eq('mes', mesCobro)      // Usamos el mes seleccionado
+            .eq('anio', anioCobro)    // Usamos el año seleccionado
             .maybeSingle()
 
         if (pagoExistente) {
@@ -269,8 +289,8 @@ export async function cobrarLigaAction(usuarioId: string, monto: number, metodoP
         } else {
             const { error: errInsert } = await supabase.from('liga_pagos').insert({
                 alumno_id: usuarioId,
-                mes: mesActual,
-                anio: anioActual,
+                mes: mesCobro,       // Usamos el mes seleccionado
+                anio: anioCobro,     // Usamos el año seleccionado
                 monto: monto,
                 metodo_pago: metodoPago
             })
@@ -285,9 +305,9 @@ export async function cobrarLigaAction(usuarioId: string, monto: number, metodoP
             const nombreAlumno = getNombreSeguro(perfilAlumno);
 
             const { error: errCaja } = await supabase.from('caja_movimientos').insert([{
-                turno_id: turno.id,
+                turno_id: turno.id, // Se asigna EXACTAMENTE a la caja del operador
                 tipo: 'ingreso',
-                concepto: `Seña/Cuota Liga (${mesActual}/${anioActual}): ${nombreAlumno}`,
+                concepto: `Seña/Cuota Liga (${mesCobro}/${anioCobro}): ${nombreAlumno}`, // Se anota en caja con el mes correcto
                 monto: monto,
                 metodo_pago: metodoPago,
                 origen_referencia: 'liga'
@@ -303,7 +323,7 @@ export async function cobrarLigaAction(usuarioId: string, monto: number, metodoP
     }
 }
 
-export async function cobrarCompaniaAction(usuarioId: string, companiaId: string, monto: number, metodoPago: string) {
+export async function cobrarCompaniaAction(usuarioId: string, companiaId: string, monto: number, metodoPago: string, mes?: number, anio?: number) {
     const supabase = await createClient()
     try {
         const { data: { session } } = await supabase.auth.getSession()
@@ -311,20 +331,30 @@ export async function cobrarCompaniaAction(usuarioId: string, companiaId: string
 
         const user = session.user
 
-        const { data: turno } = await supabase.from('caja_turnos').select('id').eq('usuario_id', user.id).eq('estado', 'abierta').maybeSingle()
+        // 🚀 FILTRO CRÍTICO APLICADO
+        const { data: turno } = await supabase
+            .from('caja_turnos')
+            .select('id')
+            .eq('usuario_id', user.id) // <--- Filtro del usuario logueado
+            .eq('estado', 'abierta')
+            .order('fecha_apertura', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
         if (!turno && monto > 0) throw new Error('¡Caja Cerrada! Abrí tu caja en Finanzas para poder cobrar.')
 
+        // 🚀 ACA ESTÁ EL FIX: Usamos el mes/año que manda el frontend, o el actual por defecto
         const hoy = new Date()
-        const mesActual = hoy.getMonth() + 1
-        const anioActual = hoy.getFullYear()
+        const mesCobro = mes || hoy.getMonth() + 1
+        const anioCobro = anio || hoy.getFullYear()
 
         const { data: pagoExistente } = await supabase
             .from('companias_pagos')
             .select('id, monto')
             .eq('alumno_id', usuarioId)
             .eq('compania_id', companiaId)
-            .eq('mes', mesActual)
-            .eq('anio', anioActual)
+            .eq('mes', mesCobro)   // Usamos el mes seleccionado
+            .eq('anio', anioCobro) // Usamos el año seleccionado
             .maybeSingle()
 
         if (pagoExistente) {
@@ -337,8 +367,8 @@ export async function cobrarCompaniaAction(usuarioId: string, companiaId: string
             const { error: errInsert } = await supabase.from('companias_pagos').insert({
                 alumno_id: usuarioId,
                 compania_id: companiaId,
-                mes: mesActual,
-                anio: anioActual,
+                mes: mesCobro,     // Usamos el mes seleccionado
+                anio: anioCobro,   // Usamos el año seleccionado
                 monto: monto,
                 metodo_pago: metodoPago
             })
@@ -350,15 +380,15 @@ export async function cobrarCompaniaAction(usuarioId: string, companiaId: string
 
         if (monto > 0 && turno) {
             const { data: perfilAlumno } = await supabase.from('profiles').select('nombre, apellido, nombre_completo').eq('id', usuarioId).single()
-            const nombreAlumno = getNombreSeguro(perfilAlumno);
+            const nombreAlumno = getNombreSeguro(perfilAlumno); // Usa tu función auxiliar
 
             const { data: dataCompania } = await supabase.from('companias').select('nombre').eq('id', companiaId).single()
             const nombreCia = dataCompania?.nombre || 'Grupo'
 
             const { error: errCaja } = await supabase.from('caja_movimientos').insert([{
-                turno_id: turno.id,
+                turno_id: turno.id, // Se asigna EXACTAMENTE a la caja del operador
                 tipo: 'ingreso',
-                concepto: `Seña/Cuota Grupo (${mesActual}/${anioActual}): ${nombreCia} - ${nombreAlumno}`,
+                concepto: `Seña/Cuota Grupo (${mesCobro}/${anioCobro}): ${nombreCia} - ${nombreAlumno}`, // Se anota en caja con el mes correcto
                 monto: monto,
                 metodo_pago: metodoPago,
                 origen_referencia: 'compania'

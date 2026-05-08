@@ -29,7 +29,8 @@ import {
 } from '@/app/actions/liga'
 
 import {
-    cambiarLigaAction
+    cambiarLigaAction,
+    cobrarLigaAction
 } from '@/app/actions/usuarios'
 
 const parseSafeDate = (dateStr: string | null | undefined) => {
@@ -337,57 +338,28 @@ function LaLigaContent() {
     const handleRegistrarPago = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!alumnoPago || !montoPago || Number(montoPago) <= 0) return
+
         setRegistrandoPago(true)
 
         try {
-            const { data: pagoExistente, error: errBuscar } = await supabase
-                .from('liga_pagos')
-                .select('id, monto')
-                .eq('alumno_id', alumnoPago.id)
-                .eq('mes', pagoMes)
-                .eq('anio', pagoAnio)
-                .maybeSingle()
+            // 🚀 LE PASAMOS LA PELOTA A LA ACTION SEGURA (incluyendo mes y año)
+            const res = await cobrarLigaAction(
+                alumnoPago.id,
+                Number(montoPago),
+                metodoPago,
+                pagoMes,   // <-- ESTO ES CLAVE
+                pagoAnio   // <-- ESTO ES CLAVE
+            );
 
-            if (errBuscar) throw errBuscar
-
-            if (pagoExistente) {
-                const { error: errUpdate } = await supabase.from('liga_pagos').update({
-                    monto: Number(pagoExistente.monto) + Number(montoPago),
-                    metodo_pago: metodoPago
-                }).eq('id', pagoExistente.id)
-                if (errUpdate) throw errUpdate
-            } else {
-                const { error: errInsert } = await supabase.from('liga_pagos').insert([{
-                    alumno_id: alumnoPago.id,
-                    mes: pagoMes,
-                    anio: pagoAnio,
-                    monto: Number(montoPago),
-                    metodo_pago: metodoPago
-                }])
-                if (errInsert) throw errInsert
+            if (!res.success) {
+                throw new Error(res.error);
             }
 
-            const { data: turnoActivo } = await supabase.from('caja_turnos').select('id').order('created_at', { ascending: false }).limit(1).maybeSingle()
-
-            if (turnoActivo) {
-                const { error: errCaja } = await supabase.from('caja_movimientos').insert([{
-                    turno_id: turnoActivo.id,
-                    tipo: 'ingreso',
-                    concepto: `Seña/Cuota Liga (${pagoMes}/${pagoAnio}): ${alumnoPago.nombre_completo}`,
-                    monto: Number(montoPago),
-                    metodo_pago: metodoPago,
-                    origen_referencia: 'liga'
-                }])
-                if (errCaja) throw errCaja
-                toast.success('Pago y movimiento de caja registrados')
-            } else {
-                toast.warning('Pago guardado, pero NO se anotó en caja (no hay turno abierto).')
-            }
-
-            setIsPagoModalOpen(false)
-            mutate()
+            toast.success('Pago y movimiento de caja registrados');
+            setIsPagoModalOpen(false);
+            mutate();
         } catch (err: any) {
-            toast.error(`Error DB: ${err.message || 'Desconocido'}`)
+            toast.error(`Error: ${err.message || 'Desconocido'}`)
         } finally {
             setRegistrandoPago(false)
         }

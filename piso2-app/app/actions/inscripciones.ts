@@ -171,14 +171,17 @@ export async function procesarInscripcionAction(payload: any) {
         let turnoId = null;
 
         if (payload.p_monto_caja > 0) {
+            // 🎯 FILTRO CRÍTICO APLICADO: Solo buscar la caja abierta del usuario actual
             const { data: turno } = await supabaseAdmin
                 .from('caja_turnos')
                 .select('id')
-                .eq('usuario_id', session.user.id)
+                .eq('usuario_id', session.user.id) // <--- ESTO EVITA CRUCES ENTRE RECEPCIONISTAS
                 .eq('estado', 'abierta')
+                .order('fecha_apertura', { ascending: false })
+                .limit(1)
                 .maybeSingle()
 
-            if (!turno) throw new Error("Caja cerrada. Abrí la caja en Finanzas para cobrar.")
+            if (!turno) throw new Error("No tenés una caja abierta. Abrí tu caja en Finanzas para cobrar.")
             turnoId = turno.id;
         }
 
@@ -228,7 +231,10 @@ export async function procesarInscripcionAction(payload: any) {
 
         let valorInscripcion = 0;
         let modalidadInsc = 'Clase Suelta';
-        let saldoPendienteCalculado = Number(payload.p_saldo_pendiente) || 0; // 🚀 RECIBIMOS EL SALDO
+
+        // 🚀 EL CAMBIO MAGICO: 
+        // Si el payload dice que es seña, clavamos el saldo pendiente en 1 (esto activa tu cartel de ADEUDA).
+        let saldoPendienteCalculado = payload.p_es_sena ? 1 : 0;
 
         // =================================================================
         // 🚀 1. FLUJO PARA CLASES EXCLUSIVAS
@@ -479,7 +485,7 @@ export async function procesarInscripcionAction(payload: any) {
     }
 }
 
-export async function saldarDeudaInscripcionAction(inscripcionId: string, monto: number, metodoPago: string) {
+export async function agregarPagoInscripcionAction(inscripcionId: string, monto: number, metodoPago: string, liquidarDeuda: boolean) {
     const supabase = await createClient()
     const supabaseAdmin = getAdminClient()
 
@@ -487,7 +493,6 @@ export async function saldarDeudaInscripcionAction(inscripcionId: string, monto:
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
-        // 1. Buscamos la inscripción para saber qué clase es y quién es el alumno
         const { data: insc, error: errInsc } = await supabaseAdmin
             .from('inscripciones')
             .select('*, clase:clases(nombre)')
@@ -496,35 +501,36 @@ export async function saldarDeudaInscripcionAction(inscripcionId: string, monto:
 
         if (errInsc || !insc) throw new Error('No se encontró la inscripción')
 
-        // 2. Verificamos caja abierta
+        // 🎯 FILTRO CRÍTICO APLICADO: Solo buscar la caja abierta del usuario actual
         const { data: turno } = await supabaseAdmin
             .from('caja_turnos')
             .select('id')
-            .eq('usuario_id', session.user.id)
+            .eq('usuario_id', session.user.id) // <--- ESTO EVITA CRUCES ENTRE RECEPCIONISTAS
             .eq('estado', 'abierta')
+            .order('fecha_apertura', { ascending: false })
+            .limit(1)
             .maybeSingle()
 
-        if (!turno) throw new Error("Caja cerrada. Abrí la caja para cobrar el saldo.")
+        if (!turno) throw new Error("No tenés una caja abierta. Abrí tu caja en Finanzas para cobrar la deuda.")
 
-        // 3. Registramos el ingreso en caja
         const nombreAlumno = insc.nombre_invitado || 'Alumno con cuenta'
         const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
-            turno_id: turno.id,
+            turno_id: turno.id, // Se usa ESTRICTAMENTE la caja de este usuario
             tipo: 'ingreso',
             monto: monto,
             metodo_pago: metodoPago,
-            concepto: `Cobro Saldo Pendiente | Clase: ${insc.clase.nombre} | Alumno: ${nombreAlumno}`,
+            concepto: `Cobro Parcial/Deuda | Clase: ${insc.clase.nombre} | Alumno: ${nombreAlumno}`,
             origen_referencia: 'inscripcion'
         })
         if (errCaja) throw new Error('Error al registrar en caja')
 
-        // 4. Actualizamos la inscripción: sumamos el valor cobrado y ponemos deuda en 0
+        // 🚀 MAGIA DE LIBERTAD ABSOLUTA
         const { error: errUpd } = await supabaseAdmin.from('inscripciones').update({
             valor_credito: Number(insc.valor_credito) + monto,
-            saldo_pendiente: 0
+            saldo_pendiente: liquidarDeuda ? 0 : 1
         }).eq('id', inscripcionId)
 
-        if (errUpd) throw new Error('Error al actualizar la deuda')
+        if (errUpd) throw new Error('Error al actualizar la inscripción')
 
         revalidatePath(`/clase/${insc.clase_id}`)
         return { success: true }
