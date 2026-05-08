@@ -307,7 +307,7 @@ export default function CajaPage() {
 
     const handleCerrarCaja = async () => {
         if (!turnoActivo) return
-        const saldoFinalTotal = saldoFisico + saldoDigital
+        const saldoFinalTotal = saldoFisico
         if (!confirm(`¿Cerrar caja con saldo TOTAL $${saldoFinalTotal.toLocaleString()}? \n(Efectivo: $${saldoFisico.toLocaleString()} | Digital: $${saldoDigital.toLocaleString()})`)) return
 
         setProcesando(true)
