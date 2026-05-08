@@ -495,7 +495,9 @@ export default function ClaseDetallePage() {
                                     </div>
 
                                     <div className="flex items-center gap-2 bg-[#111] border border-white/10 p-1 rounded-xl">
-                                        <button onClick={() => handleSetAsistencia(insc, 'ausence' as any)} title="Ausente" className={`p-2 rounded-lg transition-all ${insc.estado_asistencia === 'ausente' ? 'bg-red-500/20 text-red-500' : 'text-gray-500 hover:text-white'}`}><X size={18} /></button>
+                                        {/* 🚀 EL FIX ESTÁ ACÁ: 'ausente' en vez de 'ausence' */}
+                                        <button onClick={() => handleSetAsistencia(insc, 'ausente')} title="Ausente" className={`p-2 rounded-lg transition-all ${insc.estado_asistencia === 'ausente' ? 'bg-red-500/20 text-red-500' : 'text-gray-500 hover:text-white'}`}><X size={18} /></button>
+
                                         {esGrupoOFormacion && (
                                             <>
                                                 <button onClick={() => handleSetAsistencia(insc, 'media_falta')} title="Media Falta" className={`p-2 rounded-lg transition-all ${insc.estado_asistencia === 'media_falta' ? 'bg-yellow-500 text-black' : 'text-yellow-500/50 hover:text-yellow-500'}`}><Clock4 size={18} /></button>
