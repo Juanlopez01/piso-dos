@@ -50,16 +50,25 @@ export async function abrirCajaAction(sedeId: string, montoInicial: number) {
     }
 }
 
-export async function cerrarCajaAction(turnoId: string) {
+export async function cerrarCajaAction(turnoId: string, efectivoReal?: number) {
     const supabase = await createClient()
     try {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
+        // 1. Ejecutamos tu RPC original intacto para no romper tu lógica interna
         const { data: res, error } = await supabase.rpc('cerrar_turno_caja', { p_turno_id: turnoId })
         if (error || !res?.success) throw new Error(res?.message || 'Error al procesar el cierre de caja en la base de datos.')
 
-        revalidatePath('/caja')
+        // 2. MAGIA DEL ARQUEO: Si el frontend nos mandó el efectivo físico contado, 
+        // actualizamos el registro para que el historial refleje la realidad y no solo el teórico.
+        if (efectivoReal !== undefined) {
+            await supabase.from('caja_turnos')
+                .update({ monto_final: efectivoReal })
+                .eq('id', turnoId);
+        }
+
+        revalidatePath('/caja') // O la ruta que corresponda a tu dashboard
         return { success: true, message: res.message }
     } catch (error: any) {
         return { success: false, error: error.message }

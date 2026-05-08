@@ -3,6 +3,8 @@
 
 import { createClient } from '@/utils/supabase/server-helper'
 import { revalidatePath } from 'next/cache'
+// Importamos format y en-US para que la fecha quede en el formato gringo que pide la BDD (YYYY-MM-DD)
+import { format } from 'date-fns'
 
 export async function crearAlquileresAction(inserts: any[]) {
     const supabase = await createClient()
@@ -10,7 +12,27 @@ export async function crearAlquileresAction(inserts: any[]) {
     if (!session?.user) return { success: false, error: 'No autorizado' }
 
     try {
-        const { error } = await supabase.from('alquileres').insert(inserts)
+        // 🚀 MAGIA ANTI-ZONAS HORARIAS
+        const insertsLimpios = inserts.map(item => {
+            let fechaLimpia = item.fecha;
+
+            // 1. Si llega como objeto Date nativo de JS (ej: desde el MultiDatePicker)
+            if (fechaLimpia instanceof Date) {
+                // Forzamos el formato usando date-fns, que respeta la zona horaria local
+                fechaLimpia = format(fechaLimpia, 'yyyy-MM-dd');
+            }
+            // 2. Si llega como String con zona horaria (ej: "2026-05-24T03:00:00Z")
+            else if (typeof fechaLimpia === 'string') {
+                fechaLimpia = fechaLimpia.split('T')[0];
+            }
+
+            return {
+                ...item,
+                fecha: fechaLimpia
+            };
+        });
+
+        const { error } = await supabase.from('alquileres').insert(insertsLimpios)
         if (error) throw error
 
         revalidatePath('/alquileres')
@@ -26,7 +48,6 @@ export async function cobrarAlquilerAction(updates: any[], movimientoCaja: any) 
     if (!session?.user) return { success: false, error: 'No autorizado' }
 
     try {
-        // Actualizamos cada ítem del grupo
         const promesas = updates.map(u => supabase.from('alquileres').update({
             monto_pagado: u.monto_pagado,
             estado_pago: u.estado_pago,
@@ -36,7 +57,6 @@ export async function cobrarAlquilerAction(updates: any[], movimientoCaja: any) 
 
         await Promise.all(promesas)
 
-        // Registramos el ingreso en la caja
         const { error: errorMov } = await supabase.from('caja_movimientos').insert(movimientoCaja)
         if (errorMov) throw new Error('Error al registrar el movimiento en caja')
 

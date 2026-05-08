@@ -168,15 +168,32 @@ const fetcher = async ([key, startIso, endIso, startDateStr, endDateStr]: string
 
     if (typedData.alquileres) {
         typedData.alquileres.forEach((a) => {
-            const inicioLocal = `${a.fecha}T${a.hora_inicio.slice(0, 5)}:00`
-            const finLocal = `${a.fecha}T${a.hora_fin.slice(0, 5)}:00`
+            // 🚀 EXTRAEMOS LOS COMPONENTES DE LA FECHA MANUALMENTE
+            // 'a.fecha' viene como "2026-05-24" o "2026-05-24T00:00:00"
+            const fechaLimpia = a.fecha.includes('T') ? a.fecha.split('T')[0] : a.fecha;
+
+            // Armamos los strings de inicio y fin sin dejar que JS interprete nada todavía
+            const inicioLocal = `${fechaLimpia}T${a.hora_inicio.slice(0, 5)}:00`;
+            const finLocal = `${fechaLimpia}T${a.hora_fin.slice(0, 5)}:00`;
+
             agenda.push({
-                id: a.id, tipo: 'Alquiler', titulo: a.cliente_nombre || 'Cliente Externo',
-                subtitulo: `Alquiler (${a.tipo_uso})`, inicio: inicioLocal, fin: finLocal,
-                fecha_render: a.fecha, sala_nombre: a.sala_nombre, sala_sede: a.sala_sede, sede_id: a.sede_id,
-                alquiler_data: { telefono: a.cliente_contacto, monto: a.monto_total, estado: a.estado }
-            })
-        })
+                id: a.id,
+                tipo: 'Alquiler',
+                titulo: a.cliente_nombre || 'Cliente Externo',
+                subtitulo: `Alquiler (${a.tipo_uso})`,
+                inicio: inicioLocal,
+                fin: finLocal,
+                fecha_render: fechaLimpia, // 🎯 ESTO CLAVA EL EVENTO EN EL DÍA CORRECTO
+                sala_nombre: a.sala_nombre,
+                sala_sede: a.sala_sede,
+                sede_id: a.sede_id,
+                alquiler_data: {
+                    telefono: a.cliente_contacto,
+                    monto: a.monto_total,
+                    estado: a.estado
+                }
+            });
+        });
     }
 
     agenda.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime())

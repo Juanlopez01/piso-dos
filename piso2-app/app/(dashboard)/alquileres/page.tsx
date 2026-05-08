@@ -298,7 +298,7 @@ export default function AlquileresPage() {
                 cliente_nombre: form.cliente_nombre,
                 cliente_contacto: form.cliente_contacto,
                 sala_id: form.sala_id,
-                fecha: format(date, 'yyyy-MM-dd'),
+                fecha: date, // 🚀 SE ENVÍA EL DATE, LA ACTION LO LIMPIA (O format(date, 'yyyy-MM-dd') si prefieres mandarlo limpio desde acá)
                 hora_inicio: form.hora_inicio,
                 hora_fin: form.hora_fin,
                 monto_total: calculateDayCost(date),
@@ -514,7 +514,11 @@ export default function AlquileresPage() {
                                     <div className={`space-y-1 overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-64 overflow-y-auto custom-scrollbar' : 'max-h-0'}`}>
                                         {group.items.map(item => (
                                             <div key={item.id} className="flex justify-between items-center text-[10px] p-2 rounded bg-white/5 border border-white/5">
-                                                <div className="flex items-center gap-2 text-gray-300"><Calendar size={10} /> {format(new Date(item.fecha), "EEE d MMM", { locale: es })}</div>
+                                                {/* 🚀 ACÁ ESTÁ EL FIX DE LA FECHA */}
+                                                <div className="flex items-center gap-2 text-gray-300">
+                                                    <Calendar size={10} />
+                                                    {format(new Date(item.fecha + 'T12:00:00'), "EEE d MMM", { locale: es })}
+                                                </div>
                                                 <div className="flex gap-2">
                                                     <span className="font-mono text-gray-500">{item.hora_inicio}-{item.hora_fin}</span>
                                                     <span className="font-bold text-[#D4E655]">${item.monto_total}</span>

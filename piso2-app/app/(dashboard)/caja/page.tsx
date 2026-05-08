@@ -13,7 +13,7 @@ import {
     Trash2
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
-import { format } from 'date-fns'
+import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 
@@ -55,7 +55,7 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
         .select('*')
         .eq('estado', 'approved')
         .order('created_at', { ascending: false })
-        .limit(30)
+        .limit(100)
 
     if (errPagos) console.error("Error leyendo pagos online:", errPagos)
 
@@ -211,14 +211,17 @@ export default function CajaPage() {
     const [nuevoMovimiento, setNuevoMovimiento] = useState({ tipo: 'ingreso', concepto: '', monto: '', metodo: 'efectivo' })
     const [cajaDetalle, setCajaDetalle] = useState<any>(null)
     const [cerrandoCajas, setCerrandoCajas] = useState(false)
+
+    // 🚀 ESTADO ACORDEÓN MP
     const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>(() => {
         const hoy = format(new Date(), "yyyy-MM-dd");
-        return { [hoy]: true }; // Hoy arranca abierto
+        return { [hoy]: true };
     });
 
     // 🚀 ESTADO PARA EDICIÓN DE MOVIMIENTO
     const [movAEditar, setMovAEditar] = useState<any>(null)
 
+    // 🚀 FIX SWR MUTATE DETALLE
     const { data: movimientosDetalle, isLoading: loadingDetalle, mutate: mutateDetalle } = useSWR(
         cajaDetalle ? ['caja-detalle', cajaDetalle.id] : null,
         fetcherDetalle
@@ -297,8 +300,8 @@ export default function CajaPage() {
 
         if (res.success) {
             toast.success('Movimiento eliminado');
-            mutate(); // Refresca el dashboard
-            if (cajaDetalle) mutateDetalle(); // Refresca el modal si está abierto
+            mutate();
+            if (cajaDetalle) mutateDetalle();
         } else {
             toast.error(res.error || 'Error al eliminar');
         }
@@ -306,13 +309,41 @@ export default function CajaPage() {
     }
 
     const handleCerrarCaja = async () => {
-        if (!turnoActivo) return
-        const saldoFinalTotal = saldoFisico
-        if (!confirm(`¿Cerrar caja con saldo TOTAL $${saldoFinalTotal.toLocaleString()}? \n(Efectivo: $${saldoFisico.toLocaleString()} | Digital: $${saldoDigital.toLocaleString()})`)) return
+        if (!turnoActivo) return;
+
+        // 🚀 CÁLCULO DE ARQUEO FÍSICO
+        const conteoInput = prompt(
+            `CIERRE DE CAJA - SEDE ${turnoActivo.sede?.nombre}\n\n` +
+            `El sistema registra que deberías tener: $${saldoFisico.toLocaleString()} en efectivo.\n\n` +
+            `¿Cuánto efectivo real tenés en caja? (Ingresá solo números)`
+        );
+
+        if (conteoInput === null) return;
+
+        const efectivoReal = Number(conteoInput);
+        if (isNaN(efectivoReal)) return toast.error("Monto inválido. Ingresá solo números.");
+
+        const diferencia = efectivoReal - saldoFisico;
+        let mensajeConfirmacion = `Resumen de Cierre:\n\n` +
+            `• Efectivo contado: $${efectivoReal.toLocaleString()}\n` +
+            `• Saldo Digital: $${saldoDigital.toLocaleString()}\n` +
+            `• Total a rendir: $${(efectivoReal + saldoDigital).toLocaleString()}\n\n`;
+
+        if (diferencia === 0) {
+            mensajeConfirmacion += `✅ ¡Caja perfecta! Sin diferencias.`;
+        } else {
+            mensajeConfirmacion += diferencia > 0
+                ? `⚠️ SOBRANTE: $${diferencia.toLocaleString()}`
+                : `❌ FALTANTE: $${Math.abs(diferencia).toLocaleString()}`;
+            mensajeConfirmacion += `\n\n¿Deseas cerrar la caja con esta diferencia?`;
+        }
+
+        if (!confirm(mensajeConfirmacion)) return;
 
         setProcesando(true)
 
-        const response = await cerrarCajaAction(turnoActivo.id)
+        // Acá mandamos el efectivoReal a la action (si tu backend lo acepta, si no lo ignora y cierra igual)
+        const response = await cerrarCajaAction(turnoActivo.id, efectivoReal)
 
         if (response.success) {
             toast.success(response.message || 'Caja Cerrada Exitosamente')
@@ -366,7 +397,6 @@ export default function CajaPage() {
         setProcesando(false)
     }
 
-    // 🚀 LÓGICA DE GUARDAR EDICIÓN DE MOVIMIENTO
     const handleEditarMovimiento = async (e: React.FormEvent) => {
         e.preventDefault()
         setProcesando(true)
@@ -387,9 +417,8 @@ export default function CajaPage() {
                 if (response.success) {
                     toast.success('Movimiento actualizado y/o reubicado correctamente')
                     setMovAEditar(null)
-                    mutate() // Este actualiza la tabla general (Dashboard)
+                    mutate()
                     if (cajaDetalle) {
-                        // Este actualiza el modal de detalle específico usando el global
                         setTimeout(() => globalMutate(['caja-detalle', cajaDetalle.id]), 500)
                     }
                 }
@@ -401,7 +430,7 @@ export default function CajaPage() {
         setProcesando(false)
     }
 
-    // LÓGICA DE PAGOS ONLINE
+    // 🚀 LÓGICA DE PAGOS ONLINE (ACORDEÓN Y 5 DÍAS)
     const pagosAgrupados = pagosOnline.reduce((acc, pago) => {
         const fecha = format(new Date(pago.created_at), "yyyy-MM-dd");
         if (!acc[fecha]) {
@@ -412,58 +441,91 @@ export default function CajaPage() {
         return acc;
     }, {} as Record<string, { pagos: any[], total: number }>);
 
-    const fechasOrdenadas = Object.keys(pagosAgrupados).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    const fechasOrdenadas = Object.keys(pagosAgrupados)
+        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+        .slice(0, 5); // LÍMITE DE 5 DÍAS
+
     const totalReciente = pagosOnline.reduce((acc, p) => acc + Number(p.monto), 0);
 
     const renderPagosOnline = (
         <div className="mt-12">
-            <h2 className="text-lg font-black uppercase text-white flex items-center gap-2 mb-4">
-                <Smartphone size={18} className="text-blue-500" /> MercadoPago (Últimos 5 días)
-            </h2>
-            <div className="space-y-3">
-                {fechasOrdenadas.slice(0, 5).map(fecha => {
-                    const grupo = pagosAgrupados[fecha];
-                    const isExpanded = expandedDays[fecha];
-                    const fechaParseada = new Date(`${fecha}T12:00:00`);
-
-                    return (
-                        <div key={fecha} className="bg-[#111] border border-white/5 rounded-2xl overflow-hidden shadow-lg">
-                            <button
-                                onClick={() => setExpandedDays(prev => ({ ...prev, [fecha]: !isExpanded }))}
-                                className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-all"
-                            >
-                                <div className="flex items-center gap-3">
-                                    {isExpanded ? <ChevronDown size={16} className="text-blue-400" /> : <ChevronRight size={16} className="text-gray-500" />}
-                                    <span className="text-xs font-black uppercase tracking-widest text-gray-300">
-                                        {format(fechaParseada, "EEEE d 'de' MMMM", { locale: es })}
-                                    </span>
-                                </div>
-                                <span className="text-sm font-black text-blue-400">${grupo.total.toLocaleString()}</span>
-                            </button>
-
-                            {isExpanded && (
-                                <div className="p-2 pt-0 space-y-1 animate-in slide-in-from-top-2 duration-200">
-                                    {grupo.pagos.map((p: any) => (
-                                        <div key={p.id} className="bg-black/20 p-3 rounded-xl flex items-center justify-between gap-3">
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-bold text-white text-xs truncate">{p.concepto}</p>
-                                                <p className="text-gray-500 uppercase font-bold text-[9px] mt-0.5">
-                                                    {format(new Date(p.created_at), "HH:mm")} hs • {p.usuario?.nombre_completo}
-                                                </p>
-                                            </div>
-                                            <span className="font-black text-blue-400 text-xs shrink-0">+${Number(p.monto).toLocaleString()}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+                <h2 className="text-lg font-black uppercase text-white flex items-center gap-2">
+                    <Smartphone size={18} className="text-blue-500" /> MercadoPago (Últimos 5 días)
+                </h2>
+                {pagosOnline.length > 0 && (
+                    <div className="bg-blue-500/10 border border-blue-500/20 px-4 py-2 rounded-xl flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400">
+                            <DollarSign size={16} />
                         </div>
-                    );
-                })}
+                        <div>
+                            <p className="text-[9px] text-blue-400 font-bold uppercase tracking-widest leading-none mb-1">Total Mostrado</p>
+                            <p className="text-xl font-black text-white leading-none">
+                                ${totalReciente.toLocaleString()}
+                            </p>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            <div className="bg-[#111] border border-white/10 rounded-2xl overflow-hidden shadow-xl p-4 md:p-6">
+                {pagosOnline.length === 0 ? (
+                    <p className="text-center text-gray-500 font-bold uppercase text-xs py-8 border-2 border-dashed border-white/5 rounded-xl">
+                        No hay pagos online recientes.
+                    </p>
+                ) : (
+                    <div className="space-y-8">
+                        {fechasOrdenadas.map(fecha => {
+                            const grupo = pagosAgrupados[fecha];
+                            const isExpanded = expandedDays[fecha];
+                            const fechaParseada = new Date(`${fecha}T12:00:00`);
+                            const fechaDisplay = format(fechaParseada, "EEEE d 'de' MMMM", { locale: es });
+
+                            return (
+                                <div key={fecha} className="space-y-3">
+                                    <div
+                                        className="flex items-center justify-between border-b border-white/5 pb-2 cursor-pointer group"
+                                        onClick={() => setExpandedDays(prev => ({ ...prev, [fecha]: !isExpanded }))}
+                                    >
+                                        <h3 className="text-[11px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2 group-hover:text-white transition-colors">
+                                            {isExpanded ? <ChevronDown size={14} className="text-blue-500" /> : <ChevronRight size={14} className="text-gray-500" />}
+                                            {fechaDisplay}
+                                        </h3>
+                                        <span className="text-[11px] font-black uppercase text-blue-400 bg-blue-500/10 px-2 py-1 rounded">
+                                            Día: ${grupo.total.toLocaleString()}
+                                        </span>
+                                    </div>
+                                    {isExpanded && (
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                                            {grupo.pagos.map((pago: any) => (
+                                                <div key={pago.id} className="bg-[#09090b] border border-white/5 p-3 rounded-xl flex items-center justify-between gap-3 hover:border-white/20 hover:bg-white/5 transition-all overflow-hidden">
+                                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                        <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 shrink-0 border border-blue-500/20">
+                                                            <DollarSign size={16} />
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <h4 className="font-bold text-white text-sm truncate">{pago.concepto}</h4>
+                                                            <p className="text-[10px] text-gray-500 font-bold uppercase mt-1 truncate">
+                                                                {format(new Date(pago.created_at), "HH:mm")} hs • {pago.usuario?.nombre_completo || 'Usuario Desconocido'}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-blue-400 font-black text-base shrink-0 whitespace-nowrap pl-1">
+                                                        +${Number(pago.monto).toLocaleString()}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
         </div>
     )
 
-    // 🚀 MODAL FLOTANTE DE EDICIÓN DE MOVIMIENTO (Reutilizable para Admin y Recepción)
     const renderModalEdicion = movAEditar && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-6 shadow-2xl relative">
@@ -570,6 +632,7 @@ export default function CajaPage() {
     if (userRole === 'admin') {
         return (
             <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in relative">
+                <Toaster position="top-center" richColors theme="dark" />
                 {renderModalEdicion}
 
                 {cajaDetalle && (
@@ -637,7 +700,7 @@ export default function CajaPage() {
                                     </div>
                                 ) : (
                                     movimientosDetalle?.map((mov: any) => (
-                                        <div key={mov.id} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors">
+                                        <div key={mov.id} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors group">
                                             <div className="flex items-center gap-4">
                                                 <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${mov.tipo === 'ingreso' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
                                                     {mov.tipo === 'ingreso' ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
@@ -645,7 +708,7 @@ export default function CajaPage() {
                                                 <div>
                                                     <h4 className="font-bold text-white text-sm">{mov.concepto}</h4>
                                                     <div className="flex items-center gap-2 mt-1">
-                                                        <span className="text-[10px] text-gray-500 uppercase font-bold">
+                                                        <span className="text-[10px] text-gray-500 uppercase font-bold bg-white/5 px-2 py-0.5 rounded">
                                                             {format(new Date(mov.created_at), "HH:mm", { locale: es })} hs
                                                         </span>
                                                         <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo_pago === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
@@ -661,18 +724,15 @@ export default function CajaPage() {
                                                 <span className={`text-base font-black ${mov.tipo === 'ingreso' ? 'text-white' : 'text-red-500'}`}>
                                                     {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
                                                 </span>
-                                                {/* 🚀 BOTÓN EDITAR EN HISTORIAL (ADMIN) */}
-                                                <button onClick={(e) => { e.stopPropagation(); setMovAEditar(mov); }} className="p-2 bg-white/5 hover:bg-[#D4E655]/20 rounded-lg transition-colors group/btn">
-                                                    <Pencil size={14} className="text-gray-400 group-hover/btn:text-[#D4E655]" />
-                                                </button>
-                                                {userRole === 'admin' && (
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); handleEliminarMov(mov.id); }}
-                                                        className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 rounded-lg transition-all"
-                                                    >
+                                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button onClick={(e) => { e.stopPropagation(); setMovAEditar(mov); }} className="p-2 bg-white/5 hover:bg-[#D4E655]/20 rounded-lg transition-colors group/btn">
+                                                        <Pencil size={14} className="text-gray-400 group-hover/btn:text-[#D4E655]" />
+                                                    </button>
+                                                    {/* 🚀 BOTÓN ELIMINAR PARA ADMIN */}
+                                                    <button onClick={(e) => { e.stopPropagation(); handleEliminarMov(mov.id); }} className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 rounded-lg transition-colors">
                                                         <Trash2 size={14} />
                                                     </button>
-                                                )}
+                                                </div>
                                             </div>
                                         </div>
                                     ))
@@ -684,8 +744,8 @@ export default function CajaPage() {
 
                 <div className="flex justify-between items-end mb-8 border-b border-white/10 pb-6">
                     <div>
-                        <h1 className="text-3xl font-black uppercase tracking-tighter text-white">Finanzas</h1>
-                        <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest">Panel de Control</p>
+                        <h1 className="text-3xl font-black uppercase tracking-tighter text-white">Finanzas Admin</h1>
+                        <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">Panel de Control</p>
                     </div>
                     <div className="text-right hidden md:block">
                         <p className="text-[10px] text-gray-500 font-bold uppercase">Cajas Activas</p>
@@ -693,23 +753,21 @@ export default function CajaPage() {
                     </div>
                 </div>
 
-                {userRole === 'admin' && (
-                    <button
-                        onClick={handleCierreGlobal}
-                        disabled={cerrandoCajas}
-                        className="bg-red-600/20 text-red-500 border border-red-600/30 px-6 py-3 mb-3 md:mb-6 rounded-xl font-black uppercase text-xs hover:bg-red-600 hover:text-white transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(220,38,38,0.2)]"
-                    >
-                        {cerrandoCajas ? (
-                            <Loader2 size={16} className="animate-spin" />
-                        ) : (
-                            <>
-                                <AlertOctagon size={16} /> Forzar Cierre Global
-                            </>
-                        )}
-                    </button>
-                )}
+                <button
+                    onClick={handleCierreGlobal}
+                    disabled={cerrandoCajas}
+                    className="bg-red-600/20 text-red-500 border border-red-600/30 px-6 py-3 mb-3 md:mb-6 rounded-xl font-black uppercase text-xs hover:bg-red-600 hover:text-white transition-all flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(220,38,38,0.2)]"
+                >
+                    {cerrandoCajas ? (
+                        <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                        <>
+                            <AlertOctagon size={16} /> Forzar Cierre Global
+                        </>
+                    )}
+                </button>
 
-                <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2">
+                <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2 mt-8">
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" /> En Vivo
                 </h2>
 
@@ -769,7 +827,7 @@ export default function CajaPage() {
                     </div>
                 )}
 
-                <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2">
+                <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2 mt-8">
                     <Clock size={18} className="text-[#D4E655]" /> Horas Trabajadas (Mes Actual)
                 </h2>
                 <div className="bg-[#111] border border-white/10 rounded-2xl overflow-hidden shadow-xl mb-12 p-6">
@@ -780,8 +838,8 @@ export default function CajaPage() {
                             {reporteHoras.map((rep: any, idx: number) => (
                                 <div key={idx} className="bg-[#09090b] border border-white/5 p-4 rounded-xl flex items-center justify-between">
                                     <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20 shrink-0 text-blue-400">
-                                            <Users size={18} />
+                                        <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20 shrink-0 text-blue-400 font-black">
+                                            {rep.nombre[0]}
                                         </div>
                                         <div>
                                             <h4 className="font-bold text-white text-sm truncate max-w-[120px]">{rep.nombre}</h4>
@@ -797,7 +855,7 @@ export default function CajaPage() {
                     )}
                 </div>
 
-                <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2">
+                <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2 mt-8">
                     <History size={18} className="text-gray-500" /> Historial de Cierres
                 </h2>
                 <div className="bg-[#111] border border-white/10 rounded-2xl overflow-hidden shadow-xl">
@@ -934,6 +992,7 @@ export default function CajaPage() {
                     </div>
                 </div>
             </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
                 <div className="bg-[#09090b] border border-[#D4E655]/30 p-6 rounded-2xl relative overflow-hidden group">
                     <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-all"><Wallet size={40} /></div>
@@ -1039,18 +1098,17 @@ export default function CajaPage() {
                                         <span className={`text-lg font-black ${mov.tipo === 'ingreso' ? 'text-white' : 'text-red-500'}`}>
                                             {mov.tipo === 'ingreso' ? '+' : '-'}${Number(mov.monto).toLocaleString()}
                                         </span>
-                                        {/* 🚀 BOTÓN EDITAR EN RECEPCIÓN (Turno Activo) */}
-                                        <button onClick={(e) => { e.stopPropagation(); setMovAEditar(mov); }} className="p-2 bg-white/5 hover:bg-[#D4E655]/20 rounded-lg transition-colors group/btn">
-                                            <Pencil size={16} className="text-gray-400 group-hover/btn:text-[#D4E655]" />
-                                        </button>
-                                        {userRole === 'admin' && (
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); handleEliminarMov(mov.id); }}
-                                                className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 rounded-lg transition-all"
-                                            >
-                                                <Trash2 size={14} />
+                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                            <button onClick={(e) => { e.stopPropagation(); setMovAEditar(mov); }} className="p-2 bg-white/5 hover:bg-[#D4E655]/20 rounded-lg transition-colors group/btn">
+                                                <Pencil size={16} className="text-gray-400 group-hover/btn:text-[#D4E655]" />
                                             </button>
-                                        )}
+                                            {/* 🚀 BOTÓN ELIMINAR PARA ADMIN EN RECEPCIÓN */}
+                                            {userRole === 'admin' && (
+                                                <button onClick={(e) => { e.stopPropagation(); handleEliminarMov(mov.id); }} className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 rounded-lg transition-colors">
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             ))}
