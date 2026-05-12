@@ -49,6 +49,7 @@ export async function cobrarAlquilerAction(updates: any[], movimientoCaja: any) 
 
     try {
         const promesas = updates.map(u => supabase.from('alquileres').update({
+            monto_total: u.monto_total, // 🚀 FIX: AHORA SÍ GUARDAMOS EL NUEVO TOTAL CON EL RECARGO
             monto_pagado: u.monto_pagado,
             estado_pago: u.estado_pago,
             estado: u.estado,
