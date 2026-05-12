@@ -11,12 +11,11 @@ import { toast, Toaster } from 'sonner'
 import { cancelarReservaAction } from '@/app/actions/mis-clases'
 import { useCash } from '@/context/CashContext' // 🚀 IMPORTAMOS EL CONTEXTO GLOBAL
 
-// --- HELPER DE FECHAS SEGURAS ---
-const parseSafeDate = (dateStr: string | null | undefined) => {
-    if (!dateStr) return new Date()
-    const cleanStr = dateStr.replace('+00:00', '').replace('+00', '').replace('Z', '').replace(' ', 'T')
-    const parsed = new Date(cleanStr)
-    return isNaN(parsed.getTime()) ? new Date() : parsed
+// 🚀 FIX ZONA HORARIA: Eliminamos el parseSafeDate complejo y usamos directamente new Date()
+// Supabase ya nos manda la fecha en formato ISO (ej: 2026-05-12T20:30:00+00:00)
+// JS nativo sabe que "+00" significa UTC, así que new Date() lo ajusta a tu hora local automáticamente.
+const parseFechaLocal = (dateStr: string) => {
+    return new Date(dateStr)
 }
 
 // --- TIPOS ---
@@ -158,9 +157,9 @@ export default function MisClasesPage() {
     // VISTA PARA PROFESORES
     // ==========================================
     if (userRole === 'profesor' || userRole === 'admin') {
-        const clasesActivas = clasesProfe.filter(c => c.estado !== 'cancelada' && parseSafeDate(c.fin) > ahora)
-        const clasesInactivas = clasesProfe.filter(c => c.estado === 'cancelada' || parseSafeDate(c.fin) <= ahora)
-        clasesInactivas.sort((a, b) => parseSafeDate(b.inicio).getTime() - parseSafeDate(a.inicio).getTime())
+        const clasesActivas = clasesProfe.filter(c => c.estado !== 'cancelada' && parseFechaLocal(c.fin) > ahora)
+        const clasesInactivas = clasesProfe.filter(c => c.estado === 'cancelada' || parseFechaLocal(c.fin) <= ahora)
+        clasesInactivas.sort((a, b) => parseFechaLocal(b.inicio).getTime() - parseFechaLocal(a.inicio).getTime())
 
         return (
             <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
@@ -183,7 +182,7 @@ export default function MisClasesPage() {
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                             {clasesActivas.map((clase) => {
-                                const inicioDate = parseSafeDate(clase.inicio)
+                                const inicioDate = parseFechaLocal(clase.inicio)
                                 return (
                                     <div key={clase.id} className="bg-[#09090b] border border-white/10 rounded-2xl p-5 hover:border-[#D4E655]/40 transition-all group flex flex-col">
                                         <div className="flex justify-between items-start mb-4">
@@ -216,7 +215,7 @@ export default function MisClasesPage() {
                         </h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 opacity-60">
                             {clasesInactivas.slice(0, 3).map((clase) => {
-                                const inicioDate = parseSafeDate(clase.inicio)
+                                const inicioDate = parseFechaLocal(clase.inicio)
                                 return (
                                     <div key={clase.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex justify-between items-center">
                                         <div>
@@ -239,8 +238,8 @@ export default function MisClasesPage() {
     // ==========================================
     // VISTA PARA ALUMNOS
     // ==========================================
-    const clasesProximas = historialAlumno.filter(item => parseSafeDate(item.clase.inicio) > ahora)
-    const clasesPasadas = historialAlumno.filter(item => parseSafeDate(item.clase.inicio) <= ahora)
+    const clasesProximas = historialAlumno.filter(item => parseFechaLocal(item.clase.inicio) > ahora)
+    const clasesPasadas = historialAlumno.filter(item => parseFechaLocal(item.clase.inicio) <= ahora)
 
     return (
         <div className="pb-24 px-4 pt-4 md:p-8 min-h-screen bg-[#050505] animate-in fade-in">
@@ -262,7 +261,7 @@ export default function MisClasesPage() {
                     {clasesProximas.length > 0 ? (
                         <div className="space-y-4">
                             {clasesProximas.map((item) => {
-                                const claseDateLocal = parseSafeDate(item.clase.inicio)
+                                const claseDateLocal = parseFechaLocal(item.clase.inicio)
                                 const horasFaltantes = differenceInHours(claseDateLocal, ahora)
                                 const esCancelable = horasFaltantes >= 24
 
@@ -324,7 +323,7 @@ export default function MisClasesPage() {
                     {clasesPasadas.length > 0 ? (
                         <div className="space-y-4 opacity-80">
                             {clasesPasadas.slice(0, 3).map((item) => {
-                                const claseDateLocal = parseSafeDate(item.clase.inicio)
+                                const claseDateLocal = parseFechaLocal(item.clase.inicio)
 
                                 return (
                                     <div key={item.id} className="bg-[#111] border border-white/5 rounded-xl overflow-hidden flex flex-row transition-colors">
