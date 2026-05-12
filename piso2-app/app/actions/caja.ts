@@ -185,3 +185,20 @@ export async function eliminarMovimientoCajaAction(movimientoId: string) {
         return { success: false, error: error.message }
     }
 }
+
+export async function editarMontoInicialAction(turnoId: string, nuevoMonto: number) {
+    const supabase = await createClient()
+
+    try {
+        const { error } = await supabase
+            .from('caja_turnos')
+            .update({ monto_inicial: nuevoMonto })
+            .eq('id', turnoId)
+
+        if (error) throw error
+
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}

@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR, { mutate as globalMutate } from 'swr'
 import {
@@ -17,8 +17,12 @@ import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 
-// 🚀 IMPORTAMOS LAS SERVER ACTIONS (Incluyendo editarMovimientoAction)
-import { abrirCajaAction, cerrarCajaAction, registrarMovimientoAction, cerrarTodasLasCajasAction, editarMovimientoAction, eliminarMovimientoCajaAction } from '@/app/actions/caja'
+// 🚀 IMPORTAMOS LAS SERVER ACTIONS (Asegurate de que editarMontoInicialAction esté exportada en tu archivo)
+import {
+    abrirCajaAction, cerrarCajaAction, registrarMovimientoAction,
+    cerrarTodasLasCajasAction, editarMovimientoAction, eliminarMovimientoCajaAction,
+    editarMontoInicialAction
+} from '@/app/actions/caja'
 
 type CajaData = {
     admin: {
@@ -30,15 +34,15 @@ type CajaData = {
         sedes: any[]
         turnoActivo: any | null
         movimientos: any[]
+        ultimosCierresPorSede: Record<string, any>
     } | null
     pagosOnline: any[]
-    turnosDisponibles: any[] // 🚀 Para saber a qué sede podemos mover la plata
+    turnosDisponibles: any[]
 }
 
 const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<CajaData> => {
     const supabase = createClient()
 
-    // 🚀 1. TRAEMOS TURNOS ABIERTOS PARA EL SELECTOR DE REUBICACIÓN
     const { data: turnosAbiertosData } = await supabase
         .from('caja_turnos')
         .select(`id, sede:sedes(id, nombre)`)
@@ -49,7 +53,6 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
         sede_nombre: Array.isArray(t.sede) ? t.sede[0]?.nombre : t.sede?.nombre
     }));
 
-    // 🚀 2. TRAEMOS LOS PAGOS LIMPIOS
     const { data: pagosOnlineData, error: errPagos } = await supabase
         .from('pagos_online')
         .select('*')
@@ -61,7 +64,6 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
 
     let pagosOnline = pagosOnlineData || []
 
-    // 🚀 3. LE PEGAMOS LOS NOMBRES MANUALMENTE EN JAVASCRIPT
     if (pagosOnline.length > 0) {
         const userIds = [...new Set(pagosOnline.map((p: any) => p.user_id).filter(Boolean))]
 
@@ -170,7 +172,28 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
             movimientos = movs || []
         }
 
-        return { admin: null, recepcion: { sedes: sedes || [], turnoActivo, movimientos }, pagosOnline, turnosDisponibles }
+        const ultimosCierresPorSede: Record<string, any> = {};
+        if (sedes) {
+            for (const sede of sedes) {
+                const { data: ultimoTurno } = await supabase.from('caja_turnos')
+                    .select('monto_final, usuario:profiles(nombre_completo), fecha_cierre')
+                    .eq('sede_id', sede.id)
+                    .eq('estado', 'cerrada')
+                    .order('fecha_cierre', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (ultimoTurno) {
+                    ultimosCierresPorSede[sede.id] = {
+                        monto: ultimoTurno.monto_final,
+                        responsable: Array.isArray(ultimoTurno.usuario) ? ultimoTurno.usuario[0]?.nombre_completo : ultimoTurno.usuario?.nombre_completo,
+                        fecha: ultimoTurno.fecha_cierre
+                    };
+                }
+            }
+        }
+
+        return { admin: null, recepcion: { sedes: sedes || [], turnoActivo, movimientos, ultimosCierresPorSede }, pagosOnline, turnosDisponibles }
     }
 
     return { admin: null, recepcion: null, pagosOnline: [], turnosDisponibles: [] }
@@ -212,16 +235,16 @@ export default function CajaPage() {
     const [cajaDetalle, setCajaDetalle] = useState<any>(null)
     const [cerrandoCajas, setCerrandoCajas] = useState(false)
 
-    // 🚀 ESTADO ACORDEÓN MP
+    // 🚀 ESTADO MODAL PARA EDITAR MONTO INICIAL
+    const [modalMontoInicial, setModalMontoInicial] = useState({ isOpen: false, turnoId: '', monto: '' })
+
     const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>(() => {
         const hoy = format(new Date(), "yyyy-MM-dd");
         return { [hoy]: true };
     });
 
-    // 🚀 ESTADO PARA EDICIÓN DE MOVIMIENTO
     const [movAEditar, setMovAEditar] = useState<any>(null)
 
-    // 🚀 FIX SWR MUTATE DETALLE
     const { data: movimientosDetalle, isLoading: loadingDetalle, mutate: mutateDetalle } = useSWR(
         cajaDetalle ? ['caja-detalle', cajaDetalle.id] : null,
         fetcherDetalle
@@ -239,6 +262,16 @@ export default function CajaPage() {
     const sedes = repData?.sedes || []
     const turnoActivo = repData?.turnoActivo || null
     const movimientos = repData?.movimientos || []
+    const ultimosCierresPorSede = repData?.ultimosCierresPorSede || {}
+
+    // ✅ FIX: ESTÁ COMO USEEFFECT
+    useEffect(() => {
+        if (sedeSeleccionada && ultimosCierresPorSede[sedeSeleccionada]) {
+            setMontoInicial(String(ultimosCierresPorSede[sedeSeleccionada].monto));
+        } else {
+            setMontoInicial('');
+        }
+    }, [sedeSeleccionada, ultimosCierresPorSede]);
 
     let saldoFisico = 0, saldoDigital = 0, ingresosEfec = 0, egresosEfec = 0, ingresosDig = 0, egresosDig = 0
     if (turnoActivo) {
@@ -270,6 +303,26 @@ export default function CajaPage() {
             toast.error(response.error || 'Error al abrir caja')
         }
 
+        setProcesando(false)
+    }
+
+    // 🚀 HANDLER PARA ACTUALIZAR MONTO INICIAL
+    const handleActualizarMontoInicial = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setProcesando(true)
+
+        const response = await editarMontoInicialAction(modalMontoInicial.turnoId, Number(modalMontoInicial.monto))
+
+        if (response.success) {
+            toast.success('Fondo inicial actualizado')
+            setModalMontoInicial({ isOpen: false, turnoId: '', monto: '' })
+            mutate()
+            if (cajaDetalle) {
+                setTimeout(() => globalMutate(['caja-detalle', cajaDetalle.id]), 500)
+            }
+        } else {
+            toast.error(response.error || 'Error al actualizar')
+        }
         setProcesando(false)
     }
 
@@ -311,7 +364,6 @@ export default function CajaPage() {
     const handleCerrarCaja = async () => {
         if (!turnoActivo) return;
 
-        // 🚀 CÁLCULO DE ARQUEO FÍSICO
         const conteoInput = prompt(
             `CIERRE DE CAJA - SEDE ${turnoActivo.sede?.nombre}\n\n` +
             `El sistema registra que deberías tener: $${saldoFisico.toLocaleString()} en efectivo.\n\n` +
@@ -342,7 +394,6 @@ export default function CajaPage() {
 
         setProcesando(true)
 
-        // Acá mandamos el efectivoReal a la action (si tu backend lo acepta, si no lo ignora y cierra igual)
         const response = await cerrarCajaAction(turnoActivo.id, efectivoReal)
 
         if (response.success) {
@@ -414,14 +465,7 @@ export default function CajaPage() {
             setMovAEditar(null)
             mutate()
             if (cajaDetalle) {
-                if (response.success) {
-                    toast.success('Movimiento actualizado y/o reubicado correctamente')
-                    setMovAEditar(null)
-                    mutate()
-                    if (cajaDetalle) {
-                        setTimeout(() => globalMutate(['caja-detalle', cajaDetalle.id]), 500)
-                    }
-                }
+                setTimeout(() => globalMutate(['caja-detalle', cajaDetalle.id]), 500)
             }
         } else {
             toast.error(response.error || 'Error al actualizar el movimiento')
@@ -430,7 +474,6 @@ export default function CajaPage() {
         setProcesando(false)
     }
 
-    // 🚀 LÓGICA DE PAGOS ONLINE (ACORDEÓN Y 5 DÍAS)
     const pagosAgrupados = pagosOnline.reduce((acc, pago) => {
         const fecha = format(new Date(pago.created_at), "yyyy-MM-dd");
         if (!acc[fecha]) {
@@ -443,7 +486,7 @@ export default function CajaPage() {
 
     const fechasOrdenadas = Object.keys(pagosAgrupados)
         .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
-        .slice(0, 5); // LÍMITE DE 5 DÍAS
+        .slice(0, 5);
 
     const totalReciente = pagosOnline.reduce((acc, p) => acc + Number(p.monto), 0);
 
@@ -538,7 +581,6 @@ export default function CajaPage() {
                     </button>
                 </div>
                 <form onSubmit={handleEditarMovimiento} className="space-y-5 text-left">
-
                     <div className="space-y-1">
                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Sede (Turno Destino)</label>
                         <select
@@ -555,7 +597,6 @@ export default function CajaPage() {
                         </select>
                         <p className="text-[10px] text-gray-600 mt-1">Si cambiás la sede, la plata se moverá a la caja activa de ese lugar.</p>
                     </div>
-
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
                             <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Tipo</label>
@@ -581,33 +622,54 @@ export default function CajaPage() {
                             </select>
                         </div>
                     </div>
-
                     <div className="space-y-1">
                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Concepto / Nombre</label>
-                        <input
-                            required
-                            value={movAEditar.concepto}
-                            onChange={e => setMovAEditar({ ...movAEditar, concepto: e.target.value })}
-                            className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]"
-                        />
+                        <input required value={movAEditar.concepto} onChange={e => setMovAEditar({ ...movAEditar, concepto: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" />
                     </div>
-
                     <div className="space-y-1">
                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Monto ($)</label>
                         <div className="relative">
                             <span className="absolute left-3 top-3 text-gray-500 font-bold">$</span>
+                            <input required type="number" value={movAEditar.monto} onChange={e => setMovAEditar({ ...movAEditar, monto: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-8 text-white text-lg font-bold outline-none focus:border-[#D4E655]" />
+                        </div>
+                    </div>
+                    <button disabled={procesando} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-2 shadow-lg">
+                        {procesando ? <Loader2 className="animate-spin" /> : 'Guardar Cambios'}
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+
+    // 🚀 MODAL ACTUALIZAR FONDO INICIAL (SE USA EN RECEPCION Y ADMIN)
+    const renderModalMontoInicial = modalMontoInicial.isOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-[#09090b] border border-[#D4E655]/30 w-full max-w-sm rounded-3xl p-6 shadow-2xl relative">
+                <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
+                    <h3 className="text-lg font-black text-white uppercase flex items-center gap-2">
+                        <Wallet className="text-[#D4E655]" /> Ajustar Fondo Físico
+                    </h3>
+                    <button onClick={() => setModalMontoInicial({ isOpen: false, turnoId: '', monto: '' })} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                        <X className="text-gray-500 hover:text-white" />
+                    </button>
+                </div>
+                <form onSubmit={handleActualizarMontoInicial} className="space-y-5 text-left">
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Efectivo Real en Caja</label>
+                        <div className="relative">
+                            <span className="absolute left-4 top-4 text-gray-500 font-bold text-xl">$</span>
                             <input
                                 required
                                 type="number"
-                                value={movAEditar.monto}
-                                onChange={e => setMovAEditar({ ...movAEditar, monto: e.target.value })}
-                                className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-8 text-white text-lg font-bold outline-none focus:border-[#D4E655]"
+                                value={modalMontoInicial.monto}
+                                onChange={e => setModalMontoInicial({ ...modalMontoInicial, monto: e.target.value })}
+                                className="w-full bg-[#111] border border-white/10 rounded-xl p-4 pl-10 text-white text-2xl font-black outline-none focus:border-[#D4E655]"
                             />
                         </div>
+                        <p className="text-[10px] text-gray-500 uppercase font-bold mt-2">Corrige el saldo con el que abrió la caja.</p>
                     </div>
-
                     <button disabled={procesando} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-2 shadow-lg">
-                        {procesando ? <Loader2 className="animate-spin" /> : 'Guardar Cambios'}
+                        {procesando ? <Loader2 className="animate-spin" /> : 'Actualizar Saldo'}
                     </button>
                 </form>
             </div>
@@ -634,6 +696,7 @@ export default function CajaPage() {
             <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in relative">
                 <Toaster position="top-center" richColors theme="dark" />
                 {renderModalEdicion}
+                {renderModalMontoInicial}
 
                 {cajaDetalle && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setCajaDetalle(null)}>
@@ -659,9 +722,18 @@ export default function CajaPage() {
                             </div>
 
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 shrink-0">
-                                <div className="bg-[#111] p-4 rounded-2xl border border-white/5">
+                                <div className="bg-[#111] p-4 rounded-2xl border border-white/5 relative group/monto">
                                     <p className="text-[9px] text-gray-500 uppercase font-bold mb-1">Fondo Inicial</p>
                                     <p className="text-xl font-black text-white">${Number(cajaDetalle.monto_inicial).toLocaleString()}</p>
+                                    {cajaDetalle.estado === 'abierta' && (
+                                        <button
+                                            onClick={() => setModalMontoInicial({ isOpen: true, turnoId: cajaDetalle.id, monto: cajaDetalle.monto_inicial })}
+                                            className="absolute top-2 right-2 p-1.5 bg-white/10 hover:bg-[#D4E655] hover:text-black rounded opacity-0 group-hover/monto:opacity-100 transition-all"
+                                            title="Editar Fondo Inicial"
+                                        >
+                                            <Pencil size={12} />
+                                        </button>
+                                    )}
                                 </div>
                                 <div className="bg-[#111] p-4 rounded-2xl border border-white/5">
                                     <p className="text-[9px] text-gray-500 uppercase font-bold text-green-500 mb-1">Ingresos (Movs)</p>
@@ -728,7 +800,6 @@ export default function CajaPage() {
                                                     <button onClick={(e) => { e.stopPropagation(); setMovAEditar(mov); }} className="p-2 bg-white/5 hover:bg-[#D4E655]/20 rounded-lg transition-colors group/btn">
                                                         <Pencil size={14} className="text-gray-400 group-hover/btn:text-[#D4E655]" />
                                                     </button>
-                                                    {/* 🚀 BOTÓN ELIMINAR PARA ADMIN */}
                                                     <button onClick={(e) => { e.stopPropagation(); handleEliminarMov(mov.id); }} className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 rounded-lg transition-colors">
                                                         <Trash2 size={14} />
                                                     </button>
@@ -952,10 +1023,36 @@ export default function CajaPage() {
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">Fondo Inicial (Efectivo)</label>
+
+                                    {sedeSeleccionada && ultimosCierresPorSede[sedeSeleccionada] && (
+                                        <div className="mb-2 bg-blue-500/10 border border-blue-500/20 rounded-lg p-2 flex items-start gap-2">
+                                            <Info size={14} className="text-blue-400 shrink-0 mt-0.5" />
+                                            <div>
+                                                <p className="text-[9px] text-blue-300/80 leading-tight">
+                                                    El turno anterior cerró con <span className="font-bold text-blue-400">${Number(ultimosCierresPorSede[sedeSeleccionada].monto).toLocaleString()}</span>
+                                                </p>
+                                                <p className="text-[8px] text-blue-300/50 uppercase mt-0.5">
+                                                    Cerrado por: {ultimosCierresPorSede[sedeSeleccionada].responsable} ({format(new Date(ultimosCierresPorSede[sedeSeleccionada].fecha), "dd/MM HH:mm")})
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div className="relative">
                                         <span className="absolute left-3 top-3 text-gray-500">$</span>
-                                        <input type="number" className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-6 text-white outline-none focus:border-[#D4E655] transition-all" placeholder="0" value={montoInicial} onChange={(e) => setMontoInicial(e.target.value)} />
+                                        <input
+                                            type="number"
+                                            className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-6 text-white outline-none focus:border-[#D4E655] transition-all"
+                                            placeholder="0"
+                                            value={montoInicial}
+                                            onChange={(e) => setMontoInicial(e.target.value)}
+                                        />
                                     </div>
+                                    {sedeSeleccionada && ultimosCierresPorSede[sedeSeleccionada] && montoInicial !== '' && Number(montoInicial) !== Number(ultimosCierresPorSede[sedeSeleccionada].monto) && (
+                                        <p className="text-[9px] text-orange-400 font-bold uppercase mt-1 ml-1 animate-pulse">
+                                            ⚠️ Estás abriendo con un monto distinto al cierre anterior
+                                        </p>
+                                    )}
                                 </div>
                                 <button disabled={procesando} className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-2">
                                     {procesando ? <Loader2 className="animate-spin" /> : <><Unlock size={16} /> Abrir Caja</>}
@@ -979,6 +1076,7 @@ export default function CajaPage() {
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in duration-500">
             <Toaster position="top-center" richColors theme="dark" />
             {renderModalEdicion}
+            {renderModalMontoInicial}
 
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8 border-b border-white/10 pb-6">
                 <div>
@@ -998,8 +1096,17 @@ export default function CajaPage() {
                     <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-all"><Wallet size={40} /></div>
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Efectivo en Caja</p>
                     <h2 className="text-4xl font-black text-white tracking-tighter">${saldoFisico.toLocaleString()}</h2>
-                    <div className="mt-4 flex gap-3 text-[10px] font-bold uppercase text-gray-500">
-                        <span>Ini: ${Number(turnoActivo.monto_inicial).toLocaleString()}</span>
+                    <div className="mt-4 flex gap-3 text-[10px] font-bold uppercase text-gray-500 items-center">
+                        <span className="flex items-center">
+                            Ini: ${Number(turnoActivo.monto_inicial).toLocaleString()}
+                            <button
+                                onClick={() => setModalMontoInicial({ isOpen: true, turnoId: turnoActivo.id, monto: turnoActivo.monto_inicial })}
+                                className="ml-1 text-gray-500 hover:text-white transition-colors"
+                                title="Editar Fondo Inicial"
+                            >
+                                <Pencil size={10} />
+                            </button>
+                        </span>
                         <span className="text-green-500">Ing: ${ingresosEfec.toLocaleString()}</span>
                     </div>
                 </div>
@@ -1102,7 +1209,6 @@ export default function CajaPage() {
                                             <button onClick={(e) => { e.stopPropagation(); setMovAEditar(mov); }} className="p-2 bg-white/5 hover:bg-[#D4E655]/20 rounded-lg transition-colors group/btn">
                                                 <Pencil size={16} className="text-gray-400 group-hover/btn:text-[#D4E655]" />
                                             </button>
-                                            {/* 🚀 BOTÓN ELIMINAR PARA ADMIN EN RECEPCIÓN */}
                                             {userRole === 'admin' && (
                                                 <button onClick={(e) => { e.stopPropagation(); handleEliminarMov(mov.id); }} className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 rounded-lg transition-colors">
                                                     <Trash2 size={16} />
