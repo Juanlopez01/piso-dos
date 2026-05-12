@@ -184,7 +184,6 @@ export default function ClaseDetallePage() {
         return { totalRecaudado: total, pagoDocente: pago }
     }, [inscripciones, clase])
 
-    // 🚀 FIX: Usamos la función segura para que JS se encargue del offset
     const inicioDate = parseFechaLocal(clase?.inicio);
     const fechaText = inicioDate ? format(inicioDate, "EEE d MMM", { locale: es }) : '';
     const horaText = inicioDate ? format(inicioDate, "HH:mm") : '';
@@ -201,7 +200,7 @@ export default function ClaseDetallePage() {
 
     const getPrecioSugerido = (tipo: string, pago: string, packId: string) => {
         if (tipo === 'suelta') {
-            if (esGrupoOFormacion) return '';
+            if (esGrupoOFormacion || clase?.es_audicion) return ''; // 🚀 Audición es monto libre
             if (!clase?.es_combinable) return pago === 'efectivo' ? String(precioExclusivaEfvo) : String(precioExclusivaTransf);
             const p = PRECIOS_ALUMNO[clase?.tipo_clase === 'Especial' ? 'Especial' : 'Regular'] || PRECIOS_ALUMNO.Regular;
             return pago === 'efectivo' ? String(p.efectivo) : String(p.transferencia);
@@ -227,19 +226,23 @@ export default function ClaseDetallePage() {
         });
     }
 
-    // 🚀 FIX DE RENDIMIENTO: ELIMINAMOS EL USEEFFECT DEL MODAL ACA
-
-    const tabsDisponibles = esGrupoOFormacion
+    // 🚀 FIX: Pestañas para audición (Abonar Audición / Sin Cargo)
+    const tabsDisponibles = clase?.es_audicion
         ? [
-            { id: 'suelta', label: 'Anotar y Pagar' },
-            { id: 'invitado', label: 'Invitado (Sin Cargo)' }
+            { id: 'suelta', label: 'Abonar Audición' },
+            { id: 'invitado', label: 'Sin Cargo' }
         ]
-        : [
-            { id: 'usar_credito', label: 'Usar Crédito' },
-            { id: 'suelta', label: 'Clase Suelta' },
-            { id: 'pack', label: 'Vender Pack' },
-            { id: 'invitado', label: 'Invitado' }
-        ];
+        : esGrupoOFormacion
+            ? [
+                { id: 'suelta', label: 'Anotar y Pagar' },
+                { id: 'invitado', label: 'Invitado (Sin Cargo)' }
+            ]
+            : [
+                { id: 'usar_credito', label: 'Usar Crédito' },
+                { id: 'suelta', label: 'Clase Suelta' },
+                { id: 'pack', label: 'Vender Pack' },
+                { id: 'invitado', label: 'Invitado' }
+            ];
 
     const handleSetAsistencia = async (insc: Inscripcion, nuevoEstado: 'presente' | 'ausente' | 'media_falta' | 'justificada' | 'saf') => {
         const optimisticInscripciones = inscripciones.map(i => i.id === insc.id ? { ...i, estado_asistencia: nuevoEstado, presente: nuevoEstado === 'presente' } : i)
@@ -299,15 +302,17 @@ export default function ClaseDetallePage() {
             if (clase.es_combinable === false) tipoClaseRPC = 'exclusivo';
             else if (clase.tipo_clase === 'Especial') tipoClaseRPC = 'seminario';
 
-            if (clase.es_audicion) {
-                updateGuestForm({ tipo: 'invitado' });
-                const nomFinal = alumnoIdFinal ? alumnoSeleccionado?.nombre_completo : `${guestForm.nombre} ${guestForm.apellido}`
-                nombreInvitadoStr = `${nomFinal} ${guestForm.telefono ? `(${guestForm.telefono})` : ''}`.trim()
-            } else {
-                if (['suelta', 'pack'].includes(guestForm.tipo)) {
-                    monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : 0;
+            // 🚀 FIX: Permitir montos en Audiciones Paga o Clases Sueltas
+            if (['suelta', 'pack'].includes(guestForm.tipo)) {
+                monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : 0;
+            }
+
+            // Nombre para invitados (con teléfono si es audición)
+            if (!alumnoIdFinal) {
+                nombreInvitadoStr = `${guestForm.nombre} ${guestForm.apellido}`.trim()
+                if (clase.es_audicion && guestForm.telefono) {
+                    nombreInvitadoStr += ` (${guestForm.telefono})`;
                 }
-                if (!alumnoIdFinal) nombreInvitadoStr = `${guestForm.nombre} ${guestForm.apellido}`.trim()
             }
 
             const isMandatoryAccount = guestForm.tipo === 'pack' || (esGrupoOFormacion && guestForm.tipo === 'suelta') || crearCuenta;
@@ -370,7 +375,7 @@ export default function ClaseDetallePage() {
 
             toast.success('Inscripción registrada con éxito');
             mutate(); setIsGuestOpen(false); setAlumnoSeleccionado(null); setCrearCuenta(false);
-            setGuestForm({ ...guestForm, nombre: '', apellido: '', email: '', telefono: '', dni: '', packSeleccionadoId: '', montoManualPack: '', tipo: esGrupoOFormacion ? 'suelta' : 'usar_credito', esSena: false })
+            setGuestForm({ ...guestForm, nombre: '', apellido: '', email: '', telefono: '', dni: '', packSeleccionadoId: '', montoManualPack: '', tipo: (esGrupoOFormacion || clase.es_audicion) ? 'suelta' : 'usar_credito', esSena: false })
         } catch (err: any) { toast.error(err.message) } finally { setProcessing(false) }
     }
 
@@ -437,10 +442,10 @@ export default function ClaseDetallePage() {
                             </button>
                         )}
                         <button onClick={() => setIsNotifModalOpen(true)} className="flex-1 md:flex-none bg-[#111] border border-white/10 text-white px-4 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 hover:border-[#D4E655]"><BellRing size={18} /> Aviso</button>
-                        {/* 🚀 FIX: ELIMINAMOS EL USEEFFECT Y LE PASAMOS LA LOGICA AL BOTON */}
                         <button
                             onClick={() => {
-                                if (esGrupoOFormacion && ['pack', 'usar_credito'].includes(guestForm.tipo)) {
+                                // 🚀 FIX: Si es audición o formación, forzar pestaña "suelta" (paga) por defecto
+                                if ((esGrupoOFormacion || clase?.es_audicion) && ['pack', 'usar_credito'].includes(guestForm.tipo)) {
                                     updateGuestForm({ tipo: 'suelta' });
                                 }
                                 setIsGuestOpen(true);
@@ -475,21 +480,14 @@ export default function ClaseDetallePage() {
                                                     onClick={async () => {
                                                         const montoStr = prompt(`¿Cuánta plata está entregando ahora el alumno?`);
                                                         if (!montoStr) return;
-
                                                         const monto = Number(montoStr);
                                                         if (isNaN(monto) || monto <= 0) return toast.error("Monto inválido");
-
                                                         const metodo = confirm(`Aceptar = EFECTIVO\nCancelar = TRANSFERENCIA`);
                                                         const metodoFinal = metodo ? 'efectivo' : 'transferencia';
-
                                                         const liquidarDeuda = confirm(`¿Con este pago de $${monto} termina de saldar la deuda?\n\nACEPTAR: Sí, ya no debe nada.\nCANCELAR: No, va a seguir debiendo plata.`);
-
                                                         toast.promise(agregarPagoInscripcionAction(insc.id, monto, metodoFinal, liquidarDeuda), {
                                                             loading: 'Registrando cobro...',
-                                                            success: () => {
-                                                                mutate();
-                                                                return `Se sumaron $${monto} a la inscripción.`;
-                                                            },
+                                                            success: () => { mutate(); return `Se sumaron $${monto} a la inscripción.`; },
                                                             error: (err) => `Error: ${err}`
                                                         });
                                                     }}
@@ -557,7 +555,7 @@ export default function ClaseDetallePage() {
                                             {resultadosBusqueda.map(alum => {
                                                 const creds = getCreditosParaEstaClase(alum);
                                                 return (
-                                                    <div key={alum.id} onClick={() => { setAlumnoSeleccionado({ ...alum, creditosActivos: creds }); setBusquedaAlumno(''); setResultadosBusqueda([]); updateGuestForm({ tipo: esGrupoOFormacion ? 'suelta' : (creds > 0 ? 'usar_credito' : 'suelta') }); }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
+                                                    <div key={alum.id} onClick={() => { setAlumnoSeleccionado({ ...alum, creditosActivos: creds }); setBusquedaAlumno(''); setResultadosBusqueda([]); updateGuestForm({ tipo: (esGrupoOFormacion || clase?.es_audicion) ? 'suelta' : (creds > 0 ? 'usar_credito' : 'suelta') }); }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
                                                         <div><p className="text-xs font-bold text-white uppercase">{alum.nombre_completo || alum.nombre}</p><p className="text-[10px] text-gray-500">{alum.email}</p></div>
                                                         <span className={`text-[9px] font-black px-2 py-1 rounded ${creds > 0 ? 'bg-[#D4E655] text-black' : 'bg-white/10 text-gray-400'}`}>{creds} Disp.</span>
                                                     </div>
@@ -579,95 +577,83 @@ export default function ClaseDetallePage() {
                                 ))}
                             </div>
 
-                            {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack') && (
+                            {/* 🚀 FORMULARIO PARA PAGO (Suelta o Audición Paga) */}
+                            {guestForm.tipo === 'suelta' && (
                                 <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10 mt-4 animate-in fade-in">
-                                    {guestForm.tipo === 'pack' && (
-                                        <select required value={guestForm.packSeleccionadoId} onChange={e => updateGuestForm({ packSeleccionadoId: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655]">
-                                            <option value="">Seleccionar Pase/Pack...</option>
-                                            {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.creditos} clases) - ${p.precio.toLocaleString()}</option>)}
-                                        </select>
-                                    )}
-
-                                    {(guestForm.tipo === 'suelta' || (guestForm.tipo === 'pack' && guestForm.packSeleccionadoId)) && (
-                                        <div className="space-y-4">
-                                            <div className="flex gap-4">
-                                                <div className="flex-1">
-                                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Monto a Cobrar ($)</label>
-                                                    <div className="relative">
-                                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
-                                                        <input type="number" required value={guestForm.montoManualPack} onChange={e => setGuestForm({ ...guestForm, montoManualPack: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-8 pr-4 text-sm font-black outline-none focus:border-[#D4E655]" />
-                                                    </div>
-                                                </div>
-                                                <div className="flex-1">
-                                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Método</label>
-                                                    <div className="flex bg-[#111] rounded-xl border border-white/10 p-1">
-                                                        <button type="button" onClick={() => updateGuestForm({ pago: 'efectivo' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500'}`}>Efvo</button>
-                                                        <button type="button" onClick={() => updateGuestForm({ pago: 'transferencia' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500'}`}>Transf.</button>
-                                                    </div>
+                                    <div className="space-y-4">
+                                        <div className="flex gap-4">
+                                            <div className="flex-1">
+                                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Monto a Cobrar ($)</label>
+                                                <div className="relative">
+                                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                                    <input type="number" required value={guestForm.montoManualPack} onChange={e => setGuestForm({ ...guestForm, montoManualPack: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-8 pr-4 text-sm font-black outline-none focus:border-[#D4E655]" />
                                                 </div>
                                             </div>
-
-                                            {guestForm.tipo === 'suelta' && (
-                                                <div
-                                                    onClick={() => updateGuestForm({ esSena: !guestForm.esSena })}
-                                                    className={`flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer ${guestForm.esSena ? 'bg-orange-500/10 border-orange-500/50' : 'bg-white/5 border-white/5'}`}
-                                                >
-                                                    <div className="flex items-center gap-3">
-                                                        <div className={`p-2 rounded-lg ${guestForm.esSena ? 'bg-orange-500 text-white' : 'bg-white/10 text-gray-500'}`}>
-                                                            <Receipt size={16} />
-                                                        </div>
-                                                        <div>
-                                                            <p className="text-[10px] font-black uppercase text-white tracking-widest">¿Es una seña?</p>
-                                                            <p className="text-[9px] text-gray-500 uppercase font-bold">Marcar como pago parcial</p>
-                                                        </div>
-                                                    </div>
-                                                    <div className={`w-10 h-6 rounded-full relative transition-colors ${guestForm.esSena ? 'bg-orange-500' : 'bg-gray-700'}`}>
-                                                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${guestForm.esSena ? 'left-5' : 'left-1'}`} />
-                                                    </div>
+                                            <div className="flex-1">
+                                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Método</label>
+                                                <div className="flex bg-[#111] rounded-xl border border-white/10 p-1">
+                                                    <button type="button" onClick={() => updateGuestForm({ pago: 'efectivo' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500'}`}>Efvo</button>
+                                                    <button type="button" onClick={() => updateGuestForm({ pago: 'transferencia' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg transition-all ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500'}`}>Transf.</button>
                                                 </div>
-                                            )}
+                                            </div>
                                         </div>
-                                    )}
+                                    </div>
                                 </div>
                             )}
 
-                            {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack') && !alumnoSeleccionado && (
+                            {guestForm.tipo === 'pack' && (
+                                <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10 mt-4 animate-in fade-in">
+                                    <select required value={guestForm.packSeleccionadoId} onChange={e => updateGuestForm({ packSeleccionadoId: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655]">
+                                        <option value="">Seleccionar Pase/Pack...</option>
+                                        {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.creditos} clases) - ${p.precio.toLocaleString()}</option>)}
+                                    </select>
+                                    <div className="flex gap-4">
+                                        <div className="flex-1">
+                                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Monto ($)</label>
+                                            <input type="number" required value={guestForm.montoManualPack} onChange={e => setGuestForm({ ...guestForm, montoManualPack: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 px-4 text-sm font-black outline-none focus:border-[#D4E655]" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Método</label>
+                                            <div className="flex bg-[#111] rounded-xl border border-white/10 p-1">
+                                                <button type="button" onClick={() => updateGuestForm({ pago: 'efectivo' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500'}`}>Efvo</button>
+                                                <button type="button" onClick={() => updateGuestForm({ pago: 'transferencia' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500'}`}>Transf.</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack' || guestForm.tipo === 'invitado') && !alumnoSeleccionado && (
                                 <div className="space-y-4 mt-4">
                                     <div className="grid grid-cols-2 gap-4">
                                         <input required placeholder="Nombre" value={guestForm.nombre} onChange={e => setGuestForm({ ...guestForm, nombre: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                         <input required placeholder="Apellido" value={guestForm.apellido} onChange={e => setGuestForm({ ...guestForm, apellido: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                     </div>
-                                    {guestForm.tipo === 'suelta' && !esGrupoOFormacion && (
+                                    <input placeholder="Teléfono (Opcional)" value={guestForm.telefono} onChange={e => setGuestForm({ ...guestForm, telefono: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+
+                                    {guestForm.tipo !== 'invitado' && !esGrupoOFormacion && !clase?.es_audicion && (
                                         <label className="flex items-center gap-3 cursor-pointer mt-2 bg-white/5 p-4 rounded-xl border border-white/10">
                                             <input type="checkbox" checked={crearCuenta} onChange={e => setCrearCuenta(e.target.checked)} className="accent-[#D4E655] w-5 h-5" />
                                             <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest">Crear cuenta en el sistema</span>
                                         </label>
                                     )}
-                                    {(guestForm.tipo === 'pack' || (esGrupoOFormacion && guestForm.tipo === 'suelta') || crearCuenta) && (
+
+                                    {(crearCuenta || (esGrupoOFormacion && guestForm.tipo === 'suelta')) && (
                                         <div className="space-y-4 pt-2 border-t border-white/10 mt-4 animate-in fade-in">
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <input required placeholder="DNI (Será su clave)" value={guestForm.dni} onChange={e => setGuestForm({ ...guestForm, dni: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
-                                                <input required placeholder="Teléfono" value={guestForm.telefono} onChange={e => setGuestForm({ ...guestForm, telefono: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
-                                            </div>
                                             <input required placeholder="Email (Obligatorio)" value={guestForm.email} onChange={e => setGuestForm({ ...guestForm, email: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
+                                            <input required placeholder="DNI (Será su clave)" value={guestForm.dni} onChange={e => setGuestForm({ ...guestForm, dni: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                         </div>
                                     )}
                                 </div>
                             )}
 
                             {guestForm.tipo === 'invitado' && (
-                                <div className="space-y-4 mt-4">
-                                    {!alumnoSeleccionado && (
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <input required placeholder="Nombre" value={guestForm.nombre} onChange={e => setGuestForm({ ...guestForm, nombre: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none" />
-                                            <input required placeholder="Apellido" value={guestForm.apellido} onChange={e => setGuestForm({ ...guestForm, apellido: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none" />
-                                        </div>
-                                    )}
-                                    <div className="bg-white/5 p-4 rounded-xl text-center border border-white/10"><p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Inscripción sin costo (Invitado Staff)</p></div>
+                                <div className="mt-4 bg-white/5 p-4 rounded-xl text-center border border-white/10">
+                                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Inscripción sin costo (Invitado / Audición gratuita)</p>
                                 </div>
                             )}
 
-                            <button disabled={processing} type="submit" className="w-full py-5 rounded-2xl font-black uppercase text-sm tracking-widest bg-[#D4E655] hover:bg-white text-black transition-all">
+                            <button disabled={processing} type="submit" className={`w-full py-5 rounded-2xl font-black uppercase text-sm tracking-widest transition-all ${clase?.es_audicion ? 'bg-pink-500 hover:bg-white text-white hover:text-pink-500' : 'bg-[#D4E655] hover:bg-white text-black'}`}>
                                 {processing ? <Loader2 className="animate-spin mx-auto" /> : 'Confirmar Registro'}
                             </button>
                         </form>

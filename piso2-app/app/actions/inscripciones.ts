@@ -193,6 +193,7 @@ export async function procesarInscripcionAction(payload: any) {
 
         if (!payload.p_clase_id) throw new Error("El sistema no recibió el ID de la clase.");
 
+        // 🚀 TRAEMOS EL CAMPO es_audicion
         const { data: claseDb, error: errClase } = await supabaseAdmin.from('clases')
             .select(`
                 nombre, 
@@ -201,6 +202,7 @@ export async function procesarInscripcionAction(payload: any) {
                 liga_nivel, 
                 compania_id,
                 inicio,
+                es_audicion,
                 profesor:profiles!profesor_id(nombre_completo)
             `)
             .eq('id', payload.p_clase_id)
@@ -214,6 +216,7 @@ export async function procesarInscripcionAction(payload: any) {
         const isEspecial = tipoClaseStr === 'especial' || tipoClaseStr === 'seminario';
         const isLiga = tipoClaseStr === 'liga';
         const isCompania = tipoClaseStr === 'compania' || tipoClaseStr === 'compañia';
+        const isAudicion = claseDb.es_audicion === true; // 🚀 LO MAPEAMOS
 
         const tipoPackBusqueda = isEspecial ? 'seminario' : 'regular';
 
@@ -392,17 +395,22 @@ export async function procesarInscripcionAction(payload: any) {
                 if (isLiga || isCompania) {
                     modalidadInsc = isLiga ? 'La Liga' : 'Compañía';
                     valorInscripcion = 0;
+                } else if (isAudicion) { // 🚀 ACÁ ESTÁ LA CONDICIÓN DE LA AUDICIÓN
+                    modalidadInsc = 'Audición';
+                    valorInscripcion = payload.p_monto_caja || 0;
                 } else {
                     modalidadInsc = 'Clase Suelta';
                     valorInscripcion = payload.p_monto_caja || 0;
                 }
 
                 if (payload.p_monto_caja > 0 && turnoId) {
-                    const concepto = isLiga ? 'Inscripción La Liga' : isCompania ? 'Inscripción Compañía' : 'Venta Clase Suelta';
+                    // 🚀 ACÁ ESTÁ EL CONCEPTO PARA CAJA
+                    const conceptoFinal = isAudicion ? 'Inscripción Audición' : (isLiga ? 'Inscripción La Liga' : (isCompania ? 'Inscripción Compañía' : 'Venta Clase Suelta'));
+
                     await supabaseAdmin.from('caja_movimientos').insert({
                         turno_id: turnoId,
                         tipo: 'ingreso',
-                        concepto: `${concepto} | Alumno: ${nombreFinal}`,
+                        concepto: `${conceptoFinal} | Alumno: ${nombreFinal}`,
                         monto: payload.p_monto_caja,
                         metodo_pago: payload.p_metodo_pago,
                         origen_referencia: 'inscripcion'
