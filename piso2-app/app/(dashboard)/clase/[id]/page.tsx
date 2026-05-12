@@ -32,6 +32,12 @@ import {
 import { toggleMiembroCompaniaAction } from '@/app/actions/companias'
 import { cambiarLigaAction, crearAlumnoDesdeRecepcionAction } from '@/app/actions/usuarios'
 
+// 🚀 FIX ZONA HORARIA
+const parseFechaLocal = (dateStr?: string | null) => {
+    if (!dateStr) return null;
+    return new Date(dateStr);
+}
+
 // --- TIPOS ---
 type Inscripcion = {
     id: string
@@ -44,7 +50,7 @@ type Inscripcion = {
     estado_asistencia?: 'presente' | 'ausente' | 'media_falta' | 'justificada' | 'saf' | null
     metodo_pago: string
     es_invitado: boolean
-    saldo_pendiente?: number // 🚀 Nuevo
+    saldo_pendiente?: number
 }
 
 type ClaseDetalle = {
@@ -156,7 +162,7 @@ export default function ClaseDetallePage() {
         pago: 'efectivo' as 'efectivo' | 'transferencia',
         packSeleccionadoId: '',
         montoManualPack: '',
-        esSena: false // 🚀 NUEVO: Indica si el pago es parcial
+        esSena: false
     })
 
     const PRECIOS_ALUMNO = useMemo(() => {
@@ -178,9 +184,11 @@ export default function ClaseDetallePage() {
         return { totalRecaudado: total, pagoDocente: pago }
     }, [inscripciones, clase])
 
-    const inicioNormalizado = clase?.inicio?.replace(' ', 'T');
-    const fechaText = inicioNormalizado ? format(new Date(inicioNormalizado.split('T')[0] + 'T12:00:00'), "EEE d MMM", { locale: es }) : '';
-    const horaText = inicioNormalizado ? inicioNormalizado.split('T')[1].substring(0, 5) : '';
+    // 🚀 FIX: Usamos la función segura para que JS se encargue del offset
+    const inicioDate = parseFechaLocal(clase?.inicio);
+    const fechaText = inicioDate ? format(inicioDate, "EEE d MMM", { locale: es }) : '';
+    const horaText = inicioDate ? format(inicioDate, "HH:mm") : '';
+
     const esGrupoOFormacion = clase?.es_la_liga || !!clase?.compania_id || clase?.tipo_clase?.toLowerCase().includes('compa') || clase?.tipo_clase?.toLowerCase().includes('formacion');
 
     const packSueltaExclusiva = useMemo(() => {
@@ -219,11 +227,7 @@ export default function ClaseDetallePage() {
         });
     }
 
-    useEffect(() => {
-        if (isGuestOpen && esGrupoOFormacion) {
-            if (['pack', 'usar_credito'].includes(guestForm.tipo)) updateGuestForm({ tipo: 'suelta' })
-        }
-    }, [isGuestOpen, esGrupoOFormacion])
+    // 🚀 FIX DE RENDIMIENTO: ELIMINAMOS EL USEEFFECT DEL MODAL ACA
 
     const tabsDisponibles = esGrupoOFormacion
         ? [
@@ -322,7 +326,6 @@ export default function ClaseDetallePage() {
             const nombreProfe = Array.isArray(profeObj) ? profeObj[0]?.nombre_completo : (profeObj?.nombre_completo || 'Staff');
             const llavePase = `${clase.nombre}-${nombreProfe}-${clase.tipo_clase}`;
 
-            // 🚀 CÁLCULO DE PRECIO DE LISTA PARA DETERMINAR SI HAY SALDO PENDIENTE
             const sugerido = Number(getPrecioSugerido(guestForm.tipo, guestForm.pago, guestForm.packSeleccionadoId)) || 0;
             const saldoPendiente = (guestForm.tipo === 'suelta' && guestForm.esSena) ? Math.max(0, sugerido - monto) : 0;
 
@@ -339,7 +342,7 @@ export default function ClaseDetallePage() {
                 p_telefono_comprador: null,
                 p_alumno_nombre_real: alumnoNombreCaja,
                 p_pase_referencia: !clase.es_combinable ? llavePase : null,
-                p_saldo_pendiente: saldoPendiente // 🚀 ENVIAMOS EL SALDO
+                p_saldo_pendiente: saldoPendiente
             }
 
             const response = await procesarInscripcionAction(rpcPayload as any)
@@ -434,7 +437,18 @@ export default function ClaseDetallePage() {
                             </button>
                         )}
                         <button onClick={() => setIsNotifModalOpen(true)} className="flex-1 md:flex-none bg-[#111] border border-white/10 text-white px-4 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 hover:border-[#D4E655]"><BellRing size={18} /> Aviso</button>
-                        <button onClick={() => setIsGuestOpen(true)} className={`flex-1 md:flex-none px-6 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 ${clase?.es_audicion ? 'bg-pink-500' : 'bg-[#D4E655] text-black'}`}><UserPlus size={18} /> Inscribir</button>
+                        {/* 🚀 FIX: ELIMINAMOS EL USEEFFECT Y LE PASAMOS LA LOGICA AL BOTON */}
+                        <button
+                            onClick={() => {
+                                if (esGrupoOFormacion && ['pack', 'usar_credito'].includes(guestForm.tipo)) {
+                                    updateGuestForm({ tipo: 'suelta' });
+                                }
+                                setIsGuestOpen(true);
+                            }}
+                            className={`flex-1 md:flex-none px-6 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 ${clase?.es_audicion ? 'bg-pink-500' : 'bg-[#D4E655] text-black'}`}
+                        >
+                            <UserPlus size={18} /> Inscribir
+                        </button>
                     </div>
                 </div>
             </div>
@@ -459,18 +473,15 @@ export default function ClaseDetallePage() {
                                             {(Number(insc.saldo_pendiente) > 0) && (
                                                 <button
                                                     onClick={async () => {
-                                                        // 1. Preguntamos CUÁNTA plata está entrando ahora
                                                         const montoStr = prompt(`¿Cuánta plata está entregando ahora el alumno?`);
                                                         if (!montoStr) return;
 
                                                         const monto = Number(montoStr);
                                                         if (isNaN(monto) || monto <= 0) return toast.error("Monto inválido");
 
-                                                        // 2. Método de pago
                                                         const metodo = confirm(`Aceptar = EFECTIVO\nCancelar = TRANSFERENCIA`);
                                                         const metodoFinal = metodo ? 'efectivo' : 'transferencia';
 
-                                                        // 3. 🚀 LA PREGUNTA CLAVE: ¿Terminó de pagar?
                                                         const liquidarDeuda = confirm(`¿Con este pago de $${monto} termina de saldar la deuda?\n\nACEPTAR: Sí, ya no debe nada.\nCANCELAR: No, va a seguir debiendo plata.`);
 
                                                         toast.promise(agregarPagoInscripcionAction(insc.id, monto, metodoFinal, liquidarDeuda), {
@@ -495,9 +506,7 @@ export default function ClaseDetallePage() {
                                     </div>
 
                                     <div className="flex items-center gap-2 bg-[#111] border border-white/10 p-1 rounded-xl">
-                                        {/* 🚀 EL FIX ESTÁ ACÁ: 'ausente' en vez de 'ausence' */}
                                         <button onClick={() => handleSetAsistencia(insc, 'ausente')} title="Ausente" className={`p-2 rounded-lg transition-all ${insc.estado_asistencia === 'ausente' ? 'bg-red-500/20 text-red-500' : 'text-gray-500 hover:text-white'}`}><X size={18} /></button>
-
                                         {esGrupoOFormacion && (
                                             <>
                                                 <button onClick={() => handleSetAsistencia(insc, 'media_falta')} title="Media Falta" className={`p-2 rounded-lg transition-all ${insc.estado_asistencia === 'media_falta' ? 'bg-yellow-500 text-black' : 'text-yellow-500/50 hover:text-yellow-500'}`}><Clock4 size={18} /></button>
@@ -598,7 +607,6 @@ export default function ClaseDetallePage() {
                                                 </div>
                                             </div>
 
-                                            {/* 🚀 TOGGLE DE SEÑA (Solo para Clase Suelta) */}
                                             {guestForm.tipo === 'suelta' && (
                                                 <div
                                                     onClick={() => updateGuestForm({ esSena: !guestForm.esSena })}
