@@ -32,6 +32,7 @@ type EventoAgenda = {
     inicio: string
     fin: string
     fecha_render: string
+    hora_render: string // 🚀 AGREGADO
     sala_nombre: string
     sala_sede: string
     sede_id: string
@@ -55,7 +56,7 @@ type EventoAgenda = {
         liga_nivel: number | null
         compania_nombre: string | null
         es_audicion: boolean
-        es_combinable: boolean // 🚀 NUEVO
+        es_combinable: boolean
     }
     alquiler_data?: {
         telefono: string
@@ -96,7 +97,7 @@ type RPCClase = {
     liga_nivel: number | null
     compania_nombre: string | null
     es_audicion: boolean
-    es_combinable: boolean // 🚀 NUEVO
+    es_combinable: boolean
     estado: string
 }
 
@@ -141,11 +142,22 @@ const fetcher = async ([key, startIso, endIso, startDateStr, endDateStr]: string
     if (typedData.clases) {
         typedData.clases.forEach((c) => {
             if (c.estado === 'cancelada') return;
+
+            // 🚀 FIX: Convertimos a Date de JS para que aplique la zona horaria del navegador
+            const dateInicio = new Date(c.inicio);
+
             agenda.push({
-                id: c.id, tipo: 'Clase', titulo: c.nombre, subtitulo: c.tipo_clase,
-                inicio: c.inicio, fin: c.fin,
-                fecha_render: c.inicio.split('T')[0],
-                sala_nombre: c.sala_nombre, sala_sede: c.sala_sede, sede_id: c.sede_id,
+                id: c.id,
+                tipo: 'Clase',
+                titulo: c.nombre,
+                subtitulo: c.tipo_clase,
+                inicio: c.inicio,
+                fin: c.fin,
+                hora_render: format(dateInicio, 'HH:mm'), // 🚀 FIX RENDERIZADO VISUAL
+                fecha_render: format(dateInicio, 'yyyy-MM-dd'),
+                sala_nombre: c.sala_nombre,
+                sala_sede: c.sala_sede,
+                sede_id: c.sede_id,
                 clase_data: {
                     profesor_id: c.profesor_id,
                     profesor_2_id: c.profesor_2_id,
@@ -155,10 +167,16 @@ const fetcher = async ([key, startIso, endIso, startDateStr, endDateStr]: string
                     descripcion: c.descripcion,
                     profesor_nombre: c.profesor_nombre || 'Sin Asignar',
                     profesor_2_nombre: c.profesor_2_nombre || null,
-                    nivel: c.nivel, imagen_url: c.imagen_url,
-                    serie_id: c.serie_id, tipo_clase: c.tipo_clase, tipo_acuerdo: c.tipo_acuerdo,
-                    valor_acuerdo: c.valor_acuerdo, ritmo_id: c.ritmo_id, es_la_liga: c.es_la_liga || false,
-                    liga_nivel: c.liga_nivel || null, compania_nombre: c.compania_nombre || null,
+                    nivel: c.nivel,
+                    imagen_url: c.imagen_url,
+                    serie_id: c.serie_id,
+                    tipo_clase: c.tipo_clase,
+                    tipo_acuerdo: c.tipo_acuerdo,
+                    valor_acuerdo: c.valor_acuerdo,
+                    ritmo_id: c.ritmo_id,
+                    es_la_liga: c.es_la_liga || false,
+                    liga_nivel: c.liga_nivel || null,
+                    compania_nombre: c.compania_nombre || null,
                     es_audicion: c.es_audicion || false,
                     es_combinable: c.es_combinable ?? true
                 }
@@ -168,11 +186,7 @@ const fetcher = async ([key, startIso, endIso, startDateStr, endDateStr]: string
 
     if (typedData.alquileres) {
         typedData.alquileres.forEach((a) => {
-            // 🚀 EXTRAEMOS LOS COMPONENTES DE LA FECHA MANUALMENTE
-            // 'a.fecha' viene como "2026-05-24" o "2026-05-24T00:00:00"
             const fechaLimpia = a.fecha.includes('T') ? a.fecha.split('T')[0] : a.fecha;
-
-            // Armamos los strings de inicio y fin sin dejar que JS interprete nada todavía
             const inicioLocal = `${fechaLimpia}T${a.hora_inicio.slice(0, 5)}:00`;
             const finLocal = `${fechaLimpia}T${a.hora_fin.slice(0, 5)}:00`;
 
@@ -183,7 +197,8 @@ const fetcher = async ([key, startIso, endIso, startDateStr, endDateStr]: string
                 subtitulo: `Alquiler (${a.tipo_uso})`,
                 inicio: inicioLocal,
                 fin: finLocal,
-                fecha_render: fechaLimpia, // 🎯 ESTO CLAVA EL EVENTO EN EL DÍA CORRECTO
+                hora_render: a.hora_inicio.slice(0, 5), // 🚀 FIX RENDERIZADO VISUAL PARA ALQUILERES
+                fecha_render: fechaLimpia,
                 sala_nombre: a.sala_nombre,
                 sala_sede: a.sala_sede,
                 sede_id: a.sede_id,
@@ -230,7 +245,7 @@ export default function CalendarioPage() {
         profeId: '', profe2Id: '',
         tipoAcuerdo: 'porcentaje', valorAcuerdo: '', fechas: [] as Date[],
         esLaLiga: false, ligaNivel: 1, companiaId: '', esAudicion: false,
-        esCombinable: true // 🚀 NUEVO
+        esCombinable: true
     })
     const [formFile, setFormFile] = useState<File | null>(null)
 
@@ -327,7 +342,7 @@ export default function CalendarioPage() {
             tipo: evt.clase_data.tipo_clase,
             nivel: evt.clase_data.nivel,
             ritmoId: evt.clase_data.ritmo_id || '',
-            hora: evt.inicio.split('T')[1].substring(0, 5),
+            hora: evt.hora_render, // 🚀 FIX: Usamos la hora renderizada correctamente
             duracion: duracionReal > 0 ? duracionReal : 60,
             cupoMaximo: evt.clase_data.cupo_maximo || 20,
             sedeId: evt.sede_id,
@@ -399,9 +414,15 @@ export default function CalendarioPage() {
             }
 
             if (modalMode === 'edit' && editingId) {
-                const inicioStr = `${format(form.fechas[0], 'yyyy-MM-dd')}T${form.hora}:00`;
-                const inicioDate = new Date(inicioStr);
-                const finDate = addMinutes(inicioDate, form.duracion);
+                // 🚀 FIX: Forzamos la zona horaria en la edición al igual que en la creación
+                const [horas, minutos] = form.hora.split(':');
+                const totalMinutes = parseInt(horas) * 60 + parseInt(minutos) + Number(form.duracion);
+                const hFinStr = `${Math.floor(totalMinutes / 60).toString().padStart(2, '0')}:${(totalMinutes % 60).toString().padStart(2, '0')}`;
+
+                const fechaLimpia = format(form.fechas[0], 'yyyy-MM-dd');
+
+                const inicioGuardar = `${fechaLimpia}T${form.hora}:00-03:00`;
+                const finGuardar = `${fechaLimpia}T${hFinStr}:00-03:00`;
 
                 const updatePayload: any = {
                     nombre: form.nombre,
@@ -409,8 +430,8 @@ export default function CalendarioPage() {
                     tipo_clase: form.tipo,
                     nivel: form.nivel,
                     ritmo_id: form.ritmoId || null,
-                    inicio: inicioStr,
-                    fin: format(finDate, "yyyy-MM-dd'T'HH:mm:ss"),
+                    inicio: inicioGuardar,
+                    fin: finGuardar,
                     cupo_maximo: form.esAudicion ? 9999 : form.cupoMaximo,
                     sala_id: form.salaId,
                     profesor_id: form.profeId,
@@ -482,21 +503,14 @@ export default function CalendarioPage() {
     }
 
     const getEventStyle = (evt: EventoAgenda) => {
-        // 🚀 ALQUILERES -> Ahora Morado/Violeta
         if (evt.tipo === 'Alquiler') return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500' }
-
         if (evt.clase_data?.es_audicion) return { border: 'border-pink-500', text: 'text-pink-500', bg: 'bg-pink-500' }
         if (evt.clase_data?.es_la_liga) return { border: 'border-yellow-500', text: 'text-yellow-500', bg: 'bg-yellow-500' }
-
-        // NO COMBINABLES -> Naranja Fuerte
         if (evt.clase_data?.es_combinable === false) return { border: 'border-orange-600', text: 'text-orange-500', bg: 'bg-orange-600' }
 
         switch (evt.subtitulo) {
             case 'Regular': return { border: 'border-orange-500', text: 'text-orange-500', bg: 'bg-orange-500' }
-
-            // 🚀 ESPECIALES -> Ahora Blanco
             case 'Especial': return { border: 'border-white', text: 'text-white', bg: 'bg-white' }
-
             case 'Formacion': return { border: 'border-[#D4E655]', text: 'text-[#D4E655]', bg: 'bg-[#D4E655]' }
             case 'Compañía': return { border: 'border-blue-500', text: 'text-blue-500', bg: 'bg-blue-500' }
             default: return { border: 'border-[#D4E655]', text: 'text-[#D4E655]', bg: 'bg-[#D4E655]' }
@@ -574,7 +588,7 @@ export default function CalendarioPage() {
                 })}
             </div>
 
-            {/* 🚀 LEYENDA DE COLORES ACTUALIZADA */}
+            {/* LEYENDA */}
             <div className="mt-4 pt-4 border-t border-white/5 flex flex-wrap items-center justify-center gap-4 md:gap-6">
                 <div className="flex items-center gap-1.5">
                     <div className="w-2 h-2 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.6)]"></div>
@@ -584,7 +598,6 @@ export default function CalendarioPage() {
                     <div className="w-2 h-2 rounded-full bg-orange-600 shadow-[0_0_8px_rgba(234,88,12,0.6)]"></div>
                     <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">No Combinable</span>
                 </div>
-                {/* Especial ahora es Blanco */}
                 <div className="flex items-center gap-1.5">
                     <div className="w-2 h-2 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.6)]"></div>
                     <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Especial</span>
@@ -605,7 +618,6 @@ export default function CalendarioPage() {
                     <div className="w-2 h-2 rounded-full bg-pink-500 shadow-[0_0_8px_rgba(236,72,153,0.6)]"></div>
                     <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Audición</span>
                 </div>
-                {/* Alquiler ahora es Morado */}
                 <div className="flex items-center gap-1.5">
                     <div className="w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.6)]"></div>
                     <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Alquiler</span>
@@ -645,7 +657,8 @@ export default function CalendarioPage() {
                                                 <div key={evt.id} className={`flex flex-row bg-[#111] border rounded-xl overflow-hidden group transition-all relative ${style.border} border-l-[6px]`}>
                                                     <div className="relative w-24 md:w-32 flex-shrink-0 bg-white/5 flex flex-col">
                                                         {evt.tipo === 'Clase' && evt.clase_data?.imagen_url ? (<Image src={evt.clase_data.imagen_url} alt={evt.titulo} fill className="object-cover" />) : (<div className="w-full h-full flex flex-col items-center justify-center text-white/10 p-2">{evt.tipo === 'Alquiler' ? <Music size={24} className="opacity-50" /> : <ImageIcon size={24} />}<span className="text-[8px] font-bold uppercase mt-1 opacity-50 text-center">{evt.tipo === 'Alquiler' ? 'Externo' : 'Sin Flyer'}</span></div>)}
-                                                        <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{evt.inicio.split('T')[1].substring(0, 5)}</span><span className="text-[8px] uppercase font-bold text-gray-400 block">{evt.sala_nombre} ({evt.sala_sede})</span></div>
+                                                        {/* 🚀 FIX: ACÁ SE MUESTRA LA HORA RENDERIZADA */}
+                                                        <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{evt.hora_render}</span><span className="text-[8px] uppercase font-bold text-gray-400 block">{evt.sala_nombre} ({evt.sala_sede})</span></div>
                                                     </div>
                                                     <div className="flex-1 p-3 flex flex-col justify-center relative">
                                                         <div className="flex justify-between items-start mb-1">

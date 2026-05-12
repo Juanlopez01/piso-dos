@@ -1,3 +1,4 @@
+// app/actions/clases.ts
 'use server'
 
 // 👇 IMPORTAMOS EL LECTOR DE COOKIES
@@ -106,37 +107,63 @@ export async function crearClasesAction(form: any, publicUrl: string | null) {
         const [horas, minutos] = form.hora.split(':')
         const serieUUID = form.fechas.length > 1 ? uuidv4() : null;
 
+        // Calculamos la hora de fin sumando la duración en minutos
+        const totalMinutes = parseInt(horas) * 60 + parseInt(minutos) + Number(form.duracion);
+        const hFinStr = `${Math.floor(totalMinutes / 60).toString().padStart(2, '0')}:${(totalMinutes % 60).toString().padStart(2, '0')}`;
+        const hInicioStr = `${horas.padStart(2, '0')}:${minutos.padStart(2, '0')}`;
+
         const fechasCalculadas = form.fechas.map((fecha: string | Date) => {
-            const baseDate = new Date(fecha)
-            baseDate.setHours(parseInt(horas), parseInt(minutos), 0, 0)
-            const endDateTime = new Date(baseDate.getTime() + form.duracion * 60000)
-            return { baseDate, endDateTime }
+            // Limpiamos la fecha para forzar formato local "YYYY-MM-DD" y evitar saltos
+            let fechaString = typeof fecha === 'string' ? fecha : format(fecha, 'yyyy-MM-dd');
+            if (fechaString.includes('T')) fechaString = fechaString.split('T')[0];
+
+            // Armamos las ISO Strings forzando el offset de Argentina (-03:00) para que Postgres no lo cambie
+            const isoInicio = `${fechaString}T${hInicioStr}:00-03:00`;
+            const isoFin = `${fechaString}T${hFinStr}:00-03:00`;
+
+            return {
+                fechaLimpia: fechaString,
+                inicioGuardar: isoInicio,
+                finGuardar: isoFin
+            }
         })
 
-        // Chequeo de conflictos
-        for (const { baseDate, endDateTime } of fechasCalculadas) {
-            const inicioIso = baseDate.toISOString()
-            const finIso = endDateTime.toISOString()
-            const fechaLocalSegura = new Date(baseDate.getTime() + Math.abs(baseDate.getTimezoneOffset() * 60000))
-            const fechaStr = format(fechaLocalSegura, 'yyyy-MM-dd')
-            const hInicio = format(baseDate, 'HH:mm')
-            const hFin = format(endDateTime, 'HH:mm')
+        // 🚀 CHEQUEO DE CONFLICTOS BLINDADO
+        for (const { fechaLimpia, inicioGuardar, finGuardar } of fechasCalculadas) {
 
-            const { data: conflictoClase } = await supabase.from('clases').select('id, nombre').eq('sala_id', form.salaId).neq('estado', 'cancelada').lt('inicio', finIso).gt('fin', inicioIso).maybeSingle()
-            if (conflictoClase) throw new Error(`Conflicto el ${format(baseDate, 'dd/MM')}: Clase "${conflictoClase.nombre}"`)
+            // 1. Chequeo contra otras clases (usando las ISO forzadas a -03:00)
+            const { data: conflictoClase } = await supabase.from('clases')
+                .select('id, nombre')
+                .eq('sala_id', form.salaId)
+                .neq('estado', 'cancelada')
+                .lt('inicio', finGuardar)
+                .gt('fin', inicioGuardar)
+                .maybeSingle()
 
-            const { data: conflictoAlquiler } = await supabase.from('alquileres').select('id, cliente_nombre').eq('sala_id', form.salaId).eq('fecha', fechaStr).in('estado', ['confirmado', 'pagado', 'pendiente']).lt('hora_inicio', hFin).gt('hora_fin', hInicio).maybeSingle()
-            if (conflictoAlquiler) throw new Error(`Conflicto el ${format(baseDate, 'dd/MM')}: Alquiler "${conflictoAlquiler.cliente_nombre}"`)
+            if (conflictoClase) throw new Error(`Conflicto el ${format(new Date(fechaLimpia + "T12:00:00"), 'dd/MM')}: Clase "${conflictoClase.nombre}"`)
+
+            // 2. Chequeo contra Alquileres (Comparando Strings Puros para evitar fantasmas UTC)
+            const { data: conflictoAlquiler } = await supabase.from('alquileres')
+                .select('id, cliente_nombre')
+                .eq('sala_id', form.salaId)
+                .eq('fecha', fechaLimpia) // Match exacto "YYYY-MM-DD"
+                .in('estado', ['confirmado', 'pagado', 'pendiente'])
+                .lt('hora_inicio', hFinStr) // "16:00" < "18:00"
+                .gt('hora_fin', hInicioStr) // "15:00" > "17:30"
+                .maybeSingle()
+
+            if (conflictoAlquiler) throw new Error(`Conflicto el ${format(new Date(fechaLimpia + "T12:00:00"), 'dd/MM')}: Alquiler "${conflictoAlquiler.cliente_nombre}"`)
         }
 
-        const clasesAInsertar = fechasCalculadas.map(({ baseDate, endDateTime }: any) => ({
+        // Si todo está OK, armamos el array para insertar
+        const clasesAInsertar = fechasCalculadas.map(({ inicioGuardar, finGuardar }: any) => ({
             nombre: form.nombre,
             descripcion: form.descripcion,
             tipo_clase: form.tipo,
             nivel: form.nivel,
             ritmo_id: form.ritmoId || null,
-            inicio: baseDate.toISOString(),
-            fin: endDateTime.toISOString(),
+            inicio: inicioGuardar, // Se guarda con offset de Argentina
+            fin: finGuardar,       // Se guarda con offset de Argentina
             sala_id: form.salaId,
             profesor_id: form.profeId,
             profesor_2_id: form.profe2Id || null,

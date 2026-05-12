@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/utils/supabase/client'
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR, { useSWRConfig } from 'swr'
 import { format } from 'date-fns'
@@ -17,11 +17,11 @@ import Image from 'next/image'
 import { inscribirAlumnoAction } from '@/app/actions/cartelera'
 import { useCash } from '@/context/CashContext'
 
-const parseSafeDate = (dateStr: string | null | undefined) => {
-    if (!dateStr) return new Date()
-    const cleanStr = dateStr.replace('+00:00', '').replace('+00', '').replace('Z', '').replace(' ', 'T')
-    const parsed = new Date(cleanStr)
-    return isNaN(parsed.getTime()) ? new Date() : parsed
+// 🚀 FIX ZONA HORARIA: Eliminamos el parseSafeDate complejo y usamos directamente new Date()
+// Supabase ya nos manda la fecha en formato ISO (ej: 2026-05-12T20:30:00+00:00)
+// JS nativo sabe que "+00" significa UTC, así que new Date() lo ajusta a tu hora local automáticamente.
+const parseFechaLocal = (dateStr: string) => {
+    return new Date(dateStr)
 }
 
 type ClaseInstancia = { id: string; inicio: string; fin: string; cupo_maximo: number; inscritos_count: number; ya_inscrito: boolean; estado: string; sala: { nombre: string; sede: { nombre: string } } }
@@ -193,7 +193,6 @@ export default function ExplorarClasesPage() {
             return router.push('/login')
         }
 
-        // 🚀 Buscamos el nombre correcto del pase para este grupo
         const refCorrecta = obtenerReferenciaPase(grupo, pasesExclusivos)
 
         if (!grupo.es_combinable) {
@@ -207,7 +206,6 @@ export default function ExplorarClasesPage() {
 
         setProcesandoId(instancia.id)
 
-        // 🚀 Mandamos el nombre correcto del pase al backend (para que sepa cuál descontar)
         const response = await inscribirAlumnoAction(instancia.id, grupo.tipo_clase, refCorrecta)
 
         if (response.success) {
@@ -389,9 +387,10 @@ export default function ExplorarClasesPage() {
                                                             <MapPin size={12} className="text-white/50" />
                                                             <span>{proximaClase.sala?.nombre} <span className="text-[9px] uppercase ml-1 opacity-50 border border-white/20 px-1 rounded">{proximaClase.sala?.sede?.nombre}</span></span>
                                                         </div>
+                                                        {/* 🚀 FIX DE HORA APLICADO ACÁ */}
                                                         <p className="flex items-center gap-1.5 text-[10px] font-black text-white uppercase tracking-widest bg-white/10 px-2 py-1.5 rounded-md border border-white/5 backdrop-blur-sm">
                                                             <Clock size={12} className={estilos.icon} />
-                                                            {format(parseSafeDate(proximaClase.inicio), "HH:mm")}
+                                                            {format(parseFechaLocal(proximaClase.inicio), "HH:mm")}
                                                         </p>
                                                     </div>
                                                 </div>
@@ -432,7 +431,6 @@ export default function ExplorarClasesPage() {
 
                                 const esAutoInscrito = estadoPrivado.esPrivada && estadoPrivado.apto;
 
-                                // 🚀 Chequeamos el saldo usando la llave que descubrió la función detective
                                 const refCorrecta = obtenerReferenciaPase(selectedGrupo, pasesExclusivos)
 
                                 let tieneSaldo = false
@@ -443,8 +441,9 @@ export default function ExplorarClasesPage() {
                                     tieneSaldo = (perfil ? (esEspecial ? perfil.creditos_especiales : perfil.creditos_regulares) : 0) > 0
                                 }
 
-                                const inicioDate = parseSafeDate(inst.inicio)
-                                const finDate = parseSafeDate(inst.fin)
+                                // 🚀 FIX DE HORA APLICADO ACÁ
+                                const inicioDate = parseFechaLocal(inst.inicio)
+                                const finDate = parseFechaLocal(inst.fin)
 
                                 return (
                                     <div key={inst.id} className={`bg-[#111] border rounded-2xl p-4 flex flex-col sm:flex-row gap-4 items-center justify-between hover:border-white/20 transition-all shadow-md ${esExclusivaModal ? 'border-gray-500/20' : 'border-white/5'}`}>
@@ -489,7 +488,6 @@ export default function ExplorarClasesPage() {
                                     <ShieldCheck className="text-white/80" size={20} />
                                     <div>
                                         <p className="text-[10px] text-gray-400 font-black uppercase">Tu Saldo No Combinable</p>
-                                        {/* 🚀 Mostramos el saldo con la referencia corregida */}
                                         <p className="text-sm font-bold text-white">{pasesExclusivos[obtenerReferenciaPase(selectedGrupo, pasesExclusivos)] || 0} créditos disponibles para esta clase</p>
                                     </div>
                                 </div>

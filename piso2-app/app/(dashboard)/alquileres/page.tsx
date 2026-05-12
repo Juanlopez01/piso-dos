@@ -226,23 +226,32 @@ export default function AlquileresPage() {
 
     const checkConflictos = async (salaId: string, dateObj: Date, hInicio: string, hFin: string) => {
         const fechaStr = format(dateObj, 'yyyy-MM-dd')
-        const [hs, ms] = hInicio.split(':')
-        const [he, me] = hFin.split(':')
 
-        const reqStart = new Date(dateObj)
-        reqStart.setHours(Number(hs), Number(ms), 0, 0)
+        // 🚀 BLINDAJE DEFINITIVO: Le clavamos el -03:00 para que Supabase no asuma que es UTC
+        const reqStartStr = `${fechaStr}T${hInicio}:00-03:00`
+        const reqEndStr = `${fechaStr}T${hFin}:00-03:00`
 
-        const reqEnd = new Date(dateObj)
-        reqEnd.setHours(Number(he), Number(me), 0, 0)
-
+        // Chequeo contra Clases
         const { data: clases } = await supabase.from('clases')
-            .select('nombre').eq('sala_id', salaId).neq('estado', 'cancelada')
-            .lt('inicio', reqEnd.toISOString()).gt('fin', reqStart.toISOString()).maybeSingle()
+            .select('nombre')
+            .eq('sala_id', salaId)
+            .neq('estado', 'cancelada')
+            .lt('inicio', reqEndStr)
+            .gt('fin', reqStartStr)
+            .maybeSingle()
+
         if (clases) return `Clase: ${clases.nombre}`
 
+        // Chequeo contra otros Alquileres (Este no cambia porque la fecha y hora están separadas en texto)
         const { data: alqs } = await supabase.from('alquileres')
-            .select('cliente_nombre').eq('sala_id', salaId).eq('fecha', fechaStr)
-            .in('estado', ['confirmado', 'pagado', 'pendiente']).lt('hora_inicio', hFin).gt('hora_fin', hInicio).maybeSingle()
+            .select('cliente_nombre')
+            .eq('sala_id', salaId)
+            .eq('fecha', fechaStr)
+            .in('estado', ['confirmado', 'pagado', 'pendiente'])
+            .lt('hora_inicio', hFin)
+            .gt('hora_fin', hInicio)
+            .maybeSingle()
+
         if (alqs) return `Alquiler: ${alqs.cliente_nombre}`
 
         return null
