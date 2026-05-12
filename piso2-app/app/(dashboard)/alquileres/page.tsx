@@ -132,6 +132,7 @@ export default function AlquileresPage() {
     const [selectedGroup, setSelectedGroup] = useState<ReservaGroup | null>(null)
     const [paymentType, setPaymentType] = useState<'seña' | 'total' | 'resto'>('total')
     const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'transferencia'>('efectivo')
+    const [customSena, setCustomSena] = useState<string>('') // 🚀 PARA EL MONTO MANUAL
     const [processingPayment, setProcessingPayment] = useState(false)
 
     const [form, setForm] = useState({
@@ -342,9 +343,12 @@ export default function AlquileresPage() {
 
         let textoWsp = `*Presupuesto de Alquiler* 🏢\n\n*Actividad:* ${actividad}\n*Sala:* ${nombreSala}\n*Horario:* ${form.hora_inicio} a ${form.hora_fin} hs\n\n*Fechas solicitadas:*\n${fechasTexto}\n\n`
         if (form.descuento > 0) {
-            textoWsp += `*Subtotal:* $${priceBreakdown.subtotalBase.toLocaleString()}\n*Descuento especial (${form.descuento}%):* -$${priceBreakdown.montoDescuento.toLocaleString()}\n`
+            textoWsp += `*Subtotal Base:* $${priceBreakdown.subtotalBase.toLocaleString()}\n*Descuento especial (${form.descuento}%):* -$${priceBreakdown.montoDescuento.toLocaleString()}\n`
         }
-        textoWsp += `*Total a pagar: $${priceBreakdown.total.toLocaleString()}*\n\n_Para confirmar la reserva, por favor envianos el comprobante de seña. ¡Gracias!_`
+
+        textoWsp += `*Total a pagar (Efectivo): $${priceBreakdown.total.toLocaleString()}*\n`
+        textoWsp += `*Total a pagar (Transferencia/MP +10%): $${Math.round(priceBreakdown.total * 1.10).toLocaleString()}*\n\n`
+        textoWsp += `_Para confirmar la reserva, por favor envianos el comprobante de seña. ¡Gracias!_`
 
         navigator.clipboard.writeText(textoWsp).then(() => toast.success('¡Presupuesto copiado!')).catch(() => toast.error('Error al copiar'))
     }
@@ -356,52 +360,89 @@ export default function AlquileresPage() {
         setSelectedGroup(group)
         setPaymentType(group.estado_pago === 'pendiente' ? 'seña' : 'resto')
         setPaymentMethod('efectivo')
+        setCustomSena('') // Limpiamos el monto manual
         setIsPaymentModalOpen(true)
     }
 
+    // =======================================================
+    // 🚀 LÓGICA DE COBRO MATEMÁTICO (RECARGOS + PAGOS LIBRES)
+    // =======================================================
     const handleConfirmPayment = async () => {
         if (!selectedGroup) return
         setProcessingPayment(true)
 
         try {
-            let montoACobrar = 0
+            let montoACobrarEnCaja = 0
             let labelCobro = ''
 
-            // Preparamos los datos para la Server Action
-            const updates = selectedGroup.items.map(item => {
-                let nuevoMontoPagado = Number(item.monto_pagado || 0)
-                let nuevoEstadoPago = item.estado_pago || 'pendiente'
-                let nuevoEstado = item.estado
-                let addAmount = 0
+            const factorRecargo = paymentMethod === 'transferencia' ? 1.10 : 1;
+            const deudaTotalGrupo = selectedGroup.total_grupo - selectedGroup.total_pagado;
 
-                if (paymentType === 'seña') {
-                    addAmount = Number(item.monto_total) / 2
-                    nuevoMontoPagado = addAmount
-                    nuevoEstadoPago = 'seña_pagada'
-                    nuevoEstado = 'confirmado'
-                    labelCobro = 'Seña 50%'
-                } else if (paymentType === 'total') {
-                    addAmount = Number(item.monto_total)
-                    nuevoMontoPagado = addAmount
-                    nuevoEstadoPago = 'pagado'
-                    nuevoEstado = 'pagado'
-                    labelCobro = 'Total 100%'
-                } else if (paymentType === 'resto') {
-                    addAmount = Number(item.monto_total) - nuevoMontoPagado
-                    nuevoMontoPagado = Number(item.monto_total)
-                    nuevoEstadoPago = 'pagado'
-                    nuevoEstado = 'pagado'
-                    labelCobro = 'Saldo Restante'
+            // Determinamos cuánto "Monto Base" se está pagando
+            let montoBaseAPagar = 0;
+
+            if (paymentType === 'seña') {
+                montoBaseAPagar = Number(customSena);
+                if (isNaN(montoBaseAPagar) || montoBaseAPagar <= 0) throw new Error("Ingresá un monto válido para el pago.");
+                if (montoBaseAPagar > deudaTotalGrupo) montoBaseAPagar = deudaTotalGrupo;
+                labelCobro = paymentMethod === 'transferencia' ? 'Pago Parcial (+10%)' : 'Pago Parcial';
+            } else {
+                // Para 'total' o 'resto', el monto base es la deuda completa
+                montoBaseAPagar = deudaTotalGrupo;
+                labelCobro = paymentType === 'total' ? 'Total 100%' : 'Saldo Restante';
+                if (paymentMethod === 'transferencia') labelCobro += ' (+10%)';
+            }
+
+            // Calculamos cuánto entra a la caja (Monto Base * Recargo)
+            montoACobrarEnCaja = montoBaseAPagar * factorRecargo;
+
+            const updates = selectedGroup.items.map(item => {
+                let montoPagadoActual = Number(item.monto_pagado || 0)
+                let montoTotalActual = Number(item.monto_total)
+                let deudaItem = montoTotalActual - montoPagadoActual
+
+                let baseParaEsteItem = 0
+
+                // Distribuimos el monto base entre los items del grupo
+                if (deudaItem > 0 && montoBaseAPagar > 0) {
+                    if (montoBaseAPagar >= deudaItem) {
+                        baseParaEsteItem = deudaItem;
+                        montoBaseAPagar -= deudaItem;
+                    } else {
+                        baseParaEsteItem = montoBaseAPagar;
+                        montoBaseAPagar = 0;
+                    }
                 }
 
-                montoACobrar += addAmount
+                if (baseParaEsteItem > 0) {
+                    const cobroConRecargo = baseParaEsteItem * factorRecargo;
+                    const diferenciaRecargo = cobroConRecargo - baseParaEsteItem;
 
-                return {
-                    id: item.id,
-                    monto_pagado: nuevoMontoPagado,
-                    estado_pago: nuevoEstadoPago,
-                    estado: nuevoEstado,
-                    metodo_pago: paymentMethod
+                    const nuevoMontoPagado = montoPagadoActual + cobroConRecargo;
+                    const nuevoMontoTotal = montoTotalActual + diferenciaRecargo;
+
+                    const nuevoEstadoPago = (nuevoMontoPagado >= nuevoMontoTotal) ? 'pagado' : 'seña_pagada';
+                    let nuevoEstado = item.estado;
+                    if (nuevoEstadoPago === 'seña_pagada') nuevoEstado = 'confirmado';
+                    if (nuevoEstadoPago === 'pagado') nuevoEstado = 'pagado';
+
+                    return {
+                        id: item.id,
+                        monto_total: nuevoMontoTotal,
+                        monto_pagado: nuevoMontoPagado,
+                        estado_pago: nuevoEstadoPago,
+                        estado: nuevoEstado,
+                        metodo_pago: paymentMethod
+                    }
+                } else {
+                    return {
+                        id: item.id,
+                        monto_total: montoTotalActual,
+                        monto_pagado: montoPagadoActual,
+                        estado_pago: item.estado_pago,
+                        estado: item.estado,
+                        metodo_pago: item.metodo_pago
+                    }
                 }
             })
 
@@ -409,7 +450,7 @@ export default function AlquileresPage() {
                 turno_id: currentTurnoId,
                 tipo: 'ingreso',
                 concepto: `Alquiler ${selectedGroup.sala_nombre}: ${selectedGroup.cliente_nombre} - ${labelCobro}`,
-                monto: montoACobrar,
+                monto: montoACobrarEnCaja,
                 metodo_pago: paymentMethod,
                 origen_referencia: 'alquileres'
             }
@@ -417,8 +458,9 @@ export default function AlquileresPage() {
             const res = await cobrarAlquilerAction(updates, movimientoCaja)
             if (!res.success) throw new Error(res.error || 'Error al procesar el pago')
 
-            toast.success(`¡${labelCobro} cobrado con éxito! ($${montoACobrar.toLocaleString()})`)
+            toast.success(`¡Cobro registrado! Entraron $${Math.round(montoACobrarEnCaja).toLocaleString()} a caja.`)
             setIsPaymentModalOpen(false)
+            setCustomSena('')
             mutate()
         } catch (error: any) {
             toast.error(error.message || 'Hubo un error al procesar el pago.')
@@ -461,6 +503,7 @@ export default function AlquileresPage() {
     }
 
     const VISIBLE_TAGS = 12
+    const recargoFactor = paymentMethod === 'transferencia' ? 1.10 : 1;
 
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32">
@@ -497,7 +540,7 @@ export default function AlquileresPage() {
 
                         let tagClass = 'bg-red-500/20 text-red-500'
                         let tagText = 'Pendiente'
-                        if (isSena) { tagClass = 'bg-yellow-500/20 text-yellow-500'; tagText = 'Seña 50%' }
+                        if (isSena) { tagClass = 'bg-yellow-500/20 text-yellow-500'; tagText = 'Pago Parcial' }
                         if (isFullyPaid) { tagClass = 'bg-green-500/20 text-green-500'; tagText = 'Pagado' }
 
                         const saldoRestante = group.total_grupo - group.total_pagado
@@ -523,7 +566,6 @@ export default function AlquileresPage() {
                                     <div className={`space-y-1 overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-64 overflow-y-auto custom-scrollbar' : 'max-h-0'}`}>
                                         {group.items.map(item => (
                                             <div key={item.id} className="flex justify-between items-center text-[10px] p-2 rounded bg-white/5 border border-white/5">
-                                                {/* 🚀 ACÁ ESTÁ EL FIX DE LA FECHA */}
                                                 <div className="flex items-center gap-2 text-gray-300">
                                                     <Calendar size={10} />
                                                     {format(new Date(item.fecha + 'T12:00:00'), "EEE d MMM", { locale: es })}
@@ -536,7 +578,6 @@ export default function AlquileresPage() {
                                         ))}
                                     </div>
 
-                                    {/* 🚀 ACÁ MOSTRAMOS LA NOTA */}
                                     {group.notas_recepcion && isOpen && (
                                         <div className="mt-3 bg-yellow-500/10 border border-yellow-500/20 p-2 rounded-lg flex items-start gap-2">
                                             <ShieldAlert size={12} className="text-yellow-500 shrink-0 mt-0.5" />
@@ -578,56 +619,86 @@ export default function AlquileresPage() {
                             <div className="flex justify-center gap-8 mt-4 text-sm font-black text-white">
                                 <div><span className="block text-[10px] text-gray-500 uppercase">Total</span>${selectedGroup.total_grupo.toLocaleString()}</div>
                                 <div><span className="block text-[10px] text-green-500 uppercase">Abonado</span>${selectedGroup.total_pagado.toLocaleString()}</div>
-                                <div><span className="block text-[10px] text-red-500 uppercase">Saldo</span>${(selectedGroup.total_grupo - selectedGroup.total_pagado).toLocaleString()}</div>
+                            </div>
+
+                            <div className={`mt-3 pt-3 border-t border-white/5 text-[10px] font-black uppercase transition-all ${paymentMethod === 'transferencia' ? 'text-orange-400' : 'text-gray-500'}`}>
+                                {paymentMethod === 'transferencia' ? 'Se aplicará 10% de recargo al monto a abonar' : 'Precio de lista en efectivo'}
                             </div>
                         </div>
 
-                        {/* TIPO DE COBRO */}
+                        {/* MÉTODOS DE PAGO */}
                         <div className="space-y-3 mb-6">
-                            <label className="text-[10px] font-bold text-gray-500 uppercase">1. ¿Qué vas a cobrar?</label>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase">1. Método de Pago</label>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button onClick={() => setPaymentMethod('efectivo')} className={`p-4 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all ${paymentMethod === 'efectivo' ? 'bg-green-500/10 border-green-500 text-green-400' : 'bg-[#111] border-white/5 text-gray-400 hover:bg-white/5'}`}>
+                                    <Banknote size={24} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Efectivo</span>
+                                </button>
+                                <button onClick={() => setPaymentMethod('transferencia')} className={`p-4 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all ${paymentMethod === 'transferencia' ? 'bg-orange-500/10 border-orange-500 text-orange-400' : 'bg-[#111] border-white/5 text-gray-400 hover:bg-white/5'}`}>
+                                    <Landmark size={24} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Transf (+10%)</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* TIPO DE COBRO CON PAGO MANUAL */}
+                        <div className="space-y-3 mb-8">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase">2. ¿Qué vas a cobrar?</label>
                             <div className="grid grid-cols-1 gap-2">
-                                {selectedGroup.estado_pago === 'pendiente' && (
-                                    <button
-                                        onClick={() => setPaymentType('seña')}
-                                        className={`p-4 rounded-xl border flex justify-between items-center transition-all ${paymentType === 'seña' ? 'bg-[#D4E655]/10 border-[#D4E655] text-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-400 hover:bg-white/5'}`}
-                                    >
-                                        <span className="font-bold text-xs uppercase">Seña (50%)</span>
-                                        <span className="font-black text-lg">${(selectedGroup.total_grupo / 2).toLocaleString()}</span>
-                                    </button>
+
+                                {/* 🚀 BLOQUE PAGO PARCIAL MANUAL */}
+                                {(selectedGroup.estado_pago === 'pendiente' || selectedGroup.estado_pago === 'seña_pagada') && (
+                                    <div className={`p-4 rounded-xl border transition-all ${paymentType === 'seña' ? 'bg-[#D4E655]/10 border-[#D4E655]' : 'bg-[#111] border-white/5 hover:bg-white/5'}`}>
+                                        <div className="flex justify-between items-center cursor-pointer" onClick={() => setPaymentType('seña')}>
+                                            <span className={`font-bold text-xs uppercase ${paymentType === 'seña' ? 'text-[#D4E655]' : 'text-gray-400'}`}>
+                                                {selectedGroup.estado_pago === 'seña_pagada' ? 'Pago Parcial' : 'Seña Manual'}
+                                            </span>
+                                            {paymentType !== 'seña' && <span className="font-black text-lg text-gray-400">Personalizar</span>}
+                                        </div>
+
+                                        {paymentType === 'seña' && (
+                                            <div className="mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                                                <label className="text-[10px] font-bold text-[#D4E655] uppercase mb-1 block">Monto Base a Abonar</label>
+                                                <div className="relative">
+                                                    <span className="absolute left-3 top-3 text-[#D4E655] font-bold">$</span>
+                                                    <input
+                                                        type="number"
+                                                        value={customSena}
+                                                        onChange={(e) => setCustomSena(e.target.value)}
+                                                        placeholder={`Ej: ${Math.round((selectedGroup.total_grupo - selectedGroup.total_pagado) / 2)}`}
+                                                        className="w-full bg-black/50 border border-[#D4E655]/50 rounded-lg p-3 pl-8 text-[#D4E655] text-lg font-black outline-none focus:border-[#D4E655]"
+                                                    />
+                                                </div>
+                                                <div className="flex justify-between items-center mt-3 pt-3 border-t border-[#D4E655]/20">
+                                                    <span className="text-[10px] text-[#D4E655] uppercase font-bold">A Cobrar en Caja:</span>
+                                                    <span className="text-xl font-black text-[#D4E655]">
+                                                        ${Math.round(Number(customSena || 0) * recargoFactor).toLocaleString()}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 )}
+
+                                {/* BOTON TOTAL O RESTO */}
                                 {selectedGroup.estado_pago === 'pendiente' && (
                                     <button
-                                        onClick={() => setPaymentType('total')}
+                                        onClick={() => { setPaymentType('total'); setCustomSena(''); }}
                                         className={`p-4 rounded-xl border flex justify-between items-center transition-all ${paymentType === 'total' ? 'bg-[#D4E655]/10 border-[#D4E655] text-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-400 hover:bg-white/5'}`}
                                     >
                                         <span className="font-bold text-xs uppercase">Total (100%)</span>
-                                        <span className="font-black text-lg">${selectedGroup.total_grupo.toLocaleString()}</span>
+                                        <span className="font-black text-lg">${Math.round((selectedGroup.total_grupo - selectedGroup.total_pagado) * recargoFactor).toLocaleString()}</span>
                                     </button>
                                 )}
                                 {selectedGroup.estado_pago === 'seña_pagada' && (
                                     <button
-                                        onClick={() => setPaymentType('resto')}
+                                        onClick={() => { setPaymentType('resto'); setCustomSena(''); }}
                                         className={`p-4 rounded-xl border flex justify-between items-center transition-all ${paymentType === 'resto' ? 'bg-[#D4E655]/10 border-[#D4E655] text-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-400 hover:bg-white/5'}`}
                                     >
                                         <span className="font-bold text-xs uppercase">Saldo Restante</span>
-                                        <span className="font-black text-lg">${(selectedGroup.total_grupo - selectedGroup.total_pagado).toLocaleString()}</span>
+                                        <span className="font-black text-lg">${Math.round((selectedGroup.total_grupo - selectedGroup.total_pagado) * recargoFactor).toLocaleString()}</span>
                                     </button>
                                 )}
-                            </div>
-                        </div>
-
-                        {/* METODO DE PAGO */}
-                        <div className="space-y-3 mb-8">
-                            <label className="text-[10px] font-bold text-gray-500 uppercase">2. Método de Pago</label>
-                            <div className="grid grid-cols-2 gap-3">
-                                <button onClick={() => setPaymentMethod('efectivo')} className={`p-4 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all ${paymentMethod === 'efectivo' ? 'bg-green-500/10 border-green-500 text-green-400' : 'bg-[#111] border-white/5 text-gray-500 hover:bg-white/5'}`}>
-                                    <Banknote size={24} />
-                                    <span className="text-[10px] font-black uppercase tracking-widest">Efectivo</span>
-                                </button>
-                                <button onClick={() => setPaymentMethod('transferencia')} className={`p-4 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all ${paymentMethod === 'transferencia' ? 'bg-blue-500/10 border-blue-500 text-blue-400' : 'bg-[#111] border-white/5 text-gray-500 hover:bg-white/5'}`}>
-                                    <Landmark size={24} />
-                                    <span className="text-[10px] font-black uppercase tracking-widest">Transf. / MP</span>
-                                </button>
                             </div>
                         </div>
 

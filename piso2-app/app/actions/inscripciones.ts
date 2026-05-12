@@ -75,14 +75,17 @@ export async function eliminarInscripcionAction(inscripcionId: string) {
     const tipoClaseStr = (claseInfo.tipo_clase || '').toLowerCase();
     const esExclusiva = claseInfo.es_combinable === false || tipoClaseStr === 'exclusivo';
 
-    if (esExclusiva) {
-        // =================================================================
-        // 🚀 DEVOLUCIÓN DE EXCLUSIVAS (LIFO en packs)
-        // =================================================================
-        const { error: errDelete } = await supabaseAdmin.from('inscripciones').delete().eq('id', inscripcionId)
-        if (errDelete) return { success: false, error: 'Error al cancelar la reserva' }
+    // 1. Borramos la inscripción primero
+    const { error: errDelete } = await supabaseAdmin.from('inscripciones').delete().eq('id', inscripcionId)
+    if (errDelete) return { success: false, error: 'Error al cancelar la reserva' }
 
-        if (inscripcion.user_id && inscripcion.modalidad !== 'Invitado') {
+    // 2. Lógica de devolución de crédito
+    if (inscripcion.user_id && (inscripcion.modalidad === 'Crédito' || inscripcion.modalidad === 'Pack' || inscripcion.modalidad === 'Pase Exclusivo' || inscripcion.modalidad === 'Pase Exclusivo (Pack)')) {
+
+        if (esExclusiva) {
+            // =================================================================
+            // 🚀 DEVOLUCIÓN DE EXCLUSIVAS
+            // =================================================================
             const profeObj: any = claseInfo.profesor;
             const nombreProfe = Array.isArray(profeObj) ? profeObj[0]?.nombre_completo : (profeObj?.nombre_completo || 'Staff');
             const llavePase = `${claseInfo.nombre}-${nombreProfe}-${claseInfo.tipo_clase}`;
@@ -93,35 +96,34 @@ export async function eliminarInscripcionAction(inscripcionId: string) {
                 p_cantidad: 1
             })
 
-            const { data: latestPackEx } = await supabaseAdmin.from('alumno_packs')
-                .select('id, creditos_restantes')
+            // 🚀 LÓGICA DETECTIVE: Buscamos el pack que fue "tocado"
+            const { data: packsExAlumno } = await supabaseAdmin.from('alumno_packs')
+                .select('id, creditos_restantes, cantidad_inicial')
                 .eq('user_id', inscripcion.user_id)
                 .eq('tipo_clase', 'exclusivo')
-                .order('fecha_compra', { ascending: false })
-                .limit(1)
-                .maybeSingle();
+                .order('fecha_compra', { ascending: false });
 
-            if (latestPackEx) {
-                await supabaseAdmin.from('alumno_packs').update({
-                    creditos_restantes: latestPackEx.creditos_restantes + 1
-                }).eq('id', latestPackEx.id);
+            if (packsExAlumno && packsExAlumno.length > 0) {
+                // Buscamos el primero que no esté lleno (ahí fue a parar el consumo)
+                const packAfectado = packsExAlumno.find(p => p.creditos_restantes < p.cantidad_inicial);
+
+                if (packAfectado) {
+                    await supabaseAdmin.from('alumno_packs').update({
+                        creditos_restantes: packAfectado.creditos_restantes + 1,
+                        estado: 'activo'
+                    }).eq('id', packAfectado.id);
+                }
             }
-        }
-        return { success: true }
 
-    } else {
-        // =================================================================
-        // 🚀 DEVOLUCIÓN DE REGULARES / ESPECIALES (LIFO en packs)
-        // =================================================================
-        const isEspecial = tipoClaseStr === 'especial' || tipoClaseStr === 'seminario';
-        const campoCredito = isEspecial ? 'creditos_especiales' : 'creditos_regulares';
-        const tipoPack = isEspecial ? 'seminario' : 'regular';
+        } else {
+            // =================================================================
+            // 🚀 DEVOLUCIÓN DE REGULARES / ESPECIALES
+            // =================================================================
+            const isEspecial = tipoClaseStr === 'especial' || tipoClaseStr === 'seminario';
+            const campoCredito = isEspecial ? 'creditos_especiales' : 'creditos_regulares';
+            const tipoPack = isEspecial ? 'seminario' : 'regular';
 
-        const { error: errDelete } = await supabaseAdmin.from('inscripciones').delete().eq('id', inscripcionId)
-        if (errDelete) return { success: false, error: 'Error al cancelar la reserva' }
-
-        if (inscripcion.user_id && (inscripcion.modalidad === 'Crédito' || inscripcion.modalidad === 'Pack')) {
-
+            // 1. Devolvemos 1 crédito exacto a "profiles"
             const { data: perfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', inscripcion.user_id).single();
             if (perfil) {
                 await supabaseAdmin.from('profiles').update({
@@ -129,23 +131,28 @@ export async function eliminarInscripcionAction(inscripcionId: string) {
                 }).eq('id', inscripcion.user_id);
             }
 
-            const { data: latestPack } = await supabaseAdmin.from('alumno_packs')
-                .select('id, creditos_restantes')
+            // 2. 🚀 LÓGICA DETECTIVE: Buscamos el pack que fue "tocado"
+            const { data: packsAlumno } = await supabaseAdmin.from('alumno_packs')
+                .select('id, creditos_restantes, cantidad_inicial')
                 .eq('user_id', inscripcion.user_id)
                 .eq('tipo_clase', tipoPack)
-                .order('fecha_compra', { ascending: false })
-                .limit(1)
-                .maybeSingle();
+                .order('fecha_compra', { ascending: false });
 
-            if (latestPack) {
-                await supabaseAdmin.from('alumno_packs').update({
-                    creditos_restantes: latestPack.creditos_restantes + 1
-                }).eq('id', latestPack.id);
+            if (packsAlumno && packsAlumno.length > 0) {
+                // Encontramos el pack exacto del cual se descontó el crédito
+                const packAfectado = packsAlumno.find(p => p.creditos_restantes < p.cantidad_inicial);
+
+                if (packAfectado) {
+                    await supabaseAdmin.from('alumno_packs').update({
+                        creditos_restantes: packAfectado.creditos_restantes + 1,
+                        estado: 'activo' // Por si el pack había llegado a 0 y estaba 'agotado'
+                    }).eq('id', packAfectado.id);
+                }
             }
         }
-
-        return { success: true }
     }
+
+    return { success: true }
 }
 
 export async function enviarNotificacionClaseAction(notificaciones: any[]) {
@@ -171,11 +178,10 @@ export async function procesarInscripcionAction(payload: any) {
         let turnoId = null;
 
         if (payload.p_monto_caja > 0) {
-            // 🎯 FILTRO CRÍTICO APLICADO: Solo buscar la caja abierta del usuario actual
             const { data: turno } = await supabaseAdmin
                 .from('caja_turnos')
                 .select('id')
-                .eq('usuario_id', session.user.id) // <--- ESTO EVITA CRUCES ENTRE RECEPCIONISTAS
+                .eq('usuario_id', session.user.id)
                 .eq('estado', 'abierta')
                 .order('fecha_apertura', { ascending: false })
                 .limit(1)
@@ -185,9 +191,6 @@ export async function procesarInscripcionAction(payload: any) {
             turnoId = turno.id;
         }
 
-        // =================================================================
-        // 🚀 LA FUENTE DE LA VERDAD: BUSCAMOS LOS DATOS REALES EN LA BD
-        // =================================================================
         if (!payload.p_clase_id) throw new Error("El sistema no recibió el ID de la clase.");
 
         const { data: claseDb, error: errClase } = await supabaseAdmin.from('clases')
@@ -231,14 +234,8 @@ export async function procesarInscripcionAction(payload: any) {
 
         let valorInscripcion = 0;
         let modalidadInsc = 'Clase Suelta';
-
-        // 🚀 EL CAMBIO MAGICO: 
-        // Si el payload dice que es seña, clavamos el saldo pendiente en 1 (esto activa tu cartel de ADEUDA).
         let saldoPendienteCalculado = payload.p_es_sena ? 1 : 0;
 
-        // =================================================================
-        // 🚀 1. FLUJO PARA CLASES EXCLUSIVAS
-        // =================================================================
         if (esExclusiva) {
             if (payload.p_tipo_operacion === 'usar_credito') {
                 modalidadInsc = 'Pase Exclusivo';
@@ -322,9 +319,6 @@ export async function procesarInscripcionAction(payload: any) {
                 }
             }
         }
-        // =================================================================
-        // 🚀 2. FLUJO NORMAL (Regulares, Especiales, Liga, Compañía)
-        // =================================================================
         else {
             const campoCredito = isEspecial ? 'creditos_especiales' : 'creditos_regulares';
 
@@ -421,7 +415,6 @@ export async function procesarInscripcionAction(payload: any) {
             }
         }
 
-        // 🚀 GUARDAMOS LA INSCRIPCIÓN PRINCIPAL (CON SALDO PENDIENTE)
         const { error: errInsc } = await supabaseAdmin.from('inscripciones').insert({
             user_id: payload.p_user_id || null,
             clase_id: payload.p_clase_id,
@@ -429,7 +422,7 @@ export async function procesarInscripcionAction(payload: any) {
             es_invitado: payload.p_tipo_operacion === 'invitado' || !payload.p_user_id,
             modalidad: modalidadInsc,
             valor_credito: valorInscripcion,
-            saldo_pendiente: saldoPendienteCalculado, // 🚀 GUARDAMOS EL SALDO EN LA DB
+            saldo_pendiente: saldoPendienteCalculado,
             metodo_pago: payload.p_monto_caja > 0 ? payload.p_metodo_pago : 'credito',
             presente: true,
             estado_asistencia: 'presente'
@@ -441,9 +434,6 @@ export async function procesarInscripcionAction(payload: any) {
             await supabaseAdmin.from('profiles').update({ telefono: telefonoNuevo }).eq('id', payload.p_user_id);
         }
 
-        // =================================================================
-        // 🚀 3. AUTO-MATRICULACIÓN BATCH (RESTO DEL MES)
-        // =================================================================
         if ((isLiga || isCompania) && payload.p_user_id) {
             try {
                 const fechaClase = new Date(claseDb.inicio);
@@ -501,11 +491,10 @@ export async function agregarPagoInscripcionAction(inscripcionId: string, monto:
 
         if (errInsc || !insc) throw new Error('No se encontró la inscripción')
 
-        // 🎯 FILTRO CRÍTICO APLICADO: Solo buscar la caja abierta del usuario actual
         const { data: turno } = await supabaseAdmin
             .from('caja_turnos')
             .select('id')
-            .eq('usuario_id', session.user.id) // <--- ESTO EVITA CRUCES ENTRE RECEPCIONISTAS
+            .eq('usuario_id', session.user.id)
             .eq('estado', 'abierta')
             .order('fecha_apertura', { ascending: false })
             .limit(1)
@@ -515,7 +504,7 @@ export async function agregarPagoInscripcionAction(inscripcionId: string, monto:
 
         const nombreAlumno = insc.nombre_invitado || 'Alumno con cuenta'
         const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
-            turno_id: turno.id, // Se usa ESTRICTAMENTE la caja de este usuario
+            turno_id: turno.id,
             tipo: 'ingreso',
             monto: monto,
             metodo_pago: metodoPago,
@@ -524,7 +513,6 @@ export async function agregarPagoInscripcionAction(inscripcionId: string, monto:
         })
         if (errCaja) throw new Error('Error al registrar en caja')
 
-        // 🚀 MAGIA DE LIBERTAD ABSOLUTA
         const { error: errUpd } = await supabaseAdmin.from('inscripciones').update({
             valor_credito: Number(insc.valor_credito) + monto,
             saldo_pendiente: liquidarDeuda ? 0 : 1
