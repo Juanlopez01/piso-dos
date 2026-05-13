@@ -10,14 +10,15 @@ import {
     User, X, Info, AlertOctagon, Clock, Users, Smartphone, Pencil,
     ChevronDown,
     ChevronRight,
-    Trash2
+    Trash2,
+    ArrowLeft // 🚀 NUEVO ICONO PARA EL ADMIN
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 
-// 🚀 IMPORTAMOS LAS SERVER ACTIONS (Asegurate de que editarMontoInicialAction esté exportada en tu archivo)
+// 🚀 IMPORTAMOS LAS SERVER ACTIONS
 import {
     abrirCajaAction, cerrarCajaAction, registrarMovimientoAction,
     cerrarTodasLasCajasAction, editarMovimientoAction, eliminarMovimientoCajaAction,
@@ -218,12 +219,18 @@ export default function CajaPage() {
     const { checkStatus, userRole, userId, isLoading: loadingContext } = useCash()
     const router = useRouter()
 
+    // 🚀 ESTADO MAGICO PARA EL ADMIN
+    const [adminMode, setAdminMode] = useState<'dashboard' | 'operador'>('dashboard')
+
+    // Si es admin y activó su terminal, engañamos al SWR para que busque los datos de recepción
+    const fetchRole = userRole === 'admin' && adminMode === 'operador' ? 'recepcion' : userRole;
+
     const { data, isLoading, mutate, error } = useSWR(
-        !loadingContext && userRole && userId ? ['caja-dashboard', userRole, userId] : null,
+        !loadingContext && userRole && userId ? ['caja-dashboard', fetchRole, userId] : null,
         fetcherCaja,
         {
-            refreshInterval: userRole === 'admin' ? 10000 : 0,
-            revalidateOnFocus: userRole === 'recepcion'
+            refreshInterval: fetchRole === 'admin' ? 10000 : 0,
+            revalidateOnFocus: fetchRole === 'recepcion' || fetchRole === 'auxiliar'
         }
     )
 
@@ -235,7 +242,6 @@ export default function CajaPage() {
     const [cajaDetalle, setCajaDetalle] = useState<any>(null)
     const [cerrandoCajas, setCerrandoCajas] = useState(false)
 
-    // 🚀 ESTADO MODAL PARA EDITAR MONTO INICIAL
     const [modalMontoInicial, setModalMontoInicial] = useState({ isOpen: false, turnoId: '', monto: '' })
 
     const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>(() => {
@@ -264,7 +270,6 @@ export default function CajaPage() {
     const movimientos = repData?.movimientos || []
     const ultimosCierresPorSede = repData?.ultimosCierresPorSede || {}
 
-    // ✅ FIX: ESTÁ COMO USEEFFECT
     useEffect(() => {
         if (sedeSeleccionada && ultimosCierresPorSede[sedeSeleccionada]) {
             setMontoInicial(String(ultimosCierresPorSede[sedeSeleccionada].monto));
@@ -306,7 +311,6 @@ export default function CajaPage() {
         setProcesando(false)
     }
 
-    // 🚀 HANDLER PARA ACTUALIZAR MONTO INICIAL
     const handleActualizarMontoInicial = async (e: React.FormEvent) => {
         e.preventDefault()
         setProcesando(true)
@@ -641,7 +645,6 @@ export default function CajaPage() {
         </div>
     );
 
-    // 🚀 MODAL ACTUALIZAR FONDO INICIAL (SE USA EN RECEPCION Y ADMIN)
     const renderModalMontoInicial = modalMontoInicial.isOpen && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
             <div className="bg-[#09090b] border border-[#D4E655]/30 w-full max-w-sm rounded-3xl p-6 shadow-2xl relative">
@@ -689,9 +692,9 @@ export default function CajaPage() {
     )
 
     // =================================================================
-    // VISTA ADMIN
+    // VISTA ADMIN - DASHBOARD
     // =================================================================
-    if (userRole === 'admin') {
+    if (userRole === 'admin' && adminMode === 'dashboard') {
         return (
             <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in relative">
                 <Toaster position="top-center" richColors theme="dark" />
@@ -813,14 +816,23 @@ export default function CajaPage() {
                     </div>
                 )}
 
-                <div className="flex justify-between items-end mb-8 border-b border-white/10 pb-6">
+                <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 border-b border-white/10 pb-6 gap-4">
                     <div>
                         <h1 className="text-3xl font-black uppercase tracking-tighter text-white">Finanzas Admin</h1>
                         <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">Panel de Control</p>
                     </div>
-                    <div className="text-right hidden md:block">
-                        <p className="text-[10px] text-gray-500 font-bold uppercase">Cajas Activas</p>
-                        <p className="text-3xl font-black text-white">{cajasActivas.length}</p>
+                    <div className="flex items-center gap-6 text-right">
+                        {/* 🚀 BOTON MAGICO DEL ADMIN PARA SER OPERADOR */}
+                        <button
+                            onClick={() => setAdminMode('operador')}
+                            className="bg-white/10 border border-white/20 text-white px-4 py-3 rounded-xl font-black uppercase text-[10px] hover:bg-[#D4E655] hover:text-black transition-all flex items-center gap-2 shadow-lg tracking-widest"
+                        >
+                            <LayoutDashboard size={16} /> Mi Terminal
+                        </button>
+                        <div className="hidden md:block border-l border-white/10 pl-6">
+                            <p className="text-[10px] text-gray-500 font-bold uppercase">Cajas Activas</p>
+                            <p className="text-3xl font-black text-white">{cajasActivas.length}</p>
+                        </div>
                     </div>
                 </div>
 
@@ -986,14 +998,24 @@ export default function CajaPage() {
     }
 
     // =================================================================
-    // VISTA RECEPCIÓN - CAJA CERRADA / DESPEDIDA
+    // VISTA TERMINAL (RECEPCIÓN, AUXILIAR O ADMIN OPERADOR) - CAJA CERRADA
     // =================================================================
     if (!turnoActivo) {
         return (
-            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4 animate-in zoom-in-95 duration-300">
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4 animate-in zoom-in-95 duration-300 relative">
+                {/* 🚀 BOTON PARA QUE EL ADMIN VUELVA AL DASHBOARD */}
+                {userRole === 'admin' && (
+                    <button
+                        onClick={() => setAdminMode('dashboard')}
+                        className="absolute top-6 left-6 md:top-8 md:left-8 text-gray-400 hover:text-white flex items-center gap-2 text-xs font-bold uppercase tracking-widest transition-colors bg-white/5 px-4 py-2 rounded-xl border border-white/10 hover:bg-white/10"
+                    >
+                        <ArrowLeft size={16} /> Volver al Dashboard
+                    </button>
+                )}
+
                 <Toaster position="top-center" richColors theme="dark" />
 
-                <div className="max-w-md w-full bg-[#09090b] border border-white/10 rounded-2xl p-8 text-center shadow-2xl relative overflow-hidden mb-8">
+                <div className="max-w-md w-full bg-[#09090b] border border-white/10 rounded-2xl p-8 text-center shadow-2xl relative overflow-hidden mb-8 mt-12 md:mt-0">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#D4E655] to-transparent opacity-50" />
 
                     {recienCerrada ? (
@@ -1070,7 +1092,7 @@ export default function CajaPage() {
     }
 
     // =================================================================
-    // VISTA RECEPCIÓN - CAJA ABIERTA
+    // VISTA TERMINAL (RECEPCIÓN, AUXILIAR O ADMIN OPERADOR) - CAJA ABIERTA
     // =================================================================
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in duration-500">
@@ -1080,9 +1102,17 @@ export default function CajaPage() {
 
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8 border-b border-white/10 pb-6">
                 <div>
-                    <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white mb-1">
-                        Caja Activa
-                    </h1>
+                    <div className="flex items-center gap-4 mb-1">
+                        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white leading-none">
+                            Caja Activa
+                        </h1>
+                        {/* 🚀 BOTON PARA QUE EL ADMIN VUELVA AL DASHBOARD */}
+                        {userRole === 'admin' && (
+                            <button onClick={() => setAdminMode('dashboard')} className="bg-white/10 text-white border border-white/20 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-white/20 transition-colors">
+                                <ArrowLeft size={14} /> Dashboard
+                            </button>
+                        )}
+                    </div>
                     <div className="flex items-center gap-2 mt-2">
                         <span className="flex items-center gap-1.5 bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">
                             <MapPin size={12} /> {turnoActivo?.sede?.nombre || 'Sede Desconocida'}
