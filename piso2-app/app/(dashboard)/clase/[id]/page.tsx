@@ -408,7 +408,7 @@ export default function ClaseDetallePage() {
     }
 
     if (isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-[#D4E655]"><Loader2 className="animate-spin" /></div>
-    const showFinance = userRole === 'admin' || userRole === 'recepcion'
+    const showFinance = userRole === 'admin' || userRole === 'recepcion' || userRole === 'auxiliar'
 
     return (
         <div className="min-h-screen bg-[#050505] text-white p-2 md:p-8 pb-32">
@@ -522,7 +522,7 @@ export default function ClaseDetallePage() {
                 </div>
 
                 {/* LIQUIDACIÓN CAJA */}
-                {showFinance && !clase?.es_audicion && (
+                {(userRole === 'admin' || userRole === 'recepcion') && !clase?.es_audicion && (
                     <div className="lg:col-span-1">
                         <div className="bg-[#111] border border-white/10 rounded-2xl p-6 sticky top-8 shadow-xl">
                             <h4 className="text-[10px] font-bold text-gray-500 uppercase mb-5 tracking-widest">Liquidación Clase</h4>

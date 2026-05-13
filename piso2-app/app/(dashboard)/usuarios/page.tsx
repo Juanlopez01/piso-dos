@@ -158,7 +158,6 @@ function UsuariosContent() {
     const [userStats, setUserStats] = useState<any>(null)
     const [loadingStats, setLoadingStats] = useState(false)
 
-    // ESTADOS PARA EL HISTORIAL DE PAGOS
     const [historialPagos, setHistorialPagos] = useState<any[]>([])
     const [loadingPagos, setLoadingPagos] = useState(false)
     const [mostrarMasPagos, setMostrarMasPagos] = useState(false)
@@ -188,9 +187,11 @@ function UsuariosContent() {
     const filteredUsers = users.filter((u: UsuarioDirectorio) => {
         let matchesRole = true
         if (roleFilter === 'staff' && userRole !== 'admin') return false
-        if (roleFilter === 'staff') matchesRole = u.rol === 'admin' || u.rol === 'recepcion'
+        // 🚀 FIX: EL STAFF AHORA INCLUYE AL AUXILIAR
+        if (roleFilter === 'staff') matchesRole = u.rol === 'admin' || u.rol === 'recepcion' || u.rol === 'auxiliar'
         else if (roleFilter !== 'todos') matchesRole = u.rol === roleFilter
-        else if (userRole !== 'admin' && (u.rol === 'admin' || u.rol === 'recepcion')) matchesRole = false
+        // 🚀 FIX: Recepción no puede ver admins, ni otras recepciones, ni auxiliares (solo profes/alumnos)
+        else if (userRole !== 'admin' && (u.rol === 'admin' || u.rol === 'recepcion' || u.rol === 'auxiliar')) matchesRole = false
 
         const term = searchTerm.toLowerCase()
         const matchesSearch = (u.nombre_completo?.toLowerCase().includes(term) || false) || (u.email.toLowerCase().includes(term))
@@ -295,7 +296,6 @@ function UsuariosContent() {
         fetchLigaStats(selectedUser.id, newRango)
     }
 
-    // BÚSQUEDA DEL HISTORIAL SÚPER MEJORADA Y UNIFICADA
     const openDetailModal = async (user: UsuarioDirectorio) => {
         setSelectedUser(user)
         setUserStats(null)
@@ -324,7 +324,6 @@ function UsuariosContent() {
             const nombreBusqueda = user.nombre_completo ? user.nombre_completo.trim() : '';
             let todosLosPagos: any[] = [];
 
-            // 1. PACKS HISTÓRICOS 
             const { data: packsPagos } = await supabase
                 .from('alumno_packs')
                 .select('id, monto_abonado, created_at, tipo_clase')
@@ -345,7 +344,6 @@ function UsuariosContent() {
                 todosLosPagos = [...todosLosPagos, ...mapeadosPacks];
             }
 
-            // 2. Recepción (Caja manual)
             if (nombreBusqueda) {
                 const partes = nombreBusqueda.split(' ');
                 const nombreCorto = partes.length > 1 ? `${partes[0]} ${partes[partes.length - 1]}` : nombreBusqueda;
@@ -363,7 +361,6 @@ function UsuariosContent() {
                 }
             }
 
-            // 3. La Liga
             const { data: ligaPagos } = await supabase
                 .from('liga_pagos')
                 .select('id, mes, anio, monto, metodo_pago, created_at')
@@ -384,7 +381,6 @@ function UsuariosContent() {
                 todosLosPagos = [...todosLosPagos, ...mapeadosLiga];
             }
 
-            // 4. Grupos Exclusivos
             const { data: ciaPagos } = await supabase
                 .from('companias_pagos')
                 .select('id, mes, anio, monto, metodo_pago, created_at, compania:companias(nombre)')
@@ -405,7 +401,6 @@ function UsuariosContent() {
                 todosLosPagos = [...todosLosPagos, ...mapeadosCia];
             }
 
-            // 5. App / Tienda MercadoPago
             const { data: onlinePagos } = await supabase
                 .from('pagos_online')
                 .select('id, concepto, monto, created_at')
@@ -427,7 +422,6 @@ function UsuariosContent() {
                 todosLosPagos = [...todosLosPagos, ...mapeadosOnline];
             }
 
-            // ALGORITMO ANTI-DUPLICADOS
             const pagosUnicos = todosLosPagos.reduce((acc: any[], current: any) => {
                 const isDuplicate = acc.find(item =>
                     Math.abs(new Date(item.created_at).getTime() - new Date(current.created_at).getTime()) < 60000 &&
@@ -664,7 +658,7 @@ function UsuariosContent() {
                                 </div>
                             )}
 
-                            <div className={`absolute top-0 right-0 px-3 py-1.5 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${u.rol === 'admin' ? 'bg-red-500/20 text-red-500' : u.rol === 'recepcion' ? 'bg-blue-500/20 text-blue-500' : u.rol === 'profesor' ? 'bg-purple-500/20 text-purple-500' : 'bg-white/5 text-gray-500'}`}>
+                            <div className={`absolute top-0 right-0 px-3 py-1.5 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${u.rol === 'admin' ? 'bg-red-500/20 text-red-500' : u.rol === 'recepcion' ? 'bg-blue-500/20 text-blue-500' : u.rol === 'profesor' ? 'bg-purple-500/20 text-purple-500' : u.rol === 'auxiliar' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-white/5 text-gray-500'}`}>
                                 {u.rol}
                             </div>
 
@@ -764,6 +758,7 @@ function UsuariosContent() {
 
                                         {isAdmin && (
                                             <div className="relative flex-1">
+                                                {/* 🚀 FIX: SELECTOR ROL DIRECTO */}
                                                 <select
                                                     disabled={cambiandoRolId === u.id}
                                                     value={u.rol || ''}
@@ -773,6 +768,7 @@ function UsuariosContent() {
                                                     <option value="admin">Admin</option>
                                                     <option value="coordinador">Coordinador</option>
                                                     <option value="recepcion">Recep.</option>
+                                                    <option value="auxiliar">Auxiliar</option>
                                                     <option value="profesor">Profe</option>
                                                     <option value="alumno">Alumno</option>
                                                 </select>
@@ -879,7 +875,6 @@ function UsuariosContent() {
                                         </div>
                                     </div>
 
-                                    {/* 🚀 NUEVO: HISTORIAL DE PAGOS INTEGRADO CON "VER MÁS" */}
                                     <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2 mt-6">
                                         <History size={16} className="text-[#D4E655]" /> Historial de Cargas y Pagos
                                     </h4>
@@ -1106,11 +1101,17 @@ function UsuariosContent() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-bold text-gray-500 uppercase">Rol</label>
+                                    {/* 🚀 FIX: SELECTOR ROL CREACION */}
                                     <select value={createForm.rol} onChange={e => setCreateForm({ ...createForm, rol: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]">
                                         <option value="alumno">Alumno</option>
                                         <option value="profesor">Profesor</option>
                                         <option value="coordinador">Coordinador</option>
-                                        {isAdmin && <option value="recepcion">Recepción</option>}
+                                        {isAdmin && (
+                                            <>
+                                                <option value="recepcion">Recepción</option>
+                                                <option value="auxiliar">Auxiliar</option>
+                                            </>
+                                        )}
                                     </select>
                                 </div>
                                 <div className="space-y-1">
@@ -1132,7 +1133,7 @@ function UsuariosContent() {
                             </div>
                             <div className="bg-yellow-500/5 border border-yellow-500/20 p-3 rounded-xl flex items-start gap-2">
                                 <ShieldAlert size={14} className="text-yellow-500 mt-0.5 shrink-0" />
-                                <p className="text-[10px] text-yellow-200/80 leading-relaxed">El DNI será la contraseña inicial. Solo un Administrador puede crear perfiles de Recepción o Admin por seguridad.</p>
+                                <p className="text-[10px] text-yellow-200/80 leading-relaxed">El DNI será la contraseña inicial. Solo un Administrador puede crear perfiles de Recepción, Auxiliar o Admin por seguridad.</p>
                             </div>
                             <button disabled={creating} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-4">
                                 {creating ? <Loader2 className="animate-spin" /> : 'Crear Usuario'}

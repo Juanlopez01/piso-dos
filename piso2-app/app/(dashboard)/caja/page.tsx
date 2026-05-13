@@ -152,7 +152,7 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
 
         return { admin: { cajasActivas: activasCalculadas, historialCajas: historialCalculado, reporteHoras }, recepcion: null, pagosOnline, turnosDisponibles }
 
-    } else if (role === 'recepcion') {
+    } else if (role === 'recepcion' || role === 'auxiliar') {
         if (!uid) throw new Error("No user ID")
 
         const { data: sedes } = await supabase.from('sedes').select('*').order('nombre')

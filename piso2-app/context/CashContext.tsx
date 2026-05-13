@@ -70,7 +70,8 @@ export function CashProvider({ children }: { children: ReactNode }) {
 
                 let ligaAccess = false, compAccess = false;
 
-                if (rolReal === 'admin' || rolReal === 'recepcion') {
+                // 🚀 FIX ROL AUXILIAR: También le damos acceso a ver Compañías y Liga si necesita
+                if (rolReal === 'admin' || rolReal === 'recepcion' || rolReal === 'auxiliar') {
                     ligaAccess = true; compAccess = true;
                 } else {
                     if (rolReal === 'alumno' || rolReal === 'user') {
@@ -83,13 +84,10 @@ export function CashProvider({ children }: { children: ReactNode }) {
                         const [resLiga, resComp, resCoord] = await Promise.all([
                             supabase.from('clases').select('id').eq('profesor_id', uid).eq('es_la_liga', true).limit(1),
                             supabase.from('clases').select('id').eq('profesor_id', uid).not('compania_id', 'is', null).limit(1),
-                            // 🚀 NUEVA CONSULTA: Chequeamos si este profe figura como coordinador de alguna compañía
                             supabase.from('companias').select('id').eq('coordinador_id', uid).limit(1)
                         ]);
 
                         ligaAccess = !!(resLiga.data && resLiga.data.length > 0);
-
-                        // 🚀 MAGIA: Tiene acceso a la pestaña si da clases en una compañía O SI coordina alguna
                         compAccess = !!(resComp.data && resComp.data.length > 0) || !!(resCoord.data && resCoord.data.length > 0);
                     }
                 }
@@ -102,8 +100,9 @@ export function CashProvider({ children }: { children: ReactNode }) {
                 setHasLigaAccess(ligaAccess);
                 setHasCompaniaAccess(compAccess);
 
-                if (rolReal === 'admin' || rolReal === 'recepcion') {
-                    console.log("🟠 [CashContext] -> Consultando turnos de caja para Admin/Recepcion...")
+                // 🚀 FIX ROL AUXILIAR: Habilitamos la gestión de caja para el auxiliar
+                if (rolReal === 'admin' || rolReal === 'recepcion' || rolReal === 'auxiliar') {
+                    console.log("🟠 [CashContext] -> Consultando turnos de caja...")
                     const { data: turno } = await supabase.from('caja_turnos').select('id, sede_id').eq('usuario_id', uid).eq('estado', 'abierta').maybeSingle();
                     setIsBoxOpen(!!turno);
                     setCurrentTurnoId(turno?.id || null);

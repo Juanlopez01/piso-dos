@@ -3,9 +3,9 @@ import { Home, Calendar as CalendarIcon, Users, Settings, Package, ShoppingBag, 
 export const menuItems = [
     // --- TOP: LOS 4 BOTONES DE ALUMNOS Y PROFES (Para el menú del celu) ---
     // Alumno 1
-    { name: 'Explorar', href: '/explorar', icon: Search, roles: ['admin', 'coordinador', 'alumno', 'visitante', 'recepcion'] },
+    { name: 'Explorar', href: '/explorar', icon: Search, roles: ['admin', 'coordinador', 'alumno', 'visitante', 'recepcion', 'auxiliar'] },
     // Alumno 2 | Profe 1
-    { name: 'Mi Perfil', href: '/perfil', icon: UserCircle, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno'] },
+    { name: 'Mi Perfil', href: '/perfil', icon: UserCircle, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'auxiliar'] },
     // Alumno 3 | Profe 2
     { name: 'Mis Clases', href: '/mis-clases', icon: BookOpen, roles: ['profesor', 'alumno'] },
     // Alumno 4
@@ -13,20 +13,20 @@ export const menuItems = [
     // Profe 3
     { name: 'Mis Pagos', href: '/mis-pagos', icon: Wallet, roles: ['profesor'] },
     // Profe 4
-    { name: 'Notificaciones', href: '/notificaciones', icon: Bell, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno'] },
+    { name: 'Notificaciones', href: '/notificaciones', icon: Bell, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'auxiliar'] },
 
     // --- RESTO DEL MENÚ (Para Admin, Recepción y vistas generales) ---
-    { name: 'Inicio', href: '/', icon: Home, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'visitante'] },
-    { name: 'Agenda', href: '/calendario', icon: CalendarIcon, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'visitante'] },
+    { name: 'Inicio', href: '/', icon: Home, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'visitante', 'auxiliar'] },
+    { name: 'Agenda', href: '/calendario', icon: CalendarIcon, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'visitante', 'auxiliar'] },
     { name: 'Alumnos / Profes', href: '/usuarios', icon: Users, roles: ['admin', 'recepcion'] },
     { name: 'Staff / Equipo', href: '/usuarios?ver=staff', icon: Settings, roles: ['admin'] },
     { name: 'Alquileres', href: '/alquileres', icon: ShoppingBag, roles: ['admin', 'recepcion'] },
     { name: 'Productos', href: '/productos', icon: Package, roles: ['admin', 'recepcion'] },
-    { name: 'Caja', href: '/caja', icon: ShoppingBag, roles: ['admin', 'recepcion'] },
+    { name: 'Caja', href: '/caja', icon: ShoppingBag, roles: ['admin', 'recepcion', 'auxiliar'] },
     {
         name: 'Liquidaciones',
         href: '/liquidaciones',
-        icon: FileSpreadsheet, // Importá FileSpreadsheet de lucide-react
+        icon: FileSpreadsheet,
         roles: ['admin', 'recepcion']
     },
     { name: 'Sedes', href: '/sedes', icon: MapPin, roles: ['admin'] },

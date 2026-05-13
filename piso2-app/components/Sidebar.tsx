@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { LogOut, UserCircle, Shield, Radio, LogIn, UsersRound } from 'lucide-react'
+import { LogOut, UserCircle, Shield, Radio, LogIn, UsersRound, Zap } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { menuItems } from '@/config/menu'
 import { useCash } from '@/context/CashContext'
@@ -54,12 +54,20 @@ function SidebarContent() {
             return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
         }
 
+        // 🚀 ROL AUXILIAR: Mismo menú cerrado que recepción, pero nunca ve alquileres ni liquidaciones.
+        // 🚀 ROL AUXILIAR: Mismo menú cerrado que recepción, pero nunca ve alquileres ni liquidaciones.
+        if (userRole === 'auxiliar') {
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        }
+
         return item.roles.includes(userRole || 'visitante')
     })
 
     const handleSignOut = async () => {
         if (isLoggingOut) return;
-        if (userRole === 'recepcion' && isBoxOpen) {
+        // 🚀 FIX: El auxiliar tampoco se puede ir sin cerrar la caja
+        if ((userRole === 'recepcion' || userRole === 'auxiliar') && isBoxOpen) {
             return toast.error('¡Caja Abierta! Cerrala antes de salir.')
         }
         setIsLoggingOut(true)
@@ -83,7 +91,7 @@ function SidebarContent() {
             <nav className="flex-1 overflow-y-auto p-4 space-y-1 custom-scrollbar">
                 <div className="mb-4 px-3">
                     <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
-                        {userRole === 'admin' ? <Shield size={12} className="text-red-500" /> : userRole === 'recepcion' ? <Radio size={12} className="text-blue-500" /> : userRole === 'visitante' ? <UserCircle size={12} /> : <UsersRound size={12} />}
+                        {userRole === 'admin' ? <Shield size={12} className="text-red-500" /> : userRole === 'recepcion' ? <Radio size={12} className="text-blue-500" /> : userRole === 'auxiliar' ? <Zap size={12} className="text-purple-500" /> : userRole === 'visitante' ? <UserCircle size={12} /> : <UsersRound size={12} />}
                         {userRole || 'visitante'}
                     </p>
                 </div>
