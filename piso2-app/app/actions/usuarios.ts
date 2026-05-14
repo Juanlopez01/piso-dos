@@ -420,21 +420,34 @@ export async function crearAlumnoDesdeRecepcionAction(datos: { nombre: string, a
             }
         })
 
+        // 🚀 FIX: LIMPIAMOS EL EMAIL DE ESPACIOS INVISIBLES Y MAYÚSCULAS
+        const cleanEmail = datos.email ? datos.email.trim().toLowerCase() : '';
+        const cleanDni = datos.dni ? datos.dni.trim() : '';
+
         const { data, error } = await supabaseAdmin.auth.admin.createUser({
-            email: datos.email,
-            password: datos.dni,
+            email: cleanEmail,
+            password: cleanDni,
             email_confirm: true,
             user_metadata: {
-                nombre: datos.nombre,
-                apellido: datos.apellido,
+                nombre: datos.nombre.trim(),
+                apellido: datos.apellido.trim(),
                 nombre_completo: `${datos.nombre} ${datos.apellido}`.trim(),
-                dni: datos.dni,
-                telefono: datos.telefono,
+                dni: cleanDni,
+                telefono: datos.telefono?.trim() || null,
                 rol: 'alumno'
             }
         })
 
-        if (error) return { success: false, error: error.message }
+        if (error) {
+            // Hacemos el mensaje de error más amigable para la recepción
+            if (error.message.includes('invalid format')) {
+                return { success: false, error: `El email "${cleanEmail}" no tiene un formato válido.` }
+            }
+            if (error.message.includes('already registered')) {
+                return { success: false, error: `Ya existe una cuenta con el email "${cleanEmail}".` }
+            }
+            return { success: false, error: error.message }
+        }
 
         return { success: true, user_id: data.user.id }
     } catch (error: any) {
