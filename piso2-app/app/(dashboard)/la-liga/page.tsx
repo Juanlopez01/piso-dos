@@ -106,7 +106,7 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
             .in('clase_id', todosIds)
 
         if (inscTodas) {
-            if (!isStaff) misInscripciones = inscTodas.filter(i => i.user_id === uid);
+            if (!isStaff) misInscripciones = inscTodas.filter((i: any) => i.user_id === uid);
 
             inscTodas.forEach((insc: any) => {
                 const clase = dataClases.find((c: any) => c.id === insc.clase_id);
