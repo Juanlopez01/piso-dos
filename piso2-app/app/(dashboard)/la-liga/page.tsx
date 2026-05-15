@@ -678,13 +678,17 @@ function LaLigaContent() {
                             <button onClick={() => setAdminTab('comunicados')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'comunicados' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                 <Megaphone size={14} /> Comunicados
                             </button>
+                            {/* 🚀 AUXILIARES, ADMINS Y RECEPCIÓN PUEDEN VER ESTADÍSTICAS */}
                             {canManage && (
+                                <button onClick={() => setAdminTab('estadisticas')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'estadisticas' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                                    <Activity size={14} /> Estadísticas
+                                </button>
+                            )}
+                            {/* 🚀 SOLO ADMINS Y RECEPCIÓN (NO AUXILIARES) PUEDEN VER PADRÓN Y PRECIOS */}
+                            {profile.rol !== 'auxiliar' && canManage && (
                                 <>
                                     <button onClick={() => setAdminTab('gestion')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'gestion' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                         <UserCog size={14} /> Padrón
-                                    </button>
-                                    <button onClick={() => setAdminTab('estadisticas')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'estadisticas' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
-                                        <Activity size={14} /> Estadísticas
                                     </button>
                                     <button onClick={() => setAdminTab('precios')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'precios' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                         <Settings2 size={14} /> Configuración
@@ -717,7 +721,7 @@ function LaLigaContent() {
                 )}
 
                 {/* --- VISTA CONFIGURACIÓN (PRECIOS Y CRITERIOS) --- */}
-                {canManage && adminTab === 'precios' && (
+                {profile.rol !== 'auxiliar' && canManage && adminTab === 'precios' && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-bottom-4">
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-8 shadow-xl">
                             <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-8">
@@ -985,7 +989,7 @@ function LaLigaContent() {
                 )}
 
                 {/* --- VISTA PADRÓN --- */}
-                {canManage && adminTab === 'gestion' && (
+                {profile.rol !== 'auxiliar' && canManage && adminTab === 'gestion' && (
                     <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl animate-in fade-in">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-6 border-b border-white/5">
                             <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2"><Users size={24} className="text-[#D4E655]" /> Padrón de Alumnos</h3>
