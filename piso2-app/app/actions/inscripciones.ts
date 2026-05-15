@@ -193,7 +193,6 @@ export async function procesarInscripcionAction(payload: any) {
 
         if (!payload.p_clase_id) throw new Error("El sistema no recibió el ID de la clase.");
 
-        // 🚀 TRAEMOS EL CAMPO es_audicion
         const { data: claseDb, error: errClase } = await supabaseAdmin.from('clases')
             .select(`
                 nombre, 
@@ -216,7 +215,7 @@ export async function procesarInscripcionAction(payload: any) {
         const isEspecial = tipoClaseStr === 'especial' || tipoClaseStr === 'seminario';
         const isLiga = tipoClaseStr === 'liga';
         const isCompania = tipoClaseStr === 'compania' || tipoClaseStr === 'compañia';
-        const isAudicion = claseDb.es_audicion === true; // 🚀 LO MAPEAMOS
+        const isAudicion = claseDb.es_audicion === true;
 
         const tipoPackBusqueda = isEspecial ? 'seminario' : 'regular';
 
@@ -238,6 +237,7 @@ export async function procesarInscripcionAction(payload: any) {
         let valorInscripcion = 0;
         let modalidadInsc = 'Clase Suelta';
         let saldoPendienteCalculado = payload.p_es_sena ? 1 : 0;
+        let packUsadoId = null; // 🚀 VARIABLE CLAVE PARA GUARDAR EL ID DEL PACK
 
         if (esExclusiva) {
             if (payload.p_tipo_operacion === 'usar_credito') {
@@ -254,6 +254,7 @@ export async function procesarInscripcionAction(payload: any) {
                     .maybeSingle();
 
                 if (packActivo && packActivo.cantidad_inicial > 0) {
+                    packUsadoId = packActivo.id; // 🚀 ATRAPAMOS EL ID
                     valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
                     await supabaseAdmin.from('alumno_packs').update({
@@ -284,7 +285,7 @@ export async function procesarInscripcionAction(payload: any) {
                 }
 
                 const ahora = new Date();
-                const { error: errPackEx } = await supabaseAdmin.from('alumno_packs').insert({
+                const { data: nuevoPack, error: errPackEx } = await supabaseAdmin.from('alumno_packs').insert({
                     user_id: payload.p_user_id,
                     producto_id: productoIdLimpio,
                     tipo_clase: 'exclusivo',
@@ -294,9 +295,10 @@ export async function procesarInscripcionAction(payload: any) {
                     fecha_compra: ahora.toISOString(),
                     fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
                     estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
-                });
+                }).select().single();
 
                 if (errPackEx) throw new Error(`Fallo al guardar el pack: ${errPackEx.message}`);
+                if (nuevoPack) packUsadoId = nuevoPack.id; // 🚀 ATRAPAMOS EL ID NUEVO
 
                 if (creditosDelPack > 1) {
                     await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', {
@@ -342,6 +344,7 @@ export async function procesarInscripcionAction(payload: any) {
                     .maybeSingle();
 
                 if (packActivo && packActivo.cantidad_inicial > 0) {
+                    packUsadoId = packActivo.id; // 🚀 ATRAPAMOS EL ID
                     valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
                     await supabaseAdmin.from('alumno_packs').update({
@@ -374,7 +377,7 @@ export async function procesarInscripcionAction(payload: any) {
                 }
 
                 const ahora = new Date();
-                await supabaseAdmin.from('alumno_packs').insert({
+                const { data: nuevoPack, error: errPackRegular } = await supabaseAdmin.from('alumno_packs').insert({
                     user_id: payload.p_user_id,
                     producto_id: productoIdLimpio,
                     tipo_clase: tipoClaseProd,
@@ -384,7 +387,10 @@ export async function procesarInscripcionAction(payload: any) {
                     fecha_compra: ahora.toISOString(),
                     fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
                     estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
-                });
+                }).select().single();
+
+                if (errPackRegular) throw new Error(`Error al guardar el pack: ${errPackRegular.message}`);
+                if (nuevoPack) packUsadoId = nuevoPack.id; // 🚀 ATRAPAMOS EL ID NUEVO
 
                 if (creditosDelPack > 1) {
                     const { data: perfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', payload.p_user_id).single();
@@ -395,7 +401,7 @@ export async function procesarInscripcionAction(payload: any) {
                 if (isLiga || isCompania) {
                     modalidadInsc = isLiga ? 'La Liga' : 'Compañía';
                     valorInscripcion = 0;
-                } else if (isAudicion) { // 🚀 ACÁ ESTÁ LA CONDICIÓN DE LA AUDICIÓN
+                } else if (isAudicion) {
                     modalidadInsc = 'Audición';
                     valorInscripcion = payload.p_monto_caja || 0;
                 } else {
@@ -404,7 +410,6 @@ export async function procesarInscripcionAction(payload: any) {
                 }
 
                 if (payload.p_monto_caja > 0 && turnoId) {
-                    // 🚀 ACÁ ESTÁ EL CONCEPTO PARA CAJA
                     const conceptoFinal = isAudicion ? 'Inscripción Audición' : (isLiga ? 'Inscripción La Liga' : (isCompania ? 'Inscripción Compañía' : 'Venta Clase Suelta'));
 
                     await supabaseAdmin.from('caja_movimientos').insert({
@@ -426,8 +431,7 @@ export async function procesarInscripcionAction(payload: any) {
         const { error: errInsc } = await supabaseAdmin.from('inscripciones').insert({
             user_id: payload.p_user_id || null,
             clase_id: payload.p_clase_id,
-            nombre_invitado: payload.p_nombre_invitado || null,
-            es_invitado: payload.p_tipo_operacion === 'invitado' || !payload.p_user_id,
+            pack_usado_id: packUsadoId, // 🚀 GUARDAMOS EL ID DEL PACK EN TU COLUMNA OFICIAL
             modalidad: modalidadInsc,
             valor_credito: valorInscripcion,
             saldo_pendiente: saldoPendienteCalculado,
@@ -510,19 +514,44 @@ export async function agregarPagoInscripcionAction(inscripcionId: string, monto:
 
         if (!turno) throw new Error("No tenés una caja abierta. Abrí tu caja en Finanzas para cobrar la deuda.")
 
+        // 1. EL PAGO ENTRA COMPLETO A LA CAJA
         const nombreAlumno = insc.nombre_invitado || 'Alumno con cuenta'
         const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
             turno_id: turno.id,
             tipo: 'ingreso',
             monto: monto,
             metodo_pago: metodoPago,
-            concepto: `Cobro Parcial/Deuda | Clase: ${insc.clase.nombre} | Alumno: ${nombreAlumno}`,
+            concepto: `Cobro Deuda/Seña | Clase: ${insc.clase?.nombre || 'Clase'} | Alumno: ${nombreAlumno}`,
             origen_referencia: 'inscripcion'
         })
         if (errCaja) throw new Error('Error al registrar en caja')
 
+        // 2. LÓGICA INFALIBLE USANDO LA COLUMNA OFICIAL
+        let valorAAgregarAClaseActual = Number(monto); // Por defecto va entero si es clase suelta
+
+        if (insc.pack_usado_id) {
+            // Vamos a buscar el pack usando el ID directo
+            const { data: packAfectado } = await supabaseAdmin
+                .from('alumno_packs')
+                .select('*')
+                .eq('id', insc.pack_usado_id)
+                .single();
+
+            if (packAfectado && packAfectado.cantidad_inicial > 1) {
+                // Dividimos la plata
+                const divisor = Number(packAfectado.cantidad_inicial);
+                valorAAgregarAClaseActual = Number(monto) / divisor;
+
+                // Le sumamos la plata ingresada al pack maestro
+                await supabaseAdmin.from('alumno_packs').update({
+                    monto_abonado: Number(packAfectado.monto_abonado) + Number(monto)
+                }).eq('id', packAfectado.id);
+            }
+        }
+
+        // 3. ACTUALIZAMOS LA INSCRIPCIÓN ACTUAL (Con su fracción correspondiente o el monto total si era suelta)
         const { error: errUpd } = await supabaseAdmin.from('inscripciones').update({
-            valor_credito: Number(insc.valor_credito) + monto,
+            valor_credito: Number(insc.valor_credito) + valorAAgregarAClaseActual,
             saldo_pendiente: liquidarDeuda ? 0 : 1
         }).eq('id', inscripcionId)
 

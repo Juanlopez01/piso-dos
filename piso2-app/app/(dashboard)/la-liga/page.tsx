@@ -12,7 +12,7 @@ import {
     CheckCircle2, AlertCircle, Users, ClipboardEdit, Save, FileText,
     Search, UserCog, UserMinus, Star, Send, Trash2, Clock, Settings2, Percent,
     X, Coins, CalendarDays, Activity, XCircle, Eye, Calendar, MapPin, User,
-    Image as ImageIcon, CheckSquare
+    Image as ImageIcon, CheckSquare, ChevronDown, ChevronUp // 🚀 IMPORTAMOS CHEVRONS PARA EL DESPLEGABLE
 } from 'lucide-react'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -25,7 +25,7 @@ import {
     guardarEvaluacionAction,
     actualizarPrecioGlobalAction,
     asignarBecaAction,
-    inscribirPadronLigaAction // 🚀 IMPORTACIÓN DE LA NUEVA ACCIÓN
+    inscribirPadronLigaAction
 } from '@/app/actions/liga'
 
 import {
@@ -47,6 +47,7 @@ type Estadisticas = {
     saf: number
     medias_faltas: number
     total: number
+    desglose?: Record<string, any> // 🚀 AGREGAMOS EL TIPO DESGLOSE
 }
 
 const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, supabase: any) => {
@@ -75,7 +76,6 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
 
     const { data: criteriosData } = await supabase.from('liga_criterios').select('*').order('nombre')
 
-    // 🚀 OBTENEMOS LAS CLASES DEL MES EXACTO SELECCIONADO
     const primerDiaMes = new Date(anioActual, mesActual - 1, 1).toISOString()
     const ultimoDiaMes = new Date(anioActual, mesActual, 0, 23, 59, 59, 999).toISOString()
 
@@ -93,10 +93,72 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
 
     const { data: dataClases } = await queryClases
 
-    // 🚀 MAPEO DE CLASES DEL MES PARA LA PESTAÑA
+    // 🚀 ESTADÍSTICAS Y CRUCE DE DATOS CON INSCRIPCIONES (AHORA CON DESGLOSE POR MATERIA)
+    let statsAsistencia: Record<string, Estadisticas> = {}
+    let misInscripciones: any[] = []
+
+    if (dataClases && dataClases.length > 0) {
+        const todosIds = dataClases.map((c: any) => c.id)
+
+        const { data: inscTodas } = await supabase
+            .from('inscripciones')
+            .select('user_id, clase_id, estado_asistencia')
+            .in('clase_id', todosIds)
+
+        if (inscTodas) {
+            if (!isStaff) misInscripciones = inscTodas.filter(i => i.user_id === uid);
+
+            inscTodas.forEach((insc: any) => {
+                const clase = dataClases.find((c: any) => c.id === insc.clase_id);
+                const yaPaso = clase && new Date(clase.inicio).getTime() <= new Date().getTime();
+                const nombreMateria = clase ? clase.nombre : 'Clase Desconocida'; // 🚀 OBTENEMOS EL NOMBRE DE LA MATERIA
+
+                if (yaPaso && insc.user_id) {
+                    // Inicializamos el contador general del alumno si no existe
+                    if (!statsAsistencia[insc.user_id]) {
+                        statsAsistencia[insc.user_id] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0, desglose: {} }
+                    }
+
+                    // Inicializamos el contador de ESA materia específica para el alumno si no existe
+                    if (!statsAsistencia[insc.user_id].desglose![nombreMateria]) {
+                        statsAsistencia[insc.user_id].desglose![nombreMateria] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
+                    }
+
+                    // Aumentamos los totales
+                    statsAsistencia[insc.user_id].total++
+                    statsAsistencia[insc.user_id].desglose![nombreMateria].total++
+
+                    // Repartimos según el estado (Suma al general y al desglose)
+                    if (insc.estado_asistencia === 'presente') {
+                        statsAsistencia[insc.user_id].presentes++
+                        statsAsistencia[insc.user_id].desglose![nombreMateria].presentes++
+                    }
+                    else if (insc.estado_asistencia === 'ausente') {
+                        statsAsistencia[insc.user_id].ausentes++
+                        statsAsistencia[insc.user_id].desglose![nombreMateria].ausentes++
+                    }
+                    else if (insc.estado_asistencia === 'justificada') {
+                        statsAsistencia[insc.user_id].justificadas++
+                        statsAsistencia[insc.user_id].desglose![nombreMateria].justificadas++
+                    }
+                    else if (insc.estado_asistencia === 'saf') {
+                        statsAsistencia[insc.user_id].saf++
+                        statsAsistencia[insc.user_id].desglose![nombreMateria].saf++
+                    }
+                    else if (insc.estado_asistencia === 'media_falta') {
+                        statsAsistencia[insc.user_id].medias_faltas++
+                        statsAsistencia[insc.user_id].desglose![nombreMateria].medias_faltas++
+                    }
+                }
+            })
+        }
+    }
+
     const clasesDelMes = (dataClases || []).map((c: any) => {
         const profNombre = Array.isArray(c.profesor) ? c.profesor[0]?.nombre_completo : c.profesor?.nombre_completo
         const salaData = Array.isArray(c.sala) ? c.sala[0] : c.sala
+        const miInsc = !isStaff ? misInscripciones.find(i => i.clase_id === c.id) : null;
+
         return {
             id: c.id,
             nombre: c.nombre,
@@ -105,39 +167,11 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
             imagen_url: c.imagen_url,
             profesor: { nombre_completo: profNombre || 'Staff' },
             sala: salaData,
-            liga_nivel: c.liga_nivel
+            liga_nivel: c.liga_nivel,
+            mi_estado_asistencia: miInsc ? miInsc.estado_asistencia : null,
+            estoy_inscripto: !!miInsc
         }
     })
-
-    // 🚀 ESTADÍSTICAS DE ASISTENCIA DEL MES (FILTRADAS SOLO HASTA HOY)
-    let statsAsistencia: Record<string, Estadisticas> = {}
-    if (dataClases && dataClases.length > 0) {
-        const ahoraMs = new Date().getTime()
-        const clasesIdsPasadas = dataClases.filter((c: any) => new Date(c.inicio).getTime() <= ahoraMs).map((c: any) => c.id)
-
-        if (clasesIdsPasadas.length > 0) {
-            const { data: inscripcionesDelMes } = await supabase
-                .from('inscripciones')
-                .select('user_id, estado_asistencia')
-                .in('clase_id', clasesIdsPasadas)
-
-            if (inscripcionesDelMes) {
-                inscripcionesDelMes.forEach((insc: any) => {
-                    if (!insc.user_id) return
-                    if (!statsAsistencia[insc.user_id]) {
-                        statsAsistencia[insc.user_id] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
-                    }
-
-                    statsAsistencia[insc.user_id].total++
-                    if (insc.estado_asistencia === 'presente') statsAsistencia[insc.user_id].presentes++
-                    else if (insc.estado_asistencia === 'ausente') statsAsistencia[insc.user_id].ausentes++
-                    else if (insc.estado_asistencia === 'justificada') statsAsistencia[insc.user_id].justificadas++
-                    else if (insc.estado_asistencia === 'saf') statsAsistencia[insc.user_id].saf++
-                    else if (insc.estado_asistencia === 'media_falta') statsAsistencia[insc.user_id].medias_faltas++
-                })
-            }
-        }
-    }
 
     let preciosLiga: any[] = []
     const { data: config } = await supabase.from('configuraciones').select('*').in('clave', [
@@ -240,7 +274,7 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
                     saldoPendiente,
                     saldoPendienteEfectivo,
                     pago_al_dia,
-                    estadisticas: statsAsistencia[p.id] || { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
+                    estadisticas: statsAsistencia[p.id] || { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0, desglose: {} }
                 }
             })
         }
@@ -252,7 +286,8 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
         profile, isStaff, canManage, legajoCompleto, avisos: avisos || [],
         materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo,
         allStudents, preciosLiga, criterios: criteriosData || [],
-        clasesDelMes
+        clasesDelMes,
+        miAsistencia: statsAsistencia[uid] || { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0, desglose: {} }
     }
 }
 
@@ -311,7 +346,10 @@ function LaLigaContent() {
     const [boletinModalOpen, setBoletinModalOpen] = useState(false)
     const [selectedBoletin, setSelectedBoletin] = useState<any>(null)
 
-    const [inscribiendoNivel, setInscribiendoNivel] = useState<number | null>(null) // 🚀 ESTADO BOTÓN MÁGICO
+    const [inscribiendoNivel, setInscribiendoNivel] = useState<number | null>(null)
+
+    // 🚀 ESTADO PARA CONTROLAR EL ACORDEÓN DE ESTADÍSTICAS
+    const [expandedStudentStats, setExpandedStudentStats] = useState<string | null>(null)
 
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
@@ -342,13 +380,12 @@ function LaLigaContent() {
         setRegistrandoPago(true)
 
         try {
-            // 🚀 LE PASAMOS LA PELOTA A LA ACTION SEGURA (incluyendo mes y año)
             const res = await cobrarLigaAction(
                 alumnoPago.id,
                 Number(montoPago),
                 metodoPago,
-                pagoMes,   // <-- ESTO ES CLAVE
-                pagoAnio   // <-- ESTO ES CLAVE
+                pagoMes,
+                pagoAnio
             );
 
             if (!res.success) {
@@ -365,7 +402,6 @@ function LaLigaContent() {
         }
     }
 
-    // 🚀 LA ACCIÓN DEL BOTÓN MÁGICO DE LIGA
     const handleInscripcionMasivaLiga = async (nivel: number) => {
         setInscribiendoNivel(nivel);
         try {
@@ -402,7 +438,7 @@ function LaLigaContent() {
         )
     }
 
-    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo, allStudents, criterios, clasesDelMes } = data
+    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo, allStudents, criterios, clasesDelMes, miAsistencia } = data
     const nivelActual = profile.nivel_liga || profile.nivel || 1
 
     const filteredStudents = allStudents.filter((s: any) => {
@@ -608,7 +644,6 @@ function LaLigaContent() {
                         </div>
 
                         <div className="flex flex-col sm:flex-row items-center gap-3">
-                            {/* 🚀 SELECTOR DE MES Y AÑO */}
                             <div className="flex items-center gap-2 bg-black/40 border border-white/10 p-1.5 rounded-xl shadow-inner">
                                 <CalendarDays size={16} className="text-gray-500 ml-2" />
                                 <select value={mesDashboard} onChange={e => setMesDashboard(Number(e.target.value))} className="bg-transparent text-white text-xs font-bold uppercase outline-none focus:ring-0 cursor-pointer appearance-none px-2 py-1">
@@ -768,7 +803,7 @@ function LaLigaContent() {
                     </div>
                 )}
 
-                {/* --- 🚀 VISTA ESTADÍSTICAS --- */}
+                {/* --- 🚀 VISTA ESTADÍSTICAS (AHORA CON DESGLOSE ACORDEÓN) --- */}
                 {canManage && adminTab === 'estadisticas' && (
                     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 md:p-8 shadow-xl">
@@ -799,16 +834,25 @@ function LaLigaContent() {
 
                                         if (total === 0) return null;
 
+                                        const isExpanded = expandedStudentStats === m.id;
+
                                         return (
-                                            <div key={m.id} className="bg-[#111] p-4 rounded-xl border border-white/5 flex flex-col gap-4 hover:border-white/20 transition-all group">
+                                            <div
+                                                key={m.id}
+                                                onClick={() => setExpandedStudentStats(isExpanded ? null : m.id)}
+                                                className="bg-[#111] p-4 rounded-xl border border-white/5 flex flex-col gap-4 hover:border-white/20 transition-all group cursor-pointer overflow-hidden"
+                                            >
                                                 <div className="flex justify-between items-center border-b border-white/5 pb-3">
                                                     <div>
                                                         <h4 className="font-bold text-sm uppercase text-white truncate max-w-[200px]">{m.nombre_completo}</h4>
                                                         <p className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest mt-0.5">Nivel {m.nivel_liga}</p>
                                                     </div>
-                                                    <span className={`text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest shrink-0 ${porcentaje >= 60 ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
-                                                        {porcentaje}% Asist.
-                                                    </span>
+                                                    <div className="flex items-center gap-3">
+                                                        <span className={`text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest shrink-0 ${porcentaje >= 60 ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
+                                                            {porcentaje}% Asist.
+                                                        </span>
+                                                        {isExpanded ? <ChevronUp size={16} className="text-gray-500" /> : <ChevronDown size={16} className="text-gray-500 group-hover:text-white" />}
+                                                    </div>
                                                 </div>
 
                                                 <div className="grid grid-cols-5 gap-2 text-[10px] font-black uppercase tracking-widest">
@@ -837,6 +881,31 @@ function LaLigaContent() {
                                                 <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden mt-1">
                                                     <div className={`h-full rounded-full transition-all duration-1000 ${porcentaje >= 60 ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${porcentaje}%` }} />
                                                 </div>
+
+                                                {/* 🚀 DESGLOSE POR MATERIA (ACORDEÓN) */}
+                                                {isExpanded && (
+                                                    <div className="mt-2 pt-4 border-t border-white/5 animate-in fade-in slide-in-from-top-2">
+                                                        <h5 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Detalle por Materia</h5>
+                                                        {m.estadisticas?.desglose && Object.keys(m.estadisticas.desglose).length > 0 ? (
+                                                            <div className="space-y-2">
+                                                                {Object.entries(m.estadisticas.desglose).map(([nombreMateria, statsMat]: [string, any]) => (
+                                                                    <div key={nombreMateria} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-black/50 p-3 rounded-lg border border-white/5">
+                                                                        <span className="text-[10px] font-bold text-white uppercase truncate flex-1 leading-tight pr-2">{nombreMateria}</span>
+                                                                        <div className="flex items-center justify-end gap-2.5 shrink-0 text-[9px] font-black tracking-widest uppercase">
+                                                                            {statsMat.presentes > 0 && <span className="text-green-500 flex items-center gap-0.5" title="Presentes"><CheckCircle2 size={10} /> {statsMat.presentes}</span>}
+                                                                            {statsMat.ausentes > 0 && <span className="text-red-500 flex items-center gap-0.5" title="Ausentes"><XCircle size={10} /> {statsMat.ausentes}</span>}
+                                                                            {statsMat.medias_faltas > 0 && <span className="text-yellow-500 flex items-center gap-0.5" title="Media Falta"><Clock size={10} /> {statsMat.medias_faltas}</span>}
+                                                                            {statsMat.justificadas > 0 && <span className="text-blue-500 flex items-center gap-0.5" title="Justificadas"><FileText size={10} /> {statsMat.justificadas}</span>}
+                                                                            {statsMat.saf > 0 && <span className="text-purple-400 flex items-center gap-0.5" title="SAF"><Eye size={10} /> {statsMat.saf}</span>}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-[10px] text-gray-600 italic uppercase font-bold">No hay detalles registrados.</p>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         )
                                     })}
@@ -869,7 +938,6 @@ function LaLigaContent() {
                                                     <ImageIcon size={24} className="text-white/20" />
                                                 )}
 
-                                                {/* 🚀 ETIQUETA DE NIVEL APLICADA */}
                                                 <span className="absolute top-3 right-3 bg-[#D4E655] text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Nivel {clase.liga_nivel}</span>
 
                                                 {esHoy && <span className="absolute top-3 left-3 bg-[#D4E655] text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">⚡ Hoy</span>}
@@ -916,7 +984,7 @@ function LaLigaContent() {
                     </div>
                 )}
 
-                {/* --- VISTA PADRÓN (AHORA CON BOTÓN MÁGICO) --- */}
+                {/* --- VISTA PADRÓN --- */}
                 {canManage && adminTab === 'gestion' && (
                     <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl animate-in fade-in">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-6 border-b border-white/5">
@@ -927,7 +995,6 @@ function LaLigaContent() {
                             </div>
                         </div>
 
-                        {/* 🚀 BOTONES MÁGICOS DE INSCRIPCIÓN POR NIVEL */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                             <div className="bg-[#D4E655]/10 border border-[#D4E655]/30 rounded-2xl p-4 flex flex-col justify-between gap-4 shadow-lg shadow-[#D4E655]/5">
                                 <div>
@@ -1131,29 +1198,85 @@ function LaLigaContent() {
                     <div className="space-y-6 animate-in fade-in">
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div className="lg:col-span-2 space-y-6">
-                                <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[400px]">
+
+                                <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+                                    <div className="absolute top-0 right-0 w-32 h-32 bg-[#D4E655]/5 rounded-full blur-2xl -mr-10 -mt-10" />
+                                    <div className="flex justify-between items-center mb-6">
+                                        <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2"><Activity size={20} className="text-[#D4E655]" /> Mi Asistencia</h3>
+                                        <span className="text-[9px] font-bold text-gray-400 bg-white/5 px-2 py-1 rounded-md border border-white/10 uppercase tracking-widest">Mes {mesDashboard}/{anioDashboard}</span>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-[10px] font-black uppercase tracking-widest relative z-10">
+                                        <div className="flex flex-col items-center justify-center gap-1 p-3 rounded-2xl bg-green-500/10 text-green-500 border border-green-500/20">
+                                            <CheckCircle2 size={18} className="mb-1" />
+                                            <span className="text-lg leading-none">{miAsistencia.presentes}</span>
+                                            <span className="opacity-70">Presentes</span>
+                                        </div>
+                                        <div className="flex flex-col items-center justify-center gap-1 p-3 rounded-2xl bg-red-500/10 text-red-500 border border-red-500/20">
+                                            <XCircle size={18} className="mb-1" />
+                                            <span className="text-lg leading-none">{miAsistencia.ausentes}</span>
+                                            <span className="opacity-70">Ausentes</span>
+                                        </div>
+                                        <div className="flex flex-col items-center justify-center gap-1 p-3 rounded-2xl bg-yellow-500/10 text-yellow-500 border border-yellow-500/20">
+                                            <Clock size={18} className="mb-1" />
+                                            <span className="text-lg leading-none">{miAsistencia.medias_faltas}</span>
+                                            <span className="opacity-70 text-center">Medias<br />Faltas</span>
+                                        </div>
+                                        <div className="flex flex-col items-center justify-center gap-1 p-3 rounded-2xl bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                                            <FileText size={18} className="mb-1" />
+                                            <span className="text-lg leading-none">{miAsistencia.justificadas}</span>
+                                            <span className="opacity-70">Justific.</span>
+                                        </div>
+                                        <div className="flex flex-col items-center justify-center gap-1 p-3 rounded-2xl bg-purple-500/10 text-purple-400 border border-purple-500/20 col-span-2 md:col-span-1">
+                                            <Eye size={18} className="mb-1" />
+                                            <span className="text-lg leading-none">{miAsistencia.saf}</span>
+                                            <span className="opacity-70">S.A.F.</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6">
                                     <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6"><BookOpen size={20} className="text-[#D4E655]" /> Mis Disciplinas</h3>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         {materias.map((materia: any) => (
-                                            <div key={materia.id} onClick={() => {
-                                                if (deudaCuota) return toast.error('Tenés que abonar tu saldo para ver tu boletín.')
-                                                if (materia.evaluacion) { setSelectedBoletin(materia); setBoletinModalOpen(true) }
-                                                else toast.info('Evaluación pendiente.')
-                                            }} className={`bg-[#111] border ${materia.evaluacion ? 'border-[#D4E655]/30 cursor-pointer hover:border-[#D4E655]' : 'border-white/5'} rounded-2xl p-5 flex flex-col relative overflow-hidden`}>
+                                            <div key={materia.id} className="bg-[#111] border border-white/5 rounded-2xl p-5 flex flex-col relative overflow-hidden group hover:border-[#D4E655]/30 transition-all">
                                                 <h4 className="font-black text-xl uppercase tracking-tighter text-white mb-1 truncate">{materia.nombre}</h4>
                                                 <p className="text-[10px] text-gray-400 mb-5 uppercase font-bold tracking-widest">Prof: {materia.profesor}</p>
-                                                <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-center">
-                                                    {materia.evaluacion ? <span className="bg-[#D4E655] text-black text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-lg flex items-center gap-2 w-full justify-center"><FileText size={14} /> Boletín</span> : <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">En Proceso</span>}
+
+                                                <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-between">
+                                                    {materia.evaluacion ? (
+                                                        <>
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Nota Final</span>
+                                                                <span className={`text-3xl font-black leading-none ${materia.evaluacion.aprobado ? 'text-green-500' : 'text-red-500'}`}>{materia.evaluacion.nota_final}</span>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => {
+                                                                    if (deudaCuota) return toast.error('Tenés que abonar tu saldo para ver tu boletín completo.')
+                                                                    setSelectedBoletin(materia); setBoletinModalOpen(true);
+                                                                }}
+                                                                className="bg-white/5 hover:bg-[#D4E655] text-white hover:text-black text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl flex items-center gap-2 transition-all"
+                                                            >
+                                                                <FileText size={14} /> Boletín
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <div className="w-full text-center">
+                                                            <span className="text-[9px] text-gray-600 font-bold uppercase tracking-widest">Evaluación en proceso</span>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
                                 </div>
                             </div>
+
                             <div className="lg:col-span-1">
-                                <div className="bg-[#111] border border-white/5 rounded-3xl p-6">
+                                <div className="bg-[#111] border border-white/5 rounded-3xl p-6 sticky top-8">
                                     <h3 className="text-lg font-black uppercase tracking-tighter flex items-center gap-2 mb-6 text-white"><Megaphone size={18} className="text-[#D4E655]" /> Avisos</h3>
-                                    <div className="space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+                                    <div className="space-y-4 max-h-[600px] overflow-y-auto custom-scrollbar pr-2">
+                                        {avisos.length === 0 ? <p className="text-xs text-gray-500 uppercase font-bold text-center py-8">Sin avisos recientes</p> : null}
                                         {avisos.map((aviso: any) => (
                                             <div key={aviso.id} className="bg-black/40 border-l-2 border-[#D4E655] p-4 rounded-r-lg">
                                                 <span className="text-[9px] font-bold text-gray-500 uppercase block mb-1">{format(new Date(aviso.created_at), 'dd MMM yyyy', { locale: es })}</span>
@@ -1166,11 +1289,13 @@ function LaLigaContent() {
                             </div>
                         </div>
 
-                        {/* 🚀 CLASES DEL MES PARA EL ALUMNO */}
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6">
-                            <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6">
-                                <Calendar size={20} className="text-[#D4E655]" /> Mis clases del mes
-                            </h3>
+                            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
+                                <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2">
+                                    <Calendar size={20} className="text-[#D4E655]" /> Mis clases del mes
+                                </h3>
+                            </div>
+
                             {clasesDelMes.length > 0 ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                     {clasesDelMes.map((clase: any) => {
@@ -1191,11 +1316,21 @@ function LaLigaContent() {
                                                         <ImageIcon size={24} className="text-white/20" />
                                                     )}
 
-                                                    {/* 🚀 ETIQUETA DE NIVEL APLICADA */}
-                                                    <span className="absolute top-3 right-3 bg-[#D4E655] text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Nivel {clase.liga_nivel}</span>
-
-                                                    {esHoy && <span className="absolute top-3 left-3 bg-[#D4E655] text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">⚡ Hoy</span>}
-                                                    {yaPaso && <span className="absolute top-3 left-3 bg-gray-800 text-gray-400 text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Completada</span>}
+                                                    {yaPaso ? (
+                                                        <>
+                                                            {clase.mi_estado_asistencia === 'presente' && <span className="absolute top-3 left-3 bg-green-500 text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg flex items-center gap-1"><CheckCircle2 size={10} /> Presente</span>}
+                                                            {clase.mi_estado_asistencia === 'ausente' && <span className="absolute top-3 left-3 bg-red-500 text-white text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg flex items-center gap-1"><XCircle size={10} /> Ausente</span>}
+                                                            {clase.mi_estado_asistencia === 'media_falta' && <span className="absolute top-3 left-3 bg-yellow-500 text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg flex items-center gap-1"><Clock size={10} /> Media Falta</span>}
+                                                            {clase.mi_estado_asistencia === 'justificada' && <span className="absolute top-3 left-3 bg-blue-500 text-white text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg flex items-center gap-1"><FileText size={10} /> Justificada</span>}
+                                                            {clase.mi_estado_asistencia === 'saf' && <span className="absolute top-3 left-3 bg-purple-500 text-white text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg flex items-center gap-1"><Eye size={10} /> S.A.F.</span>}
+                                                            {!clase.estoy_inscripto && <span className="absolute top-3 left-3 bg-gray-800 text-gray-400 text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Ausente (No anotado)</span>}
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            {clase.estoy_inscripto && <span className="absolute top-3 left-3 bg-blue-500 text-white text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Inscripto</span>}
+                                                            {esHoy && <span className="absolute top-3 right-3 bg-[#D4E655] text-black text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">⚡ Hoy</span>}
+                                                        </>
+                                                    )}
                                                 </div>
 
                                                 <div className="p-5 flex-1">

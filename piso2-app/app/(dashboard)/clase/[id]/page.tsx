@@ -200,7 +200,7 @@ export default function ClaseDetallePage() {
 
     const getPrecioSugerido = (tipo: string, pago: string, packId: string) => {
         if (tipo === 'suelta') {
-            if (esGrupoOFormacion || clase?.es_audicion) return ''; // 🚀 Audición es monto libre
+            if (esGrupoOFormacion || clase?.es_audicion) return '';
             if (!clase?.es_combinable) return pago === 'efectivo' ? String(precioExclusivaEfvo) : String(precioExclusivaTransf);
             const p = PRECIOS_ALUMNO[clase?.tipo_clase === 'Especial' ? 'Especial' : 'Regular'] || PRECIOS_ALUMNO.Regular;
             return pago === 'efectivo' ? String(p.efectivo) : String(p.transferencia);
@@ -226,7 +226,6 @@ export default function ClaseDetallePage() {
         });
     }
 
-    // 🚀 FIX: Pestañas para audición (Abonar Audición / Sin Cargo)
     const tabsDisponibles = clase?.es_audicion
         ? [
             { id: 'suelta', label: 'Abonar Audición' },
@@ -302,12 +301,10 @@ export default function ClaseDetallePage() {
             if (clase.es_combinable === false) tipoClaseRPC = 'exclusivo';
             else if (clase.tipo_clase === 'Especial') tipoClaseRPC = 'seminario';
 
-            // 🚀 FIX: Permitir montos en Audiciones Paga o Clases Sueltas
             if (['suelta', 'pack'].includes(guestForm.tipo)) {
                 monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : 0;
             }
 
-            // Nombre para invitados (con teléfono si es audición)
             if (!alumnoIdFinal) {
                 nombreInvitadoStr = `${guestForm.nombre} ${guestForm.apellido}`.trim()
                 if (clase.es_audicion && guestForm.telefono) {
@@ -332,7 +329,11 @@ export default function ClaseDetallePage() {
             const llavePase = `${clase.nombre}-${nombreProfe}-${clase.tipo_clase}`;
 
             const sugerido = Number(getPrecioSugerido(guestForm.tipo, guestForm.pago, guestForm.packSeleccionadoId)) || 0;
-            const saldoPendiente = (guestForm.tipo === 'suelta' && guestForm.esSena) ? Math.max(0, sugerido - monto) : 0;
+
+            // 🚀 LÓGICA DE SEÑA PARA PACKS Y SUELTAS
+            const saldoPendiente = (['suelta', 'pack'].includes(guestForm.tipo) && guestForm.esSena)
+                ? Math.max(0, sugerido - monto)
+                : 0;
 
             const rpcPayload = {
                 p_clase_id: clase.id,
@@ -352,6 +353,19 @@ export default function ClaseDetallePage() {
 
             const response = await procesarInscripcionAction(rpcPayload as any)
             if (!response.success) throw new Error(response.error)
+
+            // 🚀 FIX CRÍTICO: Inyectar la deuda manualmente para puentear bloqueos del RPC en Packs
+            if (saldoPendiente > 0) {
+                let query = supabase.from('inscripciones').select('id').eq('clase_id', clase.id);
+                if (alumnoIdFinal) query = query.eq('user_id', alumnoIdFinal);
+                else if (nombreInvitadoStr) query = query.eq('nombre_invitado', nombreInvitadoStr);
+
+                const { data: ultInsc } = await query.order('created_at', { ascending: false }).limit(1).single();
+
+                if (ultInsc) {
+                    await supabase.from('inscripciones').update({ saldo_pendiente: saldoPendiente }).eq('id', ultInsc.id);
+                }
+            }
 
             if (esGrupoOFormacion && guestForm.tipo !== 'invitado' && alumnoIdFinal) {
                 const mesActual = new Date().getMonth() + 1;
@@ -444,7 +458,6 @@ export default function ClaseDetallePage() {
                         <button onClick={() => setIsNotifModalOpen(true)} className="flex-1 md:flex-none bg-[#111] border border-white/10 text-white px-4 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 hover:border-[#D4E655]"><BellRing size={18} /> Aviso</button>
                         <button
                             onClick={() => {
-                                // 🚀 FIX: Si es audición o formación, forzar pestaña "suelta" (paga) por defecto
                                 if ((esGrupoOFormacion || clase?.es_audicion) && ['pack', 'usar_credito'].includes(guestForm.tipo)) {
                                     updateGuestForm({ tipo: 'suelta' });
                                 }
@@ -577,10 +590,17 @@ export default function ClaseDetallePage() {
                                 ))}
                             </div>
 
-                            {/* 🚀 FORMULARIO PARA PAGO (Suelta o Audición Paga) */}
-                            {guestForm.tipo === 'suelta' && (
+                            {/* 🚀 FORMULARIO PARA PAGO (Suelta, Pack o Audición Paga) */}
+                            {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack') && (
                                 <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10 mt-4 animate-in fade-in">
                                     <div className="space-y-4">
+                                        {guestForm.tipo === 'pack' && (
+                                            <select required value={guestForm.packSeleccionadoId} onChange={e => updateGuestForm({ packSeleccionadoId: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655]">
+                                                <option value="">Seleccionar Pase/Pack...</option>
+                                                {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.creditos} clases) - ${p.precio.toLocaleString()}</option>)}
+                                            </select>
+                                        )}
+
                                         <div className="flex gap-4">
                                             <div className="flex-1">
                                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Monto a Cobrar ($)</label>
@@ -597,26 +617,23 @@ export default function ClaseDetallePage() {
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
-                                </div>
-                            )}
 
-                            {guestForm.tipo === 'pack' && (
-                                <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10 mt-4 animate-in fade-in">
-                                    <select required value={guestForm.packSeleccionadoId} onChange={e => updateGuestForm({ packSeleccionadoId: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655]">
-                                        <option value="">Seleccionar Pase/Pack...</option>
-                                        {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.creditos} clases) - ${p.precio.toLocaleString()}</option>)}
-                                    </select>
-                                    <div className="flex gap-4">
-                                        <div className="flex-1">
-                                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Monto ($)</label>
-                                            <input type="number" required value={guestForm.montoManualPack} onChange={e => setGuestForm({ ...guestForm, montoManualPack: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 px-4 text-sm font-black outline-none focus:border-[#D4E655]" />
-                                        </div>
-                                        <div className="flex-1">
-                                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1 mb-1 block">Método</label>
-                                            <div className="flex bg-[#111] rounded-xl border border-white/10 p-1">
-                                                <button type="button" onClick={() => updateGuestForm({ pago: 'efectivo' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg ${guestForm.pago === 'efectivo' ? 'bg-white text-black' : 'text-gray-500'}`}>Efvo</button>
-                                                <button type="button" onClick={() => updateGuestForm({ pago: 'transferencia' })} className={`flex-1 py-3 text-[10px] font-black uppercase rounded-lg ${guestForm.pago === 'transferencia' ? 'bg-white text-black' : 'text-gray-500'}`}>Transf.</button>
+                                        {/* 🚀 SWITCH DE SEÑA (Habilitado para Sueltas y Packs) */}
+                                        <div
+                                            onClick={() => updateGuestForm({ esSena: !guestForm.esSena })}
+                                            className={`flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer ${guestForm.esSena ? 'bg-orange-500/10 border-orange-500/50' : 'bg-white/5 border-white/5'}`}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className={`p-2 rounded-lg ${guestForm.esSena ? 'bg-orange-500 text-white' : 'bg-white/10 text-gray-500'}`}>
+                                                    <Receipt size={16} />
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] font-black uppercase text-white tracking-widest">¿Es una seña?</p>
+                                                    <p className="text-[9px] text-gray-500 uppercase font-bold">Marcar como pago parcial</p>
+                                                </div>
+                                            </div>
+                                            <div className={`w-10 h-6 rounded-full relative transition-colors ${guestForm.esSena ? 'bg-orange-500' : 'bg-gray-700'}`}>
+                                                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${guestForm.esSena ? 'left-5' : 'left-1'}`} />
                                             </div>
                                         </div>
                                     </div>
