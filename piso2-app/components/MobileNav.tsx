@@ -3,13 +3,12 @@
 import { useState, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { Menu, X, LogOut, UserCircle, Shield, Radio, LogIn, UsersRound } from 'lucide-react'
+import { Menu, X, LogOut, UserCircle, Shield, Radio, LogIn, UsersRound, Zap } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { menuItems } from '@/config/menu'
 import { useCash } from '@/context/CashContext'
 import { toast } from 'sonner'
 
-// 👇 1. Le cambiamos el nombre al componente principal
 function MobileNavContent() {
     const [isOpen, setIsOpen] = useState(false)
     const pathname = usePathname()
@@ -66,12 +65,18 @@ function MobileNavContent() {
             return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
         }
 
+        // 🚀 6. ROL AUXILIAR: Mismo menú cerrado que recepción, pero nunca ve alquileres ni liquidaciones.
+        if (userRole === 'auxiliar') {
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
+        }
+
         return item.roles.includes(userRole || 'visitante')
     })
 
     const handleSignOut = async () => {
         if (isLoggingOut) return;
-        if (userRole === 'recepcion' && isBoxOpen) {
+        if ((userRole === 'recepcion' || userRole === 'auxiliar') && isBoxOpen) {
             return toast.error('¡Caja Abierta! Cerrala antes de salir.')
         }
         setIsLoggingOut(true)
@@ -129,7 +134,7 @@ function MobileNavContent() {
                     </div>
 
                     <div className="p-4 px-6 flex items-center gap-2 border-b border-white/5 pb-4">
-                        {userRole === 'admin' ? <Shield size={14} className="text-red-500" /> : userRole === 'recepcion' ? <Radio size={14} className="text-blue-500" /> : userRole === 'visitante' ? <UserCircle size={14} className="text-gray-500" /> : <UsersRound size={14} className="text-[#D4E655]" />}
+                        {userRole === 'admin' ? <Shield size={14} className="text-red-500" /> : userRole === 'recepcion' ? <Radio size={14} className="text-blue-500" /> : userRole === 'auxiliar' ? <Zap size={14} className="text-purple-500" /> : userRole === 'visitante' ? <UserCircle size={14} className="text-gray-500" /> : <UsersRound size={14} className="text-[#D4E655]" />}
                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Conectado como: {userRole || 'visitante'}</span>
                     </div>
 
@@ -167,7 +172,6 @@ function MobileNavContent() {
     )
 }
 
-// 👇 2. Exportamos por defecto el componente blindado
 export default function MobileNav() {
     return (
         <Suspense fallback={<div className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-[#09090b] border-t border-white/10 z-40" />}>

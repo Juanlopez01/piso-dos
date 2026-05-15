@@ -54,8 +54,8 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', uid).single()
     if (!profile) throw new Error("No profile")
 
-    const isStaff = ['admin', 'recepcion', 'profesor'].includes(profile.rol)
-    const canManage = ['admin', 'recepcion'].includes(profile.rol)
+    const isStaff = ['admin', 'recepcion', 'auxiliar', 'profesor'].includes(profile.rol)
+    const canManage = ['admin', 'recepcion', 'auxiliar'].includes(profile.rol)
     const nivelAlumno = profile.nivel_liga || profile.nivel || 1
 
     let queryAvisos = supabase.from('liga_avisos').select('*, autor:profiles!liga_avisos_autor_id_fkey(nombre_completo)').order('created_at', { ascending: false }).limit(30)

@@ -55,10 +55,9 @@ function SidebarContent() {
         }
 
         // 🚀 ROL AUXILIAR: Mismo menú cerrado que recepción, pero nunca ve alquileres ni liquidaciones.
-        // 🚀 ROL AUXILIAR: Mismo menú cerrado que recepción, pero nunca ve alquileres ni liquidaciones.
         if (userRole === 'auxiliar') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
         }
 
         return item.roles.includes(userRole || 'visitante')
