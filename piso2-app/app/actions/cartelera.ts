@@ -111,7 +111,7 @@ export async function inscribirAlumnoAction(claseId: string, tipoClase: string, 
 
         if (errInsc) throw new Error(errInsc.message);
 
-        return { success: true };
+        return { success: true, message: '¡Te has inscripto correctamente!' };
 
     } catch (error: any) {
         console.error("Error al inscribir alumno desde su celular:", error);
