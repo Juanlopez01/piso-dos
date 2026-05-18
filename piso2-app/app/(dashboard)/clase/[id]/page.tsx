@@ -31,6 +31,7 @@ import {
 
 import { toggleMiembroCompaniaAction } from '@/app/actions/companias'
 import { cambiarLigaAction, crearAlumnoDesdeRecepcionAction } from '@/app/actions/usuarios'
+import { useCash } from '@/context/CashContext' // 🚀 IMPORTAMOS EL CONTEXTO GLOBAL
 
 // 🚀 FIX ZONA HORARIA
 const parseFechaLocal = (dateStr?: string | null) => {
@@ -83,15 +84,8 @@ type ProductoPack = {
 const fetcher = async ([key, id]: [string, string]) => {
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
-    const user = session?.user
 
-    let role = 'profesor'
-    if (user) {
-        const { data: profile } = await supabase.from('profiles').select('rol').eq('id', user.id).single()
-        if (profile) role = profile.rol
-    }
-
-    const { data: dataClase, error: errorClase } = await supabase
+    const { data: dataClase } = await supabase
         .from('clases')
         .select(`*, profesor:profiles!profesor_id(id, nombre_completo, email), sala:salas!sala_id(nombre, sede:sedes(nombre))`)
         .eq('id', id)
@@ -125,7 +119,6 @@ const fetcher = async ([key, id]: [string, string]) => {
             estado_asistencia: i.estado_asistencia || (i.presente ? 'presente' : 'ausente')
         })) as Inscripcion[],
         packsDisponibles: packs,
-        userRole: role,
         configuraciones: configData || []
     }
 }
@@ -135,14 +128,18 @@ export default function ClaseDetallePage() {
     const router = useRouter()
     const [supabase] = useState(() => createClient())
 
-    const { data, error, isLoading, mutate } = useSWR(
+    // 🚀 USAMOS EL ROL GLOBAL (Infalible)
+    const { userRole, isLoading: loadingContext } = useCash();
+    const showFinance = ['admin', 'recepcion', 'auxiliar'].includes(userRole || '');
+
+    const { data, isLoading: loadingSWR, mutate } = useSWR(
         params.id ? ['clase-detalle', params.id as string] : null,
         fetcher,
         { revalidateOnFocus: false }
     )
 
-    const { clase, inscripciones, packsDisponibles, userRole, configuraciones } = data || {
-        clase: null, inscripciones: [], packsDisponibles: [], userRole: 'profesor', configuraciones: []
+    const { clase, inscripciones, packsDisponibles, configuraciones } = data || {
+        clase: null, inscripciones: [], packsDisponibles: [], configuraciones: []
     }
 
     const [busquedaAlumno, setBusquedaAlumno] = useState('')
@@ -329,8 +326,6 @@ export default function ClaseDetallePage() {
             const llavePase = `${clase.nombre}-${nombreProfe}-${clase.tipo_clase}`;
 
             const sugerido = Number(getPrecioSugerido(guestForm.tipo, guestForm.pago, guestForm.packSeleccionadoId)) || 0;
-
-            // 🚀 LÓGICA DE SEÑA PARA PACKS Y SUELTAS
             const saldoPendiente = (['suelta', 'pack'].includes(guestForm.tipo) && guestForm.esSena)
                 ? Math.max(0, sugerido - monto)
                 : 0;
@@ -353,19 +348,6 @@ export default function ClaseDetallePage() {
 
             const response = await procesarInscripcionAction(rpcPayload as any)
             if (!response.success) throw new Error(response.error)
-
-            // 🚀 FIX CRÍTICO: Inyectar la deuda manualmente para puentear bloqueos del RPC en Packs
-            if (saldoPendiente > 0) {
-                let query = supabase.from('inscripciones').select('id').eq('clase_id', clase.id);
-                if (alumnoIdFinal) query = query.eq('user_id', alumnoIdFinal);
-                else if (nombreInvitadoStr) query = query.eq('nombre_invitado', nombreInvitadoStr);
-
-                const { data: ultInsc } = await query.order('created_at', { ascending: false }).limit(1).single();
-
-                if (ultInsc) {
-                    await supabase.from('inscripciones').update({ saldo_pendiente: saldoPendiente }).eq('id', ultInsc.id);
-                }
-            }
 
             if (esGrupoOFormacion && guestForm.tipo !== 'invitado' && alumnoIdFinal) {
                 const mesActual = new Date().getMonth() + 1;
@@ -410,19 +392,22 @@ export default function ClaseDetallePage() {
         doc.setFontSize(11); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100); doc.text(`Fecha: ${fechaText} | Hora: ${horaText} hs | Sala: ${clase.sala.nombre}`, 14, 30)
         const tableRows: any[] = []
         inscripciones.forEach((insc, index) => {
-            let nombre = insc.user?.nombre_completo || [insc.user?.nombre, insc.user?.apellido].join(' ').trim() || insc.nombre_invitado || 'Sin nombre'
+            // Reutilizamos la lógica de nombre a prueba de fallos
+            const nombreMostrar = insc.user
+                ? (insc.user.nombre_completo || [insc.user.nombre, insc.user.apellido].filter(Boolean).join(' ') || 'Alumno sin nombre')
+                : (insc.nombre_invitado || 'Invitado');
+
             let contacto = insc.user?.telefono || insc.user?.email || '-'
             if (insc.es_invitado && insc.nombre_invitado?.includes('(')) {
-                const match = insc.nombre_invitado.match(/(.*)\s\((.*)\)/); if (match) { nombre = match[1].trim(); contacto = match[2].trim() }
+                const match = insc.nombre_invitado.match(/(.*)\s\((.*)\)/); if (match) { contacto = match[2].trim() }
             }
-            tableRows.push([(index + 1).toString(), nombre, contacto, insc.presente ? 'PRESENTE' : ''])
+            tableRows.push([(index + 1).toString(), nombreMostrar, contacto, insc.presente ? 'PRESENTE' : ''])
         })
         autoTable(doc, { head: [["#", "Participante", "Contacto", "Firma / Presente"]], body: tableRows, startY: 40, theme: 'grid', headStyles: { fillColor: [236, 72, 153], textColor: [255, 255, 255], fontStyle: 'bold' } })
         doc.save(`Audicion_${clase.nombre.replace(/\s+/g, '_')}.pdf`)
     }
 
-    if (isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-[#D4E655]"><Loader2 className="animate-spin" /></div>
-    const showFinance = userRole === 'admin' || userRole === 'recepcion' || userRole === 'auxiliar'
+    if (loadingSWR || loadingContext) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-[#D4E655]"><Loader2 className="animate-spin" /></div>
 
     return (
         <div className="min-h-screen bg-[#050505] text-white p-2 md:p-8 pb-32">
@@ -430,32 +415,34 @@ export default function ClaseDetallePage() {
 
             {/* HEADER */}
             <div className="flex flex-col gap-4 mb-8">
-                <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-500 hover:text-white transition-colors text-xs font-bold uppercase tracking-widest px-2">
+                <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-500 hover:text-white transition-colors text-xs font-bold uppercase tracking-widest px-2 w-fit">
                     <ArrowLeft size={16} /> Volver
                 </button>
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-end border-b border-white/10 pb-6 gap-4">
-                    <div>
-                        <div className="flex items-center gap-2 mb-2">
+                    <div className="flex-1 min-w-0 pr-4">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
                             <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${clase?.estado === 'cancelada' ? 'bg-red-500' : 'bg-[#D4E655] text-black'}`}>
                                 {clase?.estado === 'cancelada' ? 'Cancelada' : 'Activa'}
                             </span>
-                            <span className="text-gray-500 text-[10px] font-bold uppercase">{clase?.tipo_clase} • {clase?.sala?.nombre}</span>
+                            <span className="text-gray-500 text-[10px] font-bold uppercase truncate">{clase?.tipo_clase} • {clase?.sala?.nombre}</span>
                             {!clase?.es_combinable && <span className="bg-orange-500/20 text-orange-400 border border-orange-500/30 px-2 py-0.5 rounded text-[9px] font-black uppercase flex items-center gap-1"><Lock size={10} /> No Combinable</span>}
                         </div>
-                        <h1 className="text-2xl md:text-5xl font-black uppercase tracking-tighter text-white leading-none">{clase?.nombre}</h1>
-                        <div className="flex gap-3 text-xs text-gray-400 font-medium mt-2">
+                        <h1 className="text-2xl md:text-5xl font-black uppercase tracking-tighter text-white leading-tight break-words">{clase?.nombre}</h1>
+                        <div className="flex flex-wrap gap-3 text-xs text-gray-400 font-medium mt-2">
                             <span className="flex items-center gap-1"><Calendar size={12} className="text-[#D4E655]" /> {fechaText}</span>
                             <span className="flex items-center gap-1"><Clock size={12} className="text-[#D4E655]" /> {horaText}</span>
                             <span className="flex items-center gap-1"><User size={12} className="text-[#D4E655]" /> {clase?.profesor?.nombre_completo || 'Staff'}</span>
                         </div>
                     </div>
-                    <div className="flex gap-2 w-full md:w-auto">
+                    <div className="flex flex-wrap md:flex-nowrap gap-2 w-full md:w-auto shrink-0 mt-4 md:mt-0">
                         {clase?.es_audicion && (
                             <button onClick={handleDownloadPDF} className="flex-1 md:flex-none bg-white/5 border border-white/10 text-white px-4 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 hover:border-pink-500 hover:text-pink-400 transition-colors">
                                 <Download size={18} /> Lista
                             </button>
                         )}
-                        <button onClick={() => setIsNotifModalOpen(true)} className="flex-1 md:flex-none bg-[#111] border border-white/10 text-white px-4 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 hover:border-[#D4E655]"><BellRing size={18} /> Aviso</button>
+                        <button onClick={() => setIsNotifModalOpen(true)} className="flex-1 md:flex-none bg-[#111] border border-white/10 text-white px-4 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 hover:border-[#D4E655]">
+                            <BellRing size={18} /> Aviso
+                        </button>
                         <button
                             onClick={() => {
                                 if ((esGrupoOFormacion || clase?.es_audicion) && ['pack', 'usar_credito'].includes(guestForm.tipo)) {
@@ -463,7 +450,7 @@ export default function ClaseDetallePage() {
                                 }
                                 setIsGuestOpen(true);
                             }}
-                            className={`flex-1 md:flex-none px-6 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 ${clase?.es_audicion ? 'bg-pink-500' : 'bg-[#D4E655] text-black'}`}
+                            className={`flex-1 md:flex-none px-6 py-4 rounded-2xl font-black uppercase text-xs flex items-center justify-center gap-2 ${clase?.es_audicion ? 'bg-pink-500 text-white' : 'bg-[#D4E655] text-black'}`}
                         >
                             <UserPlus size={18} /> Inscribir
                         </button>
@@ -474,7 +461,11 @@ export default function ClaseDetallePage() {
             {/* LISTADO ALUMNOS */}
             <div className={`grid grid-cols-1 ${showFinance && !clase?.es_audicion ? 'lg:grid-cols-3' : 'max-w-4xl mx-auto'} gap-8`}>
                 <div className={showFinance && !clase?.es_audicion ? "lg:col-span-2 space-y-4" : "space-y-4"}>
-                    <div className="flex justify-between items-center"><h3 className="text-lg font-black uppercase flex items-center gap-2"><Users size={18} className="text-[#D4E655]" /> {clase?.es_audicion ? 'Participantes' : 'Alumnos'}</h3><span className="text-[10px] font-bold bg-white/10 px-3 py-1 rounded-full">{inscripciones.length} Pax</span></div>
+                    <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-black uppercase flex items-center gap-2"><Users size={18} className="text-[#D4E655]" /> {clase?.es_audicion ? 'Participantes' : 'Alumnos'}</h3>
+                        <span className="text-[10px] font-bold bg-white/10 px-3 py-1 rounded-full">{inscripciones.length} Pax</span>
+                    </div>
+
                     <div className="bg-[#09090b] border border-white/10 rounded-xl overflow-hidden">
                         {inscripciones.length === 0 && <div className="p-8 text-center text-gray-500 uppercase text-xs">Sin inscriptos.</div>}
                         {inscripciones.map(insc => {
@@ -483,11 +474,19 @@ export default function ClaseDetallePage() {
                             else if (insc.estado_asistencia === 'media_falta') bgRowClass = 'bg-yellow-500/5 border-l-2 border-yellow-500';
                             else if (insc.estado_asistencia === 'justificada') bgRowClass = 'bg-blue-500/5 border-l-2 border-blue-500';
 
+                            // 🚀 FIX 1: Nombre a prueba de fallos
+                            const nombreMostrar = insc.user
+                                ? (insc.user.nombre_completo || [insc.user.nombre, insc.user.apellido].filter(Boolean).join(' ') || 'Alumno sin nombre')
+                                : (insc.nombre_invitado || 'Invitado');
+
                             return (
-                                <div key={insc.id} className={`p-4 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all ${bgRowClass}`}>
-                                    <div>
-                                        <div className="flex items-center gap-3">
-                                            <p className="font-bold text-white text-sm md:text-lg">{insc.user?.nombre_completo || insc.nombre_invitado}</p>
+                                // 🚀 FIX 3: Flex-wrap y min-w-0 para evitar glitchs de overflow
+                                <div key={insc.id} className={`p-4 md:p-5 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4 transition-all ${bgRowClass}`}>
+
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2 md:gap-3">
+                                            <p className="font-bold text-white text-base md:text-lg truncate">{nombreMostrar}</p>
+
                                             {(Number(insc.saldo_pendiente) > 0) && (
                                                 <button
                                                     onClick={async () => {
@@ -504,29 +503,41 @@ export default function ClaseDetallePage() {
                                                             error: (err) => `Error: ${err}`
                                                         });
                                                     }}
-                                                    className="bg-red-500 text-white text-[8px] font-black uppercase px-2 py-0.5 rounded flex items-center gap-1 animate-pulse hover:scale-105 transition-transform"
+                                                    className="bg-red-500 text-white text-[9px] md:text-[10px] font-black uppercase px-2 py-1 rounded flex items-center gap-1 animate-pulse hover:scale-105 transition-transform"
                                                     title="Cobrar deuda parcial o total"
                                                 >
-                                                    <AlertTriangle size={10} /> Adeuda / Cobrar
+                                                    <AlertTriangle size={12} /> Adeuda
                                                 </button>
                                             )}
                                         </div>
-                                        <p className="text-[10px] text-gray-500 font-bold uppercase mt-1">
+
+                                        {/* 🚀 FIX 2: Seguridad Extrema para Finanzas */}
+                                        <p className="text-[10px] text-gray-500 font-bold uppercase mt-1 truncate">
                                             {insc.modalidad} {showFinance && Number(insc.valor_credito) > 0 && `• $${Number(insc.valor_credito).toLocaleString()}`}
                                         </p>
                                     </div>
 
-                                    <div className="flex items-center gap-2 bg-[#111] border border-white/10 p-1 rounded-xl">
-                                        <button onClick={() => handleSetAsistencia(insc, 'ausente')} title="Ausente" className={`p-2 rounded-lg transition-all ${insc.estado_asistencia === 'ausente' ? 'bg-red-500/20 text-red-500' : 'text-gray-500 hover:text-white'}`}><X size={18} /></button>
+                                    {/* CONTENEDOR DE BOTONES (Envuelto para celular) */}
+                                    <div className="flex flex-wrap items-center gap-1.5 md:gap-2 bg-[#111] border border-white/10 p-1 md:p-1.5 rounded-xl shrink-0 w-fit mt-2 md:mt-0">
+                                        <button onClick={() => handleSetAsistencia(insc, 'ausente')} title="Ausente" className={`p-2 md:p-2.5 rounded-lg transition-all ${insc.estado_asistencia === 'ausente' ? 'bg-red-500/20 text-red-500' : 'text-gray-500 hover:text-white'}`}><X size={18} /></button>
+
                                         {esGrupoOFormacion && (
                                             <>
-                                                <button onClick={() => handleSetAsistencia(insc, 'media_falta')} title="Media Falta" className={`p-2 rounded-lg transition-all ${insc.estado_asistencia === 'media_falta' ? 'bg-yellow-500 text-black' : 'text-yellow-500/50 hover:text-yellow-500'}`}><Clock4 size={18} /></button>
-                                                <button onClick={() => handleSetAsistencia(insc, 'saf')} title="S.A.F." className={`p-2 rounded-lg transition-all ${insc.estado_asistencia === 'saf' ? 'bg-purple-500 text-white' : 'text-purple-500/50 hover:text-purple-500'}`}><Eye size={18} /></button>
-                                                <button onClick={() => handleSetAsistencia(insc, 'justificada')} title="Justificada" className={`p-2 rounded-lg transition-all ${insc.estado_asistencia === 'justificada' ? 'bg-blue-500 text-white' : 'text-blue-500/50 hover:text-blue-500'}`}><FileCheck2 size={18} /></button>
+                                                <button onClick={() => handleSetAsistencia(insc, 'media_falta')} title="Media Falta" className={`p-2 md:p-2.5 rounded-lg transition-all ${insc.estado_asistencia === 'media_falta' ? 'bg-yellow-500 text-black' : 'text-yellow-500/50 hover:text-yellow-500'}`}><Clock4 size={18} /></button>
+                                                <button onClick={() => handleSetAsistencia(insc, 'saf')} title="S.A.F." className={`p-2 md:p-2.5 rounded-lg transition-all ${insc.estado_asistencia === 'saf' ? 'bg-purple-500 text-white' : 'text-purple-500/50 hover:text-purple-500'}`}><Eye size={18} /></button>
+                                                <button onClick={() => handleSetAsistencia(insc, 'justificada')} title="Justificada" className={`p-2 md:p-2.5 rounded-lg transition-all ${insc.estado_asistencia === 'justificada' ? 'bg-blue-500 text-white' : 'text-blue-500/50 hover:text-blue-500'}`}><FileCheck2 size={18} /></button>
                                             </>
                                         )}
-                                        <button onClick={() => handleSetAsistencia(insc, 'presente')} title="Presente" className={`flex items-center gap-1 px-3 py-2 rounded-lg font-black uppercase text-[10px] transition-all ${insc.estado_asistencia === 'presente' ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-gray-400 hover:bg-[#D4E655]/20 hover:text-[#D4E655]'}`}><Check size={16} /> <span className="hidden md:inline">Presente</span></button>
-                                        {showFinance && <div className="pl-2 ml-1 border-l border-white/10"><button onClick={() => handleDeleteInscripcion(insc)} className="text-gray-600 hover:text-red-500 p-2"><Trash2 size={16} /></button></div>}
+
+                                        <button onClick={() => handleSetAsistencia(insc, 'presente')} title="Presente" className={`flex items-center justify-center p-2 md:p-2.5 rounded-lg transition-all ${insc.estado_asistencia === 'presente' ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-gray-400 hover:bg-[#D4E655]/20 hover:text-[#D4E655]'}`}>
+                                            <Check size={18} />
+                                        </button>
+
+                                        {showFinance && (
+                                            <div className="pl-1.5 md:pl-2 ml-1 border-l border-white/10 flex items-center">
+                                                <button onClick={() => handleDeleteInscripcion(insc)} className="text-gray-600 hover:text-red-500 p-2"><Trash2 size={16} /></button>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             )
@@ -535,7 +546,7 @@ export default function ClaseDetallePage() {
                 </div>
 
                 {/* LIQUIDACIÓN CAJA */}
-                {(userRole === 'admin' || userRole === 'recepcion') && !clase?.es_audicion && (
+                {showFinance && !clase?.es_audicion && (
                     <div className="lg:col-span-1">
                         <div className="bg-[#111] border border-white/10 rounded-2xl p-6 sticky top-8 shadow-xl">
                             <h4 className="text-[10px] font-bold text-gray-500 uppercase mb-5 tracking-widest">Liquidación Clase</h4>
@@ -618,7 +629,7 @@ export default function ClaseDetallePage() {
                                             </div>
                                         </div>
 
-                                        {/* 🚀 SWITCH DE SEÑA (Habilitado para Sueltas y Packs) */}
+                                        {/* SWITCH DE SEÑA */}
                                         <div
                                             onClick={() => updateGuestForm({ esSena: !guestForm.esSena })}
                                             className={`flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer ${guestForm.esSena ? 'bg-orange-500/10 border-orange-500/50' : 'bg-white/5 border-white/5'}`}
