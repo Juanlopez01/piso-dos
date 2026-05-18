@@ -134,7 +134,7 @@ export default function AlquileresPage() {
                     {/* Sede Congreso */}
                     <div className="group relative bg-[#09090b] rounded-3xl overflow-hidden border border-white/5 hover:border-[#D4E655]/30 transition-all duration-500 shadow-2xl">
                         <div className="h-80 overflow-hidden relative">
-                            <div className="absolute inset-0 bg-[url('https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273186/D6322754-9700-4B2F-BB10-9D5622F2B37D_2_oomwdp.png')] bg-cover bg-center grayscale group-hover:grayscale-0 transition-all duration-700 group-hover:scale-105"></div>
+                            <div className="absolute inset-0 bg-[url('https://res.cloudinary.com/dceyxuuqa/image/upload/v1779144089/SedeCongreso.JPG_yqzwh5.jpg')] bg-cover bg-center grayscale group-hover:grayscale-0 transition-all duration-700 group-hover:scale-105"></div>
                             <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] to-transparent"></div>
                         </div>
                         <div className="p-10 relative mt--20">
