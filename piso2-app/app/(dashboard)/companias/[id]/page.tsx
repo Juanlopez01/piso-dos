@@ -64,13 +64,14 @@ export default function CompaniaDetallePage() {
     const params = useParams()
     const router = useRouter()
     const [supabase] = useState(() => createClient())
-    const { userRole, isLoading: loadingContext } = useCash()
+
+    // 🚀 OBTENEMOS EL ROL Y EL LLAVERO DEL CONTEXTO GLOBAL
+    const { userRole, userId, permisosCoordinador, isLoading: loadingContext } = useCash()
 
     const [compania, setCompania] = useState<Compania | null>(null)
     const [miembros, setMiembros] = useState<Miembro[]>([])
     const [clases, setClases] = useState<ClaseCompania[]>([])
     const [loading, setLoading] = useState(true)
-    const [userId, setUserId] = useState('')
 
     const [activeTab, setActiveTab] = useState<'muro' | 'clases' | 'miembros' | 'estadisticas'>('muro')
 
@@ -105,14 +106,10 @@ export default function CompaniaDetallePage() {
     const verificarAccesoYCargar = async () => {
         setLoading(true)
 
-        const { data: { session } } = await supabase.auth.getSession()
-        const user = session?.user
-
-        if (!user) {
+        if (!userId) {
             router.replace('/login')
             return
         }
-        setUserId(user.id)
 
         const companiaId = params.id as string
 
@@ -129,25 +126,27 @@ export default function CompaniaDetallePage() {
         }
         setCompania(dataCompania)
 
-        const esAdminORecep = ['admin', 'recepcion'].includes(userRole || '')
-        const esProfeCoordinador = userRole === 'profesor' && dataCompania.coordinador_id === user.id
-        const esProfeComun = userRole === 'profesor' && dataCompania.coordinador_id !== user.id
+        // 🚀 LÓGICA DE PERMISOS: Verificamos si tiene acceso a este ID específico
+        const esAdminORecepOAuxiliar = ['admin', 'recepcion', 'auxiliar'].includes(userRole || '')
+        const esProfeCoordinador = userRole === 'profesor' && dataCompania.coordinador_id === userId
+        const esProfeComun = userRole === 'profesor' && dataCompania.coordinador_id !== userId
+        const esCoordinadorConLlave = userRole === 'coordinador' && permisosCoordinador.includes(companiaId)
 
-        let tienePermiso = esAdminORecep || esProfeCoordinador || esProfeComun
+        let tienePermiso = esAdminORecepOAuxiliar || esProfeCoordinador || esProfeComun || esCoordinadorConLlave
 
         if (userRole === 'alumno') {
             const { data: esMiembro } = await supabase
                 .from('perfiles_companias')
                 .select('compania_id')
                 .eq('compania_id', companiaId)
-                .eq('perfil_id', user.id)
+                .eq('perfil_id', userId)
                 .maybeSingle()
 
             if (esMiembro) tienePermiso = true
         }
 
         if (!tienePermiso) {
-            toast.error('Acceso denegado. No perteneces a este grupo.')
+            toast.error('Acceso denegado. No tenés permisos para este grupo.')
             router.replace('/companias')
             return
         }
@@ -232,7 +231,6 @@ export default function CompaniaDetallePage() {
             .select('perfil:profiles(id, nombre_completo, email, porcentaje_beca_compania)')
             .eq('compania_id', companiaId)
 
-        // 🚀 BÚSQUEDA SEGURA DE PRECIOS DESDE EL SERVIDOR (Bypass RLS)
         const configData = await obtenerPreciosCompaniaAction(companiaId);
 
         let precioBase = 15000;
@@ -240,7 +238,6 @@ export default function CompaniaDetallePage() {
         let precioBaseEfvo: number | null = null;
 
         configData?.forEach((c: any) => {
-            // Limpiamos los puntos por si alguien guardó "70.000" en lugar de "70000"
             const valorLimpio = String(c.valor).replace(/\./g, '').trim();
             if (c.clave === `cuota_compania_${companiaId}`) precioBase = Number(valorLimpio);
             if (c.clave === `cuota_compania_${companiaId}_transf`) precioBaseTransf = Number(valorLimpio);
@@ -264,7 +261,6 @@ export default function CompaniaDetallePage() {
                 const totalAbonado = pagosCia?.filter((p: { alumno_id: string; monto: number | string }) => p.alumno_id === m.id).reduce((acc: number, curr: { monto: number | string }) => acc + Number(curr.monto), 0) || 0
                 const beca = m.porcentaje_beca_compania || 0
 
-                // 🚀 MATEMÁTICA REAL DE PAGOS
                 const precioFinal = finalPrecioTransf - (finalPrecioTransf * beca / 100)
                 const precioEfectivo = finalPrecioEfvo - (finalPrecioEfvo * beca / 100)
 
@@ -380,14 +376,13 @@ export default function CompaniaDetallePage() {
         setRegistrandoPago(true)
 
         try {
-            // 🚀 LE PASAMOS LA PELOTA A LA ACTION SEGURA (incluyendo mes y año)
             const res = await cobrarCompaniaAction(
                 alumnoPago.id,
                 compania.id,
                 Number(montoPago),
                 metodoPago,
-                pagoMes,   // <-- ESTO ES CLAVE
-                pagoAnio   // <-- ESTO ES CLAVE
+                pagoMes,
+                pagoAnio
             );
 
             if (!res.success) {
@@ -396,7 +391,7 @@ export default function CompaniaDetallePage() {
 
             toast.success('Pago y movimiento de caja registrados correctamente');
             setIsPagoModalOpen(false);
-            verificarAccesoYCargar(); // Acá usamos tu función de recarga
+            verificarAccesoYCargar();
         } catch (err: any) {
             console.error("🕵️‍♂️ DETALLE DEL ERROR:", err)
             toast.error(`Error: ${err.message || 'Desconocido'}`)
@@ -450,7 +445,10 @@ export default function CompaniaDetallePage() {
 
     if (!compania) return null
 
-    const hasCoordinatorPowers = ['admin', 'recepcion'].includes(userRole || '') || (userRole === 'profesor' && compania.coordinador_id === userId)
+    // 🚀 DEFINIMOS QUIÉN TIENE LOS "SÚPER PODERES" DENTRO DE ESTE GRUPO
+    const hasCoordinatorPowers = ['admin', 'recepcion', 'auxiliar'].includes(userRole || '') ||
+        (userRole === 'profesor' && compania.coordinador_id === userId) ||
+        (userRole === 'coordinador' && permisosCoordinador.includes(compania.id))
 
     const miPerfilInfo = miembros.find(m => m.id === userId)
     const deboCompania = !miPerfilInfo?.pago_compania_al_dia && userRole === 'alumno'
@@ -742,7 +740,6 @@ export default function CompaniaDetallePage() {
                                                     </span>
                                                 )}
 
-                                                {/* 🚀 ACÁ LE AGREGUÉ EL PRECIO ESPERADO ASÍ VES QUÉ CÁLCULO HACE */}
                                                 <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${miembro.pago_compania_al_dia ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}>
                                                     <Coins size={10} /> Abonó ${miembro.totalAbonado} / ${miembro.precioEfectivo}
                                                 </span>

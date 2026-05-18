@@ -130,7 +130,14 @@ export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | 
     }
 }
 
-export async function guardarPerfilAction(userId: string, observaciones: string, intereses: string[], becaLiga: number, becaCompania: number) {
+export async function guardarPerfilAction(
+    userId: string,
+    observaciones: string,
+    intereses: string[],
+    becaLiga: number,
+    becaCompania: number,
+    permisosGrupos?: string[] // 🚀 NUEVO PARÁMETRO OPCIONAL (El Llavero)
+) {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return { success: false, error: 'No autorizado' }
@@ -138,14 +145,21 @@ export async function guardarPerfilAction(userId: string, observaciones: string,
     const bLiga = Math.max(0, Math.min(100, becaLiga || 0));
     const bCompania = Math.max(0, Math.min(100, becaCompania || 0));
 
+    const updatePayload: any = {
+        staff_observations: observaciones,
+        intereses_ritmos: intereses,
+        porcentaje_beca_liga: bLiga,
+        porcentaje_beca_compania: bCompania
+    };
+
+    // Si nos mandan los permisos del coordinador, los sumamos al paquete a guardar
+    if (permisosGrupos !== undefined) {
+        updatePayload.permisos_grupos = permisosGrupos;
+    }
+
     const { error } = await supabase
         .from('profiles')
-        .update({
-            staff_observations: observaciones,
-            intereses_ritmos: intereses,
-            porcentaje_beca_liga: bLiga,
-            porcentaje_beca_compania: bCompania
-        })
+        .update(updatePayload)
         .eq('id', userId)
 
     if (error) return { success: false, error: error.message }

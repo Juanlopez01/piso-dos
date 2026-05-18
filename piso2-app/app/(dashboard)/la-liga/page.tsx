@@ -12,7 +12,7 @@ import {
     CheckCircle2, AlertCircle, Users, ClipboardEdit, Save, FileText,
     Search, UserCog, UserMinus, Star, Send, Trash2, Clock, Settings2, Percent,
     X, Coins, CalendarDays, Activity, XCircle, Eye, Calendar, MapPin, User,
-    Image as ImageIcon, CheckSquare, ChevronDown, ChevronUp // 🚀 IMPORTAMOS CHEVRONS PARA EL DESPLEGABLE
+    Image as ImageIcon, CheckSquare, ChevronDown, ChevronUp
 } from 'lucide-react'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -47,15 +47,15 @@ type Estadisticas = {
     saf: number
     medias_faltas: number
     total: number
-    desglose?: Record<string, any> // 🚀 AGREGAMOS EL TIPO DESGLOSE
+    desglose?: Record<string, any>
 }
 
 const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, supabase: any) => {
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', uid).single()
     if (!profile) throw new Error("No profile")
 
-    const isStaff = ['admin', 'recepcion', 'auxiliar', 'profesor'].includes(profile.rol)
-    const canManage = ['admin', 'recepcion', 'auxiliar'].includes(profile.rol)
+    const isStaff = ['admin', 'recepcion', 'auxiliar', 'coordinador', 'profesor'].includes(profile.rol)
+    const canManage = ['admin', 'recepcion', 'auxiliar', 'coordinador'].includes(profile.rol)
     const nivelAlumno = profile.nivel_liga || profile.nivel || 1
 
     let queryAvisos = supabase.from('liga_avisos').select('*, autor:profiles!liga_avisos_autor_id_fkey(nombre_completo)').order('created_at', { ascending: false }).limit(30)
@@ -93,7 +93,6 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
 
     const { data: dataClases } = await queryClases
 
-    // 🚀 ESTADÍSTICAS Y CRUCE DE DATOS CON INSCRIPCIONES (AHORA CON DESGLOSE POR MATERIA)
     let statsAsistencia: Record<string, Estadisticas> = {}
     let misInscripciones: any[] = []
 
@@ -111,24 +110,20 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
             inscTodas.forEach((insc: any) => {
                 const clase = dataClases.find((c: any) => c.id === insc.clase_id);
                 const yaPaso = clase && new Date(clase.inicio).getTime() <= new Date().getTime();
-                const nombreMateria = clase ? clase.nombre : 'Clase Desconocida'; // 🚀 OBTENEMOS EL NOMBRE DE LA MATERIA
+                const nombreMateria = clase ? clase.nombre : 'Clase Desconocida';
 
                 if (yaPaso && insc.user_id) {
-                    // Inicializamos el contador general del alumno si no existe
                     if (!statsAsistencia[insc.user_id]) {
                         statsAsistencia[insc.user_id] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0, desglose: {} }
                     }
 
-                    // Inicializamos el contador de ESA materia específica para el alumno si no existe
                     if (!statsAsistencia[insc.user_id].desglose![nombreMateria]) {
                         statsAsistencia[insc.user_id].desglose![nombreMateria] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
                     }
 
-                    // Aumentamos los totales
                     statsAsistencia[insc.user_id].total++
                     statsAsistencia[insc.user_id].desglose![nombreMateria].total++
 
-                    // Repartimos según el estado (Suma al general y al desglose)
                     if (insc.estado_asistencia === 'presente') {
                         statsAsistencia[insc.user_id].presentes++
                         statsAsistencia[insc.user_id].desglose![nombreMateria].presentes++
@@ -243,11 +238,8 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
     let allStudents: any[] = []
     if (isStaff) {
         const { data: perfiles } = await supabase
-            .from('profiles')
-            .select('id, nombre_completo, email, nivel_liga, porcentaje_beca_liga')
-            .eq('rol', 'alumno')
-            .not('nivel_liga', 'is', null)
-            .order('nombre_completo', { ascending: true })
+            .from('profiles').select('id, nombre_completo, email, nivel_liga, porcentaje_beca_liga')
+            .eq('rol', 'alumno').not('nivel_liga', 'is', null).order('nombre_completo', { ascending: true })
 
         if (perfiles) {
             allStudents = perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '').map((p: any) => {
@@ -295,7 +287,9 @@ function LaLigaContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const [supabase] = useState(() => createClient())
-    const { userId, isLoading: loadingContext } = useCash()
+
+    // 🚀 OBTENEMOS LOS ROLES Y PERMISOS DESDE EL CONTEXTO
+    const { userId, isLoading: loadingContext, userRole, hasLigaAccess } = useCash()
 
     const [mesDashboard, setMesDashboard] = useState(new Date().getMonth() + 1)
     const [anioDashboard, setAnioDashboard] = useState(new Date().getFullYear())
@@ -347,8 +341,6 @@ function LaLigaContent() {
     const [selectedBoletin, setSelectedBoletin] = useState<any>(null)
 
     const [inscribiendoNivel, setInscribiendoNivel] = useState<number | null>(null)
-
-    // 🚀 ESTADO PARA CONTROLAR EL ACORDEÓN DE ESTADÍSTICAS
     const [expandedStudentStats, setExpandedStudentStats] = useState<string | null>(null)
 
     useEffect(() => {
@@ -378,19 +370,9 @@ function LaLigaContent() {
         if (!alumnoPago || !montoPago || Number(montoPago) <= 0) return
 
         setRegistrandoPago(true)
-
         try {
-            const res = await cobrarLigaAction(
-                alumnoPago.id,
-                Number(montoPago),
-                metodoPago,
-                pagoMes,
-                pagoAnio
-            );
-
-            if (!res.success) {
-                throw new Error(res.error);
-            }
+            const res = await cobrarLigaAction(alumnoPago.id, Number(montoPago), metodoPago, pagoMes, pagoAnio);
+            if (!res.success) throw new Error(res.error);
 
             toast.success('Pago y movimiento de caja registrados');
             setIsPagoModalOpen(false);
@@ -418,34 +400,6 @@ function LaLigaContent() {
             setInscribiendoNivel(null);
         }
     };
-
-    if (loadingSWR || loadingContext) {
-        return (
-            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center">
-                <Loader2 className="animate-spin text-[#D4E655] w-12 h-12 mb-4" />
-                <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">Cargando La Liga...</p>
-            </div>
-        )
-    }
-
-    if (error || !data?.profile) {
-        return (
-            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-6 w-full animate-in fade-in">
-                <AlertTriangle className="text-orange-500 w-16 h-16" />
-                <h2 className="text-white font-black text-2xl uppercase tracking-tighter">Conexión Perdida</h2>
-                <button onClick={() => window.location.reload()} className="bg-white/10 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white hover:text-black transition-colors">Refrescar</button>
-            </div>
-        )
-    }
-
-    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo, allStudents, criterios, clasesDelMes, miAsistencia } = data
-    const nivelActual = profile.nivel_liga || profile.nivel || 1
-
-    const filteredStudents = allStudents.filter((s: any) => {
-        const matchesSearch = (s.nombre_completo || '').toLowerCase().includes(searchStudent.toLowerCase())
-        const matchesLevel = levelFilter === 'todos' ? true : String(s.nivel_liga) === levelFilter
-        return matchesSearch && matchesLevel
-    })
 
     const handleGuardarPrecios = async () => {
         setGuardandoPrecios(true)
@@ -495,6 +449,7 @@ function LaLigaContent() {
         }
     };
 
+    // 🚀 LA FUNCIÓN QUE FALTABA
     const generarLinkPagoLiga = async () => {
         setProcesandoPago(true)
         try {
@@ -503,7 +458,7 @@ function LaLigaContent() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     titulo: `Cuota/Saldo La Liga - Mes ${mesDashboard}/${anioDashboard}`,
-                    precio: miSaldoPendiente,
+                    precio: data?.miSaldoPendiente || 0,
                     userId: userId,
                     tipo_pago: 'cuota_liga',
                     mes: mesDashboard,
@@ -576,6 +531,8 @@ function LaLigaContent() {
             const alumnosReales = perfiles ? perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '') : []
             const cuatrimestreActual = '2026-1'
             const { data: evaluaciones } = await supabase.from('liga_evaluaciones').select('alumno_id, nota_final, aprobado').eq('clase_id', materia.id).eq('cuatrimestre', cuatrimestreActual)
+
+            // 🚀 FIX: EL NOMBRE DEL CAMPO ES evaluacion
             const alumnosMapeados = alumnosReales.map((perfil: any) => {
                 const evalExistente = evaluaciones?.find((e: any) => e.alumno_id === perfil.id)
                 return { ...perfil, evaluacion: evalExistente || null }
@@ -599,7 +556,7 @@ function LaLigaContent() {
             }
         }
 
-        criterios.forEach((c: any) => notasIniciales[c.nombre] = 0)
+        data?.criterios.forEach((c: any) => notasIniciales[c.nombre] = 0)
         setNotas(notasIniciales)
         setEvalModalOpen(true)
     }
@@ -610,6 +567,49 @@ function LaLigaContent() {
         const suma = valores.reduce((a, b) => a + b, 0)
         return (suma / valores.length).toFixed(2)
     }
+
+    if (loadingSWR || loadingContext) {
+        return (
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center">
+                <Loader2 className="animate-spin text-[#D4E655] w-12 h-12 mb-4" />
+                <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">Cargando La Liga...</p>
+            </div>
+        )
+    }
+
+    // 🚀 ESCUDO MÁGICO: ESCURRIMOS AL COORDINADOR SI NO TIENE LA LLAVE 'liga'
+    if (userRole === 'coordinador' && !hasLigaAccess) {
+        return (
+            <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8 flex flex-col items-center justify-center relative overflow-hidden">
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pink-500/5 rounded-full blur-[100px] pointer-events-none" />
+                <div className="max-w-md w-full bg-[#09090b] border border-pink-500/20 rounded-3xl p-8 text-center relative z-10 shadow-2xl">
+                    <div className="w-20 h-20 bg-pink-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-pink-500/20"><Lock className="text-pink-500 w-10 h-10" /></div>
+                    <h1 className="text-2xl font-black uppercase tracking-tighter text-white mb-3">Acceso Restringido</h1>
+                    <p className="text-gray-400 text-sm mb-8 leading-relaxed">No tenés permisos asignados para coordinar o gestionar el espacio de <span className="text-[#D4E655] font-bold">La Liga</span>.</p>
+                    <Link href="/perfil" className="w-full bg-white/5 border border-white/10 text-white font-bold uppercase py-4 rounded-xl hover:bg-white hover:text-black transition-all text-xs tracking-widest flex items-center justify-center gap-2">Ir a mi Perfil <ChevronRight size={16} /></Link>
+                </div>
+            </div>
+        )
+    }
+
+    if (error || !data?.profile) {
+        return (
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center gap-6 w-full animate-in fade-in">
+                <AlertTriangle className="text-orange-500 w-16 h-16" />
+                <h2 className="text-white font-black text-2xl uppercase tracking-tighter">Conexión Perdida</h2>
+                <button onClick={() => window.location.reload()} className="bg-white/10 text-white px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-white hover:text-black transition-colors">Refrescar</button>
+            </div>
+        )
+    }
+
+    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo, allStudents, criterios, clasesDelMes, miAsistencia } = data
+    const nivelActual = profile.nivel_liga || profile.nivel || 1
+
+    const filteredStudents = allStudents.filter((s: any) => {
+        const matchesSearch = (s.nombre_completo || '').toLowerCase().includes(searchStudent.toLowerCase())
+        const matchesLevel = levelFilter === 'todos' ? true : String(s.nivel_liga) === levelFilter
+        return matchesSearch && matchesLevel
+    })
 
     if (!isStaff && !legajoCompleto) {
         return (
@@ -678,14 +678,13 @@ function LaLigaContent() {
                             <button onClick={() => setAdminTab('comunicados')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'comunicados' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                 <Megaphone size={14} /> Comunicados
                             </button>
-                            {/* 🚀 AUXILIARES, ADMINS Y RECEPCIÓN PUEDEN VER ESTADÍSTICAS */}
                             {canManage && (
                                 <button onClick={() => setAdminTab('estadisticas')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'estadisticas' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                     <Activity size={14} /> Estadísticas
                                 </button>
                             )}
-                            {/* 🚀 SOLO ADMINS Y RECEPCIÓN (NO AUXILIARES) PUEDEN VER PADRÓN Y PRECIOS */}
-                            {profile.rol !== 'auxiliar' && canManage && (
+                            {/* 🚀 OCULTAMOS PADRÓN Y CONFIGURACIÓN A AUXILIARES Y COORDINADORES */}
+                            {!['auxiliar', 'coordinador'].includes(userRole || '') && canManage && (
                                 <>
                                     <button onClick={() => setAdminTab('gestion')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'gestion' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                         <UserCog size={14} /> Padrón
@@ -702,7 +701,7 @@ function LaLigaContent() {
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
 
-                {/* 🚀 CARTEL ROJO DEL ALUMNO */}
+                {/* CARTEL ROJO DEL ALUMNO */}
                 {!isStaff && (deudaCuota) && (
                     <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="flex items-start gap-3">
@@ -721,7 +720,7 @@ function LaLigaContent() {
                 )}
 
                 {/* --- VISTA CONFIGURACIÓN (PRECIOS Y CRITERIOS) --- */}
-                {profile.rol !== 'auxiliar' && canManage && adminTab === 'precios' && (
+                {!['auxiliar', 'coordinador'].includes(userRole || '') && canManage && adminTab === 'precios' && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-bottom-4">
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-8 shadow-xl">
                             <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-8">
@@ -807,7 +806,7 @@ function LaLigaContent() {
                     </div>
                 )}
 
-                {/* --- 🚀 VISTA ESTADÍSTICAS (AHORA CON DESGLOSE ACORDEÓN) --- */}
+                {/* --- VISTA ESTADÍSTICAS --- */}
                 {canManage && adminTab === 'estadisticas' && (
                     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 md:p-8 shadow-xl">
@@ -886,7 +885,6 @@ function LaLigaContent() {
                                                     <div className={`h-full rounded-full transition-all duration-1000 ${porcentaje >= 60 ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${porcentaje}%` }} />
                                                 </div>
 
-                                                {/* 🚀 DESGLOSE POR MATERIA (ACORDEÓN) */}
                                                 {isExpanded && (
                                                     <div className="mt-2 pt-4 border-t border-white/5 animate-in fade-in slide-in-from-top-2">
                                                         <h5 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Detalle por Materia</h5>
@@ -919,7 +917,7 @@ function LaLigaContent() {
                     </div>
                 )}
 
-                {/* --- 🚀 VISTA CLASES DEL MES (STAFF) --- */}
+                {/* --- VISTA CLASES DEL MES (STAFF) --- */}
                 {isStaff && adminTab === 'clases' && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                         {clasesDelMes.length > 0 ? (
@@ -989,7 +987,7 @@ function LaLigaContent() {
                 )}
 
                 {/* --- VISTA PADRÓN --- */}
-                {profile.rol !== 'auxiliar' && canManage && adminTab === 'gestion' && (
+                {!['auxiliar', 'coordinador'].includes(userRole || '') && canManage && adminTab === 'gestion' && (
                     <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl animate-in fade-in">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-6 border-b border-white/5">
                             <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2"><Users size={24} className="text-[#D4E655]" /> Padrón de Alumnos</h3>
@@ -1197,7 +1195,7 @@ function LaLigaContent() {
                     </div>
                 )}
 
-                {/* --- 🚀 VISTA ALUMNO DASHBOARD --- */}
+                {/* --- VISTA ALUMNO DASHBOARD --- */}
                 {!isStaff && (
                     <div className="space-y-6 animate-in fade-in">
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

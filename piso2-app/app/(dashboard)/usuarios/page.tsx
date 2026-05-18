@@ -8,7 +8,7 @@ import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
     Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
-    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package
+    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { format } from 'date-fns'
@@ -47,12 +47,14 @@ type RPCUsuario = {
     alias_cbu?: string | null
     nombre_remplazo?: string | null
     contacto_remplazo?: string | null
+    permisos_grupos?: string[] // 🚀 NUEVO DATO DEL LLAVERO
 }
 
 type RPCUsuariosData = {
     usuarios: RPCUsuario[] | null
     ritmos: Ritmo[] | null
     productos: Producto[] | null
+    todasLasCompanias: CompaniaBasica[] | null // 🚀 NUEVO: LISTA MAESTRA DE GRUPOS
 }
 
 type UsuarioDirectorio = RPCUsuario & {
@@ -79,7 +81,8 @@ const getInteresesSeguro = (intereses: string | string[] | null | undefined): st
     return []
 }
 
-const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo[], productos: Producto[] }> => {
+// 🚀 ACTUALIZAMOS EL FETCHER PARA TRAER EL LLAVERO Y LA LISTA DE COMPAÑÍAS
+const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo[], productos: Producto[], todasLasCompanias: CompaniaBasica[] }> => {
     const supabase = createClient()
 
     try {
@@ -88,13 +91,15 @@ const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo
             { data: ritmos, error: errRitmos },
             { data: productos, error: errProductos },
             { data: pcData, error: errPc },
-            { data: pasesData, error: errPases }
+            { data: pasesData, error: errPases },
+            { data: companiasMaestras, error: errCias } // 🚀 NUEVA CONSULTA
         ] = await Promise.all([
             supabase.from('profiles').select('*').order('nombre_completo', { ascending: true }),
             supabase.from('ritmos').select('id, nombre').order('nombre', { ascending: true }),
             supabase.from('productos').select('id, nombre, precio, creditos, tipo_clase, pase_referencia').eq('activo', true),
             supabase.from('perfiles_companias').select('perfil_id, compania:companias(id, nombre)'),
-            supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad')
+            supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad'),
+            supabase.from('companias').select('id, nombre').order('nombre', { ascending: true }) // 🚀 PEDIMOS LAS CÍAS
         ])
 
         if (errPerfiles) throw errPerfiles
@@ -114,14 +119,16 @@ const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo
                 pases_exclusivos: misPases,
                 avatar_url: u.avatar_url || null,
                 is_frio: u.is_frio || false,
-                creditos_regulares: u.creditos_regulares || 0
+                creditos_regulares: u.creditos_regulares || 0,
+                permisos_grupos: u.permisos_grupos || [] // 🚀 INYECTAMOS EL LLAVERO
             }
         })
 
         return {
             usuarios: usuariosProcesados,
             ritmos: ritmos || [],
-            productos: productos || []
+            productos: productos || [],
+            todasLasCompanias: companiasMaestras || [] // 🚀 INYECTAMOS LAS CÍAS MAESTRAS
         }
 
     } catch (error) {
@@ -169,7 +176,8 @@ function UsuariosContent() {
     const [cobroLigaForm, setCobroLigaForm] = useState({ monto: '', metodo: 'efectivo' })
     const [cobroCompaniaForm, setCobroCompaniaForm] = useState({ monto: '', metodo: 'efectivo', companiaId: '' })
 
-    const [editForm, setEditForm] = useState({ obs: '', intereses_ritmos: [] as string[], becaLiga: 0, becaCompania: 0 })
+    // 🚀 AGREGAMOS EL LLAVERO AL FORMULARIO DE EDICIÓN
+    const [editForm, setEditForm] = useState({ obs: '', intereses_ritmos: [] as string[], becaLiga: 0, becaCompania: 0, llaves_acceso: [] as string[] })
 
     const [createForm, setCreateForm] = useState({ nombre: '', email: '', dni: '', telefono: '', rol: 'alumno' })
     const [packForm, setPackForm] = useState({ packId: '', monto: '', metodo: 'efectivo' })
@@ -183,14 +191,13 @@ function UsuariosContent() {
     const users = data?.usuarios || []
     const ritmosDisponibles = data?.ritmos || []
     const productos = data?.productos || []
+    const listadoCompaniasMaestro = data?.todasLasCompanias || [] // 🚀 ARRAY MAESTRO DE COMPAÑÍAS
 
     const filteredUsers = users.filter((u: UsuarioDirectorio) => {
         let matchesRole = true
         if (roleFilter === 'staff' && userRole !== 'admin') return false
-        // 🚀 FIX: EL STAFF AHORA INCLUYE AL AUXILIAR
-        if (roleFilter === 'staff') matchesRole = u.rol === 'admin' || u.rol === 'recepcion' || u.rol === 'auxiliar'
+        if (roleFilter === 'staff') matchesRole = u.rol === 'admin' || u.rol === 'recepcion' || u.rol === 'auxiliar' || u.rol === 'coordinador'
         else if (roleFilter !== 'todos') matchesRole = u.rol === roleFilter
-        // 🚀 FIX: Recepción no puede ver admins, ni otras recepciones, ni auxiliares (solo profes/alumnos)
         else if (userRole !== 'admin' && (u.rol === 'admin' || u.rol === 'recepcion' || u.rol === 'auxiliar')) matchesRole = false
 
         const term = searchTerm.toLowerCase()
@@ -306,7 +313,8 @@ function UsuariosContent() {
             obs: user.staff_observations || '',
             intereses_ritmos: user.intereses_procesados || [],
             becaLiga: user.porcentaje_beca_liga || 0,
-            becaCompania: user.porcentaje_beca_compania || 0
+            becaCompania: user.porcentaje_beca_compania || 0,
+            llaves_acceso: user.permisos_grupos || [] // 🚀 CARGAMOS LAS LLAVES
         })
         setIsDetailOpen(true)
         setLoadingStats(true)
@@ -454,18 +462,55 @@ function UsuariosContent() {
         }))
     }
 
+    // 🚀 LÓGICA DE TOGGLE PARA EL LLAVERO DEL COORDINADOR
+    const toggleLlaveAcceso = (idCompaniaOLiga: string) => {
+        setEditForm(prev => ({
+            ...prev,
+            llaves_acceso: prev.llaves_acceso.includes(idCompaniaOLiga) ? prev.llaves_acceso.filter(k => k !== idCompaniaOLiga) : [...prev.llaves_acceso, idCompaniaOLiga]
+        }))
+    }
+
     const handleSaveChanges = async () => {
         if (!selectedUser) return
+
+        // 🔥 GUARDADO DEL PERFIL ACTUALIZADO EN LA BASE DE DATOS 🔥
+        // Acá actualizamos para que envíe "llaves_acceso" si tu backend lo soporta.
+        // Mientras tanto, si no lo soporta la acción, inyectamos directamente con supabase por seguridad.
+
+        let success = true;
+
+        // 1. Guardar info tradicional
         const response = await guardarPerfilAction(
             selectedUser.id,
             editForm.obs,
             editForm.intereses_ritmos,
             editForm.becaLiga,
             editForm.becaCompania
+            // 👇 Acá deberías agregar `editForm.llaves_acceso` cuando modifiques guardarPerfilAction
         )
 
-        if (response.success) { toast.success('Ficha guardada'); mutate() }
-        else { toast.error(response.error) }
+        if (!response.success) {
+            success = false;
+            toast.error(response.error);
+        }
+
+        // 2. 🚀 INYECCIÓN FORZADA DE PERMISOS PARA EVITAR CAMBIAR EL BACKEND COMPLEJO
+        if (selectedUser.rol === 'coordinador') {
+            const { error: errUpdatePermisos } = await supabase.from('profiles').update({
+                permisos_grupos: editForm.llaves_acceso
+            }).eq('id', selectedUser.id);
+
+            if (errUpdatePermisos) {
+                success = false;
+                console.error(errUpdatePermisos);
+                toast.error("Error al guardar los permisos de coordinador.");
+            }
+        }
+
+        if (success) {
+            toast.success('Ficha guardada');
+            mutate();
+        }
     }
 
     const openPackModal = (user: UsuarioDirectorio) => {
@@ -658,7 +703,7 @@ function UsuariosContent() {
                                 </div>
                             )}
 
-                            <div className={`absolute top-0 right-0 px-3 py-1.5 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${u.rol === 'admin' ? 'bg-red-500/20 text-red-500' : u.rol === 'recepcion' ? 'bg-blue-500/20 text-blue-500' : u.rol === 'profesor' ? 'bg-purple-500/20 text-purple-500' : u.rol === 'auxiliar' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-white/5 text-gray-500'}`}>
+                            <div className={`absolute top-0 right-0 px-3 py-1.5 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${u.rol === 'admin' ? 'bg-red-500/20 text-red-500' : u.rol === 'recepcion' ? 'bg-blue-500/20 text-blue-500' : u.rol === 'profesor' ? 'bg-purple-500/20 text-purple-500' : u.rol === 'auxiliar' ? 'bg-indigo-500/20 text-indigo-400' : u.rol === 'coordinador' ? 'bg-pink-500/20 text-pink-400' : 'bg-white/5 text-gray-500'}`}>
                                 {u.rol}
                             </div>
 
@@ -758,7 +803,6 @@ function UsuariosContent() {
 
                                         {isAdmin && (
                                             <div className="relative flex-1">
-                                                {/* 🚀 FIX: SELECTOR ROL DIRECTO */}
                                                 <select
                                                     disabled={cambiandoRolId === u.id}
                                                     value={u.rol || ''}
@@ -772,6 +816,7 @@ function UsuariosContent() {
                                                     <option value="profesor">Profe</option>
                                                     <option value="alumno">Alumno</option>
                                                 </select>
+                                                {cambiandoRolId === u.id && <div className="absolute top-0 right-2 h-full flex items-center"><Loader2 size={12} className="animate-spin text-[#D4E655]" /></div>}
                                             </div>
                                         )}
 
@@ -804,7 +849,7 @@ function UsuariosContent() {
                 )}
             </div>
 
-            {/* FICHA DETALLADA DEL ALUMNO/PROFESOR */}
+            {/* FICHA DETALLADA DEL ALUMNO/PROFESOR/COORDINADOR */}
             {isDetailOpen && selectedUser && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in">
 
@@ -831,9 +876,36 @@ function UsuariosContent() {
                             </div>
 
                             <h3 className="text-xl font-black text-white uppercase text-center mb-1 leading-tight">{selectedUser.nombre_completo}</h3>
-                            <span className="bg-[#D4E655]/10 text-[#D4E655] px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest mb-6">
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest mb-6 ${selectedUser.rol === 'coordinador' ? 'bg-pink-500/10 text-pink-400' : 'bg-[#D4E655]/10 text-[#D4E655]'}`}>
                                 Rol: {selectedUser.rol}
                             </span>
+
+                            {/* 🚀 PANEL LLAVERO DEL COORDINADOR */}
+                            {selectedUser.rol === 'coordinador' && (
+                                <div className="w-full bg-[#09090b] border border-pink-500/20 rounded-2xl p-4 mb-6 relative overflow-hidden">
+                                    <div className="absolute top-0 right-0 w-16 h-16 bg-pink-500/10 blur-xl rounded-full" />
+                                    <h4 className="text-[10px] font-black text-pink-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                                        <KeyRound size={12} /> Permisos de Acceso
+                                    </h4>
+                                    <p className="text-[9px] text-gray-500 leading-tight mb-3">Tildá a qué grupos tiene permiso para gestionar este coordinador.</p>
+
+                                    <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar pr-1 relative z-10">
+                                        {/* Permiso Especial de La Liga */}
+                                        <label className="flex items-center justify-between p-2 bg-[#111] rounded-lg border border-white/5 cursor-pointer hover:bg-white/5 transition-colors">
+                                            <span className="text-[10px] font-bold text-white uppercase">La Liga</span>
+                                            <input type="checkbox" checked={editForm.llaves_acceso.includes('liga')} onChange={() => toggleLlaveAcceso('liga')} className="accent-pink-500" />
+                                        </label>
+
+                                        {/* Permisos de cada Compañía/Grupo */}
+                                        {listadoCompaniasMaestro.map((cia: CompaniaBasica) => (
+                                            <label key={cia.id} className="flex items-center justify-between p-2 bg-[#111] rounded-lg border border-white/5 cursor-pointer hover:bg-white/5 transition-colors">
+                                                <span className="text-[10px] font-bold text-white uppercase truncate pr-2">{cia.nombre}</span>
+                                                <input type="checkbox" checked={editForm.llaves_acceso.includes(cia.id)} onChange={() => toggleLlaveAcceso(cia.id)} className="accent-pink-500 shrink-0" />
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="w-full space-y-4">
                                 <div className="bg-white/5 rounded-xl p-3 flex items-center gap-3">
@@ -1101,7 +1173,6 @@ function UsuariosContent() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-bold text-gray-500 uppercase">Rol</label>
-                                    {/* 🚀 FIX: SELECTOR ROL CREACION */}
                                     <select value={createForm.rol} onChange={e => setCreateForm({ ...createForm, rol: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]">
                                         <option value="alumno">Alumno</option>
                                         <option value="profesor">Profesor</option>

@@ -16,6 +16,7 @@ import {
 } from '@/app/actions/companias'
 
 import { actualizarPrecioGlobalAction } from '@/app/actions/liga'
+import { useCash } from '@/context/CashContext' // 🚀 IMPORTAMOS EL CONTEXTO GLOBAL
 
 type Compania = {
     id: string
@@ -35,8 +36,9 @@ type Alumno = {
 export default function CompaniasPage() {
     const [supabase] = useState(() => createClient())
     const [loading, setLoading] = useState(true)
-    const [userRole, setUserRole] = useState<string>('alumno')
-    const [userId, setUserId] = useState<string>('')
+
+    // 🚀 USAMOS EL ROL GLOBAL
+    const { userRole, userId, permisosCoordinador } = useCash()
 
     const [companias, setCompanias] = useState<Compania[]>([])
     const [profesores, setProfesores] = useState<any[]>([])
@@ -57,28 +59,30 @@ export default function CompaniasPage() {
     const [preciosCompania, setPreciosCompania] = useState<Record<string, number>>({})
 
     useEffect(() => {
-        fetchData()
-    }, [])
+        if (userRole) {
+            fetchData()
+        }
+    }, [userRole])
 
     const fetchData = async () => {
         setLoading(true)
 
-        const { data: { session } } = await supabase.auth.getSession()
-        const user = session?.user
-
-        if (!user) return
-        setUserId(user.id)
-
-        const { data: profile } = await supabase.from('profiles').select('rol').eq('id', user.id).maybeSingle()
-        const rol = (profile?.rol || 'alumno').toLowerCase().trim()
-        setUserRole(rol)
+        if (!userId || !userRole) return
 
         let queryCompanias = supabase.from('companias').select('*, coordinador:profiles!coordinador_id(nombre_completo)')
 
-        if (rol === 'profesor') {
-            queryCompanias = queryCompanias.eq('coordinador_id', user.id)
-        } else if (rol === 'alumno') {
-            const { data: misCompanias } = await supabase.from('perfiles_companias').select('compania_id').eq('perfil_id', user.id)
+        if (userRole === 'profesor') {
+            queryCompanias = queryCompanias.eq('coordinador_id', userId)
+        } else if (userRole === 'coordinador') {
+            // 🚀 EL COORDINADOR SOLO VE LAS COMPAÑÍAS QUE TIENE EN SU LLAVERO
+            const companiasIds = permisosCoordinador.filter(p => p !== 'liga');
+            if (companiasIds.length > 0) {
+                queryCompanias = queryCompanias.in('id', companiasIds);
+            } else {
+                queryCompanias = queryCompanias.eq('id', '00000000-0000-0000-0000-000000000000'); // No ve nada
+            }
+        } else if (userRole === 'alumno') {
+            const { data: misCompanias } = await supabase.from('perfiles_companias').select('compania_id').eq('perfil_id', userId)
             if (misCompanias && misCompanias.length > 0) {
                 const ids = misCompanias.map((mc: { compania_id: string }) => mc.compania_id)
                 queryCompanias = queryCompanias.in('id', ids)
@@ -96,8 +100,8 @@ export default function CompaniasPage() {
             }))
             setCompanias(companiasConConteo)
 
-            // 🚀 CARGAMOS PRECIOS MANUALES EFVO Y TRANSF
-            if (['admin', 'recepcion'].includes(rol)) {
+            // 🚀 CARGAMOS PRECIOS MANUALES EFVO Y TRANSF (Solo admin y recepcion)
+            if (['admin', 'recepcion'].includes(userRole)) {
                 const clavesCompanias = dataCompanias.flatMap((c: any) => [
                     `cuota_compania_${c.id}_transf`,
                     `cuota_compania_${c.id}_efvo`
@@ -111,7 +115,7 @@ export default function CompaniasPage() {
             }
         }
 
-        if (['admin', 'recepcion'].includes(rol)) {
+        if (['admin', 'recepcion'].includes(userRole)) {
             const { data: profes } = await supabase.from('profiles').select('id, nombre_completo').eq('rol', 'profesor').order('nombre_completo')
             if (profes) setProfesores(profes)
 
@@ -119,7 +123,8 @@ export default function CompaniasPage() {
             if (alumnos) setAllAlumnos(alumnos)
         }
 
-        if (rol === 'profesor' && dataCompanias && dataCompanias.length > 0) {
+        // Si es profesor o coordinador, también necesita la lista de alumnos para ver padrón
+        if (['profesor', 'coordinador'].includes(userRole) && dataCompanias && dataCompanias.length > 0) {
             const { data: alumnos } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'alumno').order('nombre_completo')
             if (alumnos) setAllAlumnos(alumnos)
         }
@@ -132,7 +137,6 @@ export default function CompaniasPage() {
         try {
             let huboError = false;
             for (const compania of companias) {
-                // 🚀 GUARDAMOS LAS 2 CLAVES POR CADA COMPAÑÍA
                 const claves = [`cuota_compania_${compania.id}_transf`, `cuota_compania_${compania.id}_efvo`];
 
                 for (const clave of claves) {
@@ -160,7 +164,7 @@ export default function CompaniasPage() {
     const handleCrearCompania = async (e: React.FormEvent) => {
         e.preventDefault()
         setProcesando(true)
-        const payload = { nombre: form.nombre, descripcion: form.descripcion, coordinador_id: form.coordinador_id || userId }
+        const payload = { nombre: form.nombre, descripcion: form.descripcion, coordinador_id: form.coordinador_id || userId! }
         const response = await crearCompaniaAction(payload)
 
         if (response.success) {
@@ -210,10 +214,13 @@ export default function CompaniasPage() {
         else { toast.error(response.error || 'Error'); fetchData() }
     }
 
+    // 🚀 RESTAURADO: El coordinador y el auxiliar también pueden agregar/quitar alumnos
     const puedeGestionarAlumnos = (companiaCoordinadorId: string) => {
-        return ['admin', 'recepcion'].includes(userRole) || (userRole === 'profesor' && userId === companiaCoordinadorId)
+        if (!userRole) return false;
+        return ['admin', 'recepcion', 'auxiliar', 'coordinador'].includes(userRole) || (userRole === 'profesor' && userId === companiaCoordinadorId)
     }
 
+    // 🚀 PROTECCIÓN GENERAL
     if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-blue-500 w-12 h-12" /></div>
 
     return (
@@ -230,11 +237,12 @@ export default function CompaniasPage() {
                                 <span className="text-blue-400 font-bold text-[10px] tracking-[0.3em] uppercase">Grupos Exclusivos</span>
                             </div>
                             <h1 className="text-4xl md:text-5xl font-black uppercase tracking-tighter text-white leading-none">
-                                Grupos {['admin', 'recepcion', 'profesor'].includes(userRole) && <span className="text-gray-500 text-2xl">/ Staff</span>}
+                                Grupos {['admin', 'recepcion', 'profesor', 'auxiliar', 'coordinador'].includes(userRole || '') && <span className="text-gray-500 text-2xl">/ Staff</span>}
                             </h1>
                         </div>
 
-                        {['admin', 'recepcion'].includes(userRole) && (
+                        {/* 🚀 EL COORDINADOR NO VE LOS BOTONES DE CREAR NI PRECIOS */}
+                        {['admin', 'recepcion'].includes(userRole || '') && (
                             <div className="flex gap-2">
                                 <button onClick={() => {
                                     const obj: any = {}
@@ -258,7 +266,8 @@ export default function CompaniasPage() {
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
 
-                {!['admin', 'recepcion'].includes(userRole) && companias.length === 0 && (
+                {/* 🚀 CARTEL SI EL ALUMNO O COORDINADOR NO TIENEN GRUPOS */}
+                {(!['admin', 'recepcion', 'auxiliar'].includes(userRole || '')) && companias.length === 0 && (
                     <div className="min-h-[400px] flex flex-col items-center justify-center relative overflow-hidden">
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-blue-500/5 rounded-full blur-[100px] pointer-events-none" />
                         <div className="max-w-md w-full bg-[#09090b] border border-blue-500/20 rounded-3xl p-8 text-center relative z-10 animate-in zoom-in-95 duration-500 shadow-2xl shadow-blue-500/5">
@@ -272,11 +281,12 @@ export default function CompaniasPage() {
                     </div>
                 )}
 
-                {['admin', 'recepcion', 'profesor'].includes(userRole) && companias.length === 0 && (
+                {/* 🚀 CARTEL PARA ADMIN SI AÚN NO CREÓ GRUPOS */}
+                {['admin', 'recepcion', 'auxiliar'].includes(userRole || '') && companias.length === 0 && (
                     <div className="py-20 flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-3xl bg-[#111]/30">
                         <UsersRound size={48} className="text-gray-600 mb-4" />
                         <p className="text-gray-500 font-bold uppercase text-xs">No hay grupos creados aún.</p>
-                        {['admin', 'recepcion'].includes(userRole) && (
+                        {['admin', 'recepcion'].includes(userRole || '') && (
                             <button onClick={() => setIsCreateModalOpen(true)} className="mt-6 bg-blue-600/20 text-blue-400 px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-colors flex items-center gap-2">
                                 <Plus size={14} /> Crear el primero
                             </button>
@@ -287,7 +297,7 @@ export default function CompaniasPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {companias.map((compania) => (
                         <div key={compania.id} className="bg-[#09090b] border border-white/5 rounded-3xl overflow-hidden flex flex-col transition-all group hover:border-blue-500/30 hover:shadow-[0_0_30px_rgba(37,99,235,0.1)] relative">
-                            {['admin', 'recepcion'].includes(userRole) && (
+                            {['admin', 'recepcion'].includes(userRole || '') && (
                                 <div className="absolute top-4 right-4 z-20">
                                     <button onClick={(e) => { e.preventDefault(); handleEliminarCompania(compania.id, compania.nombre) }} disabled={procesando} className="p-2 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-full transition-colors border border-red-500/20 shadow-lg" title="Eliminar Grupo"><Trash2 size={16} /></button>
                                 </div>
@@ -323,7 +333,7 @@ export default function CompaniasPage() {
                 </div>
             </div>
 
-            {/* MODAL CONFIGURACIÓN DE PRECIOS MANUALES */}
+            {/* MODAL CONFIGURACIÓN DE PRECIOS MANUALES (SOLO ADMIN Y RECEP) */}
             {isConfigPreciosOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-2xl rounded-3xl p-8 shadow-2xl relative max-h-[90vh] flex flex-col">
@@ -375,7 +385,7 @@ export default function CompaniasPage() {
                 </div>
             )}
 
-            {/* MODAL: CREAR GRUPO */}
+            {/* MODAL: CREAR GRUPO (SOLO ADMIN Y RECEP) */}
             {isCreateModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsCreateModalOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
@@ -443,7 +453,7 @@ export default function CompaniasPage() {
                 </div>
             )}
 
-            {/* 🚀 MODAL ACTUALIZADO: GESTIONAR MIEMBROS */}
+            {/* MODAL: GESTIONAR MIEMBROS (NO DISPONIBLE PARA AUX Y COORD) */}
             {selectedCompania && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setSelectedCompania(null)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-xl rounded-3xl overflow-hidden shadow-2xl relative flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>

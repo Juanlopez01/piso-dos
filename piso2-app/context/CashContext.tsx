@@ -14,12 +14,13 @@ type CashContextType = {
     nivelLiga: number | null
     hasLigaAccess: boolean
     hasCompaniaAccess: boolean
+    permisosCoordinador: string[] // 🚀 ESTE ES EL LLAVERO (Ej: ['liga', 'id-compania-1'])
     checkStatus: () => Promise<void>
     isLoading: boolean
 }
 
 const CashContext = createContext<CashContextType>({
-    userId: null, isBoxOpen: false, currentTurnoId: null, currentSedeId: null, userRole: null, userName: null, nivelLiga: null, hasLigaAccess: false, hasCompaniaAccess: false, checkStatus: async () => { }, isLoading: true
+    userId: null, isBoxOpen: false, currentTurnoId: null, currentSedeId: null, userRole: null, userName: null, nivelLiga: null, hasLigaAccess: false, hasCompaniaAccess: false, permisosCoordinador: [], checkStatus: async () => { }, isLoading: true
 })
 
 export const useCash = () => useContext(CashContext)
@@ -36,6 +37,7 @@ export function CashProvider({ children }: { children: ReactNode }) {
     const [nivelLiga, setNivelLiga] = useState<number | null>(null)
     const [hasLigaAccess, setHasLigaAccess] = useState(false)
     const [hasCompaniaAccess, setHasCompaniaAccess] = useState(false)
+    const [permisosCoordinador, setPermisosCoordinador] = useState<string[]>([]) // 🚀 ESTADO DEL LLAVERO
     const [isLoading, setIsLoading] = useState(true)
 
     const lastCheckedUser = useRef<string | null>(null)
@@ -61,7 +63,8 @@ export function CashProvider({ children }: { children: ReactNode }) {
         try {
             const realizarConsulta = async () => {
                 console.log("🟠 [CashContext] -> Consultando tabla 'profiles'...")
-                const { data: profile, error: profErr } = await supabase.from('profiles').select('rol, nombre_completo, nivel_liga').eq('id', uid).single();
+                // 🚀 BUSCAMOS LA COLUMNA DE PERMISOS
+                const { data: profile, error: profErr } = await supabase.from('profiles').select('rol, nombre_completo, nivel_liga, permisos_grupos').eq('id', uid).single();
 
                 if (profErr) console.error("❌ [CashContext] Error al buscar perfil:", profErr);
 
@@ -69,10 +72,15 @@ export function CashProvider({ children }: { children: ReactNode }) {
                 console.log(`🟠 [CashContext] -> Perfil encontrado. Rol: ${rolReal}`)
 
                 let ligaAccess = false, compAccess = false;
+                let misPermisos: string[] = profile?.permisos_grupos || []; // 🚀 LLAVERO CARGADO DESDE LA BD
 
-                // 🚀 FIX ROL AUXILIAR: También le damos acceso a ver Compañías y Liga si necesita
+                // 🚀 FIX ROL AUXILIAR Y COORDINADOR
                 if (rolReal === 'admin' || rolReal === 'recepcion' || rolReal === 'auxiliar') {
                     ligaAccess = true; compAccess = true;
+                } else if (rolReal === 'coordinador') {
+                    // El coordinador entra si tiene las llaves específicas
+                    ligaAccess = misPermisos.includes('liga');
+                    compAccess = misPermisos.some(p => p !== 'liga'); // Si tiene alguna otra llave, es de una compañía
                 } else {
                     if (rolReal === 'alumno' || rolReal === 'user') {
                         ligaAccess = !!profile?.nivel_liga;
@@ -99,8 +107,9 @@ export function CashProvider({ children }: { children: ReactNode }) {
                 setNivelLiga(profile?.nivel_liga || null);
                 setHasLigaAccess(ligaAccess);
                 setHasCompaniaAccess(compAccess);
+                setPermisosCoordinador(misPermisos); // 🚀 GUARDAMOS EL LLAVERO EN EL ESTADO GLOBAL
 
-                // 🚀 FIX ROL AUXILIAR: Habilitamos la gestión de caja para el auxiliar
+                // 🚀 FIX CAJA
                 if (rolReal === 'admin' || rolReal === 'recepcion' || rolReal === 'auxiliar') {
                     console.log("🟠 [CashContext] -> Consultando turnos de caja...")
                     const { data: turno } = await supabase.from('caja_turnos').select('id, sede_id').eq('usuario_id', uid).eq('estado', 'abierta').maybeSingle();
@@ -153,7 +162,7 @@ export function CashProvider({ children }: { children: ReactNode }) {
             console.log(`🟠 [CashContext] Auth event escuchado: ${event}`)
             if (event === 'SIGNED_OUT') {
                 console.log("🟠 [CashContext] Usuario deslogueado. Limpiando estados y redirigiendo...")
-                setUserId(null); setUserRole('visitante'); setUserName(null); setNivelLiga(null); setIsBoxOpen(false); setCurrentTurnoId(null); setCurrentSedeId(null); setHasLigaAccess(false); setHasCompaniaAccess(false); lastCheckedUser.current = null;
+                setUserId(null); setUserRole('visitante'); setUserName(null); setNivelLiga(null); setIsBoxOpen(false); setCurrentTurnoId(null); setCurrentSedeId(null); setHasLigaAccess(false); setHasCompaniaAccess(false); setPermisosCoordinador([]); lastCheckedUser.current = null;
                 window.location.href = '/login'
             } else if (event === 'SIGNED_IN' && session?.user) {
                 console.log("🟠 [CashContext] Usuario logueado. Fetching profile...")
@@ -175,8 +184,8 @@ export function CashProvider({ children }: { children: ReactNode }) {
     }, [fetchProfileAndBox, supabase])
 
     const contextValue = useMemo(() => ({
-        userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, checkStatus, isLoading
-    }), [userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, checkStatus, isLoading])
+        userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, permisosCoordinador, checkStatus, isLoading
+    }), [userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, permisosCoordinador, checkStatus, isLoading])
 
     return <CashContext.Provider value={contextValue}>{children}</CashContext.Provider>
 }
