@@ -96,6 +96,9 @@ export default function CompaniaDetallePage() {
 
     const [procesandoPago, setProcesandoPago] = useState(false)
     const [inscribiendoMasivo, setInscribiendoMasivo] = useState(false)
+    const [searchAlumno, setSearchAlumno] = useState('')
+    const [miembrosActuales, setMiembrosActuales] = useState<string[]>([])
+    const [allAlumnos, setAllAlumnos] = useState<any[]>([])
 
     useEffect(() => {
         if (!loadingContext) {
@@ -228,7 +231,7 @@ export default function CompaniaDetallePage() {
 
         const { data: dataMiembros } = await supabase
             .from('perfiles_companias')
-            .select('perfil:profiles(id, nombre_completo, email, porcentaje_beca_compania)')
+            .select('perfil_id, perfil:profiles(id, nombre_completo, email, porcentaje_beca_compania)')
             .eq('compania_id', companiaId)
 
         const configData = await obtenerPreciosCompaniaAction(companiaId);
@@ -248,6 +251,7 @@ export default function CompaniaDetallePage() {
         const finalPrecioEfvo = precioBaseEfvo !== null ? precioBaseEfvo : precioBase;
 
         if (dataMiembros) {
+            setMiembrosActuales(dataMiembros.map((m: any) => m.perfil_id));
             let miembrosData = dataMiembros.map((m: any) => m.perfil).filter(Boolean)
 
             const { data: pagosCia } = await supabase
@@ -283,6 +287,12 @@ export default function CompaniaDetallePage() {
 
             miembrosCompletos.sort((a: any, b: any) => (a.nombre_completo || '').localeCompare(b.nombre_completo || ''))
             setMiembros(miembrosCompletos)
+        }
+
+        // Cargar todos los alumnos para la pestaña de padrón
+        if (['admin', 'recepcion'].includes(userRole || '')) {
+            const { data: alumnos } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'alumno').order('nombre_completo')
+            if (alumnos) setAllAlumnos(alumnos)
         }
 
         setLoading(false)
@@ -446,9 +456,12 @@ export default function CompaniaDetallePage() {
     if (!compania) return null
 
     // 🚀 DEFINIMOS QUIÉN TIENE LOS "SÚPER PODERES" DENTRO DE ESTE GRUPO
-    const hasCoordinatorPowers = ['admin', 'recepcion', 'auxiliar'].includes(userRole || '') ||
+    const isStaff = ['admin', 'recepcion', 'auxiliar'].includes(userRole || '') ||
         (userRole === 'profesor' && compania.coordinador_id === userId) ||
         (userRole === 'coordinador' && permisosCoordinador.includes(compania.id))
+
+    // 🚀 ADMINS/RECEP VEN TODO, COORDINADORES NO VEN PAGOS
+    const canSeeFinance = ['admin', 'recepcion'].includes(userRole || '')
 
     const miPerfilInfo = miembros.find(m => m.id === userId)
     const deboCompania = !miPerfilInfo?.pago_compania_al_dia && userRole === 'alumno'
@@ -488,7 +501,7 @@ export default function CompaniaDetallePage() {
                         </div>
 
                         {/* 🚀 SELECTOR DE MES Y AÑO */}
-                        {hasCoordinatorPowers && (
+                        {isStaff && (
                             <div className="flex items-center gap-2 bg-black/40 border border-white/10 p-1.5 rounded-xl shadow-inner w-fit">
                                 <CalendarDays size={16} className="text-gray-500 ml-2" />
                                 <select value={mesDashboard} onChange={e => setMesDashboard(Number(e.target.value))} className="bg-transparent text-white text-xs font-bold uppercase outline-none cursor-pointer appearance-none px-2 py-1">
@@ -519,13 +532,18 @@ export default function CompaniaDetallePage() {
                         >
                             <Calendar size={14} /> Clases del Mes
                         </button>
-                        <button
-                            onClick={() => setActiveTab('miembros')}
-                            className={`pb-4 text-xs font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${activeTab === 'miembros' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
-                        >
-                            <Users size={14} /> Padrón y Cobros
-                        </button>
-                        {hasCoordinatorPowers && (
+
+                        {/* 🚀 ADMINS, RECEPCIÓN Y ALUMNOS VEN PADRÓN, COORDINADOR Y PROFE NO VEN PADRÓN */}
+                        {canSeeFinance && (
+                            <button
+                                onClick={() => setActiveTab('miembros')}
+                                className={`pb-4 text-xs font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${activeTab === 'miembros' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
+                            >
+                                <Users size={14} /> Padrón y Cobros
+                            </button>
+                        )}
+
+                        {isStaff && (
                             <button
                                 onClick={() => setActiveTab('estadisticas')}
                                 className={`pb-4 text-xs font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${activeTab === 'estadisticas' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
@@ -574,7 +592,7 @@ export default function CompaniaDetallePage() {
                             </div>
                         </div>
 
-                        {hasCoordinatorPowers ? (
+                        {isStaff ? (
                             <div className="bg-[#111] border border-white/5 rounded-3xl p-6 relative overflow-hidden">
                                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
                                 <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-4 relative z-10">
@@ -658,8 +676,8 @@ export default function CompaniaDetallePage() {
                                             </div>
 
                                             <div className="p-4 bg-[#09090b] border-t border-white/5 mt-auto">
-                                                <Link href={hasCoordinatorPowers ? `/clase/${clase.id}` : `/mis-clases`} className="w-full bg-blue-600/10 text-blue-400 border border-blue-600/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">
-                                                    {hasCoordinatorPowers ? 'Gestionar / Lista' : 'Ir a Mis Clases'} <ChevronRight size={14} />
+                                                <Link href={isStaff ? `/clase/${clase.id}` : `/mis-clases`} className="w-full bg-blue-600/10 text-blue-400 border border-blue-600/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">
+                                                    {isStaff ? 'Gestionar / Lista' : 'Ir a Mis Clases'} <ChevronRight size={14} />
                                                 </Link>
                                             </div>
                                         </div>
@@ -677,10 +695,10 @@ export default function CompaniaDetallePage() {
                 )}
 
                 {/* 3. PESTAÑA: MIEMBROS */}
-                {activeTab === 'miembros' && (
+                {canSeeFinance && activeTab === 'miembros' && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                         {/* 🚀 BOTÓN MÁGICO DE INSCRIPCIÓN MASIVA AL PADRÓN */}
-                        {hasCoordinatorPowers && miembros.length > 0 && (
+                        {miembros.length > 0 && (
                             <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 shadow-lg shadow-blue-500/5">
                                 <div>
                                     <h4 className="text-white font-black uppercase text-sm flex items-center gap-2"><CheckSquare size={16} className="text-blue-500" /> Asignación de Clases</h4>
@@ -707,54 +725,50 @@ export default function CompaniaDetallePage() {
                                                 </div>
                                                 <div className="min-w-0">
                                                     <p className="text-sm font-bold text-white uppercase truncate">{miembro.nombre_completo}</p>
-                                                    {hasCoordinatorPowers && <p className="text-[10px] text-gray-500 truncate">{miembro.email}</p>}
+                                                    <p className="text-[10px] text-gray-500 truncate">{miembro.email}</p>
                                                 </div>
                                             </div>
 
-                                            {hasCoordinatorPowers && (
-                                                <div className="flex items-center gap-2 shrink-0">
-                                                    <button
-                                                        onClick={() => openPagoModal(miembro)}
-                                                        className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-emerald-600 rounded-xl transition-all border border-transparent hover:border-emerald-500/30"
-                                                        title={`Anotar pago de ${miembro.nombre_completo}`}
-                                                    >
-                                                        <Coins size={14} />
-                                                    </button>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <button
+                                                    onClick={() => openPagoModal(miembro)}
+                                                    className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-emerald-600 rounded-xl transition-all border border-transparent hover:border-emerald-500/30"
+                                                    title={`Anotar pago de ${miembro.nombre_completo}`}
+                                                >
+                                                    <Coins size={14} />
+                                                </button>
 
-                                                    <button
-                                                        onClick={() => openIndividualModal(miembro)}
-                                                        className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-blue-600 rounded-xl transition-all"
-                                                        title={`Enviar aviso a ${miembro.nombre_completo}`}
-                                                    >
-                                                        <BellRing size={14} />
-                                                    </button>
-                                                </div>
-                                            )}
+                                                <button
+                                                    onClick={() => openIndividualModal(miembro)}
+                                                    className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-blue-600 rounded-xl transition-all"
+                                                    title={`Enviar aviso a ${miembro.nombre_completo}`}
+                                                >
+                                                    <BellRing size={14} />
+                                                </button>
+                                            </div>
                                         </div>
 
-                                        {hasCoordinatorPowers && (
-                                            <div className="flex flex-wrap gap-2 pt-2 border-t border-white/5 mt-2">
-                                                {(miembro.porcentaje_beca_compania ?? 0) > 0 && (
-                                                    <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                                        <Percent size={10} /> Beca {miembro.porcentaje_beca_compania}%
-                                                    </span>
-                                                )}
-
-                                                <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${miembro.pago_compania_al_dia ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}>
-                                                    <Coins size={10} /> Abonó ${miembro.totalAbonado} / ${miembro.precioEfectivo}
+                                        <div className="flex flex-wrap gap-2 pt-2 border-t border-white/5 mt-2">
+                                            {(miembro.porcentaje_beca_compania ?? 0) > 0 && (
+                                                <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                    <Percent size={10} /> Beca {miembro.porcentaje_beca_compania}%
                                                 </span>
+                                            )}
 
-                                                {!miembro.pago_compania_al_dia ? (
-                                                    <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                                        <AlertCircle size={10} /> Debe Efvo: ${miembro.saldoPendienteEfectivo} | Transf: ${miembro.saldoPendiente}
-                                                    </span>
-                                                ) : (
-                                                    <span className="inline-flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                                        <CheckCircle2 size={10} /> Al Día
-                                                    </span>
-                                                )}
-                                            </div>
-                                        )}
+                                            <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${miembro.pago_compania_al_dia ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}>
+                                                <Coins size={10} /> Abonó ${miembro.totalAbonado} / ${miembro.precioEfectivo}
+                                            </span>
+
+                                            {!miembro.pago_compania_al_dia ? (
+                                                <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                    <AlertCircle size={10} /> Debe Efvo: ${miembro.saldoPendienteEfectivo} | Transf: ${miembro.saldoPendiente}
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                    <CheckCircle2 size={10} /> Al Día
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 ))
                             ) : (
@@ -768,7 +782,7 @@ export default function CompaniaDetallePage() {
                 )}
 
                 {/* 4. PESTAÑA: ESTADÍSTICAS */}
-                {hasCoordinatorPowers && activeTab === 'estadisticas' && (
+                {isStaff && activeTab === 'estadisticas' && (
                     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 md:p-8 shadow-xl">
                             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 border-b border-white/5 pb-6">

@@ -12,7 +12,8 @@ import {
     Clock4, FileCheck2,
     Lock,
     Eye,
-    Receipt
+    Receipt,
+    ChevronRight // 🚀 AGREGAMOS EL CHEVRON PARA EL BOTÓN DE RETORNO
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -31,7 +32,7 @@ import {
 
 import { toggleMiembroCompaniaAction } from '@/app/actions/companias'
 import { cambiarLigaAction, crearAlumnoDesdeRecepcionAction } from '@/app/actions/usuarios'
-import { useCash } from '@/context/CashContext' // 🚀 IMPORTAMOS EL CONTEXTO GLOBAL
+import { useCash } from '@/context/CashContext'
 
 // 🚀 FIX ZONA HORARIA
 const parseFechaLocal = (dateStr?: string | null) => {
@@ -392,7 +393,6 @@ export default function ClaseDetallePage() {
         doc.setFontSize(11); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100); doc.text(`Fecha: ${fechaText} | Hora: ${horaText} hs | Sala: ${clase.sala.nombre}`, 14, 30)
         const tableRows: any[] = []
         inscripciones.forEach((insc, index) => {
-            // Reutilizamos la lógica de nombre a prueba de fallos
             const nombreMostrar = insc.user
                 ? (insc.user.nombre_completo || [insc.user.nombre, insc.user.apellido].filter(Boolean).join(' ') || 'Alumno sin nombre')
                 : (insc.nombre_invitado || 'Invitado');
@@ -408,6 +408,25 @@ export default function ClaseDetallePage() {
     }
 
     if (loadingSWR || loadingContext) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-[#D4E655]"><Loader2 className="animate-spin" /></div>
+
+    // 🚀 ESCUDO PARA AUXILIARES: NO PUEDEN ENTRAR A LAS CLASES DE LA LIGA (PORQUE LA CURSAN)
+    if (userRole === 'auxiliar' && clase?.es_la_liga) {
+        return (
+            <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8 flex flex-col items-center justify-center relative overflow-hidden">
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-red-500/5 rounded-full blur-[100px] pointer-events-none" />
+                <div className="max-w-md w-full bg-[#09090b] border border-red-500/20 rounded-3xl p-8 text-center relative z-10 shadow-2xl">
+                    <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-red-500/20">
+                        <Lock className="text-red-500 w-10 h-10" />
+                    </div>
+                    <h1 className="text-2xl font-black uppercase tracking-tighter text-white mb-3">Acceso Restringido</h1>
+                    <p className="text-gray-400 text-sm mb-8 leading-relaxed">Tu rol de Auxiliar no tiene permisos para gestionar la asistencia de las clases de <span className="text-[#D4E655] font-bold">La Liga</span>.</p>
+                    <button onClick={() => router.back()} className="w-full bg-white/5 border border-white/10 text-white font-bold uppercase py-4 rounded-xl hover:bg-white hover:text-black transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                        Volver a la Agenda <ChevronRight size={16} />
+                    </button>
+                </div>
+            </div>
+        )
+    }
 
     return (
         <div className="min-h-screen bg-[#050505] text-white p-2 md:p-8 pb-32">
@@ -474,13 +493,11 @@ export default function ClaseDetallePage() {
                             else if (insc.estado_asistencia === 'media_falta') bgRowClass = 'bg-yellow-500/5 border-l-2 border-yellow-500';
                             else if (insc.estado_asistencia === 'justificada') bgRowClass = 'bg-blue-500/5 border-l-2 border-blue-500';
 
-                            // 🚀 FIX 1: Nombre a prueba de fallos
                             const nombreMostrar = insc.user
                                 ? (insc.user.nombre_completo || [insc.user.nombre, insc.user.apellido].filter(Boolean).join(' ') || 'Alumno sin nombre')
                                 : (insc.nombre_invitado || 'Invitado');
 
                             return (
-                                // 🚀 FIX 3: Flex-wrap y min-w-0 para evitar glitchs de overflow
                                 <div key={insc.id} className={`p-4 md:p-5 border-b border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4 transition-all ${bgRowClass}`}>
 
                                     <div className="flex-1 min-w-0">
@@ -511,13 +528,11 @@ export default function ClaseDetallePage() {
                                             )}
                                         </div>
 
-                                        {/* 🚀 FIX 2: Seguridad Extrema para Finanzas */}
                                         <p className="text-[10px] text-gray-500 font-bold uppercase mt-1 truncate">
                                             {insc.modalidad} {showFinance && Number(insc.valor_credito) > 0 && `• $${Number(insc.valor_credito).toLocaleString()}`}
                                         </p>
                                     </div>
 
-                                    {/* CONTENEDOR DE BOTONES (Envuelto para celular) */}
                                     <div className="flex flex-wrap items-center gap-1.5 md:gap-2 bg-[#111] border border-white/10 p-1 md:p-1.5 rounded-xl shrink-0 w-fit mt-2 md:mt-0">
                                         <button onClick={() => handleSetAsistencia(insc, 'ausente')} title="Ausente" className={`p-2 md:p-2.5 rounded-lg transition-all ${insc.estado_asistencia === 'ausente' ? 'bg-red-500/20 text-red-500' : 'text-gray-500 hover:text-white'}`}><X size={18} /></button>
 
@@ -601,7 +616,7 @@ export default function ClaseDetallePage() {
                                 ))}
                             </div>
 
-                            {/* 🚀 FORMULARIO PARA PAGO (Suelta, Pack o Audición Paga) */}
+                            {/* FORMULARIO PARA PAGO (Suelta, Pack o Audición Paga) */}
                             {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack') && (
                                 <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10 mt-4 animate-in fade-in">
                                     <div className="space-y-4">
@@ -629,7 +644,6 @@ export default function ClaseDetallePage() {
                                             </div>
                                         </div>
 
-                                        {/* SWITCH DE SEÑA */}
                                         <div
                                             onClick={() => updateGuestForm({ esSena: !guestForm.esSena })}
                                             className={`flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer ${guestForm.esSena ? 'bg-orange-500/10 border-orange-500/50' : 'bg-white/5 border-white/5'}`}

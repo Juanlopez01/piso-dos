@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { LogOut, UserCircle, Shield, Radio, LogIn, UsersRound, Zap } from 'lucide-react'
+import { LogOut, UserCircle, Shield, Radio, LogIn, UsersRound, Zap, KeyRound } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { menuItems } from '@/config/menu'
 import { useCash } from '@/context/CashContext'
@@ -21,13 +21,12 @@ function SidebarContent() {
     const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, isLoading, userId } = useCash()
 
     useEffect(() => {
-        // Solo buscamos notificaciones si ya cargó el usuario y tenemos el ID listo
         if (!isLoading && userId && userRole && userRole !== 'visitante') {
             const fetchNotifs = async () => {
                 const { count } = await supabase
                     .from('notificaciones')
                     .select('*', { count: 'exact', head: true })
-                    .eq('usuario_id', userId) // 👈 Usamos el ID directo del contexto
+                    .eq('usuario_id', userId)
                     .eq('leido', false)
                 setUnreadNotifs(count || 0)
             }
@@ -36,15 +35,16 @@ function SidebarContent() {
     }, [pathname, isLoading, userId, userRole, supabase])
 
     const visibleItems = menuItems.filter(item => {
+        // Validación de permisos estricta
         if (item.name === 'La Liga' && !hasLigaAccess) return false;
         if (item.name === 'Grupos' && !hasCompaniaAccess) return false;
 
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
+        // Vistas base por rol
         if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Caja', 'Liquidaciones', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
-        // 🚀 Agregamos "Compañías" al listado base que ven los profes
         if (userRole === 'profesor') {
             return ['Inicio', 'Mis Clases', 'Mis Pagos', 'Grupos', 'La Liga', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         }
@@ -54,10 +54,15 @@ function SidebarContent() {
             return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
         }
 
-        // 🚀 ROL AUXILIAR: Mismo menú cerrado que recepción, pero nunca ve alquileres ni liquidaciones.
+        // 🚀 ROL AUXILIAR: Ve Grupos, pero NUNCA La Liga.
         if (userRole === 'auxiliar') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'Grupos'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil', 'Grupos'].includes(item.name)
+        }
+
+        // 🚀 ROL COORDINADOR: Ve La Liga y Grupos (sujetos a su llavero que ya validamos arriba en `hasLigaAccess/hasCompaniaAccess`), y su perfil. No ve caja ni agenda de recepcion.
+        if (userRole === 'coordinador') {
+            return ['Inicio', 'Explorar', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
         }
 
         return item.roles.includes(userRole || 'visitante')
@@ -65,7 +70,6 @@ function SidebarContent() {
 
     const handleSignOut = async () => {
         if (isLoggingOut) return;
-        // 🚀 FIX: El auxiliar tampoco se puede ir sin cerrar la caja
         if ((userRole === 'recepcion' || userRole === 'auxiliar') && isBoxOpen) {
             return toast.error('¡Caja Abierta! Cerrala antes de salir.')
         }
@@ -90,7 +94,7 @@ function SidebarContent() {
             <nav className="flex-1 overflow-y-auto p-4 space-y-1 custom-scrollbar">
                 <div className="mb-4 px-3">
                     <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
-                        {userRole === 'admin' ? <Shield size={12} className="text-red-500" /> : userRole === 'recepcion' ? <Radio size={12} className="text-blue-500" /> : userRole === 'auxiliar' ? <Zap size={12} className="text-purple-500" /> : userRole === 'visitante' ? <UserCircle size={12} /> : <UsersRound size={12} />}
+                        {userRole === 'admin' ? <Shield size={12} className="text-red-500" /> : userRole === 'recepcion' ? <Radio size={12} className="text-blue-500" /> : userRole === 'auxiliar' ? <Zap size={12} className="text-purple-500" /> : userRole === 'coordinador' ? <KeyRound size={12} className="text-pink-500" /> : userRole === 'visitante' ? <UserCircle size={12} /> : <UsersRound size={12} />}
                         {userRole || 'visitante'}
                     </p>
                 </div>
@@ -142,7 +146,6 @@ function SidebarContent() {
     )
 }
 
-// EL ESCUDO ESTÁ ACÁ 👇
 export default function Sidebar() {
     return (
         <Suspense fallback={<div className="w-64 bg-[#09090b] border-r border-white/5 hidden md:flex" />}>

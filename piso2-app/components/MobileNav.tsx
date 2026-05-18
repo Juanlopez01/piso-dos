@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { Menu, X, LogOut, UserCircle, Shield, Radio, LogIn, UsersRound, Zap } from 'lucide-react'
+import { Menu, X, LogOut, UserCircle, Shield, Radio, LogIn, UsersRound, Zap, KeyRound } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { menuItems } from '@/config/menu'
 import { useCash } from '@/context/CashContext'
@@ -16,23 +16,20 @@ function MobileNavContent() {
     const [unreadNotifs, setUnreadNotifs] = useState(0)
     const [isLoggingOut, setIsLoggingOut] = useState(false)
 
-    // 🛡️ ESCUDO: Congela la conexión a la base de datos
     const [supabase] = useState(() => createClient())
-
     const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, isLoading, userId } = useCash()
 
     useEffect(() => {
-        setIsOpen(false) // Cierra el menú al cambiar de ruta
+        setIsOpen(false)
     }, [pathname, searchParams])
 
     useEffect(() => {
-        // Solo buscamos notificaciones si ya cargó el usuario y tenemos el ID listo
         if (!isLoading && userId && userRole && userRole !== 'visitante') {
             const fetchNotifs = async () => {
                 const { count } = await supabase
                     .from('notificaciones')
                     .select('*', { count: 'exact', head: true })
-                    .eq('usuario_id', userId) // 👈 Usamos el ID directo del contexto
+                    .eq('usuario_id', userId)
                     .eq('leido', false)
                 setUnreadNotifs(count || 0)
             }
@@ -41,21 +38,16 @@ function MobileNavContent() {
     }, [pathname, isLoading, userId, userRole, supabase])
 
     const visibleItems = menuItems.filter(item => {
-        // 1. Filtro de La Liga
+        // Validación de permisos estricta
         if (item.name === 'La Liga' && !hasLigaAccess) return false;
-
-        // 🚀 2. EL PATOVICA DE COMPAÑÍAS: Si es profe, lo dejamos pasar siempre. 
-        // El CashContext ya determinó en hasCompaniaAccess si tiene poderes.
         if (item.name === 'Grupos' && !hasCompaniaAccess && userRole !== 'profesor') return false;
 
-        // 3. Ocultar agenda a alumnos y profes
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
-        // 4. Permisos por Rol
+        // Vistas base por rol
         if (userRole === 'admin') return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Liquidaciones', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
-        // 🚀 5. PERMISOS DEL PROFE: Agregamos Compañías explícitamente acá
         if (userRole === 'profesor') {
             return ['Inicio', 'Mis Clases', 'Mis Pagos', 'Compañías', 'La Liga', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         }
@@ -65,10 +57,15 @@ function MobileNavContent() {
             return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
         }
 
-        // 🚀 6. ROL AUXILIAR: Mismo menú cerrado que recepción, pero nunca ve alquileres ni liquidaciones.
+        // 🚀 ROL AUXILIAR: Mismo menú cerrado que recepción, ve Grupos pero NUNCA La Liga.
         if (userRole === 'auxiliar') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'Grupos'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil', 'Grupos'].includes(item.name)
+        }
+
+        // 🚀 ROL COORDINADOR: Ve La Liga y Grupos (sujetos a su llavero que ya validamos arriba), y su perfil.
+        if (userRole === 'coordinador') {
+            return ['Inicio', 'Explorar', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
         }
 
         return item.roles.includes(userRole || 'visitante')
@@ -83,11 +80,10 @@ function MobileNavContent() {
         try {
             await supabase.auth.signOut()
         } finally {
-            window.location.href = '/' // 👈 Redirección dura
+            window.location.href = '/'
         }
     }
 
-    // 👈 Función para que detecte Staff vs Alumnos correctamente
     const checkIsActive = (itemName: string, itemHref: string) => {
         if (itemName === 'Staff / Equipo') {
             return pathname === '/usuarios' && searchParams.get('ver') === 'staff';
@@ -125,7 +121,6 @@ function MobileNavContent() {
                 </button>
             </div>
 
-            {/* OVERLAY DEL MENÚ */}
             {isOpen && (
                 <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-50 flex flex-col animate-in fade-in slide-in-from-bottom-10 pb-16">
                     <div className="flex justify-between items-center p-6 border-b border-white/10">
@@ -134,7 +129,7 @@ function MobileNavContent() {
                     </div>
 
                     <div className="p-4 px-6 flex items-center gap-2 border-b border-white/5 pb-4">
-                        {userRole === 'admin' ? <Shield size={14} className="text-red-500" /> : userRole === 'recepcion' ? <Radio size={14} className="text-blue-500" /> : userRole === 'auxiliar' ? <Zap size={14} className="text-purple-500" /> : userRole === 'visitante' ? <UserCircle size={14} className="text-gray-500" /> : <UsersRound size={14} className="text-[#D4E655]" />}
+                        {userRole === 'admin' ? <Shield size={14} className="text-red-500" /> : userRole === 'recepcion' ? <Radio size={14} className="text-blue-500" /> : userRole === 'auxiliar' ? <Zap size={14} className="text-purple-500" /> : userRole === 'coordinador' ? <KeyRound size={14} className="text-pink-500" /> : userRole === 'visitante' ? <UserCircle size={14} className="text-gray-500" /> : <UsersRound size={14} className="text-[#D4E655]" />}
                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Conectado como: {userRole || 'visitante'}</span>
                     </div>
 
