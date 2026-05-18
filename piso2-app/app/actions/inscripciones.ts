@@ -236,8 +236,8 @@ export async function procesarInscripcionAction(payload: any) {
 
         let valorInscripcion = 0;
         let modalidadInsc = 'Clase Suelta';
-        let saldoPendienteCalculado = payload.p_es_sena ? 1 : 0;
-        let packUsadoId = null; // 🚀 VARIABLE CLAVE PARA GUARDAR EL ID DEL PACK
+        let saldoPendienteCalculado = payload.p_saldo_pendiente || 0;
+        let packUsadoId = null;
 
         if (esExclusiva) {
             if (payload.p_tipo_operacion === 'usar_credito') {
@@ -254,7 +254,7 @@ export async function procesarInscripcionAction(payload: any) {
                     .maybeSingle();
 
                 if (packActivo && packActivo.cantidad_inicial > 0) {
-                    packUsadoId = packActivo.id; // 🚀 ATRAPAMOS EL ID
+                    packUsadoId = packActivo.id;
                     valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
                     await supabaseAdmin.from('alumno_packs').update({
@@ -298,7 +298,7 @@ export async function procesarInscripcionAction(payload: any) {
                 }).select().single();
 
                 if (errPackEx) throw new Error(`Fallo al guardar el pack: ${errPackEx.message}`);
-                if (nuevoPack) packUsadoId = nuevoPack.id; // 🚀 ATRAPAMOS EL ID NUEVO
+                if (nuevoPack) packUsadoId = nuevoPack.id;
 
                 if (creditosDelPack > 1) {
                     await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', {
@@ -344,7 +344,7 @@ export async function procesarInscripcionAction(payload: any) {
                     .maybeSingle();
 
                 if (packActivo && packActivo.cantidad_inicial > 0) {
-                    packUsadoId = packActivo.id; // 🚀 ATRAPAMOS EL ID
+                    packUsadoId = packActivo.id;
                     valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
                     await supabaseAdmin.from('alumno_packs').update({
@@ -390,7 +390,7 @@ export async function procesarInscripcionAction(payload: any) {
                 }).select().single();
 
                 if (errPackRegular) throw new Error(`Error al guardar el pack: ${errPackRegular.message}`);
-                if (nuevoPack) packUsadoId = nuevoPack.id; // 🚀 ATRAPAMOS EL ID NUEVO
+                if (nuevoPack) packUsadoId = nuevoPack.id;
 
                 if (creditosDelPack > 1) {
                     const { data: perfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', payload.p_user_id).single();
@@ -428,10 +428,13 @@ export async function procesarInscripcionAction(payload: any) {
             }
         }
 
+        // 🚀 CORRECCIÓN: Volvemos a mapear nombre_invitado y es_invitado
         const { error: errInsc } = await supabaseAdmin.from('inscripciones').insert({
             user_id: payload.p_user_id || null,
             clase_id: payload.p_clase_id,
-            pack_usado_id: packUsadoId, // 🚀 GUARDAMOS EL ID DEL PACK EN TU COLUMNA OFICIAL
+            pack_usado_id: packUsadoId,
+            nombre_invitado: payload.p_nombre_invitado || null, // 🎯 LÍNEA RECUPERADA
+            es_invitado: payload.p_tipo_operacion === 'invitado' || !payload.p_user_id, // 🎯 LÍNEA RECUPERADA
             modalidad: modalidadInsc,
             valor_credito: valorInscripcion,
             saldo_pendiente: saldoPendienteCalculado,
