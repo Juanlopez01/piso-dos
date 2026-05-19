@@ -566,3 +566,23 @@ export async function agregarPagoInscripcionAction(inscripcionId: string, monto:
         return { success: false, error: error.message }
     }
 }
+
+export async function editarValorInscripcionAction(inscripcionId: string, nuevoValor: number) {
+    const supabase = await createClient() // Asumiendo tu import normal del archivo
+
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        const { error } = await supabase
+            .from('inscripciones')
+            .update({ valor_credito: nuevoValor })
+            .eq('id', inscripcionId)
+
+        if (error) throw new Error(error.message)
+
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}

@@ -13,7 +13,8 @@ import {
     Lock,
     Eye,
     Receipt,
-    ChevronRight // 🚀 AGREGAMOS EL CHEVRON PARA EL BOTÓN DE RETORNO
+    ChevronRight,
+    Pencil // 🚀 IMPORTAMOS EL LÁPIZ PARA LA EDICIÓN MANUAL
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -27,7 +28,8 @@ import {
     procesarInscripcionAction,
     enviarNotificacionClaseAction,
     setEstadoAsistenciaAction,
-    agregarPagoInscripcionAction
+    agregarPagoInscripcionAction,
+    editarValorInscripcionAction // 🚀 IMPORTAMOS LA NUEVA ACCIÓN
 } from '@/app/actions/inscripciones'
 
 import { toggleMiembroCompaniaAction } from '@/app/actions/companias'
@@ -356,14 +358,14 @@ export default function ClaseDetallePage() {
                 if (clase.compania_id) {
                     await toggleMiembroCompaniaAction(clase.compania_id, alumnoIdFinal, 'agregar');
                     if (monto > 0) {
-                        const { data: p } = await supabase.from('companias_pagos').select('id, monto').eq('alumno_id', alumnoIdFinal).eq('compania_id', clase.compania_id).eq('mes', mesActual).eq('anio', anioActual).maybeSingle();
+                        const { data: p = null } = await supabase.from('companias_pagos').select('id, monto').eq('alumno_id', alumnoIdFinal).eq('compania_id', clase.compania_id).eq('mes', mesActual).eq('anio', anioActual).maybeSingle();
                         if (p) await supabase.from('companias_pagos').update({ monto: Number(p.monto) + monto, metodo_pago: guestForm.pago }).eq('id', p.id);
                         else await supabase.from('companias_pagos').insert([{ alumno_id: alumnoIdFinal, compania_id: clase.compania_id, mes: mesActual, anio: anioActual, monto: monto, metodo_pago: guestForm.pago }]);
                     }
                 } else if (clase.es_la_liga && clase.liga_nivel) {
                     await cambiarLigaAction(alumnoIdFinal, clase.liga_nivel);
                     if (monto > 0) {
-                        const { data: p } = await supabase.from('liga_pagos').select('id, monto').eq('alumno_id', alumnoIdFinal).eq('mes', mesActual).eq('anio', anioActual).maybeSingle();
+                        const { data: p = null } = await supabase.from('liga_pagos').select('id, monto').eq('alumno_id', alumnoIdFinal).eq('mes', mesActual).eq('anio', anioActual).maybeSingle();
                         if (p) await supabase.from('liga_pagos').update({ monto: Number(p.monto) + monto, metodo_pago: guestForm.pago }).eq('id', p.id);
                         else await supabase.from('liga_pagos').insert([{ alumno_id: alumnoIdFinal, mes: mesActual, anio: anioActual, monto: monto, metodo_pago: guestForm.pago }]);
                     }
@@ -528,9 +530,32 @@ export default function ClaseDetallePage() {
                                             )}
                                         </div>
 
-                                        <p className="text-[10px] text-gray-500 font-bold uppercase mt-1 truncate">
-                                            {insc.modalidad} {showFinance && Number(insc.valor_credito) > 0 && `• $${Number(insc.valor_credito).toLocaleString()}`}
-                                        </p>
+                                        {/* 🚀 LÓGICA DE EDICIÓN DEL VALOR DEL CRÉDITO */}
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <p className="text-[10px] text-gray-500 font-bold uppercase truncate">
+                                                {insc.modalidad} {showFinance && `• $${Number(insc.valor_credito).toLocaleString()}`}
+                                            </p>
+                                            {showFinance && (
+                                                <button
+                                                    onClick={async () => {
+                                                        const nuevoMontoStr = prompt(`Editar el monto de la modalidad para ${nombreMostrar}:`, String(insc.valor_credito));
+                                                        if (nuevoMontoStr === null) return;
+                                                        const nuevoMonto = Number(nuevoMontoStr);
+                                                        if (isNaN(nuevoMonto) || nuevoMonto < 0) return toast.error("Monto inválido");
+
+                                                        toast.promise(editarValorInscripcionAction(insc.id, nuevoMonto), {
+                                                            loading: 'Actualizando valor en la base de datos...',
+                                                            success: () => { mutate(); return 'Valor de la inscripción modificado con éxito'; },
+                                                            error: (err) => `Error al actualizar: ${err}`
+                                                        });
+                                                    }}
+                                                    className="text-gray-600 hover:text-[#D4E655] transition-colors p-1"
+                                                    title="Editar valor del crédito"
+                                                >
+                                                    <Pencil size={12} />
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
 
                                     <div className="flex flex-wrap items-center gap-1.5 md:gap-2 bg-[#111] border border-white/10 p-1 md:p-1.5 rounded-xl shrink-0 w-fit mt-2 md:mt-0">
@@ -616,7 +641,6 @@ export default function ClaseDetallePage() {
                                 ))}
                             </div>
 
-                            {/* FORMULARIO PARA PAGO (Suelta, Pack o Audición Paga) */}
                             {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack') && (
                                 <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10 mt-4 animate-in fade-in">
                                     <div className="space-y-4">
