@@ -8,7 +8,9 @@ import {
     MessageSquare, Calendar, Users, Info,
     Clock, MapPin, User, ChevronRight, Image as ImageIcon,
     Send, BellRing, X, Percent, CheckCircle2, AlertCircle, Coins,
-    CalendarDays, Activity, XCircle, FileText, Eye, CheckSquare
+    CalendarDays, Activity, XCircle, FileText, Eye, CheckSquare,
+    Phone, // 🚀 IMPORTAMOS EL ÍCONO DEL TELÉFONO
+    Search
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
@@ -40,6 +42,7 @@ type Miembro = {
     id: string
     nombre_completo: string
     email: string
+    telefono?: string | null // 🚀 AGREGAMOS EL TELÉFONO AL TIPO
     porcentaje_beca_compania?: number
     pago_compania_al_dia?: boolean
     totalAbonado?: number
@@ -231,7 +234,7 @@ export default function CompaniaDetallePage() {
 
         const { data: dataMiembros } = await supabase
             .from('perfiles_companias')
-            .select('perfil_id, perfil:profiles(id, nombre_completo, email, porcentaje_beca_compania)')
+            .select('perfil_id, perfil:profiles(id, nombre_completo, email, telefono, porcentaje_beca_compania)') // 🚀 PEDIMOS EL TELÉFONO
             .eq('compania_id', companiaId)
 
         const configData = await obtenerPreciosCompaniaAction(companiaId);
@@ -291,7 +294,7 @@ export default function CompaniaDetallePage() {
 
         // Cargar todos los alumnos para la pestaña de padrón
         if (['admin', 'recepcion'].includes(userRole || '')) {
-            const { data: alumnos } = await supabase.from('profiles').select('id, nombre_completo, email').eq('rol', 'alumno').order('nombre_completo')
+            const { data: alumnos } = await supabase.from('profiles').select('id, nombre_completo, email, telefono').eq('rol', 'alumno').order('nombre_completo')
             if (alumnos) setAllAlumnos(alumnos)
         }
 
@@ -714,9 +717,16 @@ export default function CompaniaDetallePage() {
                             </div>
                         )}
 
+                        <div className="p-4 border-b border-white/5 shrink-0 bg-[#09090b] mb-4 rounded-xl">
+                            <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
+                                <input type="text" placeholder="Buscar alumno..." value={searchAlumno} onChange={(e) => setSearchAlumno(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white text-sm outline-none focus:border-blue-500 transition-colors" />
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {miembros.length > 0 ? (
-                                miembros.map((miembro) => (
+                                miembros.filter(a => a.nombre_completo?.toLowerCase().includes(searchAlumno.toLowerCase()) || a.email?.toLowerCase().includes(searchAlumno.toLowerCase())).map((miembro) => (
                                     <div key={miembro.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex flex-col justify-between gap-3 hover:border-blue-500/30 transition-colors">
                                         <div className="flex items-start justify-between">
                                             <div className="flex items-center gap-4 overflow-hidden">
@@ -725,7 +735,11 @@ export default function CompaniaDetallePage() {
                                                 </div>
                                                 <div className="min-w-0">
                                                     <p className="text-sm font-bold text-white uppercase truncate">{miembro.nombre_completo}</p>
-                                                    <p className="text-[10px] text-gray-500 truncate">{miembro.email}</p>
+                                                    {/* 🚀 ACÁ RENDERIZAMOS EL TELÉFONO SOLICITADO */}
+                                                    <p className="text-[10px] text-gray-500 truncate flex items-center gap-1 mt-0.5">
+                                                        <Phone size={10} className="text-blue-400" />
+                                                        {miembro.telefono || 'Sin teléfono'}
+                                                    </p>
                                                 </div>
                                             </div>
 
