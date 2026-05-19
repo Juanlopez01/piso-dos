@@ -488,3 +488,60 @@ export async function eliminarUsuarioCompletoAction(usuarioId: string) {
         return { success: false, error: error.message }
     }
 }
+
+export async function ajustarCreditosAction(
+    userId: string,
+    regulares: number,
+    especiales: number,
+    pasesExclusivos: { referencia: string, cantidad: number }[] // 🚀 NUEVO PARÁMETRO
+) {
+    const supabase = await createClient()
+    const supabaseAdmin = getAdminClient()
+
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        // 1. Actualizamos regulares y especiales
+        const { error: errProfiles } = await supabaseAdmin.from('profiles').update({
+            creditos_regulares: Math.max(0, regulares),
+            creditos_especiales: Math.max(0, especiales)
+        }).eq('id', userId)
+
+        if (errProfiles) throw new Error(errProfiles.message)
+
+        // 2. Procesamos los pases exclusivos
+        if (pasesExclusivos && pasesExclusivos.length > 0) {
+            for (const pase of pasesExclusivos) {
+                if (pase.cantidad > 0) {
+                    // Verificamos si ya existe ese pase
+                    const { data: existing } = await supabaseAdmin.from('pases_exclusivos')
+                        .select('id').eq('usuario_id', userId).eq('pase_referencia', pase.referencia).maybeSingle();
+
+                    if (existing) {
+                        // Lo actualizamos
+                        await supabaseAdmin.from('pases_exclusivos').update({ cantidad: pase.cantidad }).eq('id', existing.id);
+                    } else {
+                        // Lo creamos
+                        await supabaseAdmin.from('pases_exclusivos').insert({
+                            usuario_id: userId,
+                            pase_referencia: pase.referencia,
+                            cantidad: pase.cantidad
+                        });
+                    }
+                } else {
+                    // Si le puso 0, lo borramos directamente para limpiar la base de datos
+                    await supabaseAdmin.from('pases_exclusivos')
+                        .delete()
+                        .eq('usuario_id', userId)
+                        .eq('pase_referencia', pase.referencia);
+                }
+            }
+        }
+
+        revalidatePath('/usuarios')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}

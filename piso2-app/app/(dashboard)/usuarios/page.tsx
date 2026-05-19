@@ -8,7 +8,7 @@ import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
     Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
-    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound
+    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { format } from 'date-fns'
@@ -21,7 +21,8 @@ import {
     guardarPerfilAction,
     asignarPackAction,
     cobrarLigaAction,
-    cobrarCompaniaAction
+    cobrarCompaniaAction,
+    ajustarCreditosAction // 🚀 IMPORTAMOS LA NUEVA ACCIÓN
 } from '@/app/actions/usuarios'
 
 type Ritmo = { id: string; nombre: string }
@@ -47,14 +48,14 @@ type RPCUsuario = {
     alias_cbu?: string | null
     nombre_remplazo?: string | null
     contacto_remplazo?: string | null
-    permisos_grupos?: string[] // 🚀 NUEVO DATO DEL LLAVERO
+    permisos_grupos?: string[]
 }
 
 type RPCUsuariosData = {
     usuarios: RPCUsuario[] | null
     ritmos: Ritmo[] | null
     productos: Producto[] | null
-    todasLasCompanias: CompaniaBasica[] | null // 🚀 NUEVO: LISTA MAESTRA DE GRUPOS
+    todasLasCompanias: CompaniaBasica[] | null
 }
 
 type UsuarioDirectorio = RPCUsuario & {
@@ -81,7 +82,6 @@ const getInteresesSeguro = (intereses: string | string[] | null | undefined): st
     return []
 }
 
-// 🚀 ACTUALIZAMOS EL FETCHER PARA TRAER EL LLAVERO Y LA LISTA DE COMPAÑÍAS
 const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo[], productos: Producto[], todasLasCompanias: CompaniaBasica[] }> => {
     const supabase = createClient()
 
@@ -92,14 +92,14 @@ const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo
             { data: productos, error: errProductos },
             { data: pcData, error: errPc },
             { data: pasesData, error: errPases },
-            { data: companiasMaestras, error: errCias } // 🚀 NUEVA CONSULTA
+            { data: companiasMaestras, error: errCias }
         ] = await Promise.all([
             supabase.from('profiles').select('*').order('nombre_completo', { ascending: true }),
             supabase.from('ritmos').select('id, nombre').order('nombre', { ascending: true }),
             supabase.from('productos').select('id, nombre, precio, creditos, tipo_clase, pase_referencia').eq('activo', true),
             supabase.from('perfiles_companias').select('perfil_id, compania:companias(id, nombre)'),
             supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad'),
-            supabase.from('companias').select('id, nombre').order('nombre', { ascending: true }) // 🚀 PEDIMOS LAS CÍAS
+            supabase.from('companias').select('id, nombre').order('nombre', { ascending: true })
         ])
 
         if (errPerfiles) throw errPerfiles
@@ -120,7 +120,7 @@ const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo
                 avatar_url: u.avatar_url || null,
                 is_frio: u.is_frio || false,
                 creditos_regulares: u.creditos_regulares || 0,
-                permisos_grupos: u.permisos_grupos || [] // 🚀 INYECTAMOS EL LLAVERO
+                permisos_grupos: u.permisos_grupos || []
             }
         })
 
@@ -128,7 +128,7 @@ const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo
             usuarios: usuariosProcesados,
             ritmos: ritmos || [],
             productos: productos || [],
-            todasLasCompanias: companiasMaestras || [] // 🚀 INYECTAMOS LAS CÍAS MAESTRAS
+            todasLasCompanias: companiasMaestras || []
         }
 
     } catch (error) {
@@ -154,6 +154,17 @@ function UsuariosContent() {
     const [isPackModalOpen, setIsPackModalOpen] = useState<boolean>(false)
     const [isCobroLigaOpen, setIsCobroLigaOpen] = useState<boolean>(false)
     const [isCobroCompaniaOpen, setIsCobroCompaniaOpen] = useState<boolean>(false)
+
+    // 🚀 ESTADOS PARA EL AJUSTE MANUAL DE CRÉDITOS
+    const [isAjustarCreditosOpen, setIsAjustarCreditosOpen] = useState(false)
+    const [creditosForm, setCreditosForm] = useState({
+        regulares: 0,
+        especiales: 0,
+        pases: [] as { referencia: string, cantidad: number }[]
+    })
+    const [nuevoPaseSelect, setNuevoPaseSelect] = useState('')
+    const [ajustandoCreditos, setAjustandoCreditos] = useState(false)
+
     const [uploadingAvatar, setUploadingAvatar] = useState(false)
 
     const [selectedUser, setSelectedUser] = useState<UsuarioDirectorio | null>(null)
@@ -176,7 +187,6 @@ function UsuariosContent() {
     const [cobroLigaForm, setCobroLigaForm] = useState({ monto: '', metodo: 'efectivo' })
     const [cobroCompaniaForm, setCobroCompaniaForm] = useState({ monto: '', metodo: 'efectivo', companiaId: '' })
 
-    // 🚀 AGREGAMOS EL LLAVERO AL FORMULARIO DE EDICIÓN
     const [editForm, setEditForm] = useState({ obs: '', intereses_ritmos: [] as string[], becaLiga: 0, becaCompania: 0, llaves_acceso: [] as string[] })
 
     const [createForm, setCreateForm] = useState({ nombre: '', email: '', dni: '', telefono: '', rol: 'alumno' })
@@ -191,7 +201,7 @@ function UsuariosContent() {
     const users = data?.usuarios || []
     const ritmosDisponibles = data?.ritmos || []
     const productos = data?.productos || []
-    const listadoCompaniasMaestro = data?.todasLasCompanias || [] // 🚀 ARRAY MAESTRO DE COMPAÑÍAS
+    const listadoCompaniasMaestro = data?.todasLasCompanias || []
 
     const filteredUsers = users.filter((u: UsuarioDirectorio) => {
         let matchesRole = true
@@ -314,7 +324,7 @@ function UsuariosContent() {
             intereses_ritmos: user.intereses_procesados || [],
             becaLiga: user.porcentaje_beca_liga || 0,
             becaCompania: user.porcentaje_beca_compania || 0,
-            llaves_acceso: user.permisos_grupos || [] // 🚀 CARGAMOS LAS LLAVES
+            llaves_acceso: user.permisos_grupos || []
         })
         setIsDetailOpen(true)
         setLoadingStats(true)
@@ -462,7 +472,6 @@ function UsuariosContent() {
         }))
     }
 
-    // 🚀 LÓGICA DE TOGGLE PARA EL LLAVERO DEL COORDINADOR
     const toggleLlaveAcceso = (idCompaniaOLiga: string) => {
         setEditForm(prev => ({
             ...prev,
@@ -472,21 +481,14 @@ function UsuariosContent() {
 
     const handleSaveChanges = async () => {
         if (!selectedUser) return
-
-        // 🔥 GUARDADO DEL PERFIL ACTUALIZADO EN LA BASE DE DATOS 🔥
-        // Acá actualizamos para que envíe "llaves_acceso" si tu backend lo soporta.
-        // Mientras tanto, si no lo soporta la acción, inyectamos directamente con supabase por seguridad.
-
         let success = true;
 
-        // 1. Guardar info tradicional
         const response = await guardarPerfilAction(
             selectedUser.id,
             editForm.obs,
             editForm.intereses_ritmos,
             editForm.becaLiga,
             editForm.becaCompania
-            // 👇 Acá deberías agregar `editForm.llaves_acceso` cuando modifiques guardarPerfilAction
         )
 
         if (!response.success) {
@@ -494,7 +496,6 @@ function UsuariosContent() {
             toast.error(response.error);
         }
 
-        // 2. 🚀 INYECCIÓN FORZADA DE PERMISOS PARA EVITAR CAMBIAR EL BACKEND COMPLEJO
         if (selectedUser.rol === 'coordinador') {
             const { error: errUpdatePermisos } = await supabase.from('profiles').update({
                 permisos_grupos: editForm.llaves_acceso
@@ -510,6 +511,33 @@ function UsuariosContent() {
         if (success) {
             toast.success('Ficha guardada');
             mutate();
+        }
+    }
+
+    // 🚀 LÓGICA PARA EL BOTÓN DE AJUSTAR CRÉDITOS MANUALMENTE
+    const handleAjustarCreditos = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!selectedUser) return;
+        setAjustandoCreditos(true);
+        try {
+            const res = await ajustarCreditosAction(selectedUser.id, creditosForm.regulares, creditosForm.especiales, creditosForm.pases);
+            if (res.success) {
+                toast.success('Créditos actualizados con éxito');
+                setIsAjustarCreditosOpen(false);
+                mutate();
+                setSelectedUser({
+                    ...selectedUser,
+                    creditos_regulares: creditosForm.regulares,
+                    creditos_especiales: creditosForm.especiales,
+                    pases_exclusivos: creditosForm.pases.filter(p => p.cantidad > 0).map(p => ({ pase_referencia: p.referencia, cantidad: p.cantidad }))
+                });
+            } else {
+                toast.error(res.error || 'Error al actualizar créditos');
+            }
+        } catch (error) {
+            toast.error('Error de conexión');
+        } finally {
+            setAjustandoCreditos(false);
         }
     }
 
@@ -928,9 +956,26 @@ function UsuariosContent() {
 
                             {selectedUser.rol === 'alumno' && (
                                 <>
-                                    <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
-                                        <CreditCard size={16} className="text-[#D4E655]" /> Estado de Cuenta
-                                    </h4>
+                                    <div className="flex justify-between items-center mb-4 border-b border-white/5 pb-2 mt-2">
+                                        <h4 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                                            <CreditCard size={16} className="text-[#D4E655]" /> Estado de Cuenta
+                                        </h4>
+
+                                        {/* 🚀 BOTÓN DE AJUSTAR CRÉDITOS (SOLO ADMIN) */}
+                                        {isAdmin && (
+                                            <button onClick={() => {
+                                                setCreditosForm({
+                                                    regulares: selectedUser.creditos_regulares || 0,
+                                                    especiales: selectedUser.creditos_especiales || 0,
+                                                    pases: selectedUser.pases_exclusivos.map(p => ({ referencia: p.pase_referencia, cantidad: p.cantidad }))
+                                                });
+                                                setNuevoPaseSelect('');
+                                                setIsAjustarCreditosOpen(true);
+                                            }} className="bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all">
+                                                <Settings2 size={12} className="inline mr-1" /> Ajustar Saldos
+                                            </button>
+                                        )}
+                                    </div>
 
                                     <div className="grid grid-cols-3 gap-3 mb-6">
                                         <div className="bg-orange-500/10 border border-orange-500/20 rounded-2xl p-4 flex flex-col items-center justify-center text-center">
@@ -1014,7 +1059,7 @@ function UsuariosContent() {
                                     </div>
                                 </>
                             )}
-                            {/* DATOS EXCLUSIVOS DEL PROFESOR */}
+
                             {selectedUser.rol === 'profesor' && (
                                 <>
                                     <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2">
@@ -1155,6 +1200,93 @@ function UsuariosContent() {
 
                             <button onClick={handleSaveChanges} className="w-full bg-white text-black font-black uppercase py-4 rounded-xl hover:bg-gray-200 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-xl shrink-0 mt-auto">
                                 <Save size={16} /> Guardar Ficha
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 🚀 NUEVO MODAL: AJUSTAR CRÉDITOS MANUALMENTE */}
+            {isAdmin && isAjustarCreditosOpen && selectedUser && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
+                        <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4 shrink-0">
+                            <h3 className="text-lg font-black text-white uppercase flex items-center gap-2"><Settings2 className="text-[#D4E655]" /> Ajustar Créditos</h3>
+                            <button onClick={() => setIsAjustarCreditosOpen(false)}><X size={20} className="text-gray-500 hover:text-white" /></button>
+                        </div>
+
+                        <div className="overflow-y-auto custom-scrollbar pr-2 flex-1">
+                            <form id="ajusteCreditosForm" onSubmit={handleAjustarCreditos} className="space-y-6">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Regulares</label>
+                                        <input type="number" min="0" value={creditosForm.regulares} onChange={e => setCreditosForm({ ...creditosForm, regulares: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white font-black outline-none focus:border-[#D4E655] text-center" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Especiales</label>
+                                        <input type="number" min="0" value={creditosForm.especiales} onChange={e => setCreditosForm({ ...creditosForm, especiales: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white font-black outline-none focus:border-[#D4E655] text-center" />
+                                    </div>
+                                </div>
+
+                                <div className="pt-4 border-t border-white/5">
+                                    <h4 className="text-[10px] font-black text-[#D4E655] uppercase tracking-widest mb-3">Pases Exclusivos</h4>
+
+                                    <div className="space-y-3 mb-4">
+                                        {creditosForm.pases.map((pase, idx) => (
+                                            <div key={idx} className="flex items-center gap-3 bg-white/5 p-2 rounded-xl border border-white/10">
+                                                <span className="flex-1 text-[10px] font-bold text-gray-300 uppercase truncate" title={pase.referencia}>{pase.referencia}</span>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    value={pase.cantidad}
+                                                    onChange={e => {
+                                                        const val = Number(e.target.value);
+                                                        setCreditosForm(prev => ({
+                                                            ...prev,
+                                                            pases: prev.pases.map((p, i) => i === idx ? { ...p, cantidad: val } : p)
+                                                        }));
+                                                    }}
+                                                    className="w-16 bg-black border border-white/10 rounded-lg p-2 text-white font-black outline-none focus:border-[#D4E655] text-center"
+                                                />
+                                            </div>
+                                        ))}
+                                        {creditosForm.pases.length === 0 && <p className="text-[10px] text-gray-600 italic uppercase font-bold text-center py-2">Sin pases activos</p>}
+                                    </div>
+
+                                    {/* SELECTOR PARA AGREGAR NUEVOS PASES */}
+                                    <div className="flex gap-2">
+                                        <select
+                                            value={nuevoPaseSelect}
+                                            onChange={e => setNuevoPaseSelect(e.target.value)}
+                                            className="flex-1 bg-[#111] border border-white/10 rounded-xl p-2 text-white text-[10px] uppercase font-bold outline-none focus:border-[#D4E655]"
+                                        >
+                                            <option value="">+ Agregar Pase a otro Grupo...</option>
+                                            {productos.filter(p => p.tipo_clase === 'exclusivo' && p.pase_referencia && !creditosForm.pases.find(x => x.referencia === p.pase_referencia)).map(prod => (
+                                                <option key={prod.id} value={prod.pase_referencia!}>{prod.nombre}</option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (!nuevoPaseSelect) return;
+                                                setCreditosForm(prev => ({
+                                                    ...prev,
+                                                    pases: [...prev.pases, { referencia: nuevoPaseSelect, cantidad: 1 }]
+                                                }));
+                                                setNuevoPaseSelect('');
+                                            }}
+                                            className="bg-white/10 hover:bg-[#D4E655] hover:text-black text-white px-4 rounded-xl text-[10px] font-black uppercase transition-colors"
+                                        >
+                                            Add
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+
+                        <div className="mt-6 pt-4 border-t border-white/10 shrink-0">
+                            <button form="ajusteCreditosForm" disabled={ajustandoCreditos} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                {ajustandoCreditos ? <Loader2 className="animate-spin" /> : 'Guardar Cambios'}
                             </button>
                         </div>
                     </div>
