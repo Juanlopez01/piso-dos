@@ -40,7 +40,7 @@ export async function inscribirAlumnoAction(claseId: string, tipoClase: string, 
         let packUsadoId = null;
         let valorInscripcion = 0;
         let modalidadInsc = 'Crédito';
-
+        let metodoPagoFinal = 'efectivo'; // 🎯 DECLARADA AQUÍ
         // 3. LÓGICA DE PASE EXCLUSIVO (Clases no combinables)
         if (!esCombinable) {
             modalidadInsc = 'Pase Exclusivo';
@@ -51,21 +51,31 @@ export async function inscribirAlumnoAction(claseId: string, tipoClase: string, 
 
             if (!miPase || miPase.cantidad < 1) return { success: false, error: 'No tenés pases exclusivos para esta clase.' };
 
-            // 🚀 RASTREO DEL PACK (Igual que la recep)
+            // 🚀 RASTREO DEL PACK
             const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
-                .select('*').eq('user_id', uid).eq('tipo_clase', 'exclusivo').gt('creditos_restantes', 0)
-                .order('fecha_compra', { ascending: true }).limit(1).maybeSingle();
+                .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago') // 🎯 PEDIMOS EL MÉTODO
+                .eq('user_id', uid)
+                .eq('tipo_clase', 'exclusivo') // o tipoPackBusqueda en el otro bloque
+                .gt('creditos_restantes', 0)
+                .order('fecha_compra', { ascending: true })
+                .limit(1)
+                .maybeSingle();
+
+            let metodoPagoFinal = 'credito'; // Valor por defecto
 
             if (packActivo && packActivo.cantidad_inicial > 0) {
                 packUsadoId = packActivo.id;
                 valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
+
+                // 🎯 HERENCIA: Si el pack tiene método de pago, lo usamos para la inscripción
+                metodoPagoFinal = packActivo.metodo_pago || 'credito';
+
                 const nuevosRestantes = packActivo.creditos_restantes - 1;
                 await supabaseAdmin.from('alumno_packs').update({
                     creditos_restantes: nuevosRestantes,
                     estado: nuevosRestantes === 0 ? 'agotado' : 'activo'
                 }).eq('id', packActivo.id);
             }
-
             // Descontamos el pase
             await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', { p_usuario_id: uid, p_referencia: paseReferencia, p_cantidad: -1 });
 
@@ -97,16 +107,16 @@ export async function inscribirAlumnoAction(claseId: string, tipoClase: string, 
             await supabaseAdmin.from('profiles').update({ [campoCredito]: (perfil as any)[campoCredito] - 1 }).eq('id', uid);
         }
 
-        // 5. INSERTAMOS LA INSCRIPCIÓN CON EL PRECIO Y EL ID DEL PACK REALES
+        // 5. INSERTAMOS LA INSCRIPCIÓN CON EL PRECIO Y EL MÉTODO REAL
         const { error: errInsc } = await supabaseAdmin.from('inscripciones').insert({
             user_id: uid,
             clase_id: claseId,
-            pack_usado_id: packUsadoId, // 🚀 ACÁ QUEDA REGISTRADO EL VÍNCULO PARA SIEMPRE
+            pack_usado_id: packUsadoId,
             modalidad: modalidadInsc,
-            valor_credito: valorInscripcion, // 🚀 ACÁ QUEDA EL VALOR EXACTO PARA LIQUIDAR AL PROFE
-            metodo_pago: 'credito',
+            valor_credito: valorInscripcion,
+            metodo_pago: metodoPagoFinal, // 🎯 AQUÍ INYECTAMOS EL MÉTODO REAL
             presente: false,
-            estado_asistencia: 'ausente' // Como lo anota por su cuenta, arranca como ausente hasta que dé el presente
+            estado_asistencia: 'ausente'
         });
 
         if (errInsc) throw new Error(errInsc.message);

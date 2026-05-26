@@ -225,12 +225,13 @@ export async function asignarPackAction(
         const { error: errPack } = await supabaseAdmin.from('alumno_packs').insert({
             user_id: usuarioId,
             producto_id: productoIdLimpio,
-            tipo_clase: tipoClase, // 'regular', 'seminario' o 'exclusivo'
+            tipo_clase: tipoClase,
             cantidad_inicial: creditos,
             creditos_restantes: creditos,
             monto_abonado: monto,
+            metodo_pago: metodoPago, // 🎯 ACÁ BLINDAMOS EL FUTURO
             fecha_compra: ahora.toISOString(),
-            fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 días default
+            fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
             estado: 'activo'
         });
 

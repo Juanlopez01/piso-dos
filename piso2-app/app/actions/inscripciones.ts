@@ -239,13 +239,16 @@ export async function procesarInscripcionAction(payload: any) {
         let saldoPendienteCalculado = payload.p_saldo_pendiente || 0;
         let packUsadoId = null;
 
+        // 🚀 VARIABLE MAESTRA: Por defecto toma el método enviado en el payload
+        let metodoPagoFinal = payload.p_metodo_pago || 'efectivo';
+
         if (esExclusiva) {
             if (payload.p_tipo_operacion === 'usar_credito') {
                 modalidadInsc = 'Pase Exclusivo';
                 if (!payload.p_user_id) throw new Error('Falta seleccionar al alumno.');
 
                 const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
-                    .select('*')
+                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago') // 🎯 PEDIMOS EL MÉTODO
                     .eq('user_id', payload.p_user_id)
                     .eq('tipo_clase', 'exclusivo')
                     .gt('creditos_restantes', 0)
@@ -256,6 +259,10 @@ export async function procesarInscripcionAction(payload: any) {
                 if (packActivo && packActivo.cantidad_inicial > 0) {
                     packUsadoId = packActivo.id;
                     valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
+
+                    // 🎯 HERENCIA DE MÉTODO DE PAGO
+                    metodoPagoFinal = packActivo.metodo_pago || 'efectivo';
+
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
                     await supabaseAdmin.from('alumno_packs').update({
                         creditos_restantes: nuevosRestantes,
@@ -292,6 +299,7 @@ export async function procesarInscripcionAction(payload: any) {
                     cantidad_inicial: creditosDelPack,
                     creditos_restantes: Math.max(0, creditosDelPack - 1),
                     monto_abonado: payload.p_monto_caja || 0,
+                    metodo_pago: payload.p_metodo_pago, // 🎯 GUARDAMOS EL MÉTODO EN EL PACK NUEVO
                     fecha_compra: ahora.toISOString(),
                     fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
                     estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
@@ -334,9 +342,8 @@ export async function procesarInscripcionAction(payload: any) {
                 const { data: perfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', payload.p_user_id).single();
                 if (!perfil || (perfil as any)[campoCredito] < 1) throw new Error(`Créditos insuficientes.`);
 
-                // 🚀 BUSCAMOS EL PACK Y EL mp_payment_id
                 const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
-                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, mp_payment_id') // 🎯 AGREGAMOS mp_payment_id
+                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago') // 🎯 PEDIMOS EL MÉTODO
                     .eq('user_id', payload.p_user_id)
                     .eq('tipo_clase', tipoPackBusqueda)
                     .gt('creditos_restantes', 0)
@@ -348,11 +355,8 @@ export async function procesarInscripcionAction(payload: any) {
                     packUsadoId = packActivo.id;
                     valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
 
-                    // 🚀 LÓGICA DE MÉTODO: Si mp_payment_id ES NULL -> EFECTIVO, SI NO -> TRANSFERENCIA
-                    const metodoOriginal = packActivo.mp_payment_id ? 'transferencia' : 'efectivo';
-
-                    // Sobrescribimos el método con el origen real del pack
-                    payload.p_metodo_pago = metodoOriginal;
+                    // 🎯 HERENCIA DE MÉTODO DE PAGO
+                    metodoPagoFinal = packActivo.metodo_pago || 'efectivo';
 
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
                     await supabaseAdmin.from('alumno_packs').update({
@@ -393,6 +397,7 @@ export async function procesarInscripcionAction(payload: any) {
                     cantidad_inicial: creditosDelPack,
                     creditos_restantes: Math.max(0, creditosDelPack - 1),
                     monto_abonado: payload.p_monto_caja || 0,
+                    metodo_pago: payload.p_metodo_pago, // 🎯 GUARDAMOS EL MÉTODO EN EL PACK NUEVO
                     fecha_compra: ahora.toISOString(),
                     fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
                     estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
@@ -437,17 +442,17 @@ export async function procesarInscripcionAction(payload: any) {
             }
         }
 
-        // 🚀 CORRECCIÓN: Volvemos a mapear nombre_invitado y es_invitado
+        // 🎯 INSERCIÓN DEFINITIVA EN LA TABLA CON EL MÉTODO REAL
         const { error: errInsc } = await supabaseAdmin.from('inscripciones').insert({
             user_id: payload.p_user_id || null,
             clase_id: payload.p_clase_id,
             pack_usado_id: packUsadoId,
-            nombre_invitado: payload.p_nombre_invitado || null, // 🎯 LÍNEA RECUPERADA
-            es_invitado: payload.p_tipo_operacion === 'invitado' || !payload.p_user_id, // 🎯 LÍNEA RECUPERADA
+            nombre_invitado: payload.p_nombre_invitado || null,
+            es_invitado: payload.p_tipo_operacion === 'invitado' || !payload.p_user_id,
             modalidad: modalidadInsc,
             valor_credito: valorInscripcion,
             saldo_pendiente: saldoPendienteCalculado,
-            metodo_pago: payload.p_monto_caja > 0 ? payload.p_metodo_pago : 'credito',
+            metodo_pago: payload.p_tipo_operacion === 'invitado' ? 'invitado' : metodoPagoFinal, // 🎯 ACÁ SE USA EL MÉTODO FINAL
             presente: true,
             estado_asistencia: 'presente'
         });
@@ -482,7 +487,7 @@ export async function procesarInscripcionAction(payload: any) {
                             clase_id: id,
                             modalidad: modalidadInsc,
                             valor_credito: 0,
-                            metodo_pago: 'credito',
+                            metodo_pago: metodoPagoFinal, // 🎯 ACÁ TAMBIÉN SE USA EL MÉTODO FINAL
                             presente: false
                         }));
                         await supabaseAdmin.from('inscripciones').insert(batchInscripciones);

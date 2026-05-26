@@ -181,6 +181,7 @@ export async function POST(request: Request) {
                     monto_abonado: montoAbonado,
                     estado: 'activo',
                     mp_payment_id: mpPaymentIdStr,
+                    metodo_pago: 'mercadopago',
                     fecha_compra: ahora.toISOString(),
                     fecha_vencimiento: fechaVencimiento
                 });

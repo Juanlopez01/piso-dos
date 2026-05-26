@@ -56,10 +56,11 @@ type Inscripcion = {
     saldo_pendiente?: number
     pack_usado_id?: string | null
     // 🚀 AÑADIMOS LA ESTRUCTURA DEL PACK CONECTADO
-    packs?: {
+    pack?: {
         id: string
         creditos_restantes: number
         cantidad_inicial: number
+        metodo_pago: string
         mp_payment_id: string | null // 🎯 ESTA ES LA CLAVE PARA SABER SI FUE TRANSF
         producto: { nombre: string }
     } | null
@@ -107,7 +108,7 @@ const fetcher = async ([key, id]: [string, string]) => {
         .select(`
             *, 
             user:profiles!user_id(nombre, apellido, nombre_completo, email, telefono),
-            pack:alumno_packs!pack_usado_id(id, creditos_restantes, cantidad_inicial, mp_payment_id, producto:productos(nombre))
+            pack:alumno_packs!pack_usado_id(id, creditos_restantes, cantidad_inicial, mp_payment_id, metodo_pago, producto:productos(nombre))
         `) // 🎯 AGREGAMOS mp_payment_id AQUÍ
         .eq('clase_id', id)
         .order('created_at', { ascending: true })
@@ -189,32 +190,42 @@ export default function ClaseDetallePage() {
 
     // 🚀 LÓGICA DE LIQUIDACIÓN: CÁLCULO DEL -10% PARA EL DOCENTE EN TRANSFERENCIAS
     const financialData = useMemo(() => {
-        if (!clase) return { totalRecaudado: 0, pagoDocente: 0 }
+        if (!clase) return { totalRecaudado: 0, totalBaseProfe: 0, pagoDocente: 0 }
 
         let totalRecaudado = 0;
-        let pagoDocente = 0;
+        let totalBaseProfe = 0;
 
-        inscripciones.forEach(insc => {
-            const monto = Number(insc.valor_credito) || 0;
+        inscripciones.forEach(curr => {
+            const monto = Number(curr.valor_credito) || 0;
             totalRecaudado += monto;
 
-            // 🎯 LÓGICA DE DETECCIÓN REAL:
-            // 1. ¿El método de pago dice 'transf' explícitamente?
-            // 2. ¿Es un pack que se pagó por MP (tiene mp_payment_id)?
-            const metodo = (insc.metodo_pago || '').toLowerCase();
-            const esTransferencia = metodo.includes('transf') ||
-                metodo.includes('mp') ||
-                metodo.includes('mercado') ||
-                metodo.includes('online') ||
-                (insc.packs?.mp_payment_id !== null); // 🎯 SI TIENE MP_PAYMENT_ID ES TRANSFERENCIA
+            // 🎯 AHORA EL DATO ES CONFIABLE: 
+            // Ya no buscamos en tablas relacionadas, leemos el método que inyectamos en la inscripción.
+            const metodo = (curr.metodo_pago || '').toLowerCase();
 
-            const netoParaProfe = esTransferencia ? (monto * 0.90) : monto;
-            pagoDocente += (netoParaProfe * (Number(clase.valor_acuerdo) / 100));
+            // Definimos qué métodos sufren el descuento del 10%
+            const esDigital = ['transferencia', 'mercadopago', 'mp', 'online'].includes(metodo);
+
+            if (esDigital) {
+                totalBaseProfe += (monto * 0.90);
+            } else {
+                // Si es 'efectivo', 'invitado' o 'credito' (sin descuento), va al 100%
+                totalBaseProfe += monto;
+            }
         });
+
+        const valorAcuerdo = Number(clase.valor_acuerdo) || 0;
+
+        // Si el acuerdo es porcentaje, calculamos sobre la base limpia. 
+        // Si es fijo, el acuerdo es el que manda (independientemente del método de pago).
+        const pago = clase.tipo_acuerdo === 'fijo'
+            ? valorAcuerdo
+            : totalBaseProfe * (valorAcuerdo / 100);
 
         return {
             totalRecaudado,
-            pagoDocente: Math.round(pagoDocente)
+            totalBaseProfe,
+            pagoDocente: Math.round(pago)
         }
     }, [inscripciones, clase]);
 
@@ -571,7 +582,7 @@ export default function ClaseDetallePage() {
                                                     {insc.modalidad}
                                                     {showFinance && Number(insc.valor_credito) > 0 && ` • $${Number(insc.valor_credito).toLocaleString()}`}
                                                 </p>
-
+                                                {console.log(insc)}
                                                 {/* 🚀 INFO DETALLADA DEL PACK */}
                                                 {(insc as any).pack && (
                                                     <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest text-[#D4E655]">
@@ -579,10 +590,29 @@ export default function ClaseDetallePage() {
                                                             {(insc as any).pack.producto?.nombre || 'Pack'}
                                                         </span>
                                                         <span className="text-gray-500">
+                                                            {/* 🎯 LÓGICA DE CONTADOR ACTUALIZADO:
+                                                                Mostramos el valor tal cual llega de la BD, 
+                                                                ya que el action realizó la resta antes del refresh.
+                                                            */}
                                                             | Restan: {(insc as any).pack.creditos_restantes}/{(insc as any).pack.cantidad_inicial}
                                                         </span>
-                                                        <span className={`px-1.5 py-0.5 rounded ${insc.metodo_pago === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
-                                                            {insc.metodo_pago === 'efectivo' ? 'EFVO' : 'TRANSF'}
+
+                                                        {/* 🎯 MÉTODO DE PAGO DINÁMICO */}
+                                                        <span className={`px-1.5 py-0.5 rounded ${insc.pack?.metodo_pago?.toLowerCase() === 'efectivo'
+                                                            ? 'bg-green-500/10 text-green-500'
+                                                            : 'bg-blue-500/10 text-blue-500' // Esto cubrirá 'transferencia', 'mercadopago', etc.
+                                                            }`}>
+                                                            {insc.modalidad === 'Crédito' && insc.pack?.metodo_pago === 'mercadopago' ? 'Online' : (insc.pack?.metodo_pago || 'N/A')}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                                {insc.pack === null && (
+                                                    <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest text-[#D4E655]">
+                                                        <span className={`px-1.5 py-0.5 rounded ${insc.metodo_pago?.toLowerCase() === 'efectivo'
+                                                            ? 'bg-green-500/10 text-green-500'
+                                                            : 'bg-blue-500/10 text-blue-500' // Esto cubrirá 'transferencia', 'mercadopago', etc.
+                                                            }`}>
+                                                            {insc.modalidad === 'Clase Suelta' && insc.metodo_pago === 'efectivo' ? 'efectivo' : (insc.metodo_pago || 'N/A')}
                                                         </span>
                                                     </div>
                                                 )}
