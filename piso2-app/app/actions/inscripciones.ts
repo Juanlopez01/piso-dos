@@ -334,8 +334,9 @@ export async function procesarInscripcionAction(payload: any) {
                 const { data: perfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', payload.p_user_id).single();
                 if (!perfil || (perfil as any)[campoCredito] < 1) throw new Error(`Créditos insuficientes.`);
 
+                // 🚀 BUSCAMOS EL PACK Y EL mp_payment_id
                 const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
-                    .select('*')
+                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, mp_payment_id') // 🎯 AGREGAMOS mp_payment_id
                     .eq('user_id', payload.p_user_id)
                     .eq('tipo_clase', tipoPackBusqueda)
                     .gt('creditos_restantes', 0)
@@ -346,6 +347,13 @@ export async function procesarInscripcionAction(payload: any) {
                 if (packActivo && packActivo.cantidad_inicial > 0) {
                     packUsadoId = packActivo.id;
                     valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
+
+                    // 🚀 LÓGICA DE MÉTODO: Si mp_payment_id ES NULL -> EFECTIVO, SI NO -> TRANSFERENCIA
+                    const metodoOriginal = packActivo.mp_payment_id ? 'transferencia' : 'efectivo';
+
+                    // Sobrescribimos el método con el origen real del pack
+                    payload.p_metodo_pago = metodoOriginal;
+
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
                     await supabaseAdmin.from('alumno_packs').update({
                         creditos_restantes: nuevosRestantes,
@@ -353,6 +361,7 @@ export async function procesarInscripcionAction(payload: any) {
                     }).eq('id', packActivo.id);
                 }
 
+                await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', { p_usuario_id: payload.p_user_id, p_referencia: paseReferencia, p_cantidad: -1 })
                 await supabaseAdmin.from('profiles').update({ [campoCredito]: (perfil as any)[campoCredito] - 1 }).eq('id', payload.p_user_id);
             }
             else if (payload.p_tipo_operacion === 'pack') {

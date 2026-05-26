@@ -29,14 +29,13 @@ import {
     enviarNotificacionClaseAction,
     setEstadoAsistenciaAction,
     agregarPagoInscripcionAction,
-    editarValorInscripcionAction // 🚀 IMPORTAMOS LA NUEVA ACCIÓN
+    editarValorInscripcionAction // 🚀 IMPORTAMOS LA ACCIÓN PARA EDITAR MONTO
 } from '@/app/actions/inscripciones'
 
 import { toggleMiembroCompaniaAction } from '@/app/actions/companias'
 import { cambiarLigaAction, crearAlumnoDesdeRecepcionAction } from '@/app/actions/usuarios'
 import { useCash } from '@/context/CashContext'
 
-// 🚀 FIX ZONA HORARIA
 const parseFechaLocal = (dateStr?: string | null) => {
     if (!dateStr) return null;
     return new Date(dateStr);
@@ -55,6 +54,15 @@ type Inscripcion = {
     metodo_pago: string
     es_invitado: boolean
     saldo_pendiente?: number
+    pack_usado_id?: string | null
+    // 🚀 AÑADIMOS LA ESTRUCTURA DEL PACK CONECTADO
+    packs?: {
+        id: string
+        creditos_restantes: number
+        cantidad_inicial: number
+        mp_payment_id: string | null // 🎯 ESTA ES LA CLAVE PARA SABER SI FUE TRANSF
+        producto: { nombre: string }
+    } | null
 }
 
 type ClaseDetalle = {
@@ -96,7 +104,11 @@ const fetcher = async ([key, id]: [string, string]) => {
 
     const { data: dataInsc } = await supabase
         .from('inscripciones')
-        .select(`*, user:profiles!user_id(nombre, apellido, nombre_completo, email, telefono)`)
+        .select(`
+            *, 
+            user:profiles!user_id(nombre, apellido, nombre_completo, email, telefono),
+            pack:alumno_packs!pack_usado_id(id, creditos_restantes, cantidad_inicial, mp_payment_id, producto:productos(nombre))
+        `) // 🎯 AGREGAMOS mp_payment_id AQUÍ
         .eq('clase_id', id)
         .order('created_at', { ascending: true })
 
@@ -131,7 +143,6 @@ export default function ClaseDetallePage() {
     const router = useRouter()
     const [supabase] = useState(() => createClient())
 
-    // 🚀 USAMOS EL ROL GLOBAL (Infalible)
     const { userRole, isLoading: loadingContext } = useCash();
     const showFinance = ['admin', 'recepcion', 'auxiliar'].includes(userRole || '');
 
@@ -176,13 +187,36 @@ export default function ClaseDetallePage() {
         }
     }, [configuraciones])
 
+    // 🚀 LÓGICA DE LIQUIDACIÓN: CÁLCULO DEL -10% PARA EL DOCENTE EN TRANSFERENCIAS
     const financialData = useMemo(() => {
         if (!clase) return { totalRecaudado: 0, pagoDocente: 0 }
-        const total = inscripciones.reduce((acc, curr) => acc + (Number(curr.valor_credito) || 0), 0)
-        const valorAcuerdo = Number(clase.valor_acuerdo) || 0
-        const pago = clase.tipo_acuerdo === 'fijo' ? valorAcuerdo : total * (valorAcuerdo / 100)
-        return { totalRecaudado: total, pagoDocente: pago }
-    }, [inscripciones, clase])
+
+        let totalRecaudado = 0;
+        let pagoDocente = 0;
+
+        inscripciones.forEach(insc => {
+            const monto = Number(insc.valor_credito) || 0;
+            totalRecaudado += monto;
+
+            // 🎯 LÓGICA DE DETECCIÓN REAL:
+            // 1. ¿El método de pago dice 'transf' explícitamente?
+            // 2. ¿Es un pack que se pagó por MP (tiene mp_payment_id)?
+            const metodo = (insc.metodo_pago || '').toLowerCase();
+            const esTransferencia = metodo.includes('transf') ||
+                metodo.includes('mp') ||
+                metodo.includes('mercado') ||
+                metodo.includes('online') ||
+                (insc.packs?.mp_payment_id !== null); // 🎯 SI TIENE MP_PAYMENT_ID ES TRANSFERENCIA
+
+            const netoParaProfe = esTransferencia ? (monto * 0.90) : monto;
+            pagoDocente += (netoParaProfe * (Number(clase.valor_acuerdo) / 100));
+        });
+
+        return {
+            totalRecaudado,
+            pagoDocente: Math.round(pagoDocente)
+        }
+    }, [inscripciones, clase]);
 
     const inicioDate = parseFechaLocal(clase?.inicio);
     const fechaText = inicioDate ? format(inicioDate, "EEE d MMM", { locale: es }) : '';
@@ -358,14 +392,14 @@ export default function ClaseDetallePage() {
                 if (clase.compania_id) {
                     await toggleMiembroCompaniaAction(clase.compania_id, alumnoIdFinal, 'agregar');
                     if (monto > 0) {
-                        const { data: p = null } = await supabase.from('companias_pagos').select('id, monto').eq('alumno_id', alumnoIdFinal).eq('compania_id', clase.compania_id).eq('mes', mesActual).eq('anio', anioActual).maybeSingle();
+                        const { data: p } = await supabase.from('companias_pagos').select('id, monto').eq('alumno_id', alumnoIdFinal).eq('compania_id', clase.compania_id).eq('mes', mesActual).eq('anio', anioActual).maybeSingle();
                         if (p) await supabase.from('companias_pagos').update({ monto: Number(p.monto) + monto, metodo_pago: guestForm.pago }).eq('id', p.id);
                         else await supabase.from('companias_pagos').insert([{ alumno_id: alumnoIdFinal, compania_id: clase.compania_id, mes: mesActual, anio: anioActual, monto: monto, metodo_pago: guestForm.pago }]);
                     }
                 } else if (clase.es_la_liga && clase.liga_nivel) {
                     await cambiarLigaAction(alumnoIdFinal, clase.liga_nivel);
                     if (monto > 0) {
-                        const { data: p = null } = await supabase.from('liga_pagos').select('id, monto').eq('alumno_id', alumnoIdFinal).eq('mes', mesActual).eq('anio', anioActual).maybeSingle();
+                        const { data: p } = await supabase.from('liga_pagos').select('id, monto').eq('alumno_id', alumnoIdFinal).eq('mes', mesActual).eq('anio', anioActual).maybeSingle();
                         if (p) await supabase.from('liga_pagos').update({ monto: Number(p.monto) + monto, metodo_pago: guestForm.pago }).eq('id', p.id);
                         else await supabase.from('liga_pagos').insert([{ alumno_id: alumnoIdFinal, mes: mesActual, anio: anioActual, monto: monto, metodo_pago: guestForm.pago }]);
                     }
@@ -411,7 +445,7 @@ export default function ClaseDetallePage() {
 
     if (loadingSWR || loadingContext) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-[#D4E655]"><Loader2 className="animate-spin" /></div>
 
-    // 🚀 ESCUDO PARA AUXILIARES: NO PUEDEN ENTRAR A LAS CLASES DE LA LIGA (PORQUE LA CURSAN)
+    // 🚀 ESCUDO PARA AUXILIARES: NO PUEDEN ENTRAR A LAS CLASES DE LA LIGA
     if (userRole === 'auxiliar' && clase?.es_la_liga) {
         return (
             <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8 flex flex-col items-center justify-center relative overflow-hidden">
@@ -532,20 +566,38 @@ export default function ClaseDetallePage() {
 
                                         {/* 🚀 LÓGICA DE EDICIÓN DEL VALOR DEL CRÉDITO */}
                                         <div className="flex items-center gap-2 mt-1">
-                                            <p className="text-[10px] text-gray-500 font-bold uppercase truncate">
-                                                {insc.modalidad} {showFinance && `• $${Number(insc.valor_credito).toLocaleString()}`}
-                                            </p>
+                                            <div className="flex flex-col gap-1 mt-1">
+                                                <p className="text-[10px] text-gray-400 font-bold uppercase truncate">
+                                                    {insc.modalidad}
+                                                    {showFinance && Number(insc.valor_credito) > 0 && ` • $${Number(insc.valor_credito).toLocaleString()}`}
+                                                </p>
+
+                                                {/* 🚀 INFO DETALLADA DEL PACK */}
+                                                {(insc as any).pack && (
+                                                    <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest text-[#D4E655]">
+                                                        <span className="bg-[#D4E655]/10 px-1.5 py-0.5 rounded">
+                                                            {(insc as any).pack.producto?.nombre || 'Pack'}
+                                                        </span>
+                                                        <span className="text-gray-500">
+                                                            | Restan: {(insc as any).pack.creditos_restantes}/{(insc as any).pack.cantidad_inicial}
+                                                        </span>
+                                                        <span className={`px-1.5 py-0.5 rounded ${insc.metodo_pago === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                                                            {insc.metodo_pago === 'efectivo' ? 'EFVO' : 'TRANSF'}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                            </div>
                                             {showFinance && (
                                                 <button
                                                     onClick={async () => {
-                                                        const nuevoMontoStr = prompt(`Editar el monto de la modalidad para ${nombreMostrar}:`, String(insc.valor_credito));
+                                                        const nuevoMontoStr = prompt(`Editar el monto para ${nombreMostrar}:`, String(insc.valor_credito));
                                                         if (nuevoMontoStr === null) return;
                                                         const nuevoMonto = Number(nuevoMontoStr);
                                                         if (isNaN(nuevoMonto) || nuevoMonto < 0) return toast.error("Monto inválido");
 
                                                         toast.promise(editarValorInscripcionAction(insc.id, nuevoMonto), {
-                                                            loading: 'Actualizando valor en la base de datos...',
-                                                            success: () => { mutate(); return 'Valor de la inscripción modificado con éxito'; },
+                                                            loading: 'Actualizando valor...',
+                                                            success: () => { mutate(); return 'Valor modificado con éxito'; },
                                                             error: (err) => `Error al actualizar: ${err}`
                                                         });
                                                     }}
@@ -585,16 +637,35 @@ export default function ClaseDetallePage() {
                     </div>
                 </div>
 
-                {/* LIQUIDACIÓN CAJA */}
+                {/* LIQUIDACIÓN CAJA - LIMPIA Y DIRECTA */}
                 {showFinance && !clase?.es_audicion && (
                     <div className="lg:col-span-1">
                         <div className="bg-[#111] border border-white/10 rounded-2xl p-6 sticky top-8 shadow-xl">
-                            <h4 className="text-[10px] font-bold text-gray-500 uppercase mb-5 tracking-widest">Liquidación Clase</h4>
+                            <h4 className="text-[10px] font-bold text-gray-500 uppercase mb-5 tracking-widest">Liquidación Docente</h4>
+
                             <div className="space-y-4 mb-6">
-                                <div className="flex justify-between items-center pb-3 border-b border-white/5"><span className="text-xs text-gray-400 font-bold uppercase">Total Recaudado</span><span className="text-sm font-black text-white">${financialData.totalRecaudado.toLocaleString()}</span></div>
-                                <div className="flex justify-between items-center pb-3 border-b border-white/5"><span className="text-xs text-gray-400 font-bold uppercase">Acuerdo Docente</span><span className="text-[10px] font-black text-[#D4E655] uppercase bg-[#D4E655]/10 px-2 py-1 rounded-md border border-[#D4E655]/20">{clase?.tipo_acuerdo === 'fijo' ? `$${Number(clase?.valor_acuerdo || 0).toLocaleString()} (Fijo)` : `${Number(clase?.valor_acuerdo || 0)}% (%)`}</span></div>
+                                <div className="flex justify-between items-center pb-3 border-b border-white/5">
+                                    <span className="text-xs text-gray-400 font-bold uppercase">Total Recaudado</span>
+                                    <span className="text-sm font-black text-white">${financialData.totalRecaudado.toLocaleString()}</span>
+                                </div>
+
+                                {/* AHORA EL DOCENTE SOLO VE EL PAGO FINAL, SIN DESGLOSE DE BASE IMPONIBLE */}
+                                <div className="flex justify-between items-center pb-3 border-b border-white/5">
+                                    <span className="text-xs text-gray-400 font-bold uppercase">Acuerdo</span>
+                                    <span className="text-[10px] font-black text-[#D4E655] uppercase bg-[#D4E655]/10 px-2 py-1 rounded-md border border-[#D4E655]/20">
+                                        {clase?.tipo_acuerdo === 'fijo'
+                                            ? `$${Number(clase?.valor_acuerdo || 0).toLocaleString()} (Fijo)`
+                                            : `${Number(clase?.valor_acuerdo || 0)}%`}
+                                    </span>
+                                </div>
                             </div>
-                            <div className="bg-[#D4E655] rounded-2xl p-6 text-center shadow-lg border border-[#D4E655]/50"><p className="text-[9px] font-black uppercase text-black/60 mb-1 tracking-widest">A Pagar al Docente</p><div className="text-4xl font-black text-black">${Math.round(financialData.pagoDocente).toLocaleString()}</div></div>
+
+                            <div className="bg-[#D4E655] rounded-2xl p-6 text-center shadow-lg border border-[#D4E655]/50">
+                                <p className="text-[9px] font-black uppercase text-black/60 mb-1 tracking-widest">Total a Pagar</p>
+                                <div className="text-4xl font-black text-black">
+                                    ${financialData.pagoDocente.toLocaleString()}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}

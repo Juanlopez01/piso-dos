@@ -208,7 +208,7 @@ export default function LandingPage() {
             <div className="p-10 md:p-16 flex flex-col justify-center">
               <h2 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6 leading-[0.9]">Estudio <br /><span className="text-[#D4E655]">Digital.</span></h2>
               <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed mb-8 font-medium">Transmisión en vivo, grabación de contenidos y producción audiovisual profesional.</p>
-              <div><a href='/streaming'><button onClick={() => scrollTo('contacto')} className="inline-flex items-center gap-3 border border-white/20 hover:border-[#D4E655] text-white font-bold uppercase px-8 py-4 text-xs tracking-[0.2em] transition-colors">CONSULTAR</button></a>
+              <div><a href='/'><button className="inline-flex items-center gap-3 border border-white/20 hover:border-[#D4E655] text-white font-bold uppercase px-8 py-4 text-xs tracking-[0.2em] transition-colors">CONSULTAR</button></a>
               </div>
             </div>
           </div>
