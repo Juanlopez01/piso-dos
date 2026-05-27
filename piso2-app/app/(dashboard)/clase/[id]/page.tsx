@@ -574,49 +574,49 @@ export default function ClaseDetallePage() {
                                                 </button>
                                             )}
                                         </div>
-
-                                        {/* 🚀 LÓGICA DE EDICIÓN DEL VALOR DEL CRÉDITO */}
                                         <div className="flex items-center gap-2 mt-1">
-                                            <div className="flex flex-col gap-1 mt-1">
-                                                <p className="text-[10px] text-gray-400 font-bold uppercase truncate">
-                                                    {insc.modalidad}
-                                                    {showFinance && Number(insc.valor_credito) > 0 && ` • $${Number(insc.valor_credito).toLocaleString()}`}
-                                                </p>
-                                                {console.log(insc)}
-                                                {/* 🚀 INFO DETALLADA DEL PACK */}
-                                                {(insc as any).pack && (
-                                                    <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest text-[#D4E655]">
-                                                        <span className="bg-[#D4E655]/10 px-1.5 py-0.5 rounded">
-                                                            {(insc as any).pack.producto?.nombre || 'Pack'}
-                                                        </span>
-                                                        <span className="text-gray-500">
-                                                            {/* 🎯 LÓGICA DE CONTADOR ACTUALIZADO:
+                                            {/* 🚀 LÓGICA DE EDICIÓN DEL VALOR DEL CRÉDITO */}
+                                            {!esGrupoOFormacion &&
+                                                <div className="flex flex-col gap-1 mt-1">
+                                                    <p className="text-[10px] text-gray-400 font-bold uppercase truncate">
+                                                        {insc.modalidad}
+                                                        {showFinance && Number(insc.valor_credito) > 0 && ` • $${Number(insc.valor_credito).toLocaleString()}`}
+                                                    </p>
+                                                    {console.log(insc)}
+                                                    {/* 🚀 INFO DETALLADA DEL PACK */}
+                                                    {(insc as any).pack && (
+                                                        <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest text-[#D4E655]">
+                                                            <span className="bg-[#D4E655]/10 px-1.5 py-0.5 rounded">
+                                                                {(insc as any).pack.producto?.nombre || 'Pack'}
+                                                            </span>
+                                                            <span className="text-gray-500">
+                                                                {/* 🎯 LÓGICA DE CONTADOR ACTUALIZADO:
                                                                 Mostramos el valor tal cual llega de la BD, 
                                                                 ya que el action realizó la resta antes del refresh.
                                                             */}
-                                                            | Restan: {(insc as any).pack.creditos_restantes}/{(insc as any).pack.cantidad_inicial}
-                                                        </span>
+                                                                | Restan: {(insc as any).pack.creditos_restantes}/{(insc as any).pack.cantidad_inicial}
+                                                            </span>
 
-                                                        {/* 🎯 MÉTODO DE PAGO DINÁMICO */}
-                                                        <span className={`px-1.5 py-0.5 rounded ${insc.pack?.metodo_pago?.toLowerCase() === 'efectivo'
-                                                            ? 'bg-green-500/10 text-green-500'
-                                                            : 'bg-blue-500/10 text-blue-500' // Esto cubrirá 'transferencia', 'mercadopago', etc.
-                                                            }`}>
-                                                            {insc.modalidad === 'Crédito' && insc.pack?.metodo_pago === 'mercadopago' ? 'Online' : (insc.pack?.metodo_pago || 'N/A')}
-                                                        </span>
-                                                    </div>
-                                                )}
-                                                {insc.pack === null && (
-                                                    <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest text-[#D4E655]">
-                                                        <span className={`px-1.5 py-0.5 rounded ${insc.metodo_pago?.toLowerCase() === 'efectivo'
-                                                            ? 'bg-green-500/10 text-green-500'
-                                                            : 'bg-blue-500/10 text-blue-500' // Esto cubrirá 'transferencia', 'mercadopago', etc.
-                                                            }`}>
-                                                            {insc.modalidad === 'Clase Suelta' && insc.metodo_pago === 'efectivo' ? 'efectivo' : (insc.metodo_pago || 'N/A')}
-                                                        </span>
-                                                    </div>
-                                                )}
-                                            </div>
+                                                            {/* 🎯 MÉTODO DE PAGO DINÁMICO */}
+                                                            <span className={`px-1.5 py-0.5 rounded ${insc.pack?.metodo_pago?.toLowerCase() === 'efectivo'
+                                                                ? 'bg-green-500/10 text-green-500'
+                                                                : 'bg-blue-500/10 text-blue-500' // Esto cubrirá 'transferencia', 'mercadopago', etc.
+                                                                }`}>
+                                                                {insc.modalidad === 'Crédito' && insc.pack?.metodo_pago === 'mercadopago' ? 'Online' : (insc.pack?.metodo_pago || 'N/A')}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                    {insc.pack === null && (
+                                                        <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest text-[#D4E655]">
+                                                            <span className={`px-1.5 py-0.5 rounded ${insc.metodo_pago?.toLowerCase() === 'efectivo'
+                                                                ? 'bg-green-500/10 text-green-500'
+                                                                : 'bg-blue-500/10 text-blue-500' // Esto cubrirá 'transferencia', 'mercadopago', etc.
+                                                                }`}>
+                                                                {insc.modalidad === 'Clase Suelta' && insc.metodo_pago === 'efectivo' ? 'efectivo' : (insc.metodo_pago || 'N/A')}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>}
                                             {showFinance && (
                                                 <button
                                                     onClick={async () => {

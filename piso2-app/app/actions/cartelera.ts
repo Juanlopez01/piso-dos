@@ -21,13 +21,11 @@ export async function inscribirAlumnoAction(claseId: string, tipoClase: string, 
         if (!session?.user) return { success: false, error: 'No estás autenticado.' }
         const uid = session.user.id;
 
-        // 1. Verificamos que no esté inscripto ya
         const { data: yaInscripto } = await supabaseAdmin.from('inscripciones')
             .select('id').eq('clase_id', claseId).eq('user_id', uid).maybeSingle();
 
         if (yaInscripto) return { success: false, error: 'Ya estás inscripto en esta clase.' };
 
-        // 2. Traemos la info de la clase para saber qué tipo de crédito descontar
         const { data: clase } = await supabaseAdmin.from('clases')
             .select('es_combinable, tipo_clase').eq('id', claseId).single();
 
@@ -40,81 +38,77 @@ export async function inscribirAlumnoAction(claseId: string, tipoClase: string, 
         let packUsadoId = null;
         let valorInscripcion = 0;
         let modalidadInsc = 'Crédito';
-        let metodoPagoFinal = 'efectivo'; // 🎯 DECLARADA AQUÍ
-        // 3. LÓGICA DE PASE EXCLUSIVO (Clases no combinables)
+        // 🎯 DECLARACIÓN ÚNICA DE LA VARIABLE
+        let metodoPagoFinal = 'credito';
+
         if (!esCombinable) {
             modalidadInsc = 'Pase Exclusivo';
 
-            // Chequeamos si tiene el pase específico
             const { data: miPase } = await supabaseAdmin.from('pases_exclusivos')
                 .select('*').eq('usuario_id', uid).eq('pase_referencia', paseReferencia).single();
 
             if (!miPase || miPase.cantidad < 1) return { success: false, error: 'No tenés pases exclusivos para esta clase.' };
 
-            // 🚀 RASTREO DEL PACK
             const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
-                .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago') // 🎯 PEDIMOS EL MÉTODO
+                .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago')
                 .eq('user_id', uid)
-                .eq('tipo_clase', 'exclusivo') // o tipoPackBusqueda en el otro bloque
+                .eq('tipo_clase', 'exclusivo')
                 .gt('creditos_restantes', 0)
                 .order('fecha_compra', { ascending: true })
                 .limit(1)
                 .maybeSingle();
 
-            let metodoPagoFinal = 'credito'; // Valor por defecto
-
             if (packActivo && packActivo.cantidad_inicial > 0) {
                 packUsadoId = packActivo.id;
                 valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
-
-                // 🎯 HERENCIA: Si el pack tiene método de pago, lo usamos para la inscripción
+                // 🎯 ACTUALIZACIÓN DE LA VARIABLE
                 metodoPagoFinal = packActivo.metodo_pago || 'credito';
 
-                const nuevosRestantes = packActivo.creditos_restantes - 1;
                 await supabaseAdmin.from('alumno_packs').update({
-                    creditos_restantes: nuevosRestantes,
-                    estado: nuevosRestantes === 0 ? 'agotado' : 'activo'
+                    creditos_restantes: packActivo.creditos_restantes - 1,
+                    estado: (packActivo.creditos_restantes - 1) === 0 ? 'agotado' : 'activo'
                 }).eq('id', packActivo.id);
             }
-            // Descontamos el pase
             await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', { p_usuario_id: uid, p_referencia: paseReferencia, p_cantidad: -1 });
 
-        }
-        // 4. LÓGICA DE CRÉDITO REGULAR / ESPECIAL
-        else {
+        } else {
             const campoCredito = isEspecial ? 'creditos_especiales' : 'creditos_regulares';
 
-            // Chequeamos si tiene saldo en el perfil
             const { data: perfil } = await supabaseAdmin.from('profiles').select(campoCredito).eq('id', uid).single();
             if (!perfil || (perfil as any)[campoCredito] < 1) return { success: false, error: 'No tenés créditos suficientes.' };
 
-            // 🚀 RASTREO DEL PACK (Igual que la recep)
             const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
-                .select('*').eq('user_id', uid).eq('tipo_clase', tipoPackBusqueda).gt('creditos_restantes', 0)
-                .order('fecha_compra', { ascending: true }).limit(1).maybeSingle();
+                .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago')
+                .eq('user_id', uid)
+                .eq('tipo_clase', tipoPackBusqueda)
+                .gt('creditos_restantes', 0)
+                .order('fecha_compra', { ascending: true })
+                .limit(1)
+                .maybeSingle();
 
             if (packActivo && packActivo.cantidad_inicial > 0) {
                 packUsadoId = packActivo.id;
                 valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
-                const nuevosRestantes = packActivo.creditos_restantes - 1;
+                // 🎯 ACTUALIZACIÓN DE LA VARIABLE
+                metodoPagoFinal = packActivo.metodo_pago || 'credito';
+
                 await supabaseAdmin.from('alumno_packs').update({
-                    creditos_restantes: nuevosRestantes,
-                    estado: nuevosRestantes === 0 ? 'agotado' : 'activo'
+                    creditos_restantes: packActivo.creditos_restantes - 1,
+                    estado: (packActivo.creditos_restantes - 1) === 0 ? 'agotado' : 'activo'
                 }).eq('id', packActivo.id);
             }
 
-            // Descontamos el crédito del perfil
             await supabaseAdmin.from('profiles').update({ [campoCredito]: (perfil as any)[campoCredito] - 1 }).eq('id', uid);
         }
 
-        // 5. INSERTAMOS LA INSCRIPCIÓN CON EL PRECIO Y EL MÉTODO REAL
+        // 5. INSERTAMOS LA INSCRIPCIÓN CON EL MÉTODO REAL
         const { error: errInsc } = await supabaseAdmin.from('inscripciones').insert({
             user_id: uid,
             clase_id: claseId,
             pack_usado_id: packUsadoId,
             modalidad: modalidadInsc,
             valor_credito: valorInscripcion,
-            metodo_pago: metodoPagoFinal, // 🎯 AQUÍ INYECTAMOS EL MÉTODO REAL
+            metodo_pago: metodoPagoFinal, // 🎯 AHORA TOMA EL VALOR CORRECTO
             presente: false,
             estado_asistencia: 'ausente'
         });
