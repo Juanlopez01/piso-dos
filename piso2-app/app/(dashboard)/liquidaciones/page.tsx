@@ -5,11 +5,11 @@ import { useEffect, useState, useMemo } from 'react'
 import useSWR from 'swr'
 import { format, subMonths, addMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { Wallet, Search, Loader2, ChevronDown, ChevronUp, Users, Calendar, DollarSign, Lock, FileSpreadsheet, CheckCircle2, X } from 'lucide-react'
+import { Wallet, Search, Loader2, ChevronDown, ChevronUp, Users, Calendar, DollarSign, Lock, FileSpreadsheet, CheckCircle2, X, Library } from 'lucide-react'
 import { useCash } from '@/context/CashContext'
 import Link from 'next/link'
 import { toast, Toaster } from 'sonner'
-import { pagarClaseProfeAction } from '@/app/actions/liquidaciones' // 🚀 Importamos la nueva action
+import { pagarClaseProfeAction } from '@/app/actions/liquidaciones'
 
 type ClaseLiquidacion = {
     id: string
@@ -20,7 +20,9 @@ type ClaseLiquidacion = {
     cant_alumnos: number
     total_clase: number
     pago_profe: number
-    pagado_profe: boolean // 🚀 Nueva propiedad
+    pagado_profe: boolean
+    profesor_nombre: string
+    alumnos_lista: { nombre: string; presente: boolean }[] // 🚀 Guardamos nombre y estado
 }
 
 type ProfeLiquidacion = {
@@ -29,6 +31,15 @@ type ProfeLiquidacion = {
     clases: ClaseLiquidacion[]
     total_pago: number
     total_recaudado: number
+}
+
+type GrupoClaseLiquidacion = {
+    nombre_grupo: string
+    profesor_nombre: string
+    clases: ClaseLiquidacion[]
+    total_pago: number
+    total_recaudado: number
+    cant_alumnos_total: number
 }
 
 const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
@@ -45,7 +56,7 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         .select(`
             id, nombre, inicio, tipo_acuerdo, valor_acuerdo, estado, pagado_profe,
             profesor:profiles!profesor_id(id, nombre_completo),
-            inscripciones ( valor_credito, presente )
+            inscripciones ( valor_credito, presente, nombre_invitado, user:profiles(nombre_completo) )
         `)
         .neq('estado', 'cancelada')
         .gte('inicio', `${prevMonth}-25`)
@@ -79,8 +90,16 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
             }
 
             const inscripcionesArreglo = Array.isArray(clase.inscripciones) ? clase.inscripciones : []
-            const cant_alumnos = inscripcionesArreglo.filter((i: any) => i.presente).length
+
+            // 🎯 AHORA SUMAMOS TODOS: PRESENTES Y AUSENTES
+            const cant_alumnos = inscripcionesArreglo.length
             const total_clase = inscripcionesArreglo.reduce((acc: number, insc: any) => acc + (Number(insc.valor_credito) || 0), 0)
+
+            const alumnos_lista = inscripcionesArreglo.map((i: any) => {
+                const nombreUsuario = Array.isArray(i.user) ? i.user[0]?.nombre_completo : i.user?.nombre_completo
+                const nombreFinal = nombreUsuario || i.nombre_invitado || 'Alumno Desconocido'
+                return { nombre: nombreFinal, presente: i.presente }
+            })
 
             let pago_profe = 0
             if (clase.tipo_acuerdo === 'fijo') {
@@ -98,7 +117,9 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                 cant_alumnos,
                 total_clase,
                 pago_profe,
-                pagado_profe: clase.pagado_profe || false // 🚀 Mapeamos la columna
+                pagado_profe: clase.pagado_profe || false,
+                profesor_nombre: profNombre,
+                alumnos_lista
             })
 
             liquidacionesPorProfe[profId].total_pago += pago_profe
@@ -132,9 +153,14 @@ export default function AdminLiquidacionesPage() {
     const [selectedMonth, setSelectedMonth] = useState(opcionesMeses[1])
     const [searchQuery, setSearchQuery] = useState('')
     const [expandedProf, setExpandedProf] = useState<string | null>(null)
+    const [expandedClase, setExpandedClase] = useState<string | null>(null)
 
-    // 🚀 Estados del Modal de Pago
+    const [vistaActiva, setVistaActiva] = useState<'docentes' | 'clases'>('docentes')
+
     const [modalPago, setModalPago] = useState<{ isOpen: boolean; clase: ClaseLiquidacion | null; nombreProfe: string }>({ isOpen: false, clase: null, nombreProfe: '' })
+
+    const [modalAlumnos, setModalAlumnos] = useState<{ isOpen: boolean; claseNombre: string; fecha: string; alumnos: { nombre: string, presente: boolean }[] }>({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })
+
     const [procesandoPago, setProcesandoPago] = useState(false)
 
     const { data, isLoading, error, mutate } = useSWR(
@@ -157,13 +183,44 @@ export default function AdminLiquidacionesPage() {
 
         if (res.success) {
             toast.success(`Pago de $${modalPago.clase.pago_profe} registrado correctamente.`)
-            mutate() // Refrescamos los datos
+            mutate()
             setModalPago({ isOpen: false, clase: null, nombreProfe: '' })
         } else {
             toast.error(res.error || 'Error al procesar el pago')
         }
         setProcesandoPago(false)
     }
+
+    const gruposDeClases = useMemo(() => {
+        if (!data?.profesores) return []
+
+        const todosLosGrupos: Record<string, GrupoClaseLiquidacion> = {}
+
+        data.profesores.forEach(profe => {
+            profe.clases.forEach(clase => {
+                const nombreLimpiado = clase.nombre.trim().toUpperCase()
+                const key = `${nombreLimpiado}-${clase.profesor_nombre}`
+
+                if (!todosLosGrupos[key]) {
+                    todosLosGrupos[key] = {
+                        nombre_grupo: clase.nombre,
+                        profesor_nombre: clase.profesor_nombre,
+                        clases: [],
+                        total_pago: 0,
+                        total_recaudado: 0,
+                        cant_alumnos_total: 0
+                    }
+                }
+
+                todosLosGrupos[key].clases.push(clase)
+                todosLosGrupos[key].total_pago += clase.pago_profe
+                todosLosGrupos[key].total_recaudado += clase.total_clase
+                todosLosGrupos[key].cant_alumnos_total += clase.cant_alumnos
+            })
+        })
+
+        return Object.values(todosLosGrupos).sort((a, b) => a.nombre_grupo.localeCompare(b.nombre_grupo))
+    }, [data])
 
     if (loadingContext || isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
@@ -181,7 +238,8 @@ export default function AdminLiquidacionesPage() {
     if (error) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-red-500 font-bold uppercase">Error al cargar liquidaciones</div>
 
     const profesores = data?.profesores || []
-    const filtrados = profesores.filter(p => p.nombre.toLowerCase().includes(searchQuery.toLowerCase()))
+    const filtradosProfes = profesores.filter(p => p.nombre.toLowerCase().includes(searchQuery.toLowerCase()))
+    const filtradosClases = gruposDeClases.filter(g => g.nombre_grupo.toLowerCase().includes(searchQuery.toLowerCase()) || g.profesor_nombre.toLowerCase().includes(searchQuery.toLowerCase()))
 
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
@@ -194,19 +252,19 @@ export default function AdminLiquidacionesPage() {
                         <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.3em] uppercase">Panel de Pagos</span>
                     </div>
                     <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white mb-1">
-                        Liquidaciones Staff
+                        Liquidaciones
                     </h1>
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
                     <div className="relative w-full sm:w-64">
                         <Search className="absolute left-3 top-3.5 text-gray-500" size={16} />
-                        <input type="text" placeholder="Buscar profesor..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-10 text-white text-sm outline-none focus:border-[#D4E655] transition-colors" />
+                        <input type="text" placeholder={vistaActiva === 'docentes' ? "Buscar profesor..." : "Buscar clase o profe..."} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-10 text-white text-sm outline-none focus:border-[#D4E655] transition-colors" />
                     </div>
-                    <select value={selectedMonth} onChange={(e) => { setSelectedMonth(e.target.value); setExpandedProf(null); }} className="w-full sm:w-auto bg-[#111] border border-[#D4E655]/30 rounded-xl p-3 text-white text-sm font-bold uppercase outline-none focus:border-[#D4E655] appearance-none">
+                    <select value={selectedMonth} onChange={(e) => { setSelectedMonth(e.target.value); setExpandedProf(null); setExpandedClase(null); }} className="w-full sm:w-auto bg-[#111] border border-[#D4E655]/30 rounded-xl p-3 text-white text-sm font-bold uppercase outline-none focus:border-[#D4E655] appearance-none">
                         {opcionesMeses.map(mes => {
                             const [y, m] = mes.split('-')
-                            const date = new Date(parseInt(y), parseInt(m) - 1, 15)
+                            const date = new Date(Number(y), Number(m) - 1, 15)
                             return <option key={mes} value={mes}>{format(date, "MMMM yyyy", { locale: es })}</option>
                         })}
                     </select>
@@ -216,149 +274,373 @@ export default function AdminLiquidacionesPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                 <div className="bg-[#111] border border-white/5 p-6 rounded-2xl flex items-center justify-between">
                     <div>
-                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">A Pagar este Mes (Profes)</p>
+                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">A Pagar este Mes</p>
                         <p className="text-3xl font-black text-[#D4E655]">${data?.totalGeneralPagar.toLocaleString()}</p>
                     </div>
                     <div className="w-12 h-12 rounded-full bg-[#D4E655]/10 flex items-center justify-center"><DollarSign className="text-[#D4E655]" /></div>
                 </div>
                 <div className="bg-[#111] border border-white/5 p-6 rounded-2xl flex items-center justify-between">
                     <div>
-                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Movido Contable</p>
+                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Recaudado Bruto</p>
                         <p className="text-3xl font-black text-white">${data?.totalGeneralRecaudado.toLocaleString()}</p>
                     </div>
                     <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center"><Wallet className="text-gray-400" /></div>
                 </div>
             </div>
 
+            <div className="flex gap-4 border-b border-white/10 mb-6 pb-4">
+                <button
+                    onClick={() => setVistaActiva('docentes')}
+                    className={`flex items-center gap-2 text-xs font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all ${vistaActiva === 'docentes' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white bg-[#111]'}`}
+                >
+                    <Users size={16} /> Resumen por Docente
+                </button>
+                <button
+                    onClick={() => setVistaActiva('clases')}
+                    className={`flex items-center gap-2 text-xs font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all ${vistaActiva === 'clases' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white bg-[#111]'}`}
+                >
+                    <Library size={16} /> Resumen por Clase
+                </button>
+            </div>
+
             <div className="space-y-4">
-                {filtrados.length === 0 ? (
-                    <div className="text-center py-20 bg-[#111]/50 rounded-3xl border border-dashed border-white/10">
-                        <Users className="mx-auto mb-3 text-gray-600" size={32} />
-                        <p className="text-sm font-bold uppercase text-gray-500">No hay liquidaciones</p>
-                        <p className="text-xs text-gray-600">No se encontraron clases para el filtro seleccionado.</p>
-                    </div>
-                ) : (
-                    filtrados.map((profe) => {
-                        const isOpen = expandedProf === profe.id
-                        return (
-                            <div key={profe.id} className={`bg-[#09090b] border ${isOpen ? 'border-[#D4E655]/30' : 'border-white/10'} rounded-2xl overflow-hidden transition-all duration-300`}>
-                                <button onClick={() => setExpandedProf(isOpen ? null : profe.id)} className="w-full p-5 flex flex-col md:flex-row justify-between items-start md:items-center bg-[#111]/50 hover:bg-[#111] transition-colors text-left gap-4">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-white font-black text-lg border border-white/10">{profe.nombre[0]}</div>
-                                        <div>
-                                            <h3 className="text-lg font-black text-white uppercase">{profe.nombre}</h3>
-                                            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">{profe.clases.length} clases dictadas</p>
+                {/* VISTA 1: AGRUPADO POR DOCENTES */}
+                {vistaActiva === 'docentes' && (
+                    filtradosProfes.length === 0 ? (
+                        <div className="text-center py-20 bg-[#111]/50 rounded-3xl border border-dashed border-white/10">
+                            <Users className="mx-auto mb-3 text-gray-600" size={32} />
+                            <p className="text-sm font-bold uppercase text-gray-500">No hay liquidaciones</p>
+                            <p className="text-xs text-gray-600">No se encontraron profesores para el mes seleccionado.</p>
+                        </div>
+                    ) : (
+                        filtradosProfes.map((profe) => {
+                            const isOpen = expandedProf === profe.id
+
+                            const clasesAgrupadas = profe.clases.reduce((acc: Record<string, ClaseLiquidacion[]>, clase) => {
+                                const key = clase.nombre
+                                if (!acc[key]) acc[key] = []
+                                acc[key].push(clase)
+                                return acc
+                            }, {})
+
+                            return (
+                                <div key={profe.id} className={`bg-[#09090b] border ${isOpen ? 'border-[#D4E655]/30' : 'border-white/10'} rounded-2xl overflow-hidden transition-all duration-300`}>
+                                    <button onClick={() => setExpandedProf(isOpen ? null : profe.id)} className="w-full p-5 flex flex-col md:flex-row justify-between items-start md:items-center bg-[#111]/50 hover:bg-[#111] transition-colors text-left gap-4">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-white font-black text-lg border border-white/10">{profe.nombre[0]}</div>
+                                            <div>
+                                                <h3 className="text-lg font-black text-white uppercase">{profe.nombre}</h3>
+                                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">{profe.clases.length} clases dictadas</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-6 w-full md:w-auto border-t md:border-t-0 border-white/10 pt-4 md:pt-0">
+                                            <div className="text-left md:text-right">
+                                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Liquidación</p>
+                                                <p className={`text-xl font-black ${isOpen ? 'text-[#D4E655]' : 'text-white'}`}>${profe.total_pago.toLocaleString()}</p>
+                                            </div>
+                                            {isOpen ? <ChevronUp className="text-gray-500 shrink-0 hidden md:block" /> : <ChevronDown className="text-gray-500 shrink-0 hidden md:block" />}
+                                        </div>
+                                    </button>
+
+                                    <div className={`transition-all duration-300 overflow-hidden ${isOpen ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                                        <div className="p-4 md:p-6 border-t border-white/5 bg-[#09090b]">
+                                            {Object.entries(clasesAgrupadas).map(([nombreGrupo, clasesList], index) => (
+                                                <div key={index} className="mb-8 last:mb-0">
+                                                    <h4 className="text-white font-black uppercase tracking-widest border-b border-white/10 pb-2 mb-4 text-sm flex items-center gap-2">
+                                                        <span className="w-2 h-2 rounded-full bg-[#D4E655]"></span>
+                                                        {nombreGrupo}
+                                                    </h4>
+
+                                                    <div className="hidden md:block overflow-x-auto bg-[#111] rounded-xl border border-white/5">
+                                                        <table className="w-full text-left border-collapse table-fixed">
+                                                            <thead>
+                                                                <tr className="text-[9px] font-black text-gray-500 uppercase tracking-widest border-b border-white/10 bg-white/5">
+                                                                    <th className="py-3 pl-4 w-[20%]">Fecha</th>
+                                                                    <th className="py-3 text-center w-[15%]">Acuerdo</th>
+                                                                    <th className="py-3 text-center w-[15%]">Inscriptos</th>
+                                                                    <th className="py-3 text-right w-[15%]">Recaudado</th>
+                                                                    <th className="py-3 text-right text-[#D4E655] w-[15%]">A Pagar</th>
+                                                                    <th className="py-3 text-center w-[20%] pr-4">Estado</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody className="divide-y divide-white/5 text-xs">
+                                                                {clasesList.map((clase) => {
+                                                                    const [fechaParte, horaParte] = clase.inicio.split('T')
+                                                                    const [a, m, d] = fechaParte.split('-')
+                                                                    const hora = horaParte ? horaParte.substring(0, 5) : '--:--'
+
+                                                                    return (
+                                                                        <tr key={clase.id} className="hover:bg-white/5 transition-colors group">
+                                                                            <td className="py-3 pl-4 text-white font-bold">{d}/{m} <span className="text-gray-500 ml-1">{hora}</span></td>
+                                                                            <td className="py-3 text-center text-gray-500 font-bold">{clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `$${clase.valor_acuerdo}`}</td>
+                                                                            <td className="py-3 text-center">
+                                                                                <button
+                                                                                    onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/{m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
+                                                                                    className="bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white transition-colors px-3 py-1 rounded flex items-center justify-center gap-1.5 w-fit mx-auto cursor-pointer"
+                                                                                    title="Ver lista de inscriptos"
+                                                                                >
+                                                                                    <Users size={12} /> {clase.cant_alumnos}
+                                                                                </button>
+                                                                            </td>
+                                                                            <td className="py-3 text-right text-gray-400">${clase.total_clase.toLocaleString()}</td>
+                                                                            <td className="py-3 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
+                                                                            <td className="py-3 text-center pr-4">
+                                                                                {clase.pagado_profe ? (
+                                                                                    <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[9px] font-black flex items-center justify-center gap-1 mx-auto cursor-not-allowed w-full max-w-[100px]">
+                                                                                        <CheckCircle2 size={12} /> OK
+                                                                                    </span>
+                                                                                ) : (
+                                                                                    <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: profe.nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors mx-auto block w-full max-w-[100px]">
+                                                                                        PAGAR
+                                                                                    </button>
+                                                                                )}
+                                                                            </td>
+                                                                        </tr>
+                                                                    )
+                                                                })}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+
+                                                    <div className="md:hidden space-y-2">
+                                                        {clasesList.map((clase) => {
+                                                            const [fechaParte, horaParte] = clase.inicio.split('T')
+                                                            const [a, m, d] = fechaParte.split('-')
+                                                            const hora = horaParte ? horaParte.substring(0, 5) : '--:--'
+
+                                                            return (
+                                                                <div key={clase.id} className="bg-[#111] p-3 rounded-xl border border-white/5">
+                                                                    <div className="flex justify-between items-start mb-2">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="bg-white/5 p-1.5 rounded"><Calendar size={14} className="text-gray-400" /></div>
+                                                                            <p className="text-white font-bold text-sm">{d}/{m} <span className="text-gray-500 text-xs">- {hora}hs</span></p>
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/{m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
+                                                                            className="bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1"
+                                                                        >
+                                                                            <Users size={10} /> {clase.cant_alumnos} pax
+                                                                        </button>
+                                                                    </div>
+                                                                    <div className="flex justify-between items-end pt-2 border-t border-white/5 mt-2">
+                                                                        <div>
+                                                                            <p className="text-[8px] text-gray-500 uppercase font-bold">Acuerdo: {clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `Fijo`}</p>
+                                                                            <p className="text-[9px] text-gray-400 mt-0.5">Recaudado: ${clase.total_clase.toLocaleString()}</p>
+                                                                        </div>
+                                                                        <div className="text-right flex flex-col items-end gap-2">
+                                                                            <div>
+                                                                                <p className="text-[8px] text-[#D4E655]/70 uppercase font-bold">A Pagar</p>
+                                                                                <p className="text-sm font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</p>
+                                                                            </div>
+                                                                            {clase.pagado_profe ? (
+                                                                                <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-0.5 rounded text-[8px] font-black flex items-center justify-center gap-1 cursor-not-allowed">
+                                                                                    <CheckCircle2 size={10} /> PAGADO
+                                                                                </span>
+                                                                            ) : (
+                                                                                <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: profe.nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors">
+                                                                                    PAGAR
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-6 w-full md:w-auto border-t md:border-t-0 border-white/10 pt-4 md:pt-0">
-                                        <div className="text-left md:text-right">
-                                            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Liquidación</p>
-                                            <p className={`text-xl font-black ${isOpen ? 'text-[#D4E655]' : 'text-white'}`}>${profe.total_pago.toLocaleString()}</p>
+                                </div>
+                            )
+                        })
+                    )
+                )}
+
+                {/* VISTA 2: AGRUPADO POR CLASES */}
+                {vistaActiva === 'clases' && (
+                    filtradosClases.length === 0 ? (
+                        <div className="text-center py-20 bg-[#111]/50 rounded-3xl border border-dashed border-white/10">
+                            <Library className="mx-auto mb-3 text-gray-600" size={32} />
+                            <p className="text-sm font-bold uppercase text-gray-500">No hay grupos de clase</p>
+                            <p className="text-xs text-gray-600">No se encontraron clases para el mes seleccionado.</p>
+                        </div>
+                    ) : (
+                        filtradosClases.map((grupo, idx) => {
+                            const isOpen = expandedClase === grupo.nombre_grupo + grupo.profesor_nombre
+
+                            return (
+                                <div key={idx} className={`bg-[#09090b] border ${isOpen ? 'border-blue-500/30' : 'border-white/10'} rounded-2xl overflow-hidden transition-all duration-300`}>
+                                    <button onClick={() => setExpandedClase(isOpen ? null : grupo.nombre_grupo + grupo.profesor_nombre)} className="w-full p-5 flex flex-col md:flex-row justify-between items-start md:items-center bg-[#111]/50 hover:bg-[#111] transition-colors text-left gap-4">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 font-black text-lg border border-blue-500/20">
+                                                <Library size={20} />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-lg font-black text-white uppercase">{grupo.nombre_grupo}</h3>
+                                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">
+                                                    Profe: <span className="text-gray-300">{grupo.profesor_nombre}</span> • {grupo.clases.length} clases
+                                                </p>
+                                            </div>
                                         </div>
-                                        {isOpen ? <ChevronUp className="text-gray-500 shrink-0 hidden md:block" /> : <ChevronDown className="text-gray-500 shrink-0 hidden md:block" />}
-                                    </div>
-                                </button>
+                                        <div className="flex items-center gap-6 w-full md:w-auto border-t md:border-t-0 border-white/10 pt-4 md:pt-0">
+                                            <div className="text-left md:text-right hidden sm:block">
+                                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Inscriptos</p>
+                                                <p className={`text-sm font-black text-white`}>{grupo.cant_alumnos_total} Alumnos</p>
+                                            </div>
+                                            <div className="text-left md:text-right">
+                                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">A liquidar</p>
+                                                <p className={`text-xl font-black ${isOpen ? 'text-[#D4E655]' : 'text-white'}`}>${grupo.total_pago.toLocaleString()}</p>
+                                            </div>
+                                            {isOpen ? <ChevronUp className="text-gray-500 shrink-0 hidden md:block" /> : <ChevronDown className="text-gray-500 shrink-0 hidden md:block" />}
+                                        </div>
+                                    </button>
 
-                                <div className={`transition-all duration-300 overflow-hidden ${isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                                    <div className="p-4 md:p-6 border-t border-white/5 bg-[#09090b]">
+                                    <div className={`transition-all duration-300 overflow-hidden ${isOpen ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                                        <div className="p-4 md:p-6 border-t border-white/5 bg-[#09090b]">
+                                            <div className="hidden md:block overflow-x-auto bg-[#111] rounded-xl border border-white/5">
+                                                <table className="w-full text-left border-collapse table-fixed">
+                                                    <thead>
+                                                        <tr className="text-[9px] font-black text-gray-500 uppercase tracking-widest border-b border-white/10 bg-white/5">
+                                                            <th className="py-3 pl-4 w-[20%]">Fecha</th>
+                                                            <th className="py-3 text-center w-[15%]">Acuerdo</th>
+                                                            <th className="py-3 text-center w-[15%]">Inscriptos</th>
+                                                            <th className="py-3 text-right w-[15%]">Recaudado</th>
+                                                            <th className="py-3 text-right text-[#D4E655] w-[15%]">A Pagar</th>
+                                                            <th className="py-3 text-center w-[20%] pr-4">Estado</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-white/5 text-xs">
+                                                        {grupo.clases.map((clase) => {
+                                                            const [fechaParte, horaParte] = clase.inicio.split('T')
+                                                            const [a, m, d] = fechaParte.split('-')
+                                                            const hora = horaParte ? horaParte.substring(0, 5) : '--:--'
 
-                                        {/* TABLA DESKTOP */}
-                                        <div className="hidden md:block overflow-x-auto">
-                                            <table className="w-full text-left border-collapse">
-                                                <thead>
-                                                    <tr className="text-[9px] font-black text-gray-500 uppercase tracking-widest border-b border-white/10">
-                                                        <th className="pb-3 pl-2">Fecha</th>
-                                                        <th className="pb-3">Clase</th>
-                                                        <th className="pb-3 text-center">Acuerdo</th>
-                                                        <th className="pb-3 text-center">Pax</th>
-                                                        <th className="pb-3 text-right">Recaudado</th>
-                                                        <th className="pb-3 text-right text-[#D4E655]">A Pagar</th>
-                                                        <th className="pb-3 text-center w-24">Estado</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-white/5 text-xs">
-                                                    {profe.clases.map((clase) => {
-                                                        const [fechaParte, horaParte] = clase.inicio.split('T')
-                                                        const [a, m, d] = fechaParte.split('-')
-                                                        const hora = horaParte ? horaParte.substring(0, 5) : '--:--'
+                                                            return (
+                                                                <tr key={clase.id} className="hover:bg-white/5 transition-colors group">
+                                                                    <td className="py-3 pl-4 text-white font-bold">{d}/{m} <span className="text-gray-500 ml-1">{hora}</span></td>
+                                                                    <td className="py-3 text-center text-gray-500 font-bold">{clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `$${clase.valor_acuerdo}`}</td>
+                                                                    <td className="py-3 text-center">
+                                                                        <button
+                                                                            onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/${m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
+                                                                            className="bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white transition-colors px-3 py-1 rounded flex items-center justify-center gap-1.5 w-fit mx-auto cursor-pointer"
+                                                                            title="Ver lista de inscriptos"
+                                                                        >
+                                                                            <Users size={12} /> {clase.cant_alumnos}
+                                                                        </button>
+                                                                    </td>
+                                                                    <td className="py-3 text-right text-gray-400">${clase.total_clase.toLocaleString()}</td>
+                                                                    <td className="py-3 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
+                                                                    <td className="py-3 text-center pr-4">
+                                                                        {clase.pagado_profe ? (
+                                                                            <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[9px] font-black flex items-center justify-center gap-1 mx-auto cursor-not-allowed w-full max-w-[100px]">
+                                                                                <CheckCircle2 size={12} /> OK
+                                                                            </span>
+                                                                        ) : (
+                                                                            <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: grupo.profesor_nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors mx-auto block w-full max-w-[100px]">
+                                                                                PAGAR
+                                                                            </button>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            )
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
 
-                                                        return (
-                                                            <tr key={clase.id} className="hover:bg-white/5 transition-colors group">
-                                                                <td className="py-3 pl-2 text-gray-400 font-medium">{d}/{m} <span className="opacity-50 ml-1">{hora}</span></td>
-                                                                <td className="py-3 font-bold text-white uppercase">{clase.nombre}</td>
-                                                                <td className="py-3 text-center text-gray-500 font-bold">{clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `$${clase.valor_acuerdo}`}</td>
-                                                                <td className="py-3 text-center"><span className="bg-white/10 px-2 py-0.5 rounded flex items-center justify-center gap-1 w-fit mx-auto"><Users size={10} /> {clase.cant_alumnos}</span></td>
-                                                                <td className="py-3 text-right text-gray-400">${clase.total_clase.toLocaleString()}</td>
-                                                                <td className="py-3 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
-                                                                <td className="py-3 text-center">
+                                            <div className="md:hidden space-y-2">
+                                                {grupo.clases.map((clase) => {
+                                                    const [fechaParte, horaParte] = clase.inicio.split('T')
+                                                    const [a, m, d] = fechaParte.split('-')
+                                                    const hora = horaParte ? horaParte.substring(0, 5) : '--:--'
+
+                                                    return (
+                                                        <div key={clase.id} className="bg-[#111] p-3 rounded-xl border border-white/5">
+                                                            <div className="flex justify-between items-start mb-2">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="bg-white/5 p-1.5 rounded"><Calendar size={14} className="text-gray-400" /></div>
+                                                                    <p className="text-white font-bold text-sm">{d}/{m} <span className="text-gray-500 text-xs">- {hora}hs</span></p>
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/{m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
+                                                                    className="bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1"
+                                                                >
+                                                                    <Users size={10} /> {clase.cant_alumnos} pax
+                                                                </button>
+                                                            </div>
+                                                            <div className="flex justify-between items-end pt-2 border-t border-white/5 mt-2">
+                                                                <div>
+                                                                    <p className="text-[8px] text-gray-500 uppercase font-bold">Acuerdo: {clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `Fijo`}</p>
+                                                                    <p className="text-[9px] text-gray-400 mt-0.5">Recaudado: ${clase.total_clase.toLocaleString()}</p>
+                                                                </div>
+                                                                <div className="text-right flex flex-col items-end gap-4">
+                                                                    <div>
+                                                                        <p className="text-[8px] text-[#D4E655]/70 uppercase font-bold">A Pagar</p>
+                                                                        <p className="text-sm font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</p>
+                                                                    </div>
                                                                     {clase.pagado_profe ? (
-                                                                        <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[9px] font-black flex items-center justify-center gap-1 mx-auto cursor-not-allowed">
-                                                                            <CheckCircle2 size={12} /> PAGADO
+                                                                        <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-0.5 rounded text-[8px] font-black w-12 flex items-center justify-center gap-1 cursor-not-allowed">
+                                                                            <CheckCircle2 size={10} /> PAGADO
                                                                         </span>
                                                                     ) : (
-                                                                        <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: profe.nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors mx-auto block">
+                                                                        <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: grupo.profesor_nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors">
                                                                             PAGAR
                                                                         </button>
                                                                     )}
-                                                                </td>
-                                                            </tr>
-                                                        )
-                                                    })}
-                                                </tbody>
-                                            </table>
-                                        </div>
-
-                                        {/* TARJETAS MOBILE */}
-                                        <div className="md:hidden space-y-2">
-                                            {profe.clases.map((clase) => {
-                                                const [fechaParte, horaParte] = clase.inicio.split('T')
-                                                const [a, m, d] = fechaParte.split('-')
-                                                const hora = horaParte ? horaParte.substring(0, 5) : '--:--'
-
-                                                return (
-                                                    <div key={clase.id} className="bg-[#111] p-3 rounded-xl border border-white/5">
-                                                        <div className="flex justify-between items-start mb-2">
-                                                            <div>
-                                                                <h4 className="font-bold text-white uppercase text-xs">{clase.nombre}</h4>
-                                                                <p className="text-[10px] text-gray-400 mt-0.5"><Calendar size={10} className="inline mr-1" /> {d}/{m} - {hora}hs</p>
-                                                            </div>
-                                                            <span className="bg-white/10 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1"><Users size={10} /> {clase.cant_alumnos}</span>
-                                                        </div>
-                                                        <div className="flex justify-between items-end pt-2 border-t border-white/5 mt-2">
-                                                            <div>
-                                                                <p className="text-[8px] text-gray-500 uppercase font-bold">Acuerdo: {clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `Fijo`}</p>
-                                                                <p className="text-[9px] text-gray-400 mt-0.5">Recaudado: ${clase.total_clase.toLocaleString()}</p>
-                                                            </div>
-                                                            <div className="text-right flex flex-col items-end gap-2">
-                                                                <div>
-                                                                    <p className="text-[8px] text-[#D4E655]/70 uppercase font-bold">A Pagar</p>
-                                                                    <p className="text-sm font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</p>
                                                                 </div>
-                                                                {clase.pagado_profe ? (
-                                                                    <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-0.5 rounded text-[8px] font-black flex items-center justify-center gap-1 cursor-not-allowed">
-                                                                        <CheckCircle2 size={10} /> PAGADO
-                                                                    </span>
-                                                                ) : (
-                                                                    <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: profe.nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors">
-                                                                        PAGAR CLASE
-                                                                    </button>
-                                                                )}
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                )
-                                            })}
+                                                    )
+                                                })}
+                                            </div>
                                         </div>
-
                                     </div>
                                 </div>
-                            </div>
-                        )
-                    })
+                            )
+                        })
+                    )
                 )}
             </div>
 
-            {/* 🚀 MODAL DE PAGO FLOTANTE */}
+            {/* 🚀 MODAL FLOTANTE DE ALUMNOS INSCRIPTOS */}
+            {modalAlumnos.isOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setModalAlumnos({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })}>
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-sm rounded-3xl p-6 shadow-2xl relative flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setModalAlumnos({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                            <X size={20} />
+                        </button>
+
+                        <div className="mb-4 pr-6">
+                            <h3 className="text-lg font-black text-white uppercase tracking-tighter flex items-center gap-2">
+                                <Users className="text-[#D4E655]" size={20} />
+                                Alumnos Inscriptos
+                            </h3>
+                            <p className="text-xs text-gray-400 mt-1 font-medium">{modalAlumnos.claseNombre} • {modalAlumnos.fecha}</p>
+                        </div>
+
+                        <div className="bg-[#111] rounded-xl border border-white/5 overflow-y-auto custom-scrollbar flex-1 p-2">
+                            {modalAlumnos.alumnos.length > 0 ? (
+                                <ul className="divide-y divide-white/5">
+                                    {modalAlumnos.alumnos.sort((a, b) => a.nombre.localeCompare(b.nombre)).map((alumno, idx) => (
+                                        <li key={idx} className={`py-3 px-3 text-xs font-bold uppercase tracking-wide flex items-center gap-3 ${alumno.presente ? 'text-gray-300' : 'text-gray-600'}`}>
+                                            <div className={`w-1.5 h-1.5 rounded-full ${alumno.presente ? 'bg-[#D4E655]' : 'bg-red-500'}`} />
+                                            {alumno.nombre}
+                                            {!alumno.presente && (
+                                                <span className="text-[9px] bg-red-500/10 text-red-500 px-1.5 py-0.5 rounded border border-red-500/20 ml-auto">Ausente</span>
+                                            )}
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="text-xs text-gray-500 text-center py-6 font-bold uppercase">Nadie se inscribió a esta clase</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL DE PAGO FLOTANTE */}
             {modalPago.isOpen && modalPago.clase && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => !procesandoPago && setModalPago({ isOpen: false, clase: null, nombreProfe: '' })}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-sm rounded-3xl p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>

@@ -9,7 +9,7 @@ import {
     Clock, MapPin, User, ChevronRight, Image as ImageIcon,
     Send, BellRing, X, Percent, CheckCircle2, AlertCircle, Coins,
     CalendarDays, Activity, XCircle, FileText, Eye, CheckSquare,
-    Phone, // 🚀 IMPORTAMOS EL ÍCONO DEL TELÉFONO
+    Phone,
     Search
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
@@ -42,7 +42,7 @@ type Miembro = {
     id: string
     nombre_completo: string
     email: string
-    telefono?: string | null // 🚀 AGREGAMOS EL TELÉFONO AL TIPO
+    telefono?: string | null
     porcentaje_beca_compania?: number
     pago_compania_al_dia?: boolean
     totalAbonado?: number
@@ -234,7 +234,7 @@ export default function CompaniaDetallePage() {
 
         const { data: dataMiembros } = await supabase
             .from('perfiles_companias')
-            .select('perfil_id, perfil:profiles(id, nombre_completo, email, telefono, porcentaje_beca_compania)') // 🚀 PEDIMOS EL TELÉFONO
+            .select('perfil_id, perfil:profiles(id, nombre_completo, email, telefono, porcentaje_beca_compania)')
             .eq('compania_id', companiaId)
 
         const configData = await obtenerPreciosCompaniaAction(companiaId);
@@ -292,7 +292,6 @@ export default function CompaniaDetallePage() {
             setMiembros(miembrosCompletos)
         }
 
-        // Cargar todos los alumnos para la pestaña de padrón
         if (['admin', 'recepcion'].includes(userRole || '')) {
             const { data: alumnos } = await supabase.from('profiles').select('id, nombre_completo, email, telefono').eq('rol', 'alumno').order('nombre_completo')
             if (alumnos) setAllAlumnos(alumnos)
@@ -458,13 +457,19 @@ export default function CompaniaDetallePage() {
 
     if (!compania) return null
 
-    // 🚀 DEFINIMOS QUIÉN TIENE LOS "SÚPER PODERES" DENTRO DE ESTE GRUPO
     const isStaff = ['admin', 'recepcion', 'auxiliar'].includes(userRole || '') ||
         (userRole === 'profesor' && compania.coordinador_id === userId) ||
         (userRole === 'coordinador' && permisosCoordinador.includes(compania.id))
 
-    // 🚀 ADMINS/RECEP VEN TODO, COORDINADORES NO VEN PAGOS
     const canSeeFinance = ['admin', 'recepcion'].includes(userRole || '')
+
+    // 🎯 LÓGICA DE LIQUIDACIÓN DEL 60% PARA GRUPOS ESPECÍFICOS
+    const gruposLiquidables = ['ballroom', 'c.i.a', 'joven ballet'];
+    const aplicaLiquidacion = gruposLiquidables.some(nombre =>
+        compania.nombre.toLowerCase().includes(nombre)
+    );
+    const totalRecaudadoMes = miembros.reduce((acc, m) => acc + (m.totalAbonado || 0), 0);
+    const liquidacionDocente = totalRecaudadoMes * 0.60;
 
     const miPerfilInfo = miembros.find(m => m.id === userId)
     const deboCompania = !miPerfilInfo?.pago_compania_al_dia && userRole === 'alumno'
@@ -503,7 +508,6 @@ export default function CompaniaDetallePage() {
                             </div>
                         </div>
 
-                        {/* 🚀 SELECTOR DE MES Y AÑO */}
                         {isStaff && (
                             <div className="flex items-center gap-2 bg-black/40 border border-white/10 p-1.5 rounded-xl shadow-inner w-fit">
                                 <CalendarDays size={16} className="text-gray-500 ml-2" />
@@ -536,7 +540,6 @@ export default function CompaniaDetallePage() {
                             <Calendar size={14} /> Clases del Mes
                         </button>
 
-                        {/* 🚀 ADMINS, RECEPCIÓN Y ALUMNOS VEN PADRÓN, COORDINADOR Y PROFE NO VEN PADRÓN */}
                         {canSeeFinance && (
                             <button
                                 onClick={() => setActiveTab('miembros')}
@@ -700,6 +703,32 @@ export default function CompaniaDetallePage() {
                 {/* 3. PESTAÑA: MIEMBROS */}
                 {canSeeFinance && activeTab === 'miembros' && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+
+                        {/* 🎯 TARJETA DE LIQUIDACIÓN DOCENTE (SOLO BALLROOM, CIA, JOVEN BALLET) */}
+                        {aplicaLiquidacion && (
+                            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 shadow-lg shadow-emerald-500/5 animate-in zoom-in-95 duration-200">
+                                <div>
+                                    <h4 className="text-white font-black uppercase text-sm flex items-center gap-2">
+                                        <Coins size={16} className="text-emerald-500" /> Liquidación Docente (60%)
+                                    </h4>
+                                    <p className="text-gray-400 text-[10px] sm:text-xs mt-1">
+                                        Porcentaje fijo calculado sobre el pozo total del mes seleccionado
+                                    </p>
+                                </div>
+                                <div className="flex gap-6 text-right items-center">
+                                    <div>
+                                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Recaudado</p>
+                                        <p className="text-sm font-black text-white">${totalRecaudadoMes.toLocaleString()}</p>
+                                    </div>
+                                    <div className="h-8 w-px bg-white/10 hidden sm:block"></div>
+                                    <div>
+                                        <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">A Pagar al Profe</p>
+                                        <p className="text-xl font-black text-emerald-400">${liquidacionDocente.toLocaleString()}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* 🚀 BOTÓN MÁGICO DE INSCRIPCIÓN MASIVA AL PADRÓN */}
                         {miembros.length > 0 && (
                             <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 shadow-lg shadow-blue-500/5">
@@ -735,7 +764,6 @@ export default function CompaniaDetallePage() {
                                                 </div>
                                                 <div className="min-w-0">
                                                     <p className="text-sm font-bold text-white uppercase truncate">{miembro.nombre_completo}</p>
-                                                    {/* 🚀 ACÁ RENDERIZAMOS EL TELÉFONO SOLICITADO */}
                                                     <p className="text-[10px] text-gray-500 truncate flex items-center gap-1 mt-0.5">
                                                         <Phone size={10} className="text-blue-400" />
                                                         {miembro.telefono || 'Sin teléfono'}

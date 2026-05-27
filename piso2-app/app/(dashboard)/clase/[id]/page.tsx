@@ -617,7 +617,7 @@ export default function ClaseDetallePage() {
                                                         </div>
                                                     )}
                                                 </div>}
-                                            {showFinance && (
+                                            {showFinance && !esGrupoOFormacion && (
                                                 <button
                                                     onClick={async () => {
                                                         const nuevoMontoStr = prompt(`Editar el monto para ${nombreMostrar}:`, String(insc.valor_credito));
