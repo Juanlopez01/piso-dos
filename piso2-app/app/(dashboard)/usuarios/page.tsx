@@ -8,7 +8,7 @@ import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
     Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
-    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2
+    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2, Library
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { format } from 'date-fns'
@@ -22,7 +22,7 @@ import {
     asignarPackAction,
     cobrarLigaAction,
     cobrarCompaniaAction,
-    ajustarCreditosAction // 🚀 IMPORTAMOS LA NUEVA ACCIÓN
+    ajustarCreditosAction
 } from '@/app/actions/usuarios'
 
 type Ritmo = { id: string; nombre: string }
@@ -155,7 +155,6 @@ function UsuariosContent() {
     const [isCobroLigaOpen, setIsCobroLigaOpen] = useState<boolean>(false)
     const [isCobroCompaniaOpen, setIsCobroCompaniaOpen] = useState<boolean>(false)
 
-    // 🚀 ESTADOS PARA EL AJUSTE MANUAL DE CRÉDITOS
     const [isAjustarCreditosOpen, setIsAjustarCreditosOpen] = useState(false)
     const [creditosForm, setCreditosForm] = useState({
         regulares: 0,
@@ -179,6 +178,10 @@ function UsuariosContent() {
     const [historialPagos, setHistorialPagos] = useState<any[]>([])
     const [loadingPagos, setLoadingPagos] = useState(false)
     const [mostrarMasPagos, setMostrarMasPagos] = useState(false)
+
+    // 🚀 ESTADOS PARA EL HISTORIAL DE CLASES
+    const [historialClases, setHistorialClases] = useState<any[]>([])
+    const [loadingClases, setLoadingClases] = useState(false)
 
     const [ligaStatsRango, setLigaStatsRango] = useState('mes')
     const [ligaStats, setLigaStats] = useState<any>(null)
@@ -318,6 +321,7 @@ function UsuariosContent() {
         setUserStats(null)
         setLigaStats(null)
         setHistorialPagos([])
+        setHistorialClases([]) // 🚀 Reiniciamos el estado
         setMostrarMasPagos(false)
         setEditForm({
             obs: user.staff_observations || '',
@@ -329,6 +333,7 @@ function UsuariosContent() {
         setIsDetailOpen(true)
         setLoadingStats(true)
         setLoadingPagos(true)
+        setLoadingClases(true) // 🚀 Activamos el loader
 
         try {
             const { data: stats, error } = await supabase.rpc('get_user_metrics_v2', { p_id: user.id, p_role: user.rol })
@@ -337,6 +342,28 @@ function UsuariosContent() {
             if (user.rol === 'alumno' && (user.nivel_liga === 1 || user.nivel_liga === 2 || user.nivel_liga === '1' || user.nivel_liga === '2')) {
                 setLigaStatsRango('mes')
                 fetchLigaStats(user.id, 'mes')
+            }
+
+            // 🚀 BÚSQUEDA DE LAS ÚLTIMAS 10 CLASES
+            if (user.rol === 'alumno') {
+                const { data: inscData } = await supabase
+                    .from('inscripciones')
+                    .select('id, presente, estado_asistencia, created_at, clase:clases(nombre, inicio)')
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false })
+                    .limit(10);
+
+                if (inscData) {
+                    // Las ordenamos por la fecha de la clase para que queden perfectas cronológicamente
+                    const sortedInsc = inscData.sort((a: any, b: any) => {
+                        const dateA = Array.isArray(a.clase) ? a.clase[0]?.inicio : a.clase?.inicio;
+                        const dateB = Array.isArray(b.clase) ? b.clase[0]?.inicio : b.clase?.inicio;
+                        const timeA = dateA ? new Date(dateA).getTime() : 0;
+                        const timeB = dateB ? new Date(dateB).getTime() : 0;
+                        return timeB - timeA;
+                    });
+                    setHistorialClases(sortedInsc);
+                }
             }
 
             const nombreBusqueda = user.nombre_completo ? user.nombre_completo.trim() : '';
@@ -462,6 +489,7 @@ function UsuariosContent() {
 
         setLoadingStats(false)
         setLoadingPagos(false)
+        setLoadingClases(false) // 🚀 Apagamos el loader
     }
 
     const toggleInterest = (ritmoId: string | number) => {
@@ -514,7 +542,6 @@ function UsuariosContent() {
         }
     }
 
-    // 🚀 LÓGICA PARA EL BOTÓN DE AJUSTAR CRÉDITOS MANUALMENTE
     const handleAjustarCreditos = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedUser) return;
@@ -908,7 +935,7 @@ function UsuariosContent() {
                                 Rol: {selectedUser.rol}
                             </span>
 
-                            {/* 🚀 PANEL LLAVERO DEL COORDINADOR */}
+                            {/* PANEL LLAVERO DEL COORDINADOR */}
                             {selectedUser.rol === 'coordinador' && (
                                 <div className="w-full bg-[#09090b] border border-pink-500/20 rounded-2xl p-4 mb-6 relative overflow-hidden">
                                     <div className="absolute top-0 right-0 w-16 h-16 bg-pink-500/10 blur-xl rounded-full" />
@@ -918,13 +945,11 @@ function UsuariosContent() {
                                     <p className="text-[9px] text-gray-500 leading-tight mb-3">Tildá a qué grupos tiene permiso para gestionar este coordinador.</p>
 
                                     <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar pr-1 relative z-10">
-                                        {/* Permiso Especial de La Liga */}
                                         <label className="flex items-center justify-between p-2 bg-[#111] rounded-lg border border-white/5 cursor-pointer hover:bg-white/5 transition-colors">
                                             <span className="text-[10px] font-bold text-white uppercase">La Liga</span>
                                             <input type="checkbox" checked={editForm.llaves_acceso.includes('liga')} onChange={() => toggleLlaveAcceso('liga')} className="accent-pink-500" />
                                         </label>
 
-                                        {/* Permisos de cada Compañía/Grupo */}
                                         {listadoCompaniasMaestro.map((cia: CompaniaBasica) => (
                                             <label key={cia.id} className="flex items-center justify-between p-2 bg-[#111] rounded-lg border border-white/5 cursor-pointer hover:bg-white/5 transition-colors">
                                                 <span className="text-[10px] font-bold text-white uppercase truncate pr-2">{cia.nombre}</span>
@@ -961,7 +986,6 @@ function UsuariosContent() {
                                             <CreditCard size={16} className="text-[#D4E655]" /> Estado de Cuenta
                                         </h4>
 
-                                        {/* 🚀 BOTÓN DE AJUSTAR CRÉDITOS (SOLO ADMIN) */}
                                         {isAdmin && (
                                             <button onClick={() => {
                                                 setCreditosForm({
@@ -1040,6 +1064,65 @@ function UsuariosContent() {
                                         ) : (
                                             <div className="text-center py-6 bg-[#111] rounded-xl border border-white/5">
                                                 <p className="text-[10px] font-bold text-gray-500 uppercase">No hay historial reciente registrado.</p>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* 🚀 NUEVO: HISTORIAL DE LAS ÚLTIMAS 10 CLASES */}
+                                    <h4 className="text-sm font-black text-white uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-white/5 pb-2 mt-6">
+                                        <Calendar size={16} className="text-[#D4E655]" /> Últimas 10 Clases
+                                    </h4>
+                                    <div className="space-y-2 mb-8">
+                                        {loadingClases ? (
+                                            <div className="flex justify-center py-4"><Loader2 className="animate-spin text-[#D4E655]" size={16} /></div>
+                                        ) : historialClases.length > 0 ? (
+                                            historialClases.map((insc: any) => {
+                                                const clase = Array.isArray(insc.clase) ? insc.clase[0] : insc.clase;
+                                                if (!clase) return null;
+
+                                                const fechaInicio = new Date(clase.inicio);
+                                                const isPasada = fechaInicio < new Date();
+
+                                                return (
+                                                    <div key={insc.id} className="bg-[#111] border border-white/5 p-3 rounded-xl flex items-center justify-between hover:bg-white/5 transition-colors">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-blue-500/10 text-blue-400">
+                                                                <Library size={14} />
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-xs font-bold text-white uppercase line-clamp-1">{clase.nombre}</p>
+                                                                <div className="flex items-center gap-2 mt-1.5">
+                                                                    <span className="text-[9px] text-gray-500 uppercase font-bold">
+                                                                        {format(fechaInicio, "dd MMM yyyy", { locale: es })} • {format(fechaInicio, "HH:mm")}hs
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="shrink-0 text-right">
+                                                            {isPasada ? (
+                                                                insc.estado_asistencia === 'presente' ? (
+                                                                    <span className="bg-green-500/10 text-green-500 px-2 py-1 rounded text-[9px] font-black uppercase border border-green-500/20">Presente</span>
+                                                                ) : insc.estado_asistencia === 'ausente' ? (
+                                                                    <span className="bg-red-500/10 text-red-500 px-2 py-1 rounded text-[9px] font-black uppercase border border-red-500/20">Ausente</span>
+                                                                ) : insc.estado_asistencia === 'justificada' ? (
+                                                                    <span className="bg-blue-500/10 text-blue-500 px-2 py-1 rounded text-[9px] font-black uppercase border border-blue-500/20">Justificada</span>
+                                                                ) : insc.estado_asistencia === 'media_falta' ? (
+                                                                    <span className="bg-yellow-500/10 text-yellow-500 px-2 py-1 rounded text-[9px] font-black uppercase border border-yellow-500/20">Media Falta</span>
+                                                                ) : insc.estado_asistencia === 'saf' ? (
+                                                                    <span className="bg-purple-500/10 text-purple-400 px-2 py-1 rounded text-[9px] font-black uppercase border border-purple-500/20">SAF</span>
+                                                                ) : (
+                                                                    <span className="text-[9px] text-gray-500 uppercase font-bold">Sin Marcar</span>
+                                                                )
+                                                            ) : (
+                                                                <span className="bg-white/10 text-white px-2 py-1 rounded text-[9px] font-black uppercase border border-white/20">Próxima</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })
+                                        ) : (
+                                            <div className="text-center py-6 bg-[#111] rounded-xl border border-white/5">
+                                                <p className="text-[10px] font-bold text-gray-500 uppercase">Aún no se anotó a ninguna clase.</p>
                                             </div>
                                         )}
                                     </div>
@@ -1206,7 +1289,7 @@ function UsuariosContent() {
                 </div>
             )}
 
-            {/* 🚀 NUEVO MODAL: AJUSTAR CRÉDITOS MANUALMENTE */}
+            {/* MODAL: AJUSTAR CRÉDITOS MANUALMENTE */}
             {isAdmin && isAjustarCreditosOpen && selectedUser && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-6 shadow-2xl relative max-h-[90vh] flex flex-col">

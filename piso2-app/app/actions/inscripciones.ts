@@ -239,16 +239,18 @@ export async function procesarInscripcionAction(payload: any) {
         let saldoPendienteCalculado = payload.p_saldo_pendiente || 0;
         let packUsadoId = null;
 
-        // 🚀 VARIABLE MAESTRA: Por defecto toma el método enviado en el payload
         let metodoPagoFinal = payload.p_metodo_pago || 'efectivo';
 
+        // =========================================================================
+        // 3. LÓGICA DE CLASES EXCLUSIVAS
+        // =========================================================================
         if (esExclusiva) {
             if (payload.p_tipo_operacion === 'usar_credito') {
                 modalidadInsc = 'Pase Exclusivo';
                 if (!payload.p_user_id) throw new Error('Falta seleccionar al alumno.');
 
                 const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
-                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago') // 🎯 PEDIMOS EL MÉTODO
+                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago')
                     .eq('user_id', payload.p_user_id)
                     .eq('tipo_clase', 'exclusivo')
                     .gt('creditos_restantes', 0)
@@ -259,8 +261,6 @@ export async function procesarInscripcionAction(payload: any) {
                 if (packActivo && packActivo.cantidad_inicial > 0) {
                     packUsadoId = packActivo.id;
                     valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
-
-                    // 🎯 HERENCIA DE MÉTODO DE PAGO
                     metodoPagoFinal = packActivo.metodo_pago || 'efectivo';
 
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
@@ -269,6 +269,7 @@ export async function procesarInscripcionAction(payload: any) {
                         estado: nuevosRestantes === 0 ? 'agotado' : 'activo'
                     }).eq('id', packActivo.id);
                 }
+                // 🔥 SÓLO ACÁ SE RESTA EL PASE
                 await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', { p_usuario_id: payload.p_user_id, p_referencia: paseReferencia, p_cantidad: -1 })
             }
             else if (payload.p_tipo_operacion === 'pack') {
@@ -299,7 +300,7 @@ export async function procesarInscripcionAction(payload: any) {
                     cantidad_inicial: creditosDelPack,
                     creditos_restantes: Math.max(0, creditosDelPack - 1),
                     monto_abonado: payload.p_monto_caja || 0,
-                    metodo_pago: payload.p_metodo_pago, // 🎯 GUARDAMOS EL MÉTODO EN EL PACK NUEVO
+                    metodo_pago: payload.p_metodo_pago,
                     fecha_compra: ahora.toISOString(),
                     fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
                     estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
@@ -332,6 +333,9 @@ export async function procesarInscripcionAction(payload: any) {
                 }
             }
         }
+        // =========================================================================
+        // 4. LÓGICA DE CLASES REGULARES / LIGA / COMPAÑÍA
+        // =========================================================================
         else {
             const campoCredito = isEspecial ? 'creditos_especiales' : 'creditos_regulares';
 
@@ -343,9 +347,9 @@ export async function procesarInscripcionAction(payload: any) {
                 if (!perfil || (perfil as any)[campoCredito] < 1) throw new Error(`Créditos insuficientes.`);
 
                 const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
-                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago') // 🎯 PEDIMOS EL MÉTODO
+                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago')
                     .eq('user_id', payload.p_user_id)
-                    .eq('tipo_clase', tipoPackBusqueda)
+                    .eq('tipo_clase', tipoPackBusqueda) // 🎯 Filtramos por regular
                     .gt('creditos_restantes', 0)
                     .order('fecha_compra', { ascending: true })
                     .limit(1)
@@ -354,8 +358,6 @@ export async function procesarInscripcionAction(payload: any) {
                 if (packActivo && packActivo.cantidad_inicial > 0) {
                     packUsadoId = packActivo.id;
                     valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
-
-                    // 🎯 HERENCIA DE MÉTODO DE PAGO
                     metodoPagoFinal = packActivo.metodo_pago || 'efectivo';
 
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
@@ -365,7 +367,7 @@ export async function procesarInscripcionAction(payload: any) {
                     }).eq('id', packActivo.id);
                 }
 
-                await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', { p_usuario_id: payload.p_user_id, p_referencia: paseReferencia, p_cantidad: -1 })
+                // Descontamos crédito del perfil, NO DEL PASE EXCLUSIVO
                 await supabaseAdmin.from('profiles').update({ [campoCredito]: (perfil as any)[campoCredito] - 1 }).eq('id', payload.p_user_id);
             }
             else if (payload.p_tipo_operacion === 'pack') {
@@ -397,7 +399,7 @@ export async function procesarInscripcionAction(payload: any) {
                     cantidad_inicial: creditosDelPack,
                     creditos_restantes: Math.max(0, creditosDelPack - 1),
                     monto_abonado: payload.p_monto_caja || 0,
-                    metodo_pago: payload.p_metodo_pago, // 🎯 GUARDAMOS EL MÉTODO EN EL PACK NUEVO
+                    metodo_pago: payload.p_metodo_pago,
                     fecha_compra: ahora.toISOString(),
                     fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
                     estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
@@ -442,7 +444,7 @@ export async function procesarInscripcionAction(payload: any) {
             }
         }
 
-        // 🎯 INSERCIÓN DEFINITIVA EN LA TABLA CON EL MÉTODO REAL
+        // 5. INSERCIÓN DEFINITIVA EN LA TABLA
         const { error: errInsc } = await supabaseAdmin.from('inscripciones').insert({
             user_id: payload.p_user_id || null,
             clase_id: payload.p_clase_id,
@@ -452,7 +454,7 @@ export async function procesarInscripcionAction(payload: any) {
             modalidad: modalidadInsc,
             valor_credito: valorInscripcion,
             saldo_pendiente: saldoPendienteCalculado,
-            metodo_pago: payload.p_tipo_operacion === 'invitado' ? 'invitado' : metodoPagoFinal, // 🎯 ACÁ SE USA EL MÉTODO FINAL
+            metodo_pago: payload.p_tipo_operacion === 'invitado' ? 'invitado' : metodoPagoFinal,
             presente: true,
             estado_asistencia: 'presente'
         });
@@ -487,7 +489,7 @@ export async function procesarInscripcionAction(payload: any) {
                             clase_id: id,
                             modalidad: modalidadInsc,
                             valor_credito: 0,
-                            metodo_pago: metodoPagoFinal, // 🎯 ACÁ TAMBIÉN SE USA EL MÉTODO FINAL
+                            metodo_pago: metodoPagoFinal,
                             presente: false
                         }));
                         await supabaseAdmin.from('inscripciones').insert(batchInscripciones);
@@ -496,7 +498,6 @@ export async function procesarInscripcionAction(payload: any) {
             } catch (errBatch) { console.error("Error silencioso en Auto-Batch:", errBatch); }
         }
 
-        revalidatePath(`/clase/${payload.p_clase_id}`);
         return { success: true }
 
     } catch (error: any) {
