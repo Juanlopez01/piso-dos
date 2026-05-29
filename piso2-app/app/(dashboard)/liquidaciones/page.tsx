@@ -5,11 +5,15 @@ import { useEffect, useState, useMemo } from 'react'
 import useSWR from 'swr'
 import { format, subMonths, addMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { Wallet, Search, Loader2, ChevronDown, ChevronUp, Users, Calendar, DollarSign, Lock, FileSpreadsheet, CheckCircle2, X, Library, Smartphone, ArrowDownRight } from 'lucide-react'
+import { Wallet, Search, Loader2, ChevronDown, ChevronUp, Users, Calendar, DollarSign, Lock, FileSpreadsheet, CheckCircle2, X, Library, Smartphone, ArrowDownRight, Download } from 'lucide-react'
 import { useCash } from '@/context/CashContext'
 import Link from 'next/link'
 import { toast, Toaster } from 'sonner'
 import { pagarClaseProfeAction } from '@/app/actions/liquidaciones'
+
+// 🚀 IMPORTACIONES CORREGIDAS PARA EL PDF (Sin errores de TypeScript)
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
 type ClaseLiquidacion = {
     id: string
@@ -59,7 +63,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     const prevMonth = parseInt(mm) === 1 ? `${parseInt(yyyy) - 1}-12` : `${yyyy}-${String(parseInt(mm) - 1).padStart(2, '0')}`
     const nextMonth = parseInt(mm) === 12 ? `${parseInt(yyyy) + 1}-01` : `${yyyy}-${String(parseInt(mm) + 1).padStart(2, '0')}`
 
-    // 1. OBTENER CLASES
     const { data: clasesData, error } = await supabase
         .from('clases')
         .select(`
@@ -73,7 +76,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
 
     if (error) throw error
 
-    // 2. OBTENER MOVIMIENTOS VIRTUALES (CAJA MANUAL)
     const { data: movsData } = await supabase
         .from('caja_movimientos')
         .select('id, concepto, monto, metodo_pago, created_at, tipo')
@@ -81,11 +83,10 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         .gte('created_at', `${prevMonth}-25T00:00:00`)
         .lte('created_at', `${nextMonth}-05T23:59:59`)
 
-    // 🚀 3. OBTENER PAGOS ONLINE (MERCADOPAGO AUTOMÁTICO)
     const { data: pagosOnlineData } = await supabase
         .from('pagos_online')
         .select('id, concepto, monto, estado, created_at')
-        .eq('estado', 'approved') // Solo traemos los pagos que pasaron exitosamente
+        .eq('estado', 'approved')
         .gte('created_at', `${prevMonth}-25T00:00:00`)
         .lte('created_at', `${nextMonth}-05T23:59:59`)
 
@@ -156,11 +157,9 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     const arrayProfes = Object.values(liquidacionesPorProfe).sort((a, b) => a.nombre.localeCompare(b.nombre))
     arrayProfes.forEach(p => { p.clases.sort((a, b) => a.inicio.localeCompare(b.inicio)) })
 
-    // 🚀 PROCESAR Y MEZCLAR TRANSACCIONES VIRTUALES
     const transaccionesVirtuales: TransaccionVirtual[] = []
     let totalVirtual = 0
 
-    // Agregamos las de caja manual
     if (movsData) {
         movsData.forEach((mov: any) => {
             if (!mov.created_at) return
@@ -181,7 +180,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         })
     }
 
-    // 🚀 Agregamos las de pagos online automático
     if (pagosOnlineData) {
         pagosOnlineData.forEach((pago: any) => {
             if (!pago.created_at) return
@@ -192,7 +190,7 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                     id: pago.id,
                     concepto: pago.concepto || 'Compra App (MercadoPago)',
                     monto: Number(pago.monto),
-                    metodo_pago: 'mercadopago_online', // Lo diferenciamos visualmente
+                    metodo_pago: 'mercadopago_online',
                     created_at: pago.created_at
                 })
                 totalVirtual += Number(pago.monto)
@@ -200,7 +198,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         })
     }
 
-    // Ordenamos TODAS las transacciones juntas desde la más nueva a la más vieja
     transaccionesVirtuales.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
     return {
@@ -320,6 +317,36 @@ export default function AdminLiquidacionesPage() {
     const filtradosProfes = profesores.filter(p => p.nombre.toLowerCase().includes(searchQuery.toLowerCase()))
     const filtradosClases = gruposDeClases.filter(g => g.nombre_grupo.toLowerCase().includes(searchQuery.toLowerCase()) || g.profesor_nombre.toLowerCase().includes(searchQuery.toLowerCase()))
     const filtradosVirtuales = transaccionesVirtuales.filter(t => t.concepto.toLowerCase().includes(searchQuery.toLowerCase()))
+
+    // 🚀 LÓGICA PARA EXPORTAR A PDF
+    const exportarPDF = () => {
+        const doc = new jsPDF()
+
+        doc.setFontSize(16)
+        doc.text(`Reporte de Ingresos Virtuales`, 14, 20)
+        doc.setFontSize(10)
+        doc.setTextColor(100)
+        doc.text(`Periodo: ${selectedMonth}  |  Total Registrado: $${totalVirtual.toLocaleString()}`, 14, 26)
+
+        const tableData = filtradosVirtuales.map(mov => [
+            format(new Date(mov.created_at), "dd/MM/yyyy HH:mm"),
+            mov.concepto,
+            mov.metodo_pago === 'mp' ? 'MercadoPago' : mov.metodo_pago.replace('_', ' ').toUpperCase(),
+            `$${mov.monto.toLocaleString()}`
+        ])
+
+        autoTable(doc, {
+            startY: 32,
+            head: [['Fecha / Hora', 'Concepto', 'Método', 'Monto']],
+            body: tableData,
+            theme: 'grid',
+            headStyles: { fillColor: [40, 40, 40], textColor: [212, 230, 85] }, // Colores combinados con tu theme (Gris oscuro y Amarillo fluor)
+            styles: { fontSize: 8 },
+        })
+
+        doc.save(`Ingresos_Virtuales_${selectedMonth}.pdf`)
+        toast.success("PDF generado y descargado con éxito")
+    }
 
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
@@ -688,10 +715,10 @@ export default function AdminLiquidacionesPage() {
                     )
                 )}
 
-                {/* 🚀 VISTA 3: REPORTE DE TRANSACCIONES VIRTUALES */}
+                {/* 🚀 VISTA 3: REPORTE DE TRANSACCIONES VIRTUALES CON PDF */}
                 {vistaActiva === 'virtual' && (
                     <div className="bg-[#09090b] border border-white/10 rounded-2xl overflow-hidden shadow-xl animate-in fade-in">
-                        <div className="p-6 border-b border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="p-6 border-b border-white/10 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                             <div>
                                 <h3 className="text-lg font-black text-white uppercase flex items-center gap-2">
                                     <Smartphone className="text-[#D4E655]" />
@@ -699,9 +726,18 @@ export default function AdminLiquidacionesPage() {
                                 </h3>
                                 <p className="text-xs text-gray-400 mt-1 font-medium">Transferencias y Mercado Pago reportados en este periodo</p>
                             </div>
-                            <div className="bg-[#111] px-4 py-2 rounded-xl border border-white/5 text-right">
-                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Total Periodo</p>
-                                <p className="text-xl font-black text-[#D4E655]">${totalVirtual.toLocaleString()}</p>
+
+                            <div className="flex flex-col sm:flex-row items-center gap-4">
+                                <button
+                                    onClick={exportarPDF}
+                                    className="bg-white/10 hover:bg-[#D4E655] hover:text-black text-white px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors border border-white/10 w-full sm:w-auto"
+                                >
+                                    <Download size={14} /> Bajar Reporte PDF
+                                </button>
+                                <div className="bg-[#111] px-4 py-2 rounded-xl border border-white/5 text-right w-full sm:w-auto">
+                                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Total Periodo</p>
+                                    <p className="text-xl font-black text-[#D4E655]">${totalVirtual.toLocaleString()}</p>
+                                </div>
                             </div>
                         </div>
 
