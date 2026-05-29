@@ -14,12 +14,12 @@ import {
     Eye,
     Receipt,
     ChevronRight,
-    Pencil // 🚀 IMPORTAMOS EL LÁPIZ PARA LA EDICIÓN MANUAL
+    Pencil
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { Toaster, toast } from 'sonner'
-import jsPDF from 'jspdf'
+import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
 import {
@@ -29,7 +29,7 @@ import {
     enviarNotificacionClaseAction,
     setEstadoAsistenciaAction,
     agregarPagoInscripcionAction,
-    editarValorInscripcionAction // 🚀 IMPORTAMOS LA ACCIÓN PARA EDITAR MONTO
+    editarValorInscripcionAction
 } from '@/app/actions/inscripciones'
 
 import { toggleMiembroCompaniaAction } from '@/app/actions/companias'
@@ -55,13 +55,12 @@ type Inscripcion = {
     es_invitado: boolean
     saldo_pendiente?: number
     pack_usado_id?: string | null
-    // 🚀 AÑADIMOS LA ESTRUCTURA DEL PACK CONECTADO
     pack?: {
         id: string
         creditos_restantes: number
         cantidad_inicial: number
         metodo_pago: string
-        mp_payment_id: string | null // 🎯 ESTA ES LA CLAVE PARA SABER SI FUE TRANSF
+        mp_payment_id: string | null
         producto: { nombre: string }
     } | null
 }
@@ -109,7 +108,7 @@ const fetcher = async ([key, id]: [string, string]) => {
             *, 
             user:profiles!user_id(nombre, apellido, nombre_completo, email, telefono),
             pack:alumno_packs!pack_usado_id(id, creditos_restantes, cantidad_inicial, mp_payment_id, metodo_pago, producto:productos(nombre))
-        `) // 🎯 AGREGAMOS mp_payment_id AQUÍ
+        `)
         .eq('clase_id', id)
         .order('created_at', { ascending: true })
 
@@ -188,36 +187,43 @@ export default function ClaseDetallePage() {
         }
     }, [configuraciones])
 
-    // 🚀 LÓGICA DE LIQUIDACIÓN: CÁLCULO DEL -10% PARA EL DOCENTE EN TRANSFERENCIAS
+    // 🚀 LÓGICA DE LIQUIDACIÓN Y TICKET
     const financialData = useMemo(() => {
-        if (!clase) return { totalRecaudado: 0, totalBaseProfe: 0, pagoDocente: 0 }
+        if (!clase) return { totalRecaudado: 0, totalBaseProfe: 0, pagoDocente: 0, detalleEfvo: 0, cantEfvo: 0, detalleTransf: 0, cantTransf: 0, totalDescuentos: 0 }
 
         let totalRecaudado = 0;
         let totalBaseProfe = 0;
+
+        let detalleEfvo = 0;
+        let cantEfvo = 0;
+        let detalleTransf = 0;
+        let cantTransf = 0;
+        let totalDescuentos = 0;
 
         inscripciones.forEach(curr => {
             const monto = Number(curr.valor_credito) || 0;
             totalRecaudado += monto;
 
-            // 🎯 AHORA EL DATO ES CONFIABLE: 
-            // Ya no buscamos en tablas relacionadas, leemos el método que inyectamos en la inscripción.
             const metodo = (curr.metodo_pago || '').toLowerCase();
-
-            // Definimos qué métodos sufren el descuento del 10%
             const esDigital = ['transferencia', 'mercadopago', 'mp', 'online'].includes(metodo);
 
             if (esDigital) {
-                totalBaseProfe += (monto * 0.90);
+                const montoDescontado = monto * 0.90;
+                totalBaseProfe += montoDescontado;
+                detalleTransf += monto;
+                cantTransf += 1;
+                totalDescuentos += (monto - montoDescontado);
             } else {
-                // Si es 'efectivo', 'invitado' o 'credito' (sin descuento), va al 100%
                 totalBaseProfe += monto;
+                if (monto > 0) {
+                    detalleEfvo += monto;
+                    cantEfvo += 1;
+                }
             }
         });
 
         const valorAcuerdo = Number(clase.valor_acuerdo) || 0;
 
-        // Si el acuerdo es porcentaje, calculamos sobre la base limpia. 
-        // Si es fijo, el acuerdo es el que manda (independientemente del método de pago).
         const pago = clase.tipo_acuerdo === 'fijo'
             ? valorAcuerdo
             : totalBaseProfe * (valorAcuerdo / 100);
@@ -225,7 +231,12 @@ export default function ClaseDetallePage() {
         return {
             totalRecaudado,
             totalBaseProfe,
-            pagoDocente: Math.round(pago)
+            pagoDocente: Math.round(pago),
+            detalleEfvo,
+            cantEfvo,
+            detalleTransf,
+            cantTransf,
+            totalDescuentos
         }
     }, [inscripciones, clase]);
 
@@ -456,7 +467,6 @@ export default function ClaseDetallePage() {
 
     if (loadingSWR || loadingContext) return <div className="min-h-screen bg-[#050505] flex items-center justify-center text-[#D4E655]"><Loader2 className="animate-spin" /></div>
 
-    // 🚀 ESCUDO PARA AUXILIARES: NO PUEDEN ENTRAR A LAS CLASES DE LA LIGA
     if (userRole === 'auxiliar' && clase?.es_la_liga) {
         return (
             <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8 flex flex-col items-center justify-center relative overflow-hidden">
@@ -575,32 +585,23 @@ export default function ClaseDetallePage() {
                                             )}
                                         </div>
                                         <div className="flex items-center gap-2 mt-1">
-                                            {/* 🚀 LÓGICA DE EDICIÓN DEL VALOR DEL CRÉDITO */}
                                             {!esGrupoOFormacion &&
                                                 <div className="flex flex-col gap-1 mt-1">
                                                     <p className="text-[10px] text-gray-400 font-bold uppercase truncate">
                                                         {insc.modalidad}
                                                         {showFinance && Number(insc.valor_credito) > 0 && ` • $${Number(insc.valor_credito).toLocaleString()}`}
                                                     </p>
-                                                    {console.log(insc)}
-                                                    {/* 🚀 INFO DETALLADA DEL PACK */}
                                                     {(insc as any).pack && (
                                                         <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest text-[#D4E655]">
                                                             <span className="bg-[#D4E655]/10 px-1.5 py-0.5 rounded">
                                                                 {(insc as any).pack.producto?.nombre || 'Pack'}
                                                             </span>
                                                             <span className="text-gray-500">
-                                                                {/* 🎯 LÓGICA DE CONTADOR ACTUALIZADO:
-                                                                Mostramos el valor tal cual llega de la BD, 
-                                                                ya que el action realizó la resta antes del refresh.
-                                                            */}
                                                                 | Restan: {(insc as any).pack.creditos_restantes}/{(insc as any).pack.cantidad_inicial}
                                                             </span>
-
-                                                            {/* 🎯 MÉTODO DE PAGO DINÁMICO */}
                                                             <span className={`px-1.5 py-0.5 rounded ${insc.pack?.metodo_pago?.toLowerCase() === 'efectivo'
                                                                 ? 'bg-green-500/10 text-green-500'
-                                                                : 'bg-blue-500/10 text-blue-500' // Esto cubrirá 'transferencia', 'mercadopago', etc.
+                                                                : 'bg-blue-500/10 text-blue-500'
                                                                 }`}>
                                                                 {insc.modalidad === 'Crédito' && insc.pack?.metodo_pago === 'mercadopago' ? 'Online' : (insc.pack?.metodo_pago || 'N/A')}
                                                             </span>
@@ -610,7 +611,7 @@ export default function ClaseDetallePage() {
                                                         <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest text-[#D4E655]">
                                                             <span className={`px-1.5 py-0.5 rounded ${insc.metodo_pago?.toLowerCase() === 'efectivo'
                                                                 ? 'bg-green-500/10 text-green-500'
-                                                                : 'bg-blue-500/10 text-blue-500' // Esto cubrirá 'transferencia', 'mercadopago', etc.
+                                                                : 'bg-blue-500/10 text-blue-500'
                                                                 }`}>
                                                                 {insc.modalidad === 'Clase Suelta' && insc.metodo_pago === 'efectivo' ? 'efectivo' : (insc.metodo_pago || 'N/A')}
                                                             </span>
@@ -667,7 +668,7 @@ export default function ClaseDetallePage() {
                     </div>
                 </div>
 
-                {/* LIQUIDACIÓN CAJA - LIMPIA Y DIRECTA */}
+                {/* LIQUIDACIÓN CAJA Y TICKET DEL DOCENTE */}
                 {showFinance && !clase?.es_audicion && (
                     <div className="lg:col-span-1">
                         <div className="bg-[#111] border border-white/10 rounded-2xl p-6 sticky top-8 shadow-xl">
@@ -675,11 +676,34 @@ export default function ClaseDetallePage() {
 
                             <div className="space-y-4 mb-6">
                                 <div className="flex justify-between items-center pb-3 border-b border-white/5">
-                                    <span className="text-xs text-gray-400 font-bold uppercase">Total Recaudado</span>
+                                    <span className="text-xs text-gray-400 font-bold uppercase">Recaudación Bruta</span>
                                     <span className="text-sm font-black text-white">${financialData.totalRecaudado.toLocaleString()}</span>
                                 </div>
 
-                                {/* AHORA EL DOCENTE SOLO VE EL PAGO FINAL, SIN DESGLOSE DE BASE IMPONIBLE */}
+                                {/* 🚀 TICKET DE DESGLOSE DE MÉTODOS DE PAGO */}
+                                <div className="bg-black/30 border border-white/5 rounded-xl p-4 space-y-2 mb-2">
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="text-gray-400 font-bold flex items-center gap-1.5"><Wallet size={12} className="text-green-500" /> Efectivo ({financialData.cantEfvo})</span>
+                                        <span className="text-white font-bold">${financialData.detalleEfvo.toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="text-gray-400 font-bold flex items-center gap-1.5"><CreditCard size={12} className="text-blue-500" /> Transf/MP ({financialData.cantTransf})</span>
+                                        <span className="text-white font-bold">${financialData.detalleTransf.toLocaleString()}</span>
+                                    </div>
+
+                                    {financialData.totalDescuentos > 0 && (
+                                        <div className="flex justify-between items-center text-xs pt-2 border-t border-white/5 mt-2">
+                                            <span className="text-red-400 font-bold flex items-center gap-1.5">-10% Descuento transferencia</span>
+                                            <span className="text-red-400 font-black">-${financialData.totalDescuentos.toLocaleString()}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="flex justify-between items-center pb-3 border-b border-white/5">
+                                    <span className="text-xs text-gray-400 font-bold uppercase">Total con descuento</span>
+                                    <span className="text-sm font-black text-white">${financialData.totalBaseProfe.toLocaleString()}</span>
+                                </div>
+
                                 <div className="flex justify-between items-center pb-3 border-b border-white/5">
                                     <span className="text-xs text-gray-400 font-bold uppercase">Acuerdo</span>
                                     <span className="text-[10px] font-black text-[#D4E655] uppercase bg-[#D4E655]/10 px-2 py-1 rounded-md border border-[#D4E655]/20">
