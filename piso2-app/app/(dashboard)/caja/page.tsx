@@ -11,14 +11,14 @@ import {
     ChevronDown,
     ChevronRight,
     Trash2,
-    ArrowLeft // 🚀 NUEVO ICONO PARA EL ADMIN
+    ArrowLeft,
+    Calendar as CalendarIcon // 🚀 Icono para el buscador de fechas
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 
-// 🚀 IMPORTAMOS LAS SERVER ACTIONS
 import {
     abrirCajaAction, cerrarCajaAction, registrarMovimientoAction,
     cerrarTodasLasCajasAction, editarMovimientoAction, eliminarMovimientoCajaAction,
@@ -105,11 +105,12 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
             })
         }
 
+        // 🚀 Traemos un historial más grande para poder filtrar bien
         const { data: historial } = await supabase.from('caja_turnos')
             .select(`*, sede:sedes(nombre), usuario:profiles(nombre_completo)`)
             .eq('estado', 'cerrada')
             .order('fecha_cierre', { ascending: false })
-            .limit(20)
+            .limit(100)
 
         const historialCalculado = (historial || []).map((caja: any) => ({
             ...caja,
@@ -219,10 +220,11 @@ export default function CajaPage() {
     const { checkStatus, userRole, userId, isLoading: loadingContext } = useCash()
     const router = useRouter()
 
-    // 🚀 ESTADO MAGICO PARA EL ADMIN
     const [adminMode, setAdminMode] = useState<'dashboard' | 'operador'>('dashboard')
 
-    // Si es admin y activó su terminal, engañamos al SWR para que busque los datos de recepción
+    // 🚀 NUEVO ESTADO: Filtro de fecha para el historial de cajas
+    const [filtroFechaHistorial, setFiltroFechaHistorial] = useState('')
+
     const fetchRole = userRole === 'admin' && adminMode === 'operador' ? 'recepcion' : userRole;
 
     const { data, isLoading, mutate, error } = useSWR(
@@ -695,6 +697,14 @@ export default function CajaPage() {
     // VISTA ADMIN - DASHBOARD
     // =================================================================
     if (userRole === 'admin' && adminMode === 'dashboard') {
+        // 🚀 FILTRAMOS EL HISTORIAL DE CAJAS POR LA FECHA SELECCIONADA
+        const cajasFiltradasHistorial = filtroFechaHistorial
+            ? historialCajas.filter((caja: any) => {
+                const fechaCaja = new Date(caja.fecha_cierre).toISOString().split('T')[0]
+                return fechaCaja === filtroFechaHistorial
+            })
+            : historialCajas;
+
         return (
             <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in relative">
                 <Toaster position="top-center" richColors theme="dark" />
@@ -822,7 +832,6 @@ export default function CajaPage() {
                         <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">Panel de Control</p>
                     </div>
                     <div className="flex items-center gap-6 text-right">
-                        {/* 🚀 BOTON MAGICO DEL ADMIN PARA SER OPERADOR */}
                         <button
                             onClick={() => setAdminMode('operador')}
                             className="bg-white/10 border border-white/20 text-white px-4 py-3 rounded-xl font-black uppercase text-[10px] hover:bg-[#D4E655] hover:text-black transition-all flex items-center gap-2 shadow-lg tracking-widest"
@@ -938,9 +947,32 @@ export default function CajaPage() {
                     )}
                 </div>
 
-                <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2 mt-8">
-                    <History size={18} className="text-gray-500" /> Historial de Cierres
-                </h2>
+                <div className="flex flex-col md:flex-row justify-between md:items-end gap-4 mb-4 mt-8">
+                    <h2 className="text-lg font-black uppercase text-white flex items-center gap-2">
+                        <History size={18} className="text-gray-500" /> Historial de Cierres
+                    </h2>
+
+                    {/* 🚀 BUSCADOR POR FECHA DE CAJAS CERRADAS */}
+                    <div className="relative">
+                        <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={14} />
+                        <input
+                            type="date"
+                            value={filtroFechaHistorial}
+                            onChange={(e) => setFiltroFechaHistorial(e.target.value)}
+                            className="bg-[#111] border border-white/10 text-xs font-bold uppercase text-gray-300 p-2.5 pl-9 rounded-xl outline-none focus:border-[#D4E655] transition-colors w-full sm:w-auto"
+                        />
+                        {filtroFechaHistorial && (
+                            <button
+                                onClick={() => setFiltroFechaHistorial('')}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+                                title="Limpiar filtro"
+                            >
+                                <X size={12} />
+                            </button>
+                        )}
+                    </div>
+                </div>
+
                 <div className="bg-[#111] border border-white/10 rounded-2xl overflow-hidden shadow-xl">
                     <div className="overflow-x-auto">
                         <table className="w-full text-left min-w-[600px]">
@@ -955,7 +987,7 @@ export default function CajaPage() {
                                 </tr>
                             </thead>
                             <tbody className="text-xs divide-y divide-white/5">
-                                {historialCajas.map((caja) => (
+                                {cajasFiltradasHistorial.map((caja: any) => (
                                     <tr
                                         key={caja.id}
                                         onClick={() => setCajaDetalle(caja)}
@@ -985,9 +1017,9 @@ export default function CajaPage() {
                             </tbody>
                         </table>
                     </div>
-                    {historialCajas.length === 0 && (
+                    {cajasFiltradasHistorial.length === 0 && (
                         <div className="p-8 text-center text-gray-500 font-bold uppercase text-xs">
-                            No hay historial disponible.
+                            {filtroFechaHistorial ? 'No hay cajas cerradas en la fecha seleccionada.' : 'No hay historial disponible.'}
                         </div>
                     )}
                 </div>
@@ -1003,7 +1035,6 @@ export default function CajaPage() {
     if (!turnoActivo) {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center p-4 animate-in zoom-in-95 duration-300 relative">
-                {/* 🚀 BOTON PARA QUE EL ADMIN VUELVA AL DASHBOARD */}
                 {userRole === 'admin' && (
                     <button
                         onClick={() => setAdminMode('dashboard')}
@@ -1106,7 +1137,6 @@ export default function CajaPage() {
                         <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white leading-none">
                             Caja Activa
                         </h1>
-                        {/* 🚀 BOTON PARA QUE EL ADMIN VUELVA AL DASHBOARD */}
                         {userRole === 'admin' && (
                             <button onClick={() => setAdminMode('dashboard')} className="bg-white/10 text-white border border-white/20 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-white/20 transition-colors">
                                 <ArrowLeft size={14} /> Dashboard
