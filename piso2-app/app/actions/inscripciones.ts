@@ -212,15 +212,13 @@ export async function procesarInscripcionAction(payload: any) {
 
         const tipoClaseStr = (claseDb.tipo_clase || '').toLowerCase();
 
-        // 🚀 BLINDAJE ABSOLUTO: Forzamos el comportamiento según el texto del tipo de clase
-        const isRegular = tipoClaseStr === 'regular';
+        // 🚀 CORRECCIÓN CLAVE: El servidor ahora respeta a rajatabla si la clase es combinable o no
+        const esExclusiva = claseDb.es_combinable === false || tipoClaseStr === 'exclusivo';
+
         const isEspecial = tipoClaseStr === 'especial' || tipoClaseStr === 'seminario';
         const isLiga = tipoClaseStr === 'liga';
         const isCompania = tipoClaseStr === 'compania' || tipoClaseStr === 'compañia';
         const isAudicion = claseDb.es_audicion === true;
-
-        // 🎯 NUNCA será exclusiva si es Regular o Especial, sin importar el error humano en el switch "es_combinable"
-        const esExclusiva = (!isRegular && !isEspecial && claseDb.es_combinable === false) || tipoClaseStr === 'exclusivo';
 
         const tipoPackBusqueda = isEspecial ? 'seminario' : 'regular';
 
@@ -254,7 +252,7 @@ export async function procesarInscripcionAction(payload: any) {
                 modalidadInsc = 'Pase Exclusivo';
                 if (!payload.p_user_id) throw new Error('Falta seleccionar al alumno.');
 
-                // 🚀 BLOQUEO DE SEGURIDAD: Evita saldos en negativo si no tiene el pase
+                // 🚀 El bloqueo de seguridad sigue activo para que no queden en -1
                 const { data: miPase } = await supabaseAdmin.from('pases_exclusivos')
                     .select('cantidad')
                     .eq('usuario_id', payload.p_user_id)
@@ -262,7 +260,7 @@ export async function procesarInscripcionAction(payload: any) {
                     .maybeSingle();
 
                 if (!miPase || miPase.cantidad < 1) {
-                    throw new Error('El alumno no tiene pases exclusivos disponibles para esta clase específica.');
+                    throw new Error('El alumno no tiene pases exclusivos disponibles para esta clase.');
                 }
 
                 const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
@@ -286,7 +284,6 @@ export async function procesarInscripcionAction(payload: any) {
                     }).eq('id', packActivo.id);
                 }
 
-                // Restamos el pase
                 await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', { p_usuario_id: payload.p_user_id, p_referencia: paseReferencia, p_cantidad: -1 })
             }
             else if (payload.p_tipo_operacion === 'pack') {
@@ -384,7 +381,6 @@ export async function procesarInscripcionAction(payload: any) {
                     }).eq('id', packActivo.id);
                 }
 
-                // Descontamos crédito del perfil numérico clásico, NO DEL PASE EXCLUSIVO
                 await supabaseAdmin.from('profiles').update({ [campoCredito]: (perfil as any)[campoCredito] - 1 }).eq('id', payload.p_user_id);
             }
             else if (payload.p_tipo_operacion === 'pack') {

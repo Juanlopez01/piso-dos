@@ -92,13 +92,13 @@ function AdminContent() {
                 </p>
             </div>
 
-            {/* 🚀 CAJA DE FILTROS PREMIUM */}
+            {/* CAJA DE FILTROS PREMIUM */}
             <div className="bg-[#111] border border-white/5 rounded-3xl p-2 shadow-2xl mb-8 max-w-6xl mx-auto">
                 <div className="bg-[#09090b] rounded-[20px] p-6 border border-white/5">
 
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
 
-                        {/* COLUMNA PERIODO (Ocupa 3 de 12) */}
+                        {/* COLUMNA PERIODO */}
                         <div className="lg:col-span-3 flex flex-col justify-start h-full">
                             <label className="text-[10px] font-bold uppercase text-gray-500 tracking-widest flex items-center gap-1.5 mb-3">
                                 <Calendar size={14} className="text-[#D4E655]" /> Periodo de Análisis
@@ -125,7 +125,7 @@ function AdminContent() {
                             </div>
                         </div>
 
-                        {/* COLUMNA GRUPOS (Ocupa 6 de 12) */}
+                        {/* COLUMNA GRUPOS */}
                         <div className="lg:col-span-6 flex flex-col justify-start h-full border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-8">
                             <label className="text-[10px] font-bold uppercase text-gray-500 tracking-widest flex items-center gap-1.5 mb-3">
                                 <CheckSquare size={14} className="text-gray-400" /> Grupos a Incluir
@@ -138,8 +138,8 @@ function AdminContent() {
                                             key={cia.id}
                                             onClick={() => toggleCia(cia.id)}
                                             className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-200 ${isSelected
-                                                    ? 'bg-white text-black shadow-[0_4px_15px_rgba(255,255,255,0.15)] scale-[1.02] border border-white'
-                                                    : 'bg-black text-gray-500 border border-white/10 hover:border-white/30 hover:text-white hover:bg-white/5'
+                                                ? 'bg-white text-black shadow-[0_4px_15px_rgba(255,255,255,0.15)] scale-[1.02] border border-white'
+                                                : 'bg-black text-gray-500 border border-white/10 hover:border-white/30 hover:text-white hover:bg-white/5'
                                                 }`}
                                         >
                                             {cia.nombre}
@@ -149,9 +149,8 @@ function AdminContent() {
                             </div>
                         </div>
 
-                        {/* COLUMNA BOTON (Ocupa 3 de 12) */}
+                        {/* COLUMNA BOTON */}
                         <div className="lg:col-span-3 flex flex-col justify-end h-full mt-2 lg:mt-0">
-                            {/* Un espaciador invisible para empujar el botón hacia abajo y que alinee con los selectores */}
                             <div className="hidden lg:block h-[26px]"></div>
                             <button
                                 onClick={handleGenerar}
@@ -171,17 +170,21 @@ function AdminContent() {
                 <div className="space-y-6 animate-in slide-in-from-bottom-8 duration-500 max-w-6xl mx-auto">
 
                     {/* 1 y 2. CLASES Y PACKS */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         <div className="bg-[#09090b] border border-white/10 rounded-3xl p-5 md:p-8">
                             <h3 className="text-base font-black text-[#D4E655] uppercase flex items-center gap-2 mb-6"><Package size={18} /> Regulares (y Exclusivas)</h3>
-                            <div className="grid grid-cols-2 gap-4 mb-6">
-                                <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
-                                    <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Packs Vendidos</p>
-                                    <p className="text-3xl font-black">{reporte.packs.regular.total_vendidos}</p>
+                            <div className="grid grid-cols-3 gap-3 mb-6">
+                                <div className="bg-white/5 p-3 rounded-2xl border border-white/5 text-center flex flex-col justify-center">
+                                    <p className="text-[9px] text-gray-500 uppercase font-bold mb-1">Packs</p>
+                                    <p className="text-2xl font-black">{reporte.packs.regular.total_vendidos}</p>
                                 </div>
-                                <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
-                                    <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Clases Tomadas</p>
-                                    <p className="text-3xl font-black text-[#D4E655]">{reporte.tomadas.regulares}</p>
+                                <div className="bg-white/5 p-3 rounded-2xl border border-white/5 text-center flex flex-col justify-center">
+                                    <p className="text-[9px] text-gray-500 uppercase font-bold mb-1">Inscriptos</p>
+                                    <p className="text-2xl font-black text-white">{reporte.inscriptos?.regulares || 0}</p>
+                                </div>
+                                <div className="bg-[#D4E655]/10 p-3 rounded-2xl border border-[#D4E655]/20 text-center flex flex-col justify-center">
+                                    <p className="text-[9px] text-[#D4E655] uppercase font-bold mb-1">Presentes</p>
+                                    <p className="text-2xl font-black text-[#D4E655]">{reporte.tomadas?.regulares || 0}</p>
                                 </div>
                             </div>
                             <div className="space-y-1">
@@ -195,14 +198,18 @@ function AdminContent() {
 
                         <div className="bg-[#09090b] border border-white/10 rounded-3xl p-5 md:p-8">
                             <h3 className="text-base font-black text-purple-400 uppercase flex items-center gap-2 mb-6"><Package size={18} /> Clases Especiales</h3>
-                            <div className="grid grid-cols-2 gap-4 mb-6">
-                                <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
-                                    <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Packs Vendidos</p>
-                                    <p className="text-3xl font-black">{reporte.packs.especial.total_vendidos}</p>
+                            <div className="grid grid-cols-3 gap-3 mb-6">
+                                <div className="bg-white/5 p-3 rounded-2xl border border-white/5 text-center flex flex-col justify-center">
+                                    <p className="text-[9px] text-gray-500 uppercase font-bold mb-1">Packs</p>
+                                    <p className="text-2xl font-black">{reporte.packs.especial.total_vendidos}</p>
                                 </div>
-                                <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
-                                    <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Clases Tomadas</p>
-                                    <p className="text-3xl font-black text-purple-400">{reporte.tomadas.especiales}</p>
+                                <div className="bg-white/5 p-3 rounded-2xl border border-white/5 text-center flex flex-col justify-center">
+                                    <p className="text-[9px] text-gray-500 uppercase font-bold mb-1">Inscriptos</p>
+                                    <p className="text-2xl font-black text-white">{reporte.inscriptos?.especiales || 0}</p>
+                                </div>
+                                <div className="bg-purple-500/10 p-3 rounded-2xl border border-purple-500/20 text-center flex flex-col justify-center">
+                                    <p className="text-[9px] text-purple-400 uppercase font-bold mb-1">Presentes</p>
+                                    <p className="text-2xl font-black text-purple-400">{reporte.tomadas?.especiales || 0}</p>
                                 </div>
                             </div>
                             <div className="space-y-1">
@@ -217,22 +224,43 @@ function AdminContent() {
 
                     {/* 3. LIGA Y COMPAÑIAS */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div className="bg-[#09090b] border border-yellow-500/20 rounded-3xl p-6">
+                        <div className="bg-[#09090b] border border-yellow-500/20 rounded-3xl p-6 flex flex-col">
                             <h3 className="text-base font-black text-yellow-500 uppercase mb-4 tracking-widest flex items-center justify-center gap-2"><Star size={16} /> La Liga</h3>
-                            <div className="space-y-3">
-                                <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5"><span className="text-[10px] text-gray-400 font-bold uppercase">Participantes</span><span className="text-lg font-black">{reporte.liga.participantes}</span></div>
-                                <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5"><span className="text-[10px] text-gray-400 font-bold uppercase">Recaudado</span><span className="text-lg font-black text-white">${reporte.liga.recaudacion.toLocaleString()}</span></div>
-                                <div className="flex justify-between items-center bg-yellow-500/10 p-3 rounded-xl border border-yellow-500/20 mt-4"><span className="text-xs text-yellow-500 font-black uppercase">A pagar Profes</span><span className="text-xl font-black text-yellow-500">${Math.round(reporte.liga.pago_docentes).toLocaleString()}</span></div>
+                            <div className="space-y-3 flex-1">
+                                <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5"><span className="text-[10px] text-gray-400 font-bold uppercase">Participantes Mensuales</span><span className="text-lg font-black">{reporte.liga.participantes}</span></div>
+                                <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5"><span className="text-[10px] text-gray-400 font-bold uppercase">Recaudado Cuotas</span><span className="text-lg font-black text-white">${reporte.liga.recaudacion.toLocaleString()}</span></div>
+                            </div>
+                            {/* 🚀 NUEVAS MÉTRICAS: Inscriptos y Presentes */}
+                            <div className="grid grid-cols-2 gap-3 mt-3">
+                                <div className="bg-white/5 p-3 rounded-xl border border-white/5 text-center">
+                                    <p className="text-[9px] text-gray-400 font-bold uppercase mb-1">Inscriptos</p>
+                                    <p className="text-xl font-black text-white">{reporte.liga.inscriptos}</p>
+                                </div>
+                                <div className="bg-yellow-500/10 p-3 rounded-xl border border-yellow-500/20 text-center">
+                                    <p className="text-[9px] text-yellow-500 font-bold uppercase mb-1">Presentes</p>
+                                    <p className="text-xl font-black text-yellow-500">{reporte.liga.tomadas}</p>
+                                </div>
                             </div>
                         </div>
 
                         {reporte.companias.map((cia: any) => (
-                            <div key={cia.nombre} className="bg-[#09090b] border border-blue-500/20 rounded-3xl p-6">
+                            <div key={cia.nombre} className="bg-[#09090b] border border-blue-500/20 rounded-3xl p-6 flex flex-col">
                                 <h3 className="text-base font-black text-blue-400 uppercase mb-4 tracking-widest flex items-center justify-center gap-2"><Users size={16} /> {cia.nombre}</h3>
-                                <div className="space-y-3">
-                                    <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5"><span className="text-[10px] text-gray-400 font-bold uppercase">Participantes</span><span className="text-lg font-black">{cia.participantes}</span></div>
-                                    <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5"><span className="text-[10px] text-gray-400 font-bold uppercase">Recaudado</span><span className="text-lg font-black text-white">${cia.recaudacion.toLocaleString()}</span></div>
-                                    <div className="flex justify-between items-center bg-blue-500/10 p-3 rounded-xl border border-blue-500/20 mt-4"><span className="text-xs text-blue-400 font-black uppercase">A pagar Profes</span><span className="text-xl font-black text-blue-400">${Math.round(cia.pago_docentes).toLocaleString()}</span></div>
+                                <div className="space-y-3 flex-1">
+                                    <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5"><span className="text-[10px] text-gray-400 font-bold uppercase">Participantes Mensuales</span><span className="text-lg font-black">{cia.participantes}</span></div>
+                                    <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5"><span className="text-[10px] text-gray-400 font-bold uppercase">Recaudado Cuotas</span><span className="text-lg font-black text-white">${cia.recaudacion.toLocaleString()}</span></div>
+                                    <div className="flex justify-between items-center bg-blue-500/10 p-3 rounded-xl border border-blue-500/20 mt-4"><span className="text-xs text-blue-400 font-black uppercase">A pagar Profes (60%)</span><span className="text-xl font-black text-blue-400">${Math.round(cia.recaudacion * 0.60).toLocaleString()}</span></div>
+                                </div>
+                                {/* 🚀 NUEVAS MÉTRICAS: Inscriptos y Presentes */}
+                                <div className="grid grid-cols-2 gap-3 mt-3">
+                                    <div className="bg-white/5 p-3 rounded-xl border border-white/5 text-center">
+                                        <p className="text-[9px] text-gray-400 font-bold uppercase mb-1">Inscriptos</p>
+                                        <p className="text-xl font-black text-white">{cia.inscriptos}</p>
+                                    </div>
+                                    <div className="bg-blue-500/10 p-3 rounded-xl border border-blue-500/20 text-center">
+                                        <p className="text-[9px] text-blue-400 font-bold uppercase mb-1">Presentes</p>
+                                        <p className="text-xl font-black text-blue-400">{cia.tomadas}</p>
+                                    </div>
                                 </div>
                             </div>
                         ))}

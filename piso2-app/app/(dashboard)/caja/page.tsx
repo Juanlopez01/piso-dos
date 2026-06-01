@@ -12,17 +12,18 @@ import {
     ChevronRight,
     Trash2,
     ArrowLeft,
-    Calendar as CalendarIcon // 🚀 Icono para el buscador de fechas
+    Calendar as CalendarIcon
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
 
+// 🚀 IMPORTAMOS LAS SERVER ACTIONS (AHORA CON LA DE HORARIOS)
 import {
     abrirCajaAction, cerrarCajaAction, registrarMovimientoAction,
     cerrarTodasLasCajasAction, editarMovimientoAction, eliminarMovimientoCajaAction,
-    editarMontoInicialAction
+    editarMontoInicialAction, editarHorarioTurnoAction // <-- Acá está la nueva
 } from '@/app/actions/caja'
 
 type CajaData = {
@@ -105,7 +106,6 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
             })
         }
 
-        // 🚀 Traemos un historial más grande para poder filtrar bien
         const { data: historial } = await supabase.from('caja_turnos')
             .select(`*, sede:sedes(nombre), usuario:profiles(nombre_completo)`)
             .eq('estado', 'cerrada')
@@ -221,8 +221,6 @@ export default function CajaPage() {
     const router = useRouter()
 
     const [adminMode, setAdminMode] = useState<'dashboard' | 'operador'>('dashboard')
-
-    // 🚀 NUEVO ESTADO: Filtro de fecha para el historial de cajas
     const [filtroFechaHistorial, setFiltroFechaHistorial] = useState('')
 
     const fetchRole = userRole === 'admin' && adminMode === 'operador' ? 'recepcion' : userRole;
@@ -245,6 +243,9 @@ export default function CajaPage() {
     const [cerrandoCajas, setCerrandoCajas] = useState(false)
 
     const [modalMontoInicial, setModalMontoInicial] = useState({ isOpen: false, turnoId: '', monto: '' })
+
+    // 🚀 ESTADO PARA EL MODAL DE EDICIÓN DE HORARIOS
+    const [modalHorario, setModalHorario] = useState({ isOpen: false, turnoId: '', tipo: 'apertura' as 'apertura' | 'cierre', fechaLocal: '' })
 
     const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>(() => {
         const hoy = format(new Date(), "yyyy-MM-dd");
@@ -309,7 +310,6 @@ export default function CajaPage() {
         } else {
             toast.error(response.error || 'Error al abrir caja')
         }
-
         setProcesando(false)
     }
 
@@ -328,6 +328,34 @@ export default function CajaPage() {
             }
         } else {
             toast.error(response.error || 'Error al actualizar')
+        }
+        setProcesando(false)
+    }
+
+    // 🚀 LÓGICA PARA ENVIAR EL NUEVO HORARIO
+    const handleEditarHorario = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setProcesando(true)
+
+        try {
+            const fechaObj = new Date(modalHorario.fechaLocal)
+            const response = await editarHorarioTurnoAction(modalHorario.turnoId, modalHorario.tipo, fechaObj.toISOString())
+
+            if (response.success) {
+                toast.success(`Horario de ${modalHorario.tipo} actualizado con éxito`)
+                mutate()
+                if (cajaDetalle) {
+                    setCajaDetalle((prev: any) => ({
+                        ...prev,
+                        [modalHorario.tipo === 'apertura' ? 'fecha_apertura' : 'fecha_cierre']: fechaObj.toISOString()
+                    }))
+                }
+                setModalHorario({ isOpen: false, turnoId: '', tipo: 'apertura', fechaLocal: '' })
+            } else {
+                toast.error(response.error || 'Error al actualizar horario')
+            }
+        } catch (error) {
+            toast.error('Formato de fecha inválido')
         }
         setProcesando(false)
     }
@@ -353,10 +381,8 @@ export default function CajaPage() {
 
     const handleEliminarMov = async (id: string) => {
         if (!confirm('¿Seguro que querés eliminar este movimiento? Esta acción es irreversible.')) return;
-
         setProcesando(true);
         const res = await eliminarMovimientoCajaAction(id);
-
         if (res.success) {
             toast.success('Movimiento eliminado');
             mutate();
@@ -377,7 +403,6 @@ export default function CajaPage() {
         );
 
         if (conteoInput === null) return;
-
         const efectivoReal = Number(conteoInput);
         if (isNaN(efectivoReal)) return toast.error("Monto inválido. Ingresá solo números.");
 
@@ -399,7 +424,6 @@ export default function CajaPage() {
         if (!confirm(mensajeConfirmacion)) return;
 
         setProcesando(true)
-
         const response = await cerrarCajaAction(turnoActivo.id, efectivoReal)
 
         if (response.success) {
@@ -411,7 +435,6 @@ export default function CajaPage() {
         } else {
             toast.error(response.error || 'Fallo al intentar cerrar caja.')
         }
-
         setProcesando(false)
     }
 
@@ -438,7 +461,6 @@ export default function CajaPage() {
         }, false)
 
         setProcesando(true)
-
         const response = await registrarMovimientoAction(payload)
 
         if (response.success) {
@@ -450,14 +472,12 @@ export default function CajaPage() {
             toast.error(response.error || 'Error al registrar')
             mutate()
         }
-
         setProcesando(false)
     }
 
     const handleEditarMovimiento = async (e: React.FormEvent) => {
         e.preventDefault()
         setProcesando(true)
-
         const response = await editarMovimientoAction(movAEditar.id, {
             concepto: movAEditar.concepto,
             monto: Number(movAEditar.monto),
@@ -476,7 +496,6 @@ export default function CajaPage() {
         } else {
             toast.error(response.error || 'Error al actualizar el movimiento')
         }
-
         setProcesando(false)
     }
 
@@ -681,6 +700,40 @@ export default function CajaPage() {
         </div>
     );
 
+    // 🚀 RENDERIZADO DEL NUEVO MODAL DE HORARIOS
+    const renderModalHorario = modalHorario.isOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-[#09090b] border border-white/10 w-full max-w-sm rounded-3xl p-6 shadow-2xl relative">
+                <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
+                    <h3 className="text-lg font-black text-white uppercase flex items-center gap-2">
+                        <Clock className="text-[#D4E655]" /> Editar Hora
+                    </h3>
+                    <button onClick={() => setModalHorario({ isOpen: false, turnoId: '', tipo: 'apertura', fechaLocal: '' })} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                        <X className="text-gray-500 hover:text-white" />
+                    </button>
+                </div>
+                <form onSubmit={handleEditarHorario} className="space-y-5 text-left">
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                            {modalHorario.tipo === 'apertura' ? 'Fecha y Hora de Apertura' : 'Fecha y Hora de Cierre'}
+                        </label>
+                        <input
+                            required
+                            type="datetime-local"
+                            value={modalHorario.fechaLocal}
+                            onChange={e => setModalHorario({ ...modalHorario, fechaLocal: e.target.value })}
+                            className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm font-black outline-none focus:border-[#D4E655]"
+                        />
+                        <p className="text-[10px] text-gray-500 uppercase font-bold mt-2">Modificar este horario afectará los reportes de horas de la sede.</p>
+                    </div>
+                    <button disabled={procesando} type="submit" className="w-full bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-2 shadow-lg">
+                        {procesando ? <Loader2 className="animate-spin" /> : 'Guardar Horario'}
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+
     if (isLoading || loadingContext) return (
         <div className="min-h-screen bg-[#050505] flex items-center justify-center">
             <Loader2 className="animate-spin text-[#D4E655] w-10 h-10" />
@@ -697,7 +750,6 @@ export default function CajaPage() {
     // VISTA ADMIN - DASHBOARD
     // =================================================================
     if (userRole === 'admin' && adminMode === 'dashboard') {
-        // 🚀 FILTRAMOS EL HISTORIAL DE CAJAS POR LA FECHA SELECCIONADA
         const cajasFiltradasHistorial = filtroFechaHistorial
             ? historialCajas.filter((caja: any) => {
                 const fechaCaja = new Date(caja.fecha_cierre).toISOString().split('T')[0]
@@ -710,6 +762,7 @@ export default function CajaPage() {
                 <Toaster position="top-center" richColors theme="dark" />
                 {renderModalEdicion}
                 {renderModalMontoInicial}
+                {renderModalHorario}
 
                 {cajaDetalle && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setCajaDetalle(null)}>
@@ -723,12 +776,40 @@ export default function CajaPage() {
                                             {cajaDetalle.estado}
                                         </span>
                                     </h3>
-                                    <div className="text-[11px] text-gray-400 font-bold uppercase mt-2 flex items-center gap-3">
+                                    <div className="text-[11px] text-gray-400 font-bold uppercase mt-2 flex flex-wrap items-center gap-3">
                                         <span className="flex items-center gap-1"><MapPin size={12} /> {cajaDetalle.sede?.nombre}</span>
                                         <span className="text-white/20">|</span>
                                         <span className="flex items-center gap-1"><User size={12} /> {cajaDetalle.usuario?.nombre_completo}</span>
                                         <span className="text-white/20">|</span>
-                                        <span className="flex items-center gap-1"><History size={12} /> Abierta: {format(new Date(cajaDetalle.fecha_apertura), "dd/MM HH:mm")} hs</span>
+
+                                        {/* 🚀 LAPICITO EN HORA DE APERTURA */}
+                                        <span className="flex items-center gap-1 group/hora">
+                                            <History size={12} /> Abierta: {format(new Date(cajaDetalle.fecha_apertura), "dd/MM HH:mm")} hs
+                                            <button
+                                                onClick={() => setModalHorario({ isOpen: true, turnoId: cajaDetalle.id, tipo: 'apertura', fechaLocal: format(new Date(cajaDetalle.fecha_apertura), "yyyy-MM-dd'T'HH:mm") })}
+                                                className="opacity-0 group-hover/hora:opacity-100 transition-opacity ml-1 hover:text-[#D4E655] cursor-pointer"
+                                                title="Editar Hora de Apertura"
+                                            >
+                                                <Pencil size={10} />
+                                            </button>
+                                        </span>
+
+                                        {/* 🚀 LAPICITO EN HORA DE CIERRE */}
+                                        {cajaDetalle.fecha_cierre && (
+                                            <>
+                                                <span className="text-white/20">|</span>
+                                                <span className="flex items-center gap-1 group/hora">
+                                                    <History size={12} /> Cerrada: {format(new Date(cajaDetalle.fecha_cierre), "dd/MM HH:mm")} hs
+                                                    <button
+                                                        onClick={() => setModalHorario({ isOpen: true, turnoId: cajaDetalle.id, tipo: 'cierre', fechaLocal: format(new Date(cajaDetalle.fecha_cierre), "yyyy-MM-dd'T'HH:mm") })}
+                                                        className="opacity-0 group-hover/hora:opacity-100 transition-opacity ml-1 hover:text-[#D4E655] cursor-pointer"
+                                                        title="Editar Hora de Cierre"
+                                                    >
+                                                        <Pencil size={10} />
+                                                    </button>
+                                                </span>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                                 <button onClick={() => setCajaDetalle(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X className="text-gray-500 hover:text-white" /></button>
@@ -952,7 +1033,6 @@ export default function CajaPage() {
                         <History size={18} className="text-gray-500" /> Historial de Cierres
                     </h2>
 
-                    {/* 🚀 BUSCADOR POR FECHA DE CAJAS CERRADAS */}
                     <div className="relative">
                         <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={14} />
                         <input

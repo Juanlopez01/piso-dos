@@ -5,13 +5,12 @@ import { useEffect, useState, useMemo } from 'react'
 import useSWR from 'swr'
 import { format, subMonths, addMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { Wallet, Search, Loader2, ChevronDown, ChevronUp, Users, Calendar, DollarSign, Lock, FileSpreadsheet, CheckCircle2, X, Library, Smartphone, ArrowDownRight, Download } from 'lucide-react'
+import { Wallet, Search, Loader2, ChevronDown, ChevronUp, Users, Calendar, DollarSign, Lock, FileSpreadsheet, CheckCircle2, X, Library, Smartphone, ArrowDownRight, Download, Trophy, User } from 'lucide-react'
 import { useCash } from '@/context/CashContext'
 import Link from 'next/link'
 import { toast, Toaster } from 'sonner'
 import { pagarClaseProfeAction } from '@/app/actions/liquidaciones'
 
-// 🚀 IMPORTACIONES CORREGIDAS PARA EL PDF (Sin errores de TypeScript)
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -54,6 +53,16 @@ type TransaccionVirtual = {
     created_at: string
 }
 
+type ClaseRanking = {
+    id: string
+    nombre: string
+    inicio: string
+    profesor_nombre: string
+    cant_alumnos: number
+    total_recaudado: number
+    categoria: 'regular' | 'especial' | 'grupo'
+}
+
 const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
@@ -63,10 +72,11 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     const prevMonth = parseInt(mm) === 1 ? `${parseInt(yyyy) - 1}-12` : `${yyyy}-${String(parseInt(mm) - 1).padStart(2, '0')}`
     const nextMonth = parseInt(mm) === 12 ? `${parseInt(yyyy) + 1}-01` : `${yyyy}-${String(parseInt(mm) + 1).padStart(2, '0')}`
 
+    // 🚀 AGREGAMOS compania_id Y liga_nivel A LA BÚSQUEDA
     const { data: clasesData, error } = await supabase
         .from('clases')
         .select(`
-            id, nombre, inicio, tipo_acuerdo, valor_acuerdo, estado, pagado_profe,
+            id, nombre, inicio, tipo_clase, tipo_acuerdo, valor_acuerdo, estado, pagado_profe, compania_id, liga_nivel,
             profesor:profiles!profesor_id(id, nombre_completo),
             inscripciones ( valor_credito, presente, nombre_invitado, user:profiles(nombre_completo) )
         `)
@@ -93,6 +103,9 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     const liquidacionesPorProfe: Record<string, ProfeLiquidacion> = {}
     let totalGeneralPagar = 0
     let totalGeneralRecaudado = 0
+    let totalYaPagado = 0
+
+    const rankingClases: ClaseRanking[] = []
 
     if (clasesData) {
         clasesData.forEach((clase: any) => {
@@ -146,11 +159,43 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                 alumnos_lista
             })
 
-            liquidacionesPorProfe[profId].total_pago += pago_profe
-            liquidacionesPorProfe[profId].total_recaudado += total_clase
+            if (clase.pagado_profe) {
+                totalYaPagado += pago_profe;
+            } else {
+                liquidacionesPorProfe[profId].total_pago += pago_profe;
+                totalGeneralPagar += pago_profe;
+            }
 
-            totalGeneralPagar += pago_profe
+            liquidacionesPorProfe[profId].total_recaudado += total_clase
             totalGeneralRecaudado += total_clase
+
+            // 🚀 CATEGORIZACIÓN BLINDADA PARA EL RANKING
+            const tipoClaseStr = (clase.tipo_clase || '').toLowerCase();
+            let categoria: 'regular' | 'especial' | 'grupo' = 'regular';
+
+            const perteneceAGrupo = tipoClaseStr === 'liga' ||
+                tipoClaseStr.includes('compa') ||
+                tipoClaseStr.includes('formacion') ||
+                !!clase.compania_id ||
+                !!clase.liga_nivel;
+
+            if (perteneceAGrupo) {
+                categoria = 'grupo';
+            } else if (tipoClaseStr === 'especial' || tipoClaseStr === 'seminario') {
+                categoria = 'especial';
+            } else {
+                categoria = 'regular'; // Solo si no tiene vinculación con compañías/liga cae acá
+            }
+
+            rankingClases.push({
+                id: clase.id,
+                nombre: clase.nombre,
+                inicio: clase.inicio,
+                profesor_nombre: profNombre,
+                cant_alumnos,
+                total_recaudado: total_clase,
+                categoria
+            });
         })
     }
 
@@ -205,7 +250,8 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         totalGeneralPagar,
         totalGeneralRecaudado,
         transaccionesVirtuales,
-        totalVirtual
+        totalVirtual,
+        rankingClases
     }
 }
 
@@ -228,12 +274,13 @@ export default function AdminLiquidacionesPage() {
     const [expandedProf, setExpandedProf] = useState<string | null>(null)
     const [expandedClase, setExpandedClase] = useState<string | null>(null)
 
-    const [vistaActiva, setVistaActiva] = useState<'docentes' | 'clases' | 'virtual'>('docentes')
+    const [vistaActiva, setVistaActiva] = useState<'docentes' | 'clases' | 'virtual' | 'ranking'>('docentes')
+
+    const [rankingCategoria, setRankingCategoria] = useState<'regular' | 'especial' | 'grupo'>('regular')
+    const [rankingOrden, setRankingOrden] = useState<'alumnos' | 'recaudacion'>('alumnos')
 
     const [modalPago, setModalPago] = useState<{ isOpen: boolean; clase: ClaseLiquidacion | null; nombreProfe: string }>({ isOpen: false, clase: null, nombreProfe: '' })
-
     const [modalAlumnos, setModalAlumnos] = useState<{ isOpen: boolean; claseNombre: string; fecha: string; alumnos: { nombre: string, presente: boolean }[] }>({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })
-
     const [procesandoPago, setProcesandoPago] = useState(false)
 
     const { data, isLoading, error, mutate } = useSWR(
@@ -266,9 +313,7 @@ export default function AdminLiquidacionesPage() {
 
     const gruposDeClases = useMemo(() => {
         if (!data?.profesores) return []
-
         const todosLosGrupos: Record<string, GrupoClaseLiquidacion> = {}
-
         data.profesores.forEach(profe => {
             profe.clases.forEach(clase => {
                 const nombreLimpiado = clase.nombre.trim().toUpperCase()
@@ -284,16 +329,24 @@ export default function AdminLiquidacionesPage() {
                         cant_alumnos_total: 0
                     }
                 }
-
                 todosLosGrupos[key].clases.push(clase)
                 todosLosGrupos[key].total_pago += clase.pago_profe
                 todosLosGrupos[key].total_recaudado += clase.total_clase
                 todosLosGrupos[key].cant_alumnos_total += clase.cant_alumnos
             })
         })
-
         return Object.values(todosLosGrupos).sort((a, b) => a.nombre_grupo.localeCompare(b.nombre_grupo))
     }, [data])
+
+    const clasesRankeadas = useMemo(() => {
+        if (!data?.rankingClases) return [];
+        const filtradas = data.rankingClases.filter((c: any) => c.categoria === rankingCategoria);
+        if (rankingOrden === 'alumnos') {
+            return filtradas.sort((a: any, b: any) => b.cant_alumnos - a.cant_alumnos);
+        } else {
+            return filtradas.sort((a: any, b: any) => b.total_recaudado - a.total_recaudado);
+        }
+    }, [data, rankingCategoria, rankingOrden]);
 
     if (loadingContext || isLoading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655] w-12 h-12" /></div>
 
@@ -318,10 +371,8 @@ export default function AdminLiquidacionesPage() {
     const filtradosClases = gruposDeClases.filter(g => g.nombre_grupo.toLowerCase().includes(searchQuery.toLowerCase()) || g.profesor_nombre.toLowerCase().includes(searchQuery.toLowerCase()))
     const filtradosVirtuales = transaccionesVirtuales.filter(t => t.concepto.toLowerCase().includes(searchQuery.toLowerCase()))
 
-    // 🚀 LÓGICA PARA EXPORTAR A PDF
     const exportarPDF = () => {
         const doc = new jsPDF()
-
         doc.setFontSize(16)
         doc.text(`Reporte de Ingresos Virtuales`, 14, 20)
         doc.setFontSize(10)
@@ -340,7 +391,7 @@ export default function AdminLiquidacionesPage() {
             head: [['Fecha / Hora', 'Concepto', 'Método', 'Monto']],
             body: tableData,
             theme: 'grid',
-            headStyles: { fillColor: [40, 40, 40], textColor: [212, 230, 85] }, // Colores combinados con tu theme (Gris oscuro y Amarillo fluor)
+            headStyles: { fillColor: [40, 40, 40], textColor: [212, 230, 85] },
             styles: { fontSize: 8 },
         })
 
@@ -364,10 +415,12 @@ export default function AdminLiquidacionesPage() {
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
-                    <div className="relative w-full sm:w-64">
-                        <Search className="absolute left-3 top-3.5 text-gray-500" size={16} />
-                        <input type="text" placeholder={vistaActiva === 'docentes' ? "Buscar profesor..." : vistaActiva === 'clases' ? "Buscar clase o profe..." : "Buscar concepto..."} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-10 text-white text-sm outline-none focus:border-[#D4E655] transition-colors" />
-                    </div>
+                    {vistaActiva !== 'ranking' && (
+                        <div className="relative w-full sm:w-64">
+                            <Search className="absolute left-3 top-3.5 text-gray-500" size={16} />
+                            <input type="text" placeholder={vistaActiva === 'docentes' ? "Buscar profesor..." : vistaActiva === 'clases' ? "Buscar clase o profe..." : "Buscar concepto..."} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-10 text-white text-sm outline-none focus:border-[#D4E655] transition-colors" />
+                        </div>
+                    )}
                     <select value={selectedMonth} onChange={(e) => { setSelectedMonth(e.target.value); setExpandedProf(null); setExpandedClase(null); }} className="w-full sm:w-auto bg-[#111] border border-[#D4E655]/30 rounded-xl p-3 text-white text-sm font-bold uppercase outline-none focus:border-[#D4E655] appearance-none">
                         {opcionesMeses.map(mes => {
                             const [y, m] = mes.split('-')
@@ -409,6 +462,12 @@ export default function AdminLiquidacionesPage() {
                     <Library size={16} /> Por Clase
                 </button>
                 <button
+                    onClick={() => setVistaActiva('ranking')}
+                    className={`flex items-center gap-2 text-xs font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all whitespace-nowrap ${vistaActiva === 'ranking' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white bg-[#111]'}`}
+                >
+                    <Trophy size={16} /> Ranking
+                </button>
+                <button
                     onClick={() => setVistaActiva('virtual')}
                     className={`flex items-center gap-2 text-xs font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all whitespace-nowrap ${vistaActiva === 'virtual' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white bg-[#111]'}`}
                 >
@@ -448,7 +507,7 @@ export default function AdminLiquidacionesPage() {
                                         </div>
                                         <div className="flex items-center gap-6 w-full md:w-auto border-t md:border-t-0 border-white/10 pt-4 md:pt-0">
                                             <div className="text-left md:text-right">
-                                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Liquidación</p>
+                                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">A Liquidar</p>
                                                 <p className={`text-xl font-black ${isOpen ? 'text-[#D4E655]' : 'text-white'}`}>${profe.total_pago.toLocaleString()}</p>
                                             </div>
                                             {isOpen ? <ChevronUp className="text-gray-500 shrink-0 hidden md:block" /> : <ChevronDown className="text-gray-500 shrink-0 hidden md:block" />}
@@ -499,7 +558,7 @@ export default function AdminLiquidacionesPage() {
                                                                             <td className="py-3 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
                                                                             <td className="py-3 text-center pr-4">
                                                                                 {clase.pagado_profe ? (
-                                                                                    <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[9px] font-black flex items-center justify-center gap-1 mx-auto cursor-not-allowed">
+                                                                                    <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[9px] font-black flex items-center justify-center gap-1 mx-auto cursor-not-allowed w-full max-w-[100px]">
                                                                                         <CheckCircle2 size={12} /> OK
                                                                                     </span>
                                                                                 ) : (
@@ -602,7 +661,7 @@ export default function AdminLiquidacionesPage() {
                                                 <p className={`text-sm font-black text-white`}>{grupo.cant_alumnos_total} Alumnos</p>
                                             </div>
                                             <div className="text-left md:text-right">
-                                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">A liquidar</p>
+                                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Deuda Activa</p>
                                                 <p className={`text-xl font-black ${isOpen ? 'text-[#D4E655]' : 'text-white'}`}>${grupo.total_pago.toLocaleString()}</p>
                                             </div>
                                             {isOpen ? <ChevronUp className="text-gray-500 shrink-0 hidden md:block" /> : <ChevronDown className="text-gray-500 shrink-0 hidden md:block" />}
@@ -646,7 +705,7 @@ export default function AdminLiquidacionesPage() {
                                                                     <td className="py-3 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
                                                                     <td className="py-3 text-center pr-4">
                                                                         {clase.pagado_profe ? (
-                                                                            <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[9px] font-black flex items-center justify-center gap-1 mx-auto cursor-not-allowed">
+                                                                            <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[9px] font-black flex items-center justify-center gap-1 mx-auto cursor-not-allowed w-full max-w-[100px]">
                                                                                 <CheckCircle2 size={12} /> OK
                                                                             </span>
                                                                         ) : (
@@ -715,7 +774,69 @@ export default function AdminLiquidacionesPage() {
                     )
                 )}
 
-                {/* 🚀 VISTA 3: REPORTE DE TRANSACCIONES VIRTUALES CON PDF */}
+                {/* 🚀 VISTA 4: RANKING DE CLASES */}
+                {vistaActiva === 'ranking' && (
+                    <div className="animate-in fade-in">
+                        <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4 mb-6 bg-[#09090b] border border-white/10 p-4 rounded-2xl">
+
+                            <div className="flex bg-[#111] p-1 rounded-xl w-full lg:w-auto overflow-x-auto custom-scrollbar">
+                                <button onClick={() => setRankingCategoria('regular')} className={`flex-1 md:flex-none md:px-6 py-3 md:py-2 text-[10px] font-black uppercase rounded-lg transition-all whitespace-nowrap ${rankingCategoria === 'regular' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}>Regulares</button>
+                                <button onClick={() => setRankingCategoria('especial')} className={`flex-1 md:flex-none md:px-6 py-3 md:py-2 text-[10px] font-black uppercase rounded-lg transition-all whitespace-nowrap ${rankingCategoria === 'especial' ? 'bg-purple-500 text-white' : 'text-gray-500 hover:text-white'}`}>Especiales</button>
+                                <button onClick={() => setRankingCategoria('grupo')} className={`flex-1 md:flex-none md:px-6 py-3 md:py-2 text-[10px] font-black uppercase rounded-lg transition-all whitespace-nowrap ${rankingCategoria === 'grupo' ? 'bg-blue-500 text-white' : 'text-gray-500 hover:text-white'}`}>Grupos</button>
+                            </div>
+
+                            <div className="flex items-center gap-2 bg-[#111] p-1 rounded-xl w-full lg:w-auto shrink-0 overflow-x-auto custom-scrollbar">
+                                <span className="text-[10px] font-bold text-gray-500 uppercase px-2 shrink-0">Ordenar por:</span>
+                                <button onClick={() => setRankingOrden('alumnos')} className={`flex-1 md:flex-none px-4 py-3 md:py-2 text-[10px] font-black uppercase rounded-lg transition-all whitespace-nowrap ${rankingOrden === 'alumnos' ? 'bg-white/20 text-white' : 'text-gray-500 hover:text-white'}`}>Alumnos</button>
+                                <button onClick={() => setRankingOrden('recaudacion')} className={`flex-1 md:flex-none px-4 py-3 md:py-2 text-[10px] font-black uppercase rounded-lg transition-all whitespace-nowrap ${rankingOrden === 'recaudacion' ? 'bg-white/20 text-white' : 'text-gray-500 hover:text-white'}`}>Recaudación</button>
+                            </div>
+                        </div>
+
+                        <div className="space-y-3">
+                            {clasesRankeadas.length === 0 ? (
+                                <div className="text-center py-16 bg-[#111]/50 rounded-2xl border border-dashed border-white/10">
+                                    <Trophy className="mx-auto mb-3 text-gray-600" size={32} />
+                                    <p className="text-xs font-bold uppercase text-gray-500">No hay clases en esta categoría</p>
+                                </div>
+                            ) : (
+                                clasesRankeadas.map((c: any, idx: number) => (
+                                    <div key={c.id} className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 md:p-5 rounded-2xl border transition-all ${c.cant_alumnos <= 5 ? 'bg-red-500/10 border-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.1)]' : 'bg-[#111] border-white/5 hover:border-white/20'}`}>
+
+                                        <div className="flex items-center gap-4 mb-4 sm:mb-0">
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${idx === 0 ? 'bg-yellow-500 text-black' : idx === 1 ? 'bg-gray-300 text-black' : idx === 2 ? 'bg-amber-700 text-white' : 'bg-white/10 text-gray-400'}`}>
+                                                {idx + 1}
+                                            </div>
+                                            <div>
+                                                <h4 className="font-bold text-white uppercase text-sm">{c.nombre}</h4>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <span className="text-[10px] text-gray-500 font-bold uppercase"><User size={10} className="inline mr-1" />{c.profesor_nombre}</span>
+                                                    <span className="text-[10px] text-gray-500 font-bold uppercase"><Calendar size={10} className="inline mr-1" />{format(new Date(c.inicio), "dd/MM")}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-6 sm:text-right border-t sm:border-t-0 border-white/5 pt-4 sm:pt-0">
+                                            <div className="flex-1 sm:flex-none">
+                                                <p className="text-[9px] text-gray-500 uppercase font-bold tracking-widest mb-0.5">Alumnos</p>
+                                                <p className={`text-xl font-black ${c.cant_alumnos <= 5 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                                                    {c.cant_alumnos}
+                                                </p>
+                                            </div>
+                                            <div className="flex-1 sm:flex-none">
+                                                <p className="text-[9px] text-gray-500 uppercase font-bold tracking-widest mb-0.5">Recaudado</p>
+                                                <p className="text-xl font-black text-[#D4E655]">
+                                                    ${c.total_recaudado.toLocaleString()}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* VISTA 3: REPORTE DE TRANSACCIONES VIRTUALES CON PDF */}
                 {vistaActiva === 'virtual' && (
                     <div className="bg-[#09090b] border border-white/10 rounded-2xl overflow-hidden shadow-xl animate-in fade-in">
                         <div className="p-6 border-b border-white/10 flex flex-col lg:flex-row lg:items-center justify-between gap-4">

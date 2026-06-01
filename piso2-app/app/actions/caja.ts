@@ -202,3 +202,22 @@ export async function editarMontoInicialAction(turnoId: string, nuevoMonto: numb
         return { success: false, error: error.message }
     }
 }
+
+export async function editarHorarioTurnoAction(turnoId: string, tipo: 'apertura' | 'cierre', nuevaFechaISO: string) {
+    const supabaseAdmin = getAdminClient()
+
+    try {
+        const campoActualizar = tipo === 'apertura' ? { fecha_apertura: nuevaFechaISO } : { fecha_cierre: nuevaFechaISO };
+
+        const { error } = await supabaseAdmin
+            .from('caja_turnos')
+            .update(campoActualizar)
+            .eq('id', turnoId)
+
+        if (error) throw new Error(error.message)
+
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
