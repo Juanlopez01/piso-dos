@@ -45,6 +45,21 @@ const DEFAULT_PRICING = {
         'Escenografía': 50000,
     }
 }
+const IMAGENES_TECNICA: Record<string, string> = {
+    'Cámaras': '/images/tecnica/camaras.jpg',
+    'Multicámara': '/images/tecnica/multicamara.jpg',
+    'Micrófonos': '/images/tecnica/microfonos.jpg',
+    'Iluminación': '/images/tecnica/iluminacion.jpg',
+    'Pantallas': '/images/tecnica/pantallas.jpg',
+    'Proyectores': '/images/tecnica/proyectores.jpg',
+    'Branding visual': '/images/tecnica/branding.jpg',
+    'Clips para redes': '/images/tecnica/clips.jpg',
+    'Producción creativa': '/images/tecnica/produccion.jpg',
+    'Operador técnico': '/images/tecnica/operador.jpg',
+    'Streaming en vivo': '/images/tecnica/streaming.jpg',
+    'Invitados remotos': '/images/tecnica/remotos.jpg',
+    'Escenografía': '/images/tecnica/escenografia.jpg',
+}
 
 export default function CotizadorPage() {
     const [supabase] = useState(() => createClient())
@@ -96,13 +111,20 @@ export default function CotizadorPage() {
     }, [supabase])
 
     // Opciones estáticas del flujo
-    const tipos = ['Podcast', 'Streaming', 'Eventos', 'Grabaciones', 'Show en vivo', 'Contenido para redes']
+    const tipos = [
+        { nombre: 'Podcast', image: '/podcast.jpg' },
+        { nombre: 'Streaming', image: '/podcast.jpg' },
+        { nombre: 'Eventos', image: '/podcast.jpg' },
+        { nombre: 'Grabaciones', image: '/podcast.jpg' },
+        { nombre: 'Show en vivo', image: '/podcast.jpg' },
+        { nombre: 'Contenido para redes', image: '/podcast.jpg' },
+    ]
     const espacios = [
-        { id: 'Sala Streaming', desc: 'Multicámara, monitores y setup completo para streaming profesional.' },
-        { id: 'Sala Negra', desc: 'Ambiente cinematic, ideal para producciones premium y entrevistas.' },
-        { id: 'Sala Blanca', desc: 'Espacio luminoso y versátil para contenido clean y corporativo.' },
-        { id: 'Otros espacios', desc: 'Salas adicionales y espacios creativos de Piso 2.' },
-        { id: 'Eventos externos', desc: 'Llevamos la producción a tu locación o evento.' }
+        { id: 'Sala Streaming', desc: 'Multicámara, monitores y setup completo para streaming profesional.', img: '/images/sala-streaming.jpg' },
+        { id: 'Sala Negra', desc: 'Ambiente cinematic, ideal para producciones premium y entrevistas.', img: '/images/sala-negra.jpg' },
+        { id: 'Sala Blanca', desc: 'Espacio luminoso y versátil para contenido clean y corporativo.', img: '/images/sala-blanca.jpg' },
+        { id: 'Otros espacios', desc: 'Salas adicionales y espacios creativos de Piso 2.', img: '/images/sala-otros.jpg' },
+        { id: 'Eventos externos', desc: 'Llevamos la producción a tu locación o evento.', img: '/images/eventos-externos.jpg' }
     ]
     const estilos = ['Gaming', 'Show en vivo', 'Producción premium', 'Streamer setup', 'Podcast relajado', 'Cinematic', 'Minimalista', 'Tech', 'Corporativo premium']
     const tecnicas = Object.keys(pricingConfig.tecnica)
@@ -198,33 +220,47 @@ export default function CotizadorPage() {
 
                 {/* --- PASO 1: DATOS PERSONALES --- */}
                 {step === 1 && (
-                    <div className="max-w-md mx-auto bg-[#0a0a0c] border border-white/5 rounded-3xl p-8 shadow-2xl animate-in fade-in zoom-in-95 duration-500">
-                        <h2 className="text-2xl font-black mb-6 text-center uppercase tracking-tighter text-white">Contanos de tu proyecto</h2>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Nombre completo</label>
-                                <input value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="Ej: Juan Pérez" />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Marca / Nombre del Programa</label>
-                                <input value={formData.marca} onChange={e => setFormData({ ...formData, marca: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="Ej: Piso 2 Stream" />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Usuario de Instagram</label>
-                                <input value={formData.instagram} onChange={e => setFormData({ ...formData, instagram: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="@usuario" />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">WhatsApp de contacto</label>
-                                <input value={formData.whatsapp} onChange={e => setFormData({ ...formData, whatsapp: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="+54 9..." />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Productora / Empresa (Opcional)</label>
-                                <input value={formData.empresa} onChange={e => setFormData({ ...formData, empresa: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="Compañía" />
-                            </div>
-                            <button onClick={handleNext} disabled={!formData.nombre || !formData.whatsapp} className="w-full bg-[#1ed760] text-black font-black uppercase tracking-widest py-4 rounded-xl mt-4 hover:bg-white hover:shadow-[0_0_25px_rgba(30,215,96,0.3)] transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed">
-                                Continuar
-                            </button>
+                    <div className="max-w-md mx-auto animate-in fade-in zoom-in-95 duration-500">
+
+                        {/* LOGO 2S CENTRADO ARRIBA */}
+                        <div className="flex justify-center mb-8">
+                            <img
+                                src="/2S-verde.png" // Ajustá la ruta o extensión de tu logo de Piso 2
+                                alt="Logo 2S"
+                                className="h-16 w-auto object-contain drop-shadow-[0_0_20px_rgba(30,215,96,0.4)]"
+                            />
                         </div>
+
+                        {/* CONTENEDOR DEL FORMULARIO */}
+                        <div className="bg-[#0a0a0c] border border-white/5 rounded-3xl p-8 shadow-2xl">
+                            <h2 className="text-2xl font-black mb-6 text-center uppercase tracking-tighter text-white">Contanos de tu proyecto</h2>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Nombre completo</label>
+                                    <input value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="Ej: Juan Pérez" />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Marca / Nombre del Programa</label>
+                                    <input value={formData.marca} onChange={e => setFormData({ ...formData, marca: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="Ej: Piso 2 Stream" />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Usuario de Instagram</label>
+                                    <input value={formData.instagram} onChange={e => setFormData({ ...formData, instagram: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="@usuario" />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">WhatsApp de contacto</label>
+                                    <input value={formData.whatsapp} onChange={e => setFormData({ ...formData, whatsapp: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="+54 9..." />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Productora / Empresa (Opcional)</label>
+                                    <input value={formData.empresa} onChange={e => setFormData({ ...formData, empresa: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="Compañía" />
+                                </div>
+                                <button onClick={handleNext} disabled={!formData.nombre || !formData.whatsapp} className="w-full bg-[#1ed760] text-black font-black uppercase tracking-widest py-4 rounded-xl mt-4 hover:bg-white hover:shadow-[0_0_25px_rgba(30,215,96,0.3)] transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed">
+                                    Continuar
+                                </button>
+                            </div>
+                        </div>
+
                     </div>
                 )}
 
@@ -235,15 +271,23 @@ export default function CotizadorPage() {
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-10 max-w-3xl mx-auto">
                             {tipos.map(tipo => (
                                 <button
-                                    key={tipo}
-                                    onClick={() => setFormData({ ...formData, tipo })}
-                                    className={`relative h-36 rounded-2xl overflow-hidden group border transition-all duration-300 ${formData.tipo === tipo ? 'border-[#1ed760] shadow-[0_0_25px_rgba(30,215,96,0.25)]' : 'border-white/5 hover:border-white/20'}`}
+                                    key={tipo.nombre}
+                                    onClick={() => setFormData({ ...formData, tipo: tipo.nombre })}
+                                    className={`relative h-36 rounded-2xl overflow-hidden group border transition-all duration-300 ${formData.tipo === tipo.nombre ? 'border-[#1ed760] shadow-[0_0_25px_rgba(30,215,96,0.25)]' : 'border-white/5 hover:border-white/20'}`}
                                 >
                                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent z-10" />
                                     <div className="absolute inset-0 bg-[#111] transform group-hover:scale-110 group-focus:scale-110 transition-transform duration-500 flex items-center justify-center">
-                                        <Video className="text-white/5 w-16 h-16" />
+                                        <div className="h-40 w-full rounded-xl bg-[#111] mb-4 relative overflow-hidden">
+                                            <img
+                                                src={tipo.image}
+                                                alt={tipo.nombre}
+                                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-60 group-hover:opacity-90"
+                                            />
+                                            {/* Gradiente oscuro inferior para asegurar contraste */}
+                                            <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0c] via-transparent to-black/20" />
+                                        </div>
                                     </div>
-                                    <span className="absolute bottom-4 left-4 z-20 font-black uppercase text-xs tracking-wider">{tipo}</span>
+                                    <span className="absolute bottom-4 left-4 z-20 font-black uppercase text-xs tracking-wider">{tipo.nombre}</span>
                                 </button>
                             ))}
                         </div>
@@ -266,11 +310,17 @@ export default function CotizadorPage() {
                                     onClick={() => setFormData({ ...formData, espacio: esp.id })}
                                     className={`flex flex-col text-left group p-1 rounded-2xl transition-all duration-300 border ${formData.espacio === esp.id ? 'border-[#1ed760] bg-white/5 shadow-[0_0_25px_rgba(30,215,96,0.2)]' : 'border-transparent hover:bg-white/5'}`}
                                 >
+                                    {/* CONTENEDOR DE IMAGEN MEJORADO */}
                                     <div className="h-40 w-full rounded-xl bg-[#111] mb-4 relative overflow-hidden">
-                                        <div className="absolute inset-0 flex items-center justify-center text-white/5 transform group-hover:scale-110 transition-transform duration-500">
-                                            <LayoutGrid size={40} />
-                                        </div>
+                                        <img
+                                            src={esp.img}
+                                            alt={esp.id}
+                                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-60 group-hover:opacity-90"
+                                        />
+                                        {/* Gradiente oscuro inferior para asegurar contraste */}
+                                        <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0c] via-transparent to-black/20" />
                                     </div>
+
                                     <div className="px-3 pb-3">
                                         <h3 className="font-black text-white uppercase text-sm mb-2">{esp.id}</h3>
                                         <p className="text-xs text-gray-500 leading-relaxed">{esp.desc}</p>
@@ -319,13 +369,26 @@ export default function CotizadorPage() {
                         <div className="flex flex-wrap justify-center gap-3 mb-12 max-w-3xl mx-auto">
                             {tecnicas.map(tec => {
                                 const isSelected = formData.tecnica.includes(tec);
+                                const bgImagen = IMAGENES_TECNICA[tec] || '/images/tecnica/default.jpg';
+
                                 return (
                                     <button
                                         key={tec}
                                         onClick={() => toggleTecnica(tec)}
-                                        className={`px-5 py-3.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-300 border ${isSelected ? 'bg-[#1ed760]/10 border-[#1ed760] text-[#1ed760] shadow-[0_0_20px_rgba(30,215,96,0.15)]' : 'bg-[#111] border-white/10 text-gray-400 hover:border-white/40 hover:text-white'}`}
+                                        style={{ backgroundImage: `url(${bgImagen})` }}
+                                        className={`relative overflow-hidden bg-cover bg-center px-5 py-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-300 border ${isSelected
+                                            ? 'border-[#1ed760] text-[#1ed760] shadow-[0_0_20px_rgba(30,215,96,0.25)] scale-[1.02]'
+                                            : 'border-white/10 text-gray-300 hover:border-white/30'
+                                            }`}
                                     >
-                                        {tec}
+                                        {/* Capa de oscurecimiento (Overlay) dinámico */}
+                                        <div className={`absolute inset-0 transition-colors duration-300 ${isSelected ? 'bg-black/60 backdrop-blur-[1px]' : 'bg-black/75 hover:bg-black/65'
+                                            }`} />
+
+                                        {/* Texto posicionado por encima de la imagen y del overlay */}
+                                        <span className="relative z-10 block pointer-events-none">
+                                            {tec}
+                                        </span>
                                     </button>
                                 )
                             })}

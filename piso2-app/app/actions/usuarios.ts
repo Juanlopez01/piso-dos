@@ -752,7 +752,7 @@ export async function crearAnuncioAction(
             data: anuncio,
             error: errAnuncio
         } = await supabase
-            .from('estudio_anuncios')
+            .from('notificaciones')
             .insert([
                 {
                     titulo,
