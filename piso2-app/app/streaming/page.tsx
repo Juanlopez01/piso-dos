@@ -45,21 +45,6 @@ const DEFAULT_PRICING = {
         'Escenografía': 50000,
     }
 }
-const IMAGENES_TECNICA: Record<string, string> = {
-    'Cámaras': '/images/tecnica/camaras.jpg',
-    'Multicámara': '/images/tecnica/multicamara.jpg',
-    'Micrófonos': '/images/tecnica/microfonos.jpg',
-    'Iluminación': '/images/tecnica/iluminacion.jpg',
-    'Pantallas': '/images/tecnica/pantallas.jpg',
-    'Proyectores': '/images/tecnica/proyectores.jpg',
-    'Branding visual': '/images/tecnica/branding.jpg',
-    'Clips para redes': '/images/tecnica/clips.jpg',
-    'Producción creativa': '/images/tecnica/produccion.jpg',
-    'Operador técnico': '/images/tecnica/operador.jpg',
-    'Streaming en vivo': '/images/tecnica/streaming.jpg',
-    'Invitados remotos': '/images/tecnica/remotos.jpg',
-    'Escenografía': '/images/tecnica/escenografia.jpg',
-}
 
 export default function CotizadorPage() {
     const [supabase] = useState(() => createClient())
@@ -114,19 +99,29 @@ export default function CotizadorPage() {
     const tipos = [
         { nombre: 'Podcast', image: '/podcast.jpg' },
         { nombre: 'Streaming', image: '/streaming.jpg' },
-        { nombre: 'Eventos', image: '/podcast.jpg' },
-        { nombre: 'Grabaciones', image: '/podcast.jpg' },
-        { nombre: 'Show en vivo', image: '/podcast.jpg' },
-        { nombre: 'Contenido para redes', image: '/podcast.jpg' },
+        { nombre: 'Eventos', image: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273212/5C318F3E-0064-4DD1-802A-2301A6115FA6_2_iwwqs2.jpg' },
+        { nombre: 'Grabaciones', image: '/grabaciones.jpg' },
+        { nombre: 'Show en vivo', image: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273164/DSC08820_fkpapk.jpg' },
+        { nombre: 'Contenido para redes', image: '/redes.jpg' },
     ]
     const espacios = [
-        { id: 'Sala Streaming', desc: 'Multicámara, monitores y setup completo para streaming profesional.', img: '/images/sala-streaming.jpg' },
-        { id: 'Sala Negra', desc: 'Ambiente cinematic, ideal para producciones premium y entrevistas.', img: '/images/sala-negra.jpg' },
-        { id: 'Sala Blanca', desc: 'Espacio luminoso y versátil para contenido clean y corporativo.', img: '/images/sala-blanca.jpg' },
-        { id: 'Otros espacios', desc: 'Salas adicionales y espacios creativos de Piso 2.', img: '/images/sala-otros.jpg' },
-        { id: 'Eventos externos', desc: 'Llevamos la producción a tu locación o evento.', img: '/images/eventos-externos.jpg' }
+        { id: 'Sala Streaming', desc: 'Multicámara, monitores y setup completo para streaming profesional.', img: '/sala-redes.jpg' },
+        { id: 'Sala Negra', desc: 'Ambiente cinematic, ideal para producciones premium y entrevistas.', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273185/40F11C05-7457-4AD6-A4D9-6EC3FCDB2568_2_yr9lw9.png' },
+        { id: 'Sala Blanca', desc: 'Espacio luminoso y versátil para contenido clean y corporativo.', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273186/D6322754-9700-4B2F-BB10-9D5622F2B37D_2_oomwdp.png' },
+        { id: 'Otros espacios', desc: 'Salas adicionales y espacios creativos de Piso 2.', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273212/IMG_0556_2_mwuo4s.jpg' },
+        { id: 'Eventos externos', desc: 'Llevamos la producción a tu locación o evento.', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273213/50E7A27C-DAA6-4DB9-B6F2-254CFEBAEF14_2_av71vm.png' }
     ]
-    const estilos = ['Gaming', 'Show en vivo', 'Producción premium', 'Streamer setup', 'Podcast relajado', 'Cinematic', 'Minimalista', 'Tech', 'Corporativo premium']
+    const estilos = [
+        { nombre: 'Gaming', image: 'https://culturageek.com.ar/wp-content/uploads/2025/10/Armada-Gaming-Center-www.culturageek.com_.ar_-1.webp' },
+        { nombre: 'Show en vivo', image: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273164/DSC08820_fkpapk.jpg' },
+        { nombre: 'Producción premium', image: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273163/DSC08549_jauf3a.jpg' },
+        { nombre: 'Streamer setup', image: 'https://i.ytimg.com/vi/AHyvoTwLFGU/maxresdefault.jpg' },
+        { nombre: 'Podcast relajado', image: 'https://www.plugthejack.com/_default_upload_bucket/Images%20all%202024/ENG/20%20Podcast%20Studios/12798/image-thumb__12798__area-wysiwyg-image/Banner%20studio%20podcast.jpg' },
+        { nombre: 'Cinematic', image: 'https://www.georgefox.edu/college-admissions/academics/major/_assets-cinematic-arts/images/2212_cinematicarts_gf27574.webp' },
+        { nombre: 'Minimalista', image: 'https://i.pinimg.com/736x/39/a9/d8/39a9d8fb1da012f2d2e325254a86dcae.jpg' },
+        { nombre: 'Tech', image: 'https://cdn.tapetender70er.de/media/image/bc/51/18/Mood-Boosting-RGB-Gaming-Room-with-LED-Lighting-and-Color-Psychology-Inspired-Design_944x944.jpg' },
+        { nombre: 'Corporativo premium', image: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273186/5461029F-2CA2-4B36-ABDB-52CEE6B6EECE_2_cfua07.jpg' },
+    ]
     const tecnicas = Object.keys(pricingConfig.tecnica)
     const participantesOpt = ['1-2', '3-5', '5-10', '+10']
     const duraciones = [
@@ -343,13 +338,24 @@ export default function CotizadorPage() {
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-10 max-w-4xl mx-auto">
                             {estilos.map(estilo => (
                                 <button
-                                    key={estilo}
-                                    onClick={() => setFormData({ ...formData, estilo })}
-                                    className={`relative h-24 rounded-2xl overflow-hidden group border transition-all duration-300 ${formData.estilo === estilo ? 'border-[#1ed760] shadow-[0_0_25px_rgba(30,215,96,0.25)]' : 'border-white/5 hover:border-white/20'}`}
+                                    key={estilo.nombre}
+                                    onClick={() => setFormData({ ...formData, estilo: estilo.nombre })}
+                                    className={`flex flex-col text-left group p-1 rounded-2xl transition-all duration-300 border ${formData.estilo === estilo.nombre ? 'border-[#1ed760] bg-white/5 shadow-[0_0_25px_rgba(30,215,96,0.2)]' : 'border-transparent hover:bg-white/5'}`}
                                 >
-                                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 to-black/20 z-10" />
-                                    <div className="absolute inset-0 bg-[#111] transform group-hover:scale-110 transition-transform duration-500" />
-                                    <span className="absolute bottom-3 left-4 z-20 font-bold text-xs uppercase tracking-wider text-white">{estilo}</span>
+                                    {/* CONTENEDOR DE IMAGEN MEJORADO */}
+                                    <div className="h-35 w-full rounded-xl bg-[#111] mb-4 relative overflow-hidden">
+                                        <img
+                                            src={estilo.image}
+                                            alt={estilo.nombre}
+                                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-60 group-hover:opacity-90"
+                                        />
+                                        {/* Gradiente oscuro inferior para asegurar contraste */}
+                                        <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0c] via-transparent to-black/20" />
+                                    </div>
+
+                                    <div className="px-3 pb-3">
+                                        <h3 className="font-black text-white uppercase text-sm mb-2">{estilo.nombre}</h3>
+                                    </div>
                                 </button>
                             ))}
                         </div>
@@ -369,7 +375,7 @@ export default function CotizadorPage() {
                         <div className="flex flex-wrap justify-center gap-3 mb-12 max-w-3xl mx-auto">
                             {tecnicas.map(tec => {
                                 const isSelected = formData.tecnica.includes(tec);
-                                const bgImagen = IMAGENES_TECNICA[tec] || '/images/tecnica/default.jpg';
+                                const bgImagen = '';
 
                                 return (
                                     <button
