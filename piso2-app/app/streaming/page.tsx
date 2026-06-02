@@ -113,7 +113,7 @@ export default function CotizadorPage() {
     // Opciones estáticas del flujo
     const tipos = [
         { nombre: 'Podcast', image: '/podcast.jpg' },
-        { nombre: 'Streaming', image: '/podcast.jpg' },
+        { nombre: 'Streaming', image: '/streaming.jpg' },
         { nombre: 'Eventos', image: '/podcast.jpg' },
         { nombre: 'Grabaciones', image: '/podcast.jpg' },
         { nombre: 'Show en vivo', image: '/podcast.jpg' },
