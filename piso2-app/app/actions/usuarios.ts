@@ -756,7 +756,7 @@ export async function crearAnuncioAction(
             .insert([
                 {
                     titulo,
-                    contenido: mensaje,
+                    mensaje,
                     categoria: 'general',
                     segmento,
                     created_at:
