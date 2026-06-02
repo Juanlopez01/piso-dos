@@ -546,3 +546,501 @@ export async function ajustarCreditosAction(
         return { success: false, error: error.message }
     }
 }
+
+// -------------------------------------------------------------
+// 1. ACTION: OBTENER ALUMNOS CON PACKS AGOTADOS (REMARKETING)
+// -------------------------------------------------------------
+export interface PackAgotado {
+    tipo: string
+    nombre: string
+}
+
+export interface AlumnoRemarketing {
+    user_id: string
+    nombre: string
+    telefono: string | null
+    packs_agotados: PackAgotado[]
+}
+
+export async function obtenerPacksAgotadosParaNotificarAction() {
+    const supabase = getAdminClient()
+
+    try {
+        const hoySoloFecha = new Date()
+            .toISOString()
+            .split('T')[0]
+
+        const {
+            data: packsAgotados,
+            error: errAgotados
+        } = await supabase
+            .from('alumno_packs')
+            .select(`
+                id,
+                user_id,
+                tipo_clase,
+                producto_id,
+                estado,
+                creditos_restantes,
+                fecha_vencimiento,
+                profiles (
+                    nombre,
+                    apellido,
+                    nombre_completo,
+                    telefono
+                ),
+                productos (
+                    id,
+                    nombre
+                )
+            `)
+            .or(
+                `estado.eq.agotado,fecha_vencimiento.lt.${hoySoloFecha}`
+            )
+            .order('fecha_vencimiento', {
+                ascending: false
+            })
+            .limit(10000)
+
+        if (errAgotados) {
+            throw new Error(
+                `Error obteniendo packs agotados: ${errAgotados.message}`
+            )
+        }
+
+        const {
+            data: packsActivos,
+            error: errActivos
+        } = await supabase
+            .from('alumno_packs')
+            .select(`
+                user_id,
+                tipo_clase
+            `)
+            .eq('estado', 'activo')
+            .gt('creditos_restantes', 0)
+
+        if (errActivos) {
+            throw new Error(
+                `Error obteniendo packs activos: ${errActivos.message}`
+            )
+        }
+
+        const alumnosNotificables =
+            (packsAgotados || []).filter(pack => {
+                const yaRenovo =
+                    packsActivos?.some(
+                        activo =>
+                            activo.user_id ===
+                            pack.user_id &&
+                            activo.tipo_clase ===
+                            pack.tipo_clase
+                    )
+
+                return !yaRenovo
+            })
+
+        const resultado: Record<
+            string,
+            AlumnoRemarketing
+        > = {}
+
+        alumnosNotificables.forEach((pack: any) => {
+            const profile = Array.isArray(
+                pack.profiles
+            )
+                ? pack.profiles[0]
+                : pack.profiles
+
+            const producto = Array.isArray(
+                pack.productos
+            )
+                ? pack.productos[0]
+                : pack.productos
+
+            const nombreAlumno =
+                profile?.nombre_completo ||
+                `${profile?.nombre || ''} ${profile?.apellido || ''}`.trim() ||
+                'Desconocido'
+
+            const nombrePack =
+                producto?.nombre ||
+                pack.tipo_clase ||
+                'Pack sin nombre'
+
+            if (!resultado[pack.user_id]) {
+                resultado[pack.user_id] = {
+                    user_id: pack.user_id,
+                    nombre: nombreAlumno,
+                    telefono:
+                        profile?.telefono || null,
+                    packs_agotados: []
+                }
+            }
+
+            const yaExiste =
+                resultado[
+                    pack.user_id
+                ].packs_agotados.some(
+                    p =>
+                        p.tipo ===
+                        pack.tipo_clase &&
+                        p.nombre ===
+                        nombrePack
+                )
+
+            if (!yaExiste) {
+                resultado[
+                    pack.user_id
+                ].packs_agotados.push({
+                    tipo: pack.tipo_clase,
+                    nombre: nombrePack
+                })
+            }
+        })
+
+        return {
+            success: true,
+            data: Object.values(resultado)
+        }
+    } catch (error: any) {
+        console.error(
+            'Error en obtenerPacksAgotadosParaNotificarAction:',
+            error
+        )
+
+        return {
+            success: false,
+            error:
+                error?.message ||
+                'Error interno del servidor'
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// ACTION: CREAR ANUNCIO MASIVO CON SEGMENTACIÓN AVANZADA
+// -------------------------------------------------------------
+type SegmentoAnuncio =
+    | 'todos'
+    | 'la_liga'
+    | 'regulares'
+    | string
+
+export async function crearAnuncioAction(
+    titulo: string,
+    mensaje: string,
+    enviarComoNotificacion: boolean,
+    segmento: SegmentoAnuncio
+) {
+    const supabase = getAdminClient()
+
+    try {
+        if (!titulo?.trim()) {
+            throw new Error(
+                'El título es obligatorio.'
+            )
+        }
+
+        if (!mensaje?.trim()) {
+            throw new Error(
+                'El mensaje es obligatorio.'
+            )
+        }
+
+        const {
+            data: anuncio,
+            error: errAnuncio
+        } = await supabase
+            .from('estudio_anuncios')
+            .insert([
+                {
+                    titulo,
+                    contenido: mensaje,
+                    categoria: 'general',
+                    segmento,
+                    created_at:
+                        new Date().toISOString()
+                }
+            ])
+            .select()
+            .single()
+
+        if (errAnuncio) {
+            throw new Error(
+                errAnuncio.message
+            )
+        }
+
+        if (enviarComoNotificacion) {
+            let usuariosIds: string[] = []
+
+            switch (segmento) {
+                // ---------------------------------
+                // TODOS
+                // ---------------------------------
+                case 'todos': {
+                    const { data, error } =
+                        await supabase
+                            .from('profiles')
+                            .select('id')
+
+                    if (error)
+                        throw new Error(
+                            error.message
+                        )
+
+                    usuariosIds =
+                        data?.map(
+                            usuario => usuario.id
+                        ) || []
+
+                    break
+                }
+
+                // ---------------------------------
+                // LA LIGA
+                // ---------------------------------
+                case 'la_liga': {
+                    const { data, error } =
+                        await supabase
+                            .from('profiles')
+                            .select('id')
+                            .eq(
+                                'es_la_liga',
+                                true
+                            )
+
+                    if (error)
+                        throw new Error(
+                            error.message
+                        )
+
+                    usuariosIds =
+                        data?.map(
+                            usuario => usuario.id
+                        ) || []
+
+                    break
+                }
+
+                // ---------------------------------
+                // REGULARES
+                // ---------------------------------
+                case 'regulares': {
+                    const {
+                        data: packsRegulares,
+                        error
+                    } = await supabase
+                        .from('alumno_packs')
+                        .select(`
+                            user_id,
+                            compania_id,
+                            profiles (
+                                id,
+                                es_la_liga
+                            )
+                        `)
+                        .eq('estado', 'activo')
+
+                    if (error)
+                        throw new Error(
+                            error.message
+                        )
+
+                    usuariosIds = [
+                        ...new Set(
+                            (packsRegulares || [])
+                                .filter(pack => {
+                                    const profile =
+                                        Array.isArray(
+                                            pack.profiles
+                                        )
+                                            ? pack
+                                                .profiles[0]
+                                            : pack.profiles
+
+                                    return (
+                                        !pack.compania_id &&
+                                        !profile?.es_la_liga
+                                    )
+                                })
+                                .map(
+                                    pack =>
+                                        pack.user_id
+                                )
+                        )
+                    ]
+
+                    break
+                }
+
+                // ---------------------------------
+                // UUID COMPAÑÍA
+                // ---------------------------------
+                default: {
+                    const companiaId =
+                        segmento
+
+                    const {
+                        data: alumnosCompania,
+                        error
+                    } = await supabase
+                        .from('alumno_packs')
+                        .select('user_id')
+                        .eq(
+                            'compania_id',
+                            companiaId
+                        )
+                        .eq('estado', 'activo')
+
+                    if (error)
+                        throw new Error(
+                            error.message
+                        )
+
+                    usuariosIds = [
+                        ...new Set(
+                            (
+                                alumnosCompania ||
+                                []
+                            ).map(
+                                alumno =>
+                                    alumno.user_id
+                            )
+                        )
+                    ]
+
+                    break
+                }
+            }
+
+            if (usuariosIds.length > 0) {
+                const notificaciones =
+                    usuariosIds.map(
+                        usuarioId => ({
+                            usuario_id:
+                                usuarioId,
+                            titulo,
+                            mensaje,
+                            leido: false,
+                            link: null,
+                            created_at:
+                                new Date().toISOString()
+                        })
+                    )
+
+                const chunkSize = 200
+
+                for (
+                    let i = 0;
+                    i <
+                    notificaciones.length;
+                    i += chunkSize
+                ) {
+                    const lote =
+                        notificaciones.slice(
+                            i,
+                            i + chunkSize
+                        )
+
+                    const {
+                        error: errNotif
+                    } = await supabase
+                        .from(
+                            'notificaciones'
+                        )
+                        .insert(lote)
+
+                    if (errNotif) {
+                        console.error(
+                            `Error lote ${i}:`,
+                            errNotif.message
+                        )
+                    }
+                }
+            }
+        }
+
+        return {
+            success: true,
+            data: anuncio
+        }
+    } catch (error: any) {
+        console.error(
+            'Error en crearAnuncioAction:',
+            error
+        )
+
+        return {
+            success: false,
+            error:
+                error?.message ||
+                'Error interno del servidor.'
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// 3. ACTION: OBTENER HISTORIAL DE COMUNICADOS ENVIADOS
+// -------------------------------------------------------------
+export async function obtenerAnunciosAction() {
+    const supabase = getAdminClient()
+
+    try {
+        const { data, error } = await supabase
+            .from('notificaciones')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50) // Traemos los últimos 50 anuncios para no sobrecargar el historial
+
+        if (error) throw new Error(error.message)
+
+        return { success: true, data: data || [] }
+    } catch (error: any) {
+        console.error("Error en obtenerAnunciosAction:", error)
+        return { success: false, error: error.message }
+    }
+}
+
+export interface Compania {
+    id: string
+    nombre: string
+}
+
+export async function obtenerCompaniasAction() {
+    const supabase = getAdminClient()
+
+    try {
+        const { data, error } = await supabase
+            .from('companias') // cambiar por 'estudio_companias' si corresponde
+            .select(`
+                id,
+                nombre
+            `)
+            .order('nombre', {
+                ascending: true
+            })
+
+        if (error) {
+            throw new Error(error.message)
+        }
+
+        return {
+            success: true,
+            data: (data || []) as Compania[]
+        }
+    } catch (error: any) {
+        console.error(
+            'Error en obtenerCompaniasAction:',
+            error
+        )
+
+        return {
+            success: false,
+            error:
+                error?.message ||
+                'Error interno del servidor'
+        }
+    }
+}

@@ -45,7 +45,22 @@ function MobileNavContent() {
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
         // Vistas base por rol
-        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Liquidaciones', 'Caja', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'admin') return [
+            'Inicio',
+            'Agenda',
+            'Explorar',
+            'Alumnos / Profes',
+            'Staff / Equipo',
+            'Productos',
+            'La Liga',
+            'Grupos',
+            'Liquidaciones',
+            'Remarketing',
+            'Caja',
+            'Sedes',
+            'Notificaciones',
+            'Mi Perfil'
+        ].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         if (userRole === 'profesor') {
@@ -53,8 +68,18 @@ function MobileNavContent() {
         }
 
         if (userRole === 'recepcion') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Grupos'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
+            if (!isBoxOpen)
+                return [
+                    'Inicio',
+                    'Agenda',
+                    'Caja',
+                    'Mi Perfil',
+                    'Explorar',
+                    'Notificaciones',
+                    'La Liga',
+                    'Grupos'
+                ].includes(item.name)
+            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
         }
 
         // 🚀 ROL AUXILIAR: Mismo menú cerrado que recepción, ve Grupos pero NUNCA La Liga.
