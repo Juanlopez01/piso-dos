@@ -12,7 +12,8 @@ import {
     ChevronRight,
     Trash2,
     ArrowLeft,
-    Calendar as CalendarIcon
+    Calendar as CalendarIcon,
+    Calendar
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import { format, isToday } from 'date-fns'
@@ -42,7 +43,7 @@ type CajaData = {
     turnosDisponibles: any[]
 }
 
-const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<CajaData> => {
+const fetcherCaja = async ([key, role, uid, mesSeleccionado]: [string, string, string, string?]): Promise<CajaData> => {
     const supabase = createClient()
 
     const { data: turnosAbiertosData } = await supabase
@@ -117,12 +118,24 @@ const fetcherCaja = async ([key, role, uid]: [string, string, string]): Promise<
             ingresos_con_inicial: Number(caja.total_ingresos) + Number(caja.monto_inicial)
         }))
 
-        const hoy = new Date();
-        const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString();
+        // --- LÓGICA DE FILTRO POR MES ---
+        let fechaInicioMes: string;
+        let fechaFinMes: string;
+
+        if (mesSeleccionado) {
+            const [year, month] = mesSeleccionado.split('-');
+            fechaInicioMes = new Date(Number(year), Number(month) - 1, 1).toISOString();
+            fechaFinMes = new Date(Number(year), Number(month), 1).toISOString();
+        } else {
+            const hoy = new Date();
+            fechaInicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString();
+            fechaFinMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 1).toISOString();
+        }
 
         const { data: turnosMes } = await supabase.from('caja_turnos')
             .select(`usuario_id, fecha_apertura, fecha_cierre, usuario:profiles(nombre_completo)`)
-            .gte('fecha_apertura', primerDiaMes)
+            .gte('fecha_apertura', fechaInicioMes)
+            .lt('fecha_apertura', fechaFinMes)
             .not('fecha_cierre', 'is', null)
 
         const horasPorRecepcionista: Record<string, any> = {}
@@ -222,11 +235,13 @@ export default function CajaPage() {
 
     const [adminMode, setAdminMode] = useState<'dashboard' | 'operador'>('dashboard')
     const [filtroFechaHistorial, setFiltroFechaHistorial] = useState('')
-
+    const [mesFiltro, setMesFiltro] = useState(new Date().toISOString().slice(0, 7))
     const fetchRole = userRole === 'admin' && adminMode === 'operador' ? 'recepcion' : userRole;
 
     const { data, isLoading, mutate, error } = useSWR(
-        !loadingContext && userRole && userId ? ['caja-dashboard', fetchRole, userId] : null,
+        !loadingContext && userRole && userId
+            ? ['caja-dashboard', fetchRole, userId, mesFiltro] // <-- Agregamos mesFiltro acá
+            : null,
         fetcherCaja,
         {
             refreshInterval: fetchRole === 'admin' ? 10000 : 0,
@@ -1000,9 +1015,26 @@ export default function CajaPage() {
                     </div>
                 )}
 
-                <h2 className="text-lg font-black uppercase text-white mb-4 flex items-center gap-2 mt-8">
-                    <Clock size={18} className="text-[#D4E655]" /> Horas Trabajadas (Mes Actual)
-                </h2>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-8 mb-4 gap-4">
+                    <h2 className="text-lg font-black uppercase text-white flex items-center gap-2">
+                        <Clock size={18} className="text-[#D4E655]" /> Horas Trabajadas
+                    </h2>
+
+                    {/* CONTROLES DE FILTRO */}
+                    <div className="flex items-center gap-3 bg-[#111] px-4 py-2 rounded-xl border border-white/10 w-fit shadow-lg">
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                            <Calendar size={14} className="text-[#D4E655]" />
+                            Mes:
+                        </label>
+                        <input
+                            type="month"
+                            value={mesFiltro}
+                            onChange={(e) => setMesFiltro(e.target.value)}
+                            className="bg-transparent text-sm text-white font-bold outline-none cursor-pointer color-scheme-dark"
+                        />
+                    </div>
+                </div>
+
                 <div className="bg-[#111] border border-white/10 rounded-2xl overflow-hidden shadow-xl mb-12 p-6">
                     {reporteHoras.length === 0 ? (
                         <p className="text-center text-gray-500 font-bold uppercase text-xs py-4">No hay turnos cerrados en este mes aún.</p>
