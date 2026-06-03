@@ -111,7 +111,7 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
 
     const pagosStaffPorId: Record<string, number> = {};
     if (pagosStaffData) {
-        pagosStaffData.forEach(pago => {
+        pagosStaffData.forEach((pago: any) => {
             const match = pago.concepto?.match(/ID: ([a-zA-Z0-9-]+) /);
             if (match && match[1]) {
                 const uid = match[1];
