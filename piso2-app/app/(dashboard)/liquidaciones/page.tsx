@@ -72,7 +72,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     const prevMonth = parseInt(mm) === 1 ? `${parseInt(yyyy) - 1}-12` : `${yyyy}-${String(parseInt(mm) - 1).padStart(2, '0')}`
     const nextMonth = parseInt(mm) === 12 ? `${parseInt(yyyy) + 1}-01` : `${yyyy}-${String(parseInt(mm) + 1).padStart(2, '0')}`
 
-    // 🚀 AGREGAMOS compania_id Y liga_nivel A LA BÚSQUEDA
     const { data: clasesData, error } = await supabase
         .from('clases')
         .select(`
@@ -169,7 +168,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
             liquidacionesPorProfe[profId].total_recaudado += total_clase
             totalGeneralRecaudado += total_clase
 
-            // 🚀 CATEGORIZACIÓN BLINDADA PARA EL RANKING
             const tipoClaseStr = (clase.tipo_clase || '').toLowerCase();
             let categoria: 'regular' | 'especial' | 'grupo' = 'regular';
 
@@ -184,7 +182,7 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
             } else if (tipoClaseStr === 'especial' || tipoClaseStr === 'seminario') {
                 categoria = 'especial';
             } else {
-                categoria = 'regular'; // Solo si no tiene vinculación con compañías/liga cae acá
+                categoria = 'regular';
             }
 
             rankingClases.push({
@@ -281,6 +279,10 @@ export default function AdminLiquidacionesPage() {
 
     const [modalPago, setModalPago] = useState<{ isOpen: boolean; clase: ClaseLiquidacion | null; nombreProfe: string }>({ isOpen: false, clase: null, nombreProfe: '' })
     const [modalAlumnos, setModalAlumnos] = useState<{ isOpen: boolean; claseNombre: string; fecha: string; alumnos: { nombre: string, presente: boolean }[] }>({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })
+
+    // 🔥 NUEVO ESTADO PARA PAGO MASIVO (LIQUIDAR BLOQUE COMPLETO)
+    const [modalPagoMasivo, setModalPagoMasivo] = useState<{ isOpen: boolean; clases: ClaseLiquidacion[]; nombreGrupo: string; nombreProfe: string; total: number }>({ isOpen: false, clases: [], nombreGrupo: '', nombreProfe: '', total: 0 })
+
     const [procesandoPago, setProcesandoPago] = useState(false)
 
     const { data, isLoading, error, mutate } = useSWR(
@@ -308,6 +310,34 @@ export default function AdminLiquidacionesPage() {
         } else {
             toast.error(res.error || 'Error al procesar el pago')
         }
+        setProcesandoPago(false)
+    }
+
+    // 🔥 NUEVA FUNCIÓN PARA PROCESAR TODAS LAS CLASES DE UN BLOQUE
+    const handleProcesarPagoMasivo = async (metodo: 'efectivo' | 'transferencia') => {
+        if (!modalPagoMasivo.clases.length) return
+        setProcesandoPago(true)
+
+        let successCount = 0
+        for (const clase of modalPagoMasivo.clases) {
+            const res = await pagarClaseProfeAction(
+                clase.id,
+                clase.pago_profe,
+                metodo,
+                clase.nombre,
+                modalPagoMasivo.nombreProfe
+            )
+            if (res.success) successCount++
+        }
+
+        if (successCount === modalPagoMasivo.clases.length) {
+            toast.success(`¡Excelente! Se liquidaron ${successCount} clases correctamente.`)
+        } else {
+            toast.warning(`Atención: Se liquidaron ${successCount} de ${modalPagoMasivo.clases.length} clases.`)
+        }
+
+        mutate()
+        setModalPagoMasivo({ isOpen: false, clases: [], nombreGrupo: '', nombreProfe: '', total: 0 })
         setProcesandoPago(false)
     }
 
@@ -516,111 +546,157 @@ export default function AdminLiquidacionesPage() {
 
                                     <div className={`transition-all duration-300 overflow-hidden ${isOpen ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'}`}>
                                         <div className="p-4 md:p-6 border-t border-white/5 bg-[#09090b]">
-                                            {Object.entries(clasesAgrupadas).map(([nombreGrupo, clasesList], index) => (
-                                                <div key={index} className="mb-8 last:mb-0">
-                                                    <h4 className="text-white font-black uppercase tracking-widest border-b border-white/10 pb-2 mb-4 text-sm flex items-center gap-2">
-                                                        <span className="w-2 h-2 rounded-full bg-[#D4E655]"></span>
-                                                        {nombreGrupo}
-                                                    </h4>
+                                            {Object.entries(clasesAgrupadas).map(([nombreGrupo, clasesList], index) => {
 
-                                                    <div className="hidden md:block overflow-x-auto bg-[#111] rounded-xl border border-white/5">
-                                                        <table className="w-full text-left border-collapse table-fixed">
-                                                            <thead>
-                                                                <tr className="text-[9px] font-black text-gray-500 uppercase tracking-widest border-b border-white/10 bg-white/5">
-                                                                    <th className="py-3 pl-4 w-[20%]">Fecha</th>
-                                                                    <th className="py-3 text-center w-[15%]">Acuerdo</th>
-                                                                    <th className="py-3 text-center w-[15%]">Inscriptos</th>
-                                                                    <th className="py-3 text-right w-[15%]">Recaudado</th>
-                                                                    <th className="py-3 text-right text-[#D4E655] w-[15%]">A Pagar</th>
-                                                                    <th className="py-3 text-center w-[20%] pr-4">Estado</th>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody className="divide-y divide-white/5 text-xs">
-                                                                {clasesList.map((clase) => {
-                                                                    const [fechaParte, horaParte] = clase.inicio.split('T')
-                                                                    const [a, m, d] = fechaParte.split('-')
-                                                                    const hora = horaParte ? horaParte.substring(0, 5) : '--:--'
+                                                // 🔥 CALCULAMOS EL SUBTOTAL SOLO DE LO QUE FALTA PAGAR DE ESTE GRUPO
+                                                const clasesPendientes = clasesList.filter(c => !c.pagado_profe)
+                                                const subtotalPendiente = clasesPendientes.reduce((acc, c) => acc + c.pago_profe, 0)
 
-                                                                    return (
-                                                                        <tr key={clase.id} className="hover:bg-white/5 transition-colors group">
-                                                                            <td className="py-3 pl-4 text-white font-bold">{d}/{m} <span className="text-gray-500 ml-1">{hora}</span></td>
-                                                                            <td className="py-3 text-center text-gray-500 font-bold">{clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `$${clase.valor_acuerdo}`}</td>
-                                                                            <td className="py-3 text-center">
-                                                                                <button
-                                                                                    onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/${m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
-                                                                                    className="bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white transition-colors px-3 py-1 rounded flex items-center justify-center gap-1.5 w-fit mx-auto cursor-pointer"
-                                                                                    title="Ver lista de inscriptos"
-                                                                                >
-                                                                                    <Users size={12} /> {clase.cant_alumnos}
-                                                                                </button>
-                                                                            </td>
-                                                                            <td className="py-3 text-right text-gray-400">${clase.total_clase.toLocaleString()}</td>
-                                                                            <td className="py-3 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
-                                                                            <td className="py-3 text-center pr-4">
+                                                return (
+                                                    <div key={index} className="mb-8 last:mb-0">
+                                                        <h4 className="text-white font-black uppercase tracking-widest border-b border-white/10 pb-2 mb-4 text-sm flex items-center gap-2">
+                                                            <span className="w-2 h-2 rounded-full bg-[#D4E655]"></span>
+                                                            {nombreGrupo}
+                                                        </h4>
+
+                                                        {/* TABLA DE ESCRITORIO */}
+                                                        <div className="hidden md:block overflow-hidden bg-[#111] rounded-xl border border-white/5">
+                                                            <table className="w-full text-left border-collapse table-fixed">
+                                                                <thead>
+                                                                    <tr className="text-[9px] font-black text-gray-500 uppercase tracking-widest border-b border-white/10 bg-white/5">
+                                                                        <th className="py-3 pl-4 w-[20%]">Fecha</th>
+                                                                        <th className="py-3 text-center w-[15%]">Acuerdo</th>
+                                                                        <th className="py-3 text-center w-[15%]">Inscriptos</th>
+                                                                        <th className="py-3 text-right w-[15%]">Recaudado</th>
+                                                                        <th className="py-3 text-right text-[#D4E655] w-[15%]">A Pagar</th>
+                                                                        <th className="py-3 text-center w-[20%] pr-4">Estado</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-white/5 text-xs">
+                                                                    {clasesList.map((clase) => {
+                                                                        const [fechaParte, horaParte] = clase.inicio.split('T')
+                                                                        const [a, m, d] = fechaParte.split('-')
+                                                                        const hora = horaParte ? horaParte.substring(0, 5) : '--:--'
+
+                                                                        return (
+                                                                            <tr key={clase.id} className="hover:bg-white/5 transition-colors group">
+                                                                                <td className="py-3 pl-4 text-white font-bold">{d}/{m} <span className="text-gray-500 ml-1">{hora}</span></td>
+                                                                                <td className="py-3 text-center text-gray-500 font-bold">{clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `$${clase.valor_acuerdo}`}</td>
+                                                                                <td className="py-3 text-center">
+                                                                                    <button
+                                                                                        onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/{m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
+                                                                                        className="bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white transition-colors px-3 py-1 rounded flex items-center justify-center gap-1.5 w-fit mx-auto cursor-pointer"
+                                                                                        title="Ver lista de inscriptos"
+                                                                                    >
+                                                                                        <Users size={12} /> {clase.cant_alumnos}
+                                                                                    </button>
+                                                                                </td>
+                                                                                <td className="py-3 text-right text-gray-400">${clase.total_clase.toLocaleString()}</td>
+                                                                                <td className="py-3 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
+                                                                                <td className="py-3 text-center pr-4">
+                                                                                    {clase.pagado_profe ? (
+                                                                                        <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[9px] font-black flex items-center justify-center gap-1 mx-auto cursor-not-allowed w-full max-w-[100px]">
+                                                                                            <CheckCircle2 size={12} /> OK
+                                                                                        </span>
+                                                                                    ) : (
+                                                                                        <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: profe.nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors mx-auto block w-full max-w-[100px]">
+                                                                                            PAGAR
+                                                                                        </button>
+                                                                                    )}
+                                                                                </td>
+                                                                            </tr>
+                                                                        )
+                                                                    })}
+                                                                </tbody>
+                                                            </table>
+
+                                                            {/* 🔥 NUEVO FOOTER: SUBTOTAL Y BOTÓN DE PAGO MASIVO (ESCRITORIO) */}
+                                                            {subtotalPendiente > 0 ? (
+                                                                <div className="bg-[#1a1a15] p-4 flex justify-between items-center border-t border-[#D4E655]/20">
+                                                                    <div>
+                                                                        <p className="text-[10px] text-[#D4E655] uppercase font-bold tracking-widest mb-1">Subtotal Pendiente de este bloque</p>
+                                                                        <p className="text-xl font-black text-white">${subtotalPendiente.toLocaleString()}</p>
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => setModalPagoMasivo({ isOpen: true, clases: clasesPendientes, nombreGrupo, nombreProfe: profe.nombre, total: subtotalPendiente })}
+                                                                        className="bg-[#D4E655] hover:bg-white text-black px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(212,230,85,0.2)]"
+                                                                    >
+                                                                        Liquidar Bloque Completo
+                                                                    </button>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="bg-white/5 p-4 text-center border-t border-white/5">
+                                                                    <p className="text-xs text-gray-500 font-bold uppercase flex items-center justify-center gap-2">
+                                                                        <CheckCircle2 size={14} className="text-green-500" />
+                                                                        Todas las clases de este bloque están pagadas
+                                                                    </p>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {/* VISTA MOBILE */}
+                                                        <div className="md:hidden space-y-2">
+                                                            {clasesList.map((clase) => {
+                                                                const [fechaParte, horaParte] = clase.inicio.split('T')
+                                                                const [a, m, d] = fechaParte.split('-')
+                                                                const hora = horaParte ? horaParte.substring(0, 5) : '--:--'
+
+                                                                return (
+                                                                    <div key={clase.id} className="bg-[#111] p-3 rounded-xl border border-white/5">
+                                                                        <div className="flex justify-between items-start mb-2">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <div className="bg-white/5 p-1.5 rounded"><Calendar size={14} className="text-gray-400" /></div>
+                                                                                <p className="text-white font-bold text-sm">{d}/{m} <span className="text-gray-500 text-xs">- {hora}hs</span></p>
+                                                                            </div>
+                                                                            <button
+                                                                                onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/{m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
+                                                                                className="bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1"
+                                                                            >
+                                                                                <Users size={10} /> {clase.cant_alumnos} pax
+                                                                            </button>
+                                                                        </div>
+                                                                        <div className="flex justify-between items-end pt-2 border-t border-white/5 mt-2">
+                                                                            <div>
+                                                                                <p className="text-[8px] text-gray-500 uppercase font-bold">Acuerdo: {clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `Fijo`}</p>
+                                                                                <p className="text-[9px] text-gray-400 mt-0.5">Recaudado: ${clase.total_clase.toLocaleString()}</p>
+                                                                            </div>
+                                                                            <div className="text-right flex flex-col items-end gap-2">
+                                                                                <div>
+                                                                                    <p className="text-[8px] text-[#D4E655]/70 uppercase font-bold">A Pagar</p>
+                                                                                    <p className="text-sm font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</p>
+                                                                                </div>
                                                                                 {clase.pagado_profe ? (
-                                                                                    <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-1 rounded text-[9px] font-black flex items-center justify-center gap-1 mx-auto cursor-not-allowed w-full max-w-[100px]">
-                                                                                        <CheckCircle2 size={12} /> OK
+                                                                                    <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-0.5 rounded text-[8px] font-black flex items-center justify-center gap-1 cursor-not-allowed">
+                                                                                        <CheckCircle2 size={10} /> PAGADO
                                                                                     </span>
                                                                                 ) : (
-                                                                                    <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: profe.nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors mx-auto block w-full max-w-[100px]">
+                                                                                    <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: profe.nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors">
                                                                                         PAGAR
                                                                                     </button>
                                                                                 )}
-                                                                            </td>
-                                                                        </tr>
-                                                                    )
-                                                                })}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-
-                                                    <div className="md:hidden space-y-2">
-                                                        {clasesList.map((clase) => {
-                                                            const [fechaParte, horaParte] = clase.inicio.split('T')
-                                                            const [a, m, d] = fechaParte.split('-')
-                                                            const hora = horaParte ? horaParte.substring(0, 5) : '--:--'
-
-                                                            return (
-                                                                <div key={clase.id} className="bg-[#111] p-3 rounded-xl border border-white/5">
-                                                                    <div className="flex justify-between items-start mb-2">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <div className="bg-white/5 p-1.5 rounded"><Calendar size={14} className="text-gray-400" /></div>
-                                                                            <p className="text-white font-bold text-sm">{d}/{m} <span className="text-gray-500 text-xs">- {hora}hs</span></p>
-                                                                        </div>
-                                                                        <button
-                                                                            onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/${m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
-                                                                            className="bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1"
-                                                                        >
-                                                                            <Users size={10} /> {clase.cant_alumnos} pax
-                                                                        </button>
-                                                                    </div>
-                                                                    <div className="flex justify-between items-end pt-2 border-t border-white/5 mt-2">
-                                                                        <div>
-                                                                            <p className="text-[8px] text-gray-500 uppercase font-bold">Acuerdo: {clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `Fijo`}</p>
-                                                                            <p className="text-[9px] text-gray-400 mt-0.5">Recaudado: ${clase.total_clase.toLocaleString()}</p>
-                                                                        </div>
-                                                                        <div className="text-right flex flex-col items-end gap-2">
-                                                                            <div>
-                                                                                <p className="text-[8px] text-[#D4E655]/70 uppercase font-bold">A Pagar</p>
-                                                                                <p className="text-sm font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</p>
                                                                             </div>
-                                                                            {clase.pagado_profe ? (
-                                                                                <span className="bg-green-500/10 text-green-500 border border-green-500/20 px-2 py-0.5 rounded text-[8px] font-black flex items-center justify-center gap-1 cursor-not-allowed">
-                                                                                    <CheckCircle2 size={10} /> PAGADO
-                                                                                </span>
-                                                                            ) : (
-                                                                                <button onClick={() => setModalPago({ isOpen: true, clase, nombreProfe: profe.nombre })} className="bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black border border-[#D4E655]/30 px-3 py-1 rounded text-[9px] font-black transition-colors">
-                                                                                    PAGAR
-                                                                                </button>
-                                                                            )}
                                                                         </div>
                                                                     </div>
+                                                                )
+                                                            })}
+
+                                                            {/* 🔥 NUEVO FOOTER: SUBTOTAL Y BOTÓN DE PAGO MASIVO (MOBILE) */}
+                                                            {subtotalPendiente > 0 && (
+                                                                <div className="bg-[#1a1a15] p-4 mt-4 rounded-xl border border-[#D4E655]/30">
+                                                                    <p className="text-[10px] text-[#D4E655] uppercase font-bold tracking-widest text-center mb-1">Subtotal Pendiente</p>
+                                                                    <p className="text-2xl font-black text-white text-center mb-3">${subtotalPendiente.toLocaleString()}</p>
+                                                                    <button
+                                                                        onClick={() => setModalPagoMasivo({ isOpen: true, clases: clasesPendientes, nombreGrupo, nombreProfe: profe.nombre, total: subtotalPendiente })}
+                                                                        className="w-full bg-[#D4E655] hover:bg-white text-black py-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+                                                                    >
+                                                                        Liquidar Bloque
+                                                                    </button>
                                                                 </div>
-                                                            )
-                                                        })}
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            ))}
+                                                )
+                                            })}
                                         </div>
                                     </div>
                                 </div>
@@ -694,7 +770,7 @@ export default function AdminLiquidacionesPage() {
                                                                     <td className="py-3 text-center text-gray-500 font-bold">{clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `$${clase.valor_acuerdo}`}</td>
                                                                     <td className="py-3 text-center">
                                                                         <button
-                                                                            onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/${m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
+                                                                            onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/{m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
                                                                             className="bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white transition-colors px-3 py-1 rounded flex items-center justify-center gap-1.5 w-fit mx-auto cursor-pointer"
                                                                             title="Ver lista de inscriptos"
                                                                         >
@@ -735,7 +811,7 @@ export default function AdminLiquidacionesPage() {
                                                                     <p className="text-white font-bold text-sm">{d}/{m} <span className="text-gray-500 text-xs">- {hora}hs</span></p>
                                                                 </div>
                                                                 <button
-                                                                    onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/${m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
+                                                                    onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${d}/{m} - ${hora}hs`, alumnos: clase.alumnos_lista })}
                                                                     className="bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1"
                                                                 >
                                                                     <Users size={10} /> {clase.cant_alumnos} pax
@@ -893,8 +969,8 @@ export default function AdminLiquidacionesPage() {
                                                     </td>
                                                     <td className="py-4">
                                                         <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase tracking-wider ${mov.metodo_pago.includes('mercadopago') || mov.metodo_pago === 'mp' || mov.metodo_pago === 'online'
-                                                                ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                                                                : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                                                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                                                            : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
                                                             }`}>
                                                             {mov.metodo_pago === 'mp' ? 'MercadoPago' : mov.metodo_pago.replace('_', ' ')}
                                                         </span>
@@ -951,7 +1027,44 @@ export default function AdminLiquidacionesPage() {
                 </div>
             )}
 
-            {/* MODAL DE PAGO FLOTANTE */}
+            {/* 🔥 NUEVO MODAL DE PAGO MASIVO (POR BLOQUE) */}
+            {modalPagoMasivo.isOpen && modalPagoMasivo.clases.length > 0 && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => !procesandoPago && setModalPagoMasivo({ isOpen: false, clases: [], nombreGrupo: '', nombreProfe: '', total: 0 })}>
+                    <div className="bg-[#09090b] border border-[#D4E655]/20 w-full max-w-sm rounded-3xl p-6 shadow-[0_0_50px_rgba(212,230,85,0.1)] relative" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => !procesandoPago && setModalPagoMasivo({ isOpen: false, clases: [], nombreGrupo: '', nombreProfe: '', total: 0 })} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                            <X size={20} />
+                        </button>
+
+                        <div className="text-center mb-6">
+                            <div className="w-12 h-12 bg-[#D4E655]/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-[#D4E655]/30">
+                                <DollarSign className="text-[#D4E655]" size={24} />
+                            </div>
+                            <h3 className="text-xl font-black text-white uppercase tracking-tighter">Liquidar Bloque</h3>
+                            <p className="text-xs text-gray-400 mt-2 font-medium leading-relaxed">
+                                Vas a pagar todas las clases pendientes de <br />
+                                <strong className="text-white">{modalPagoMasivo.nombreGrupo}</strong> dictadas por <strong className="text-white">{modalPagoMasivo.nombreProfe}</strong>.
+                            </p>
+
+                            <div className="mt-4 p-3 bg-white/5 rounded-xl">
+                                <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Total Acumulado ({modalPagoMasivo.clases.length} clases)</p>
+                                <p className="text-3xl font-black text-[#D4E655] mt-1">${modalPagoMasivo.total.toLocaleString()}</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-3">
+                            <p className="text-[10px] font-black uppercase text-gray-500 tracking-widest text-center">¿Cómo le pagaste?</p>
+                            <button onClick={() => handleProcesarPagoMasivo('efectivo')} disabled={procesandoPago} className="w-full bg-[#111] hover:bg-white/10 border border-white/10 text-white font-black uppercase py-4 rounded-xl transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : '💵 Aboné en Efectivo'}
+                            </button>
+                            <button onClick={() => handleProcesarPagoMasivo('transferencia')} disabled={procesandoPago} className="w-full bg-[#D4E655] hover:bg-white text-black font-black uppercase py-4 rounded-xl transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : '📱 Hice Transferencia'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL DE PAGO INDIVIDUAL */}
             {modalPago.isOpen && modalPago.clase && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => !procesandoPago && setModalPago({ isOpen: false, clase: null, nombreProfe: '' })}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-sm rounded-3xl p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
@@ -963,7 +1076,7 @@ export default function AdminLiquidacionesPage() {
                             <div className="w-12 h-12 bg-[#D4E655]/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-[#D4E655]/30">
                                 <DollarSign className="text-[#D4E655]" size={24} />
                             </div>
-                            <h3 className="text-xl font-black text-white uppercase tracking-tighter">Pagar a Profe</h3>
+                            <h3 className="text-xl font-black text-white uppercase tracking-tighter">Pago Individual</h3>
                             <p className="text-xs text-gray-400 mt-2 font-medium">Vas a registrar el pago de <strong className="text-white">{modalPago.clase.nombre}</strong> a <strong className="text-white">{modalPago.nombreProfe}</strong>.</p>
                             <p className="text-3xl font-black text-[#D4E655] mt-4">${modalPago.clase.pago_profe.toLocaleString()}</p>
                         </div>
