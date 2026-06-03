@@ -47,3 +47,48 @@ export async function pagarClaseProfeAction(
         return { success: false, error: error.message }
     }
 }
+// Guarda el valor de la hora en la tabla configuraciones
+export async function guardarValorHoraRecepAction(valor: number) {
+    const supabase = await createClient() // <--- EL AWAIT VA ACÁ
+
+    const { error } = await supabase
+        .from('configuraciones')
+        .upsert({ clave: 'valor_hora_recepcion', valor: valor.toString() }, { onConflict: 'clave' })
+
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+// Registra el pago al staff como un egreso en la caja activa
+export async function pagarStaffAction(uid: string, nombre: string, monto: number, metodo: string, mesKey: string) {
+    const supabase = await createClient() // <--- EL AWAIT VA ACÁ TAMBIÉN
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { success: false, error: "No autenticado" }
+
+    // Buscar si el admin tiene un turno de caja abierto
+    const { data: caja } = await supabase
+        .from('caja_turnos')
+        .select('id')
+        .eq('usuario_id', user.id)
+        .eq('estado', 'abierta')
+        .single()
+
+    if (!caja) return { success: false, error: "Debes tener un turno de caja abierto para registrar un egreso." }
+
+    // El concepto tiene un formato específico para que el sistema lo reconozca después
+    const concepto = `Pago Staff | ID: ${uid} | Mes: ${mesKey} | ${nombre}`
+
+    const { error } = await supabase
+        .from('caja_movimientos')
+        .insert({
+            turno_id: caja.id,
+            tipo: 'egreso',
+            monto: monto,
+            metodo_pago: metodo,
+            concepto: concepto
+        })
+
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}

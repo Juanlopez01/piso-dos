@@ -5,11 +5,13 @@ import { useEffect, useState, useMemo } from 'react'
 import useSWR from 'swr'
 import { format, subMonths, addMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { Wallet, Search, Loader2, ChevronDown, ChevronUp, Users, Calendar, DollarSign, Lock, FileSpreadsheet, CheckCircle2, X, Library, Smartphone, ArrowDownRight, Download, Trophy, User } from 'lucide-react'
+import { Wallet, Search, Loader2, ChevronDown, ChevronUp, Users, Calendar, DollarSign, Lock, FileSpreadsheet, CheckCircle2, X, Library, Smartphone, ArrowDownRight, Download, Trophy, User, Clock, Save } from 'lucide-react'
 import { useCash } from '@/context/CashContext'
 import Link from 'next/link'
 import { toast, Toaster } from 'sonner'
 import { pagarClaseProfeAction } from '@/app/actions/liquidaciones'
+// 👇 ACORDATE DE IMPORTAR LAS ACCIONES NUEVAS QUE CREASTE EN EL PASO 1
+import { guardarValorHoraRecepAction, pagarStaffAction } from '@/app/actions/liquidaciones'
 
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -72,6 +74,14 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     const prevMonth = parseInt(mm) === 1 ? `${parseInt(yyyy) - 1}-12` : `${yyyy}-${String(parseInt(mm) - 1).padStart(2, '0')}`
     const nextMonth = parseInt(mm) === 12 ? `${parseInt(yyyy) + 1}-01` : `${yyyy}-${String(parseInt(mm) + 1).padStart(2, '0')}`
 
+    // 🚀 LECTURA DEL VALOR HORA GUARDADO
+    const { data: configData } = await supabase
+        .from('configuraciones')
+        .select('valor')
+        .eq('clave', 'valor_hora_recepcion')
+        .maybeSingle();
+    const valorHoraConfig = configData && configData.valor ? Number(configData.valor) : 2500;
+
     const { data: clasesData, error } = await supabase
         .from('clases')
         .select(`
@@ -91,6 +101,24 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         .in('metodo_pago', ['transferencia', 'mercadopago', 'mercadopago_manual', 'mp', 'online'])
         .gte('created_at', `${prevMonth}-25T00:00:00`)
         .lte('created_at', `${nextMonth}-05T23:59:59`)
+
+    // 🚀 LECTURA DE PAGOS DE STAFF YA REALIZADOS ESTE MES
+    const { data: pagosStaffData } = await supabase
+        .from('caja_movimientos')
+        .select('concepto, monto')
+        .eq('tipo', 'egreso')
+        .ilike('concepto', `%Pago Staff | ID:% | Mes: ${mesKey}%`);
+
+    const pagosStaffPorId: Record<string, number> = {};
+    if (pagosStaffData) {
+        pagosStaffData.forEach(pago => {
+            const match = pago.concepto?.match(/ID: ([a-zA-Z0-9-]+) /);
+            if (match && match[1]) {
+                const uid = match[1];
+                pagosStaffPorId[uid] = (pagosStaffPorId[uid] || 0) + Number(pago.monto);
+            }
+        });
+    }
 
     const { data: pagosOnlineData } = await supabase
         .from('pagos_online')
@@ -243,13 +271,51 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
 
     transaccionesVirtuales.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
+    // 🚀 HORAS DE RECEPCIÓN
+    const { data: turnosMes } = await supabase.from('caja_turnos')
+        .select(`usuario_id, fecha_apertura, fecha_cierre, usuario:profiles(nombre_completo)`)
+        .gte('fecha_apertura', `${prevMonth}-25T00:00:00`)
+        .lte('fecha_apertura', `${nextMonth}-05T23:59:59`)
+        .not('fecha_cierre', 'is', null)
+
+    const horasPorRecepcionista: Record<string, { id: string, nombre: string, horas: number, cantidad_turnos: number, total_pagado: number }> = {}
+
+    if (turnosMes) {
+        turnosMes.forEach((turno: any) => {
+            if (!turno.fecha_apertura || !turno.fecha_cierre) return;
+
+            const apertura = new Date(turno.fecha_apertura).getTime();
+            const cierre = new Date(turno.fecha_cierre).getTime();
+            const diffHoras = (cierre - apertura) / (1000 * 60 * 60);
+            const uid = turno.usuario_id;
+
+            if (!horasPorRecepcionista[uid]) {
+                const nombreUsuario = Array.isArray(turno.usuario) ? turno.usuario[0]?.nombre_completo : turno.usuario?.nombre_completo;
+                horasPorRecepcionista[uid] = {
+                    id: uid,
+                    nombre: nombreUsuario || 'Staff Desconocido',
+                    horas: 0,
+                    cantidad_turnos: 0,
+                    total_pagado: pagosStaffPorId[uid] || 0 // Lo que ya se le pagó en el mes
+                };
+            }
+
+            horasPorRecepcionista[uid].horas += diffHoras;
+            horasPorRecepcionista[uid].cantidad_turnos += 1;
+        })
+    }
+
+    const reporteRecepcion = Object.values(horasPorRecepcionista).sort((a: any, b: any) => b.horas - a.horas);
+
     return {
         profesores: arrayProfes,
         totalGeneralPagar,
         totalGeneralRecaudado,
         transaccionesVirtuales,
         totalVirtual,
-        rankingClases
+        rankingClases,
+        reporteRecepcion,
+        valorHoraConfig
     }
 }
 
@@ -272,7 +338,7 @@ export default function AdminLiquidacionesPage() {
     const [expandedProf, setExpandedProf] = useState<string | null>(null)
     const [expandedClase, setExpandedClase] = useState<string | null>(null)
 
-    const [vistaActiva, setVistaActiva] = useState<'docentes' | 'clases' | 'virtual' | 'ranking'>('docentes')
+    const [vistaActiva, setVistaActiva] = useState<'docentes' | 'clases' | 'virtual' | 'ranking' | 'recepcion'>('docentes')
 
     const [rankingCategoria, setRankingCategoria] = useState<'regular' | 'especial' | 'grupo'>('regular')
     const [rankingOrden, setRankingOrden] = useState<'alumnos' | 'recaudacion'>('alumnos')
@@ -280,8 +346,12 @@ export default function AdminLiquidacionesPage() {
     const [modalPago, setModalPago] = useState<{ isOpen: boolean; clase: ClaseLiquidacion | null; nombreProfe: string }>({ isOpen: false, clase: null, nombreProfe: '' })
     const [modalAlumnos, setModalAlumnos] = useState<{ isOpen: boolean; claseNombre: string; fecha: string; alumnos: { nombre: string, presente: boolean }[] }>({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })
 
-    // 🔥 NUEVO ESTADO PARA PAGO MASIVO (LIQUIDAR BLOQUE COMPLETO)
     const [modalPagoMasivo, setModalPagoMasivo] = useState<{ isOpen: boolean; clases: ClaseLiquidacion[]; nombreGrupo: string; nombreProfe: string; total: number }>({ isOpen: false, clases: [], nombreGrupo: '', nombreProfe: '', total: 0 })
+
+    // 🔥 ESTADOS PARA EL STAFF
+    const [valorHoraRecep, setValorHoraRecep] = useState<number>(0)
+    const [guardandoValor, setGuardandoValor] = useState(false)
+    const [modalPagoStaff, setModalPagoStaff] = useState<{ isOpen: boolean; staff: any; monto: number }>({ isOpen: false, staff: null, monto: 0 })
 
     const [procesandoPago, setProcesandoPago] = useState(false)
 
@@ -290,6 +360,47 @@ export default function AdminLiquidacionesPage() {
         fetchLiquidacionesGlobales,
         { revalidateOnFocus: false }
     )
+
+    // Sincronizar el input de valor hora con el dato real de la BDD cuando cargue
+    useEffect(() => {
+        if (data && data.valorHoraConfig && valorHoraRecep === 0) {
+            setValorHoraRecep(data.valorHoraConfig)
+        }
+    }, [data])
+
+    const handleGuardarValorHora = async () => {
+        setGuardandoValor(true)
+        const res = await guardarValorHoraRecepAction(valorHoraRecep)
+        if (res.success) {
+            toast.success('Valor por hora actualizado exitosamente.')
+            mutate()
+        } else {
+            toast.error(res.error || 'Error al guardar el valor de la hora.')
+        }
+        setGuardandoValor(false)
+    }
+
+    const handleProcesarPagoStaff = async (metodo: 'efectivo' | 'transferencia') => {
+        if (!modalPagoStaff.staff) return
+        setProcesandoPago(true)
+
+        const res = await pagarStaffAction(
+            modalPagoStaff.staff.id,
+            modalPagoStaff.staff.nombre,
+            modalPagoStaff.monto,
+            metodo,
+            selectedMonth
+        )
+
+        if (res.success) {
+            toast.success(`Pago de $${modalPagoStaff.monto.toLocaleString()} registrado al Staff.`)
+            mutate()
+            setModalPagoStaff({ isOpen: false, staff: null, monto: 0 })
+        } else {
+            toast.error(res.error || 'Asegurate de tener un Turno de Caja Abierto para poder registrar este pago.')
+        }
+        setProcesandoPago(false)
+    }
 
     const handleProcesarPago = async (metodo: 'efectivo' | 'transferencia') => {
         if (!modalPago.clase) return
@@ -313,7 +424,6 @@ export default function AdminLiquidacionesPage() {
         setProcesandoPago(false)
     }
 
-    // 🔥 NUEVA FUNCIÓN PARA PROCESAR TODAS LAS CLASES DE UN BLOQUE
     const handleProcesarPagoMasivo = async (metodo: 'efectivo' | 'transferencia') => {
         if (!modalPagoMasivo.clases.length) return
         setProcesandoPago(true)
@@ -445,7 +555,7 @@ export default function AdminLiquidacionesPage() {
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
-                    {vistaActiva !== 'ranking' && (
+                    {vistaActiva !== 'ranking' && vistaActiva !== 'recepcion' && (
                         <div className="relative w-full sm:w-64">
                             <Search className="absolute left-3 top-3.5 text-gray-500" size={16} />
                             <input type="text" placeholder={vistaActiva === 'docentes' ? "Buscar profesor..." : vistaActiva === 'clases' ? "Buscar clase o profe..." : "Buscar concepto..."} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-10 text-white text-sm outline-none focus:border-[#D4E655] transition-colors" />
@@ -503,6 +613,14 @@ export default function AdminLiquidacionesPage() {
                 >
                     <Smartphone size={16} /> Ingresos Virtuales
                 </button>
+                {userRole === 'admin' && (
+                    <button
+                        onClick={() => setVistaActiva('recepcion')}
+                        className={`flex items-center gap-2 text-xs font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all whitespace-nowrap ${vistaActiva === 'recepcion' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white bg-[#111]'}`}
+                    >
+                        <Clock size={16} /> Staff / Recepción
+                    </button>
+                )}
             </div>
 
             <div className="space-y-4">
@@ -988,6 +1106,103 @@ export default function AdminLiquidacionesPage() {
                         )}
                     </div>
                 )}
+
+                {/* 🚀 VISTA 5: RECEPCIÓN Y STAFF */}
+                {vistaActiva === 'recepcion' && (
+                    <div className="animate-in fade-in space-y-6">
+                        <div className="bg-[#09090b] border border-white/10 p-6 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                            <div>
+                                <h3 className="text-lg font-black text-white uppercase flex items-center gap-2">
+                                    <Clock className="text-[#D4E655]" />
+                                    Liquidación de Staff
+                                </h3>
+                                <p className="text-xs text-gray-400 mt-1 font-medium">Horas calculadas según las aperturas y cierres de caja del mes.</p>
+                            </div>
+                            <div className="bg-[#111] border border-white/5 p-2 rounded-xl flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest sm:pl-2">Valor por Hora:</label>
+                                <div className="flex items-center gap-2 w-full sm:w-auto">
+                                    <div className="relative flex-1 sm:flex-none">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                                        <input
+                                            type="number"
+                                            value={valorHoraRecep}
+                                            onChange={(e) => setValorHoraRecep(Number(e.target.value))}
+                                            className="w-full sm:w-32 bg-black border border-white/10 rounded-lg py-2 pl-7 pr-3 text-white text-sm font-black outline-none focus:border-[#D4E655] transition-colors"
+                                        />
+                                    </div>
+                                    <button
+                                        onClick={handleGuardarValorHora}
+                                        disabled={guardandoValor}
+                                        className="bg-[#D4E655] hover:bg-white text-black p-2 rounded-lg transition-colors"
+                                        title="Guardar valor para todo el staff"
+                                    >
+                                        {guardandoValor ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {data?.reporteRecepcion?.length === 0 ? (
+                                <div className="col-span-full text-center py-12 bg-[#111]/50 rounded-2xl border border-dashed border-white/10">
+                                    <p className="text-xs font-bold uppercase text-gray-500">No hay turnos registrados este mes</p>
+                                </div>
+                            ) : (
+                                data?.reporteRecepcion?.map((recep: any) => {
+                                    const aPagarTotal = recep.horas * valorHoraRecep;
+                                    const saldoPendiente = Math.max(0, aPagarTotal - recep.total_pagado);
+
+                                    return (
+                                        <div key={recep.id} className="bg-[#111] border border-white/5 p-5 rounded-2xl hover:border-white/20 transition-all flex flex-col justify-between">
+                                            <div>
+                                                <div className="flex items-center gap-3 mb-4">
+                                                    <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20 text-blue-400 font-black shrink-0">
+                                                        {recep.nombre[0]}
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="font-bold text-white text-sm truncate">{recep.nombre}</h4>
+                                                        <p className="text-[10px] text-gray-500 uppercase font-bold">{recep.cantidad_turnos} turnos ({recep.horas.toFixed(2)} hs)</p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="border-t border-white/5 pt-4 space-y-2 mb-4">
+                                                    <div className="flex justify-between items-center text-xs">
+                                                        <span className="text-gray-500 font-bold uppercase tracking-wider">Total Generado</span>
+                                                        <span className="text-white font-black">${aPagarTotal.toLocaleString()}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center text-xs">
+                                                        <span className="text-gray-500 font-bold uppercase tracking-wider">Ya Pagado</span>
+                                                        <span className="text-gray-400 font-black">-${recep.total_pagado.toLocaleString()}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="border-t border-white/10 pt-4 flex flex-col gap-3">
+                                                <div className="flex justify-between items-end">
+                                                    <p className="text-[10px] text-[#D4E655]/70 uppercase font-bold tracking-widest">Saldo Pendiente</p>
+                                                    <p className="text-2xl font-black text-[#D4E655]">${saldoPendiente.toLocaleString()}</p>
+                                                </div>
+
+                                                {saldoPendiente > 0 ? (
+                                                    <button
+                                                        onClick={() => setModalPagoStaff({ isOpen: true, staff: recep, monto: saldoPendiente })}
+                                                        className="w-full bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black font-black uppercase py-2.5 rounded-xl transition-all text-[10px] tracking-widest border border-[#D4E655]/30"
+                                                    >
+                                                        Registrar Pago
+                                                    </button>
+                                                ) : (
+                                                    <div className="w-full bg-green-500/10 border border-green-500/20 text-green-500 font-black uppercase py-2.5 rounded-xl flex items-center justify-center gap-2 text-[10px] tracking-widest cursor-not-allowed">
+                                                        <CheckCircle2 size={14} /> Todo Pagado
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )
+                                })
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* MODAL FLOTANTE DE ALUMNOS INSCRIPTOS */}
@@ -1027,7 +1242,43 @@ export default function AdminLiquidacionesPage() {
                 </div>
             )}
 
-            {/* 🔥 NUEVO MODAL DE PAGO MASIVO (POR BLOQUE) */}
+            {/* 🔥 NUEVO MODAL DE PAGO A STAFF */}
+            {modalPagoStaff.isOpen && modalPagoStaff.staff && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => !procesandoPago && setModalPagoStaff({ isOpen: false, staff: null, monto: 0 })}>
+                    <div className="bg-[#09090b] border border-blue-500/20 w-full max-w-sm rounded-3xl p-6 shadow-[0_0_50px_rgba(59,130,246,0.1)] relative" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => !procesandoPago && setModalPagoStaff({ isOpen: false, staff: null, monto: 0 })} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                            <X size={20} />
+                        </button>
+
+                        <div className="text-center mb-6">
+                            <div className="w-12 h-12 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-blue-500/30">
+                                <Clock className="text-blue-500" size={24} />
+                            </div>
+                            <h3 className="text-xl font-black text-white uppercase tracking-tighter">Pagar a Staff</h3>
+                            <p className="text-xs text-gray-400 mt-2 font-medium leading-relaxed">
+                                Vas a registrar la liquidación de horas del mes para <strong className="text-white">{modalPagoStaff.staff.nombre}</strong>.
+                            </p>
+
+                            <div className="mt-4 p-3 bg-white/5 rounded-xl">
+                                <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Monto a Pagar</p>
+                                <p className="text-3xl font-black text-[#D4E655] mt-1">${modalPagoStaff.monto.toLocaleString()}</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-3">
+                            <p className="text-[10px] font-black uppercase text-gray-500 tracking-widest text-center">¿Cómo le pagaste?</p>
+                            <button onClick={() => handleProcesarPagoStaff('efectivo')} disabled={procesandoPago} className="w-full bg-[#111] hover:bg-white/10 border border-white/10 text-white font-black uppercase py-4 rounded-xl transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : '💵 Aboné en Efectivo'}
+                            </button>
+                            <button onClick={() => handleProcesarPagoStaff('transferencia')} disabled={procesandoPago} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black uppercase py-4 rounded-xl transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : '📱 Hice Transferencia'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL DE PAGO MASIVO DE CLASES (POR BLOQUE) */}
             {modalPagoMasivo.isOpen && modalPagoMasivo.clases.length > 0 && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => !procesandoPago && setModalPagoMasivo({ isOpen: false, clases: [], nombreGrupo: '', nombreProfe: '', total: 0 })}>
                     <div className="bg-[#09090b] border border-[#D4E655]/20 w-full max-w-sm rounded-3xl p-6 shadow-[0_0_50px_rgba(212,230,85,0.1)] relative" onClick={e => e.stopPropagation()}>
