@@ -31,6 +31,67 @@ const fetcherNotificaciones = async (uid: string, supabase: any): Promise<Notifi
     return data || []
 }
 
+// 🚀 NUEVO COMPONENTE INDIVIDUAL PARA CADA NOTIFICACIÓN
+function NotificacionItem({
+    n,
+    onClick
+}: {
+    n: Notificacion,
+    onClick: (id: string, leido: boolean, link: string | null) => void
+}) {
+    const [expandido, setExpandido] = useState(false)
+    const esMensajeLargo = n.mensaje.length > 180
+
+    return (
+        <div
+            onClick={() => onClick(n.id, n.leido, n.link)}
+            className={`group border rounded-2xl p-5 transition-all cursor-pointer flex flex-col md:flex-row items-start md:items-center justify-between gap-4 
+                ${n.leido
+                    ? 'bg-[#09090b] border-white/5 opacity-70 hover:opacity-100 hover:border-white/20'
+                    : 'bg-[#111] border-[#D4E655]/30 shadow-lg hover:border-[#D4E655]/60'}`}
+        >
+            <div className="flex items-start gap-4 w-full">
+                <div className={`mt-1 shrink-0 ${n.leido ? 'text-gray-600' : 'text-[#D4E655]'}`}>
+                    {n.leido ? <CheckCircle2 size={24} /> : <Circle fill="currentColor" size={24} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                    <h3 className={`text-lg uppercase leading-tight mb-1 ${n.leido ? 'font-bold text-gray-300' : 'font-black text-white'}`}>
+                        {n.titulo}
+                    </h3>
+
+                    {/* 🚀 ACÁ ESTÁ LA MAGIA DEL TEXTO: pre-wrap para saltos de línea, line-clamp para resumir */}
+                    <div className={`text-sm leading-relaxed mb-2 whitespace-pre-wrap ${n.leido ? 'text-gray-500' : 'text-gray-300'} ${!expandido ? 'line-clamp-4' : ''}`}>
+                        {n.mensaje}
+                    </div>
+
+                    {/* BOTÓN VER MÁS SOLO SI ES LARGO */}
+                    {esMensajeLargo && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation() // 🚀 EVITA QUE SE ABRA EL LINK AL EXPANDIR
+                                setExpandido(!expandido)
+                            }}
+                            className="text-[#D4E655] text-[10px] font-black uppercase tracking-widest hover:underline outline-none block mb-3"
+                        >
+                            {expandido ? 'Ver menos' : 'Leer completo'}
+                        </button>
+                    )}
+
+                    <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">
+                        {formatDistanceToNow(new Date(n.created_at), { addSuffix: true, locale: es })}
+                    </p>
+                </div>
+            </div>
+
+            {n.link && (
+                <div className={`shrink-0 p-3 rounded-xl transition-colors ${n.leido ? 'bg-white/5 text-gray-400 group-hover:bg-white/10 group-hover:text-white' : 'bg-[#D4E655]/10 text-[#D4E655] group-hover:bg-[#D4E655] group-hover:text-black'}`}>
+                    <ArrowRight size={20} />
+                </div>
+            )}
+        </div>
+    )
+}
+
 export default function NotificacionesPage() {
     // 1. Singleton de Supabase
     const [supabase] = useState(() => createClient())
@@ -60,7 +121,6 @@ export default function NotificacionesPage() {
             }, () => {
                 // Le avisamos a SWR que hay datos nuevos
                 mutate()
-                // Opcional: Un sonido o toast extra si estás en la página
             })
             .subscribe()
 
@@ -192,37 +252,11 @@ export default function NotificacionesPage() {
                     </div>
                 ) : (
                     safeNotificaciones.map((n) => (
-                        <div
+                        <NotificacionItem
                             key={n.id}
-                            onClick={() => handleClickNotificacion(n.id, n.leido, n.link)}
-                            className={`group border rounded-2xl p-5 transition-all cursor-pointer flex flex-col md:flex-row items-start md:items-center justify-between gap-4 
-                                ${n.leido
-                                    ? 'bg-[#09090b] border-white/5 opacity-70 hover:opacity-100 hover:border-white/20'
-                                    : 'bg-[#111] border-[#D4E655]/30 shadow-lg hover:border-[#D4E655]/60'}`}
-                        >
-                            <div className="flex items-start gap-4">
-                                <div className={`mt-1 shrink-0 ${n.leido ? 'text-gray-600' : 'text-[#D4E655]'}`}>
-                                    {n.leido ? <CheckCircle2 size={24} /> : <Circle fill="currentColor" size={24} />}
-                                </div>
-                                <div>
-                                    <h3 className={`text-lg uppercase leading-tight mb-1 ${n.leido ? 'font-bold text-gray-300' : 'font-black text-white'}`}>
-                                        {n.titulo}
-                                    </h3>
-                                    <p className={`text-sm leading-relaxed mb-2 ${n.leido ? 'text-gray-500' : 'text-gray-300'}`}>
-                                        {n.mensaje}
-                                    </p>
-                                    <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">
-                                        {formatDistanceToNow(new Date(n.created_at), { addSuffix: true, locale: es })}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {n.link && (
-                                <div className={`shrink-0 p-3 rounded-xl transition-colors ${n.leido ? 'bg-white/5 text-gray-400 group-hover:bg-white/10 group-hover:text-white' : 'bg-[#D4E655]/10 text-[#D4E655] group-hover:bg-[#D4E655] group-hover:text-black'}`}>
-                                    <ArrowRight size={20} />
-                                </div>
-                            )}
-                        </div>
+                            n={n}
+                            onClick={handleClickNotificacion}
+                        />
                     ))
                 )}
             </div>
