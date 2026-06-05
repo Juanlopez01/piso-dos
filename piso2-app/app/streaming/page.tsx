@@ -5,7 +5,8 @@ import {
     ChevronLeft, Lock, Loader2, Video, Radio, Users,
     MonitorPlay, Mic, PlaySquare, Film, Sparkles, LayoutGrid,
     CheckCircle2, Plus, Calendar, Clock, Monitor, Settings2,
-    X, Save, Phone, Receipt
+    X, Save, Phone, Receipt,
+    ChevronDown
 } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import { Toaster } from 'sonner'
@@ -486,17 +487,39 @@ export default function CotizadorPage() {
                             <div className="space-y-5">
                                 <div>
                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Día tentativo</label>
-                                    <input type="date" value={formData.fecha} onChange={e => setFormData({ ...formData, fecha: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] transition-colors text-sm text-white color-scheme-dark" />
+                                    <input
+                                        type="date"
+                                        value={formData.fecha}
+                                        onChange={e => setFormData({ ...formData, fecha: e.target.value })}
+                                        // 🚀 Esto abre el calendario al tocar en cualquier parte del input
+                                        onClick={(e) => 'showPicker' in HTMLInputElement.prototype && (e.target as HTMLInputElement).showPicker()}
+                                        // 🚀 [color-scheme:dark] fuerza el icono a color blanco
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] transition-colors text-sm text-white cursor-pointer [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Hora de inicio</label>
-                                    <input type="time" value={formData.horario} onChange={e => setFormData({ ...formData, horario: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] transition-colors text-sm text-white" />
+                                    <input
+                                        type="time"
+                                        value={formData.horario}
+                                        onChange={e => setFormData({ ...formData, horario: e.target.value })}
+                                        onClick={(e) => 'showPicker' in HTMLInputElement.prototype && (e.target as HTMLInputElement).showPicker()}
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] transition-colors text-sm text-white cursor-pointer [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Duración de la sesión</label>
-                                    <select value={formData.duracion} onChange={e => setFormData({ ...formData, duracion: Number(e.target.value) })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] transition-colors text-sm text-white appearance-none cursor-pointer">
-                                        {duraciones.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
-                                    </select>
+                                    <div className="relative">
+                                        <select
+                                            value={formData.duracion}
+                                            onChange={e => setFormData({ ...formData, duracion: Number(e.target.value) })}
+                                            className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] transition-colors text-sm text-white appearance-none cursor-pointer"
+                                        >
+                                            {duraciones.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+                                        </select>
+                                        {/* 🚀 Flechita agregada para que no quede pelado a la derecha */}
+                                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                                    </div>
                                 </div>
                                 <button onClick={handleNext} disabled={!formData.fecha || !formData.horario} className="w-full bg-[#1ed760] text-black font-black uppercase tracking-widest py-4 rounded-xl mt-6 hover:bg-white hover:shadow-[0_0_25px_rgba(30,215,96,0.3)] transition-all disabled:opacity-40">
                                     Armar presupuesto
