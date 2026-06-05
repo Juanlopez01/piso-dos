@@ -272,10 +272,17 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     transaccionesVirtuales.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
     // 🚀 HORAS DE RECEPCIÓN
+    // 🚀 LÓGICA CORREGIDA: HORAS DE RECEPCIÓN (Mes Calendario Exacto)
+    const yearNum = Number(yyyy);
+    const monthNum = Number(mm);
+    // Calculamos el inicio exacto del mes (ej: 1 de Junio) y el fin exacto (1 de Julio)
+    const inicioMesCalendario = new Date(yearNum, monthNum - 1, 1).toISOString();
+    const finMesCalendario = new Date(yearNum, monthNum, 1).toISOString();
+
     const { data: turnosMes } = await supabase.from('caja_turnos')
         .select(`usuario_id, fecha_apertura, fecha_cierre, usuario:profiles(nombre_completo)`)
-        .gte('fecha_apertura', `${prevMonth}-25T00:00:00`)
-        .lte('fecha_apertura', `${nextMonth}-05T23:59:59`)
+        .gte('fecha_apertura', inicioMesCalendario)
+        .lt('fecha_apertura', finMesCalendario) // Usamos .lt para que no incluya el primer día del mes siguiente
         .not('fecha_cierre', 'is', null)
 
     const horasPorRecepcionista: Record<string, { id: string, nombre: string, horas: number, cantidad_turnos: number, total_pagado: number }> = {}
@@ -296,7 +303,7 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                     nombre: nombreUsuario || 'Staff Desconocido',
                     horas: 0,
                     cantidad_turnos: 0,
-                    total_pagado: pagosStaffPorId[uid] || 0 // Lo que ya se le pagó en el mes
+                    total_pagado: pagosStaffPorId[uid] || 0
                 };
             }
 
@@ -304,7 +311,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
             horasPorRecepcionista[uid].cantidad_turnos += 1;
         })
     }
-
     const reporteRecepcion = Object.values(horasPorRecepcionista).sort((a: any, b: any) => b.horas - a.horas);
 
     return {
