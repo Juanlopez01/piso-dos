@@ -30,7 +30,7 @@ const DEFAULT_PRICING = {
         'Eventos externos': 100000,
     },
     tecnica: {
-        'Cámaras': 15000,
+        'Cámara': 15000, // 🚀 RENOMBRADO A SINGULAR
         'Multicámara': 25000,
         'Micrófonos': 5000,
         'Iluminación': 10000,
@@ -45,6 +45,9 @@ const DEFAULT_PRICING = {
         'Escenografía': 50000,
     }
 }
+
+// 🚀 LISTA DE EQUIPOS YA INCLUIDOS EN LA SALA DE STREAMING
+const EQUIPOS_INCLUIDOS_STREAMING = ['Cámara', 'Micrófonos', 'Operador técnico', 'Multicámara'];
 
 export default function CotizadorPage() {
     const [supabase] = useState(() => createClient())
@@ -100,14 +103,14 @@ export default function CotizadorPage() {
         { nombre: 'Podcast', image: '/podcast.jpg' },
         { nombre: 'Streaming', image: '/streaming.jpg' },
         { nombre: 'Eventos', image: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273212/5C318F3E-0064-4DD1-802A-2301A6115FA6_2_iwwqs2.jpg' },
-        { nombre: 'Grabaciones', image: '/grabaciones.jpg' },
+        { nombre: 'Grabaciones', image: '/grabaciones.jpeg' },
         { nombre: 'Show en vivo', image: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273164/DSC08820_fkpapk.jpg' },
         { nombre: 'Contenido para redes', image: '/redes.jpg' },
     ]
     const espacios = [
         { id: 'Sala Streaming', desc: 'Multicámara, monitores y setup completo para streaming profesional.', img: '/sala-redes.jpg' },
-        { id: 'Sala Negra', desc: 'Ambiente cinematic, ideal para producciones premium y entrevistas.', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273185/40F11C05-7457-4AD6-A4D9-6EC3FCDB2568_2_yr9lw9.png' },
-        { id: 'Sala Blanca', desc: 'Espacio luminoso y versátil para contenido clean y corporativo.', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273186/D6322754-9700-4B2F-BB10-9D5622F2B37D_2_oomwdp.png' },
+        { id: 'Sala Negra', desc: 'Ambiente cinematic, ideal para producciones premium y entrevistas.', img: '/sala-negra.jpeg' },
+        { id: 'Sala Blanca', desc: 'Espacio luminoso y versátil para contenido clean y corporativo.', img: '/sala-blanca.jpeg' },
         { id: 'Otros espacios', desc: 'Salas adicionales y espacios creativos de Piso 2.', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273212/IMG_0556_2_mwuo4s.jpg' },
         { id: 'Eventos externos', desc: 'Llevamos la producción a tu locación o evento.', img: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273213/50E7A27C-DAA6-4DB9-B6F2-254CFEBAEF14_2_av71vm.png' }
     ]
@@ -143,6 +146,9 @@ export default function CotizadorPage() {
     const handleBack = () => setStep(prev => prev - 1)
 
     const toggleTecnica = (item: string) => {
+        // Evitar toggle si el equipo está bloqueado por ser Sala Streaming
+        if (formData.espacio === 'Sala Streaming' && EQUIPOS_INCLUIDOS_STREAMING.includes(item)) return;
+
         setFormData(prev => ({
             ...prev,
             tecnica: prev.tecnica.includes(item)
@@ -379,40 +385,73 @@ export default function CotizadorPage() {
 
                     {/* --- PASO 5: TÉCNICA --- */}
                     {step === 5 && (
-                        <div className="animate-in fade-in slide-in-from-right-8 duration-500">
+                        <div className="animate-in fade-in slide-in-from-right-8 duration-500 flex flex-col items-center">
                             <h2 className="text-3xl font-black mb-4 text-center uppercase tracking-tighter">Equipamiento y Adicionales</h2>
-                            <p className="text-center text-gray-500 text-xs uppercase tracking-widest mb-10 font-bold">Seleccioná todo lo que necesite tu producción</p>
-                            <div className="flex flex-wrap justify-center gap-3 mb-12 max-w-3xl mx-auto">
+
+                            <p className="text-center text-gray-500 text-xs uppercase tracking-widest mb-4 font-bold">
+                                Seleccioná todo lo que necesite tu producción
+                            </p>
+
+                            {/* 🚀 ACLARACIÓN ESPECÍFICA PARA SALA STREAMING */}
+                            {formData.espacio === 'Sala Streaming' ? (
+                                <div className="mb-8 text-center animate-in fade-in">
+                                    <p className="text-[#1ed760] text-[10px] uppercase font-bold tracking-widest bg-[#1ed760]/10 px-4 py-1.5 rounded-full inline-flex items-center gap-2 border border-[#1ed760]/20">
+                                        <Lock size={12} /> Algunos equipos están bloqueados porque ya vienen incluidos en esta sala
+                                    </p>
+                                </div>
+                            ) : (
+                                // Espacio vacío para mantener la estructura y que no salte el diseño
+                                <div className="mb-8 h-[30px]" />
+                            )}
+
+                            <div className="flex flex-wrap justify-center gap-3 mb-10 max-w-3xl mx-auto">
                                 {tecnicas.map(tec => {
-                                    const isSelected = formData.tecnica.includes(tec);
-                                    const bgImagen = '';
+                                    // 🚀 LÓGICA DE BLOQUEO VISUAL
+                                    const isBlocked = formData.espacio === 'Sala Streaming' && EQUIPOS_INCLUIDOS_STREAMING.includes(tec);
+                                    const isSelected = formData.tecnica.includes(tec) && !isBlocked;
+                                    const bgImagen = ''; // Acá podés poner tus URLs de fondo
 
                                     return (
                                         <button
                                             key={tec}
                                             onClick={() => toggleTecnica(tec)}
+                                            disabled={isBlocked}
                                             style={{ backgroundImage: `url(${bgImagen})` }}
-                                            className={`relative overflow-hidden bg-cover bg-center px-5 py-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-300 border ${isSelected
-                                                ? 'border-[#1ed760] text-[#1ed760] shadow-[0_0_20px_rgba(30,215,96,0.25)] scale-[1.02]'
-                                                : 'border-white/10 text-gray-300 hover:border-white/30'
+                                            className={`relative overflow-hidden bg-cover bg-center px-5 py-4 rounded-xl text-xs font-black uppercase tracking-wider transition-all duration-300 border 
+                                                ${isBlocked
+                                                    ? 'border-white/5 text-gray-600 bg-[#111] cursor-not-allowed opacity-40'
+                                                    : isSelected
+                                                        ? 'border-[#1ed760] text-[#1ed760] shadow-[0_0_20px_rgba(30,215,96,0.25)] scale-[1.02]'
+                                                        : 'border-white/10 text-gray-300 hover:border-white/30'
                                                 }`}
                                         >
                                             {/* Capa de oscurecimiento (Overlay) dinámico */}
-                                            <div className={`absolute inset-0 transition-colors duration-300 ${isSelected ? 'bg-black/60 backdrop-blur-[1px]' : 'bg-black/75 hover:bg-black/65'
+                                            <div className={`absolute inset-0 transition-colors duration-300 ${isBlocked ? 'bg-black/90' : isSelected ? 'bg-black/60 backdrop-blur-[1px]' : 'bg-black/75 hover:bg-black/65'
                                                 }`} />
 
                                             {/* Texto posicionado por encima de la imagen y del overlay */}
-                                            <span className="relative z-10 block pointer-events-none">
+                                            <span className="relative z-10 flex items-center gap-2 pointer-events-none">
                                                 {tec}
+                                                {isBlocked && <Lock size={12} className="text-gray-600" />}
                                             </span>
                                         </button>
                                     )
                                 })}
                             </div>
-                            <div className="flex justify-center">
+
+                            {/* BOTÓN SIGUIENTE */}
+                            <div className="flex justify-center w-full z-10 relative">
                                 <button onClick={handleNext} className="bg-[#1ed760] text-black font-black uppercase tracking-widest px-12 py-4 rounded-full hover:bg-white hover:shadow-[0_0_20px_rgba(30,215,96,0.3)] transition-all">
                                     Siguiente
                                 </button>
+                            </div>
+
+                            {/* 🚀 TEXTO ACLARATORIO SIEMPRE VISIBLE ABAJO */}
+                            <div className="mt-8 max-w-lg mx-auto text-center animate-in fade-in slide-in-from-bottom-2 duration-700">
+                                <p className="text-gray-300/80 text-sm leading-relaxed font-medium">
+                                    * TRES CÁMARAS, TRES MICRÓFONOS, DOS PANTALLAS,<br />
+                                    OPERACIÓN TÉCNICA, DOS PANELES LED, SWITCH, CONTROLADOR.
+                                </p>
                             </div>
                         </div>
                     )}
@@ -485,6 +524,17 @@ export default function CotizadorPage() {
                                         <span className="text-xs text-gray-500 font-bold uppercase tracking-wider">Estudio</span>
                                         <span className="text-sm text-white font-black uppercase">{formData.espacio}</span>
                                     </div>
+
+                                    {/* 🚀 AVISO DE EQUIPOS INCLUIDOS EN EL RESUMEN */}
+                                    {formData.espacio === 'Sala Streaming' && (
+                                        <div className="bg-[#1ed760]/5 border border-[#1ed760]/10 p-3 rounded-xl mb-3">
+                                            <p className="text-[10px] text-[#1ed760] font-bold uppercase tracking-widest mb-1 flex items-center gap-1">
+                                                <CheckCircle2 size={12} /> Incluido en Sala
+                                            </p>
+                                            <p className="text-xs text-gray-400">3 Cámaras, 3 micrófonos, 2 pantallas LED, switch y operación técnica.</p>
+                                        </div>
+                                    )}
+
                                     <div className="flex justify-between border-b border-white/5 pb-3">
                                         <span className="text-xs text-gray-500 font-bold uppercase tracking-wider">Estética</span>
                                         <span className="text-sm text-white font-black uppercase">{formData.estilo}</span>
@@ -495,7 +545,7 @@ export default function CotizadorPage() {
                                     </div>
                                     {formData.tecnica.length > 0 && (
                                         <div className="flex justify-between border-b border-white/5 pb-3">
-                                            <span className="text-xs text-gray-500 font-bold uppercase tracking-wider">Adicionales</span>
+                                            <span className="text-xs text-gray-500 font-bold uppercase tracking-wider">Extras Elegidos</span>
                                             <span className="text-xs text-gray-300 font-bold uppercase text-right max-w-[70%]">{formData.tecnica.join(', ')}</span>
                                         </div>
                                     )}
