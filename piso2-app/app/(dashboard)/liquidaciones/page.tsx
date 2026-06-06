@@ -10,7 +10,6 @@ import { useCash } from '@/context/CashContext'
 import Link from 'next/link'
 import { toast, Toaster } from 'sonner'
 import { pagarClaseProfeAction } from '@/app/actions/liquidaciones'
-// 👇 ACORDATE DE IMPORTAR LAS ACCIONES NUEVAS QUE CREASTE EN EL PASO 1
 import { guardarValorHoraRecepAction, pagarStaffAction } from '@/app/actions/liquidaciones'
 
 import { jsPDF } from 'jspdf'
@@ -82,12 +81,20 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         .maybeSingle();
     const valorHoraConfig = configData && configData.valor ? Number(configData.valor) : 2500;
 
+    // 🚀 MODIFICACIÓN: Agregamos metodo_pago en inscripciones para las clases sueltas
     const { data: clasesData, error } = await supabase
         .from('clases')
         .select(`
             id, nombre, inicio, tipo_clase, tipo_acuerdo, valor_acuerdo, estado, pagado_profe, compania_id, liga_nivel,
             profesor:profiles!profesor_id(id, nombre_completo),
-            inscripciones ( valor_credito, presente, nombre_invitado, user:profiles(nombre_completo) )
+            inscripciones ( 
+                valor_credito, 
+                presente, 
+                nombre_invitado,
+                metodo_pago,
+                user:profiles(nombre_completo),
+                pack:alumno_packs(metodo_pago) 
+            )
         `)
         .neq('estado', 'cancelada')
         .gte('inicio', `${prevMonth}-25`)
@@ -157,7 +164,25 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
 
             const inscripcionesArreglo = Array.isArray(clase.inscripciones) ? clase.inscripciones : []
             const cant_alumnos = inscripcionesArreglo.length
-            const total_clase = inscripcionesArreglo.reduce((acc: number, insc: any) => acc + (Number(insc.valor_credito) || 0), 0)
+
+            // 🚀 NUEVA LÓGICA: SEPARAMOS BRUTO DE NETO
+            let total_bruto = 0;
+            let total_neto = 0;
+
+            inscripcionesArreglo.forEach((insc: any) => {
+                const valorInscripcion = Number(insc.valor_credito) || 0;
+                total_bruto += valorInscripcion;
+
+                // Buscamos el método de pago: priorizamos el del pack, si no hay, buscamos el de la clase suelta
+                const metodo = (insc.pack?.metodo_pago || insc.metodo_pago || 'efectivo').toLowerCase();
+
+                // Si NO es efectivo, sumamos al neto con el 10% de descuento
+                if (metodo !== 'efectivo') {
+                    total_neto += valorInscripcion * 0.9;
+                } else {
+                    total_neto += valorInscripcion;
+                }
+            })
 
             const alumnos_lista = inscripcionesArreglo.map((i: any) => {
                 const nombreUsuario = Array.isArray(i.user) ? i.user[0]?.nombre_completo : i.user?.nombre_completo
@@ -169,7 +194,8 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
             if (clase.tipo_acuerdo === 'fijo') {
                 pago_profe = Number(clase.valor_acuerdo) || 0
             } else {
-                pago_profe = total_clase * ((Number(clase.valor_acuerdo) || 0) / 100)
+                // 🚀 EL PROFE COBRA SU PORCENTAJE SOBRE EL NETO (YA CON EL DESCUENTO APLICADO)
+                pago_profe = total_neto * ((Number(clase.valor_acuerdo) || 0) / 100)
             }
 
             liquidacionesPorProfe[profId].clases.push({
@@ -179,7 +205,7 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                 tipo_acuerdo: clase.tipo_acuerdo,
                 valor_acuerdo: clase.valor_acuerdo,
                 cant_alumnos,
-                total_clase,
+                total_clase: total_bruto, // Mostramos el bruto en la tabla de recaudación
                 pago_profe,
                 pagado_profe: clase.pagado_profe || false,
                 profesor_nombre: profNombre,
@@ -193,8 +219,8 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                 totalGeneralPagar += pago_profe;
             }
 
-            liquidacionesPorProfe[profId].total_recaudado += total_clase
-            totalGeneralRecaudado += total_clase
+            liquidacionesPorProfe[profId].total_recaudado += total_bruto
+            totalGeneralRecaudado += total_bruto
 
             const tipoClaseStr = (clase.tipo_clase || '').toLowerCase();
             let categoria: 'regular' | 'especial' | 'grupo' = 'regular';
@@ -219,7 +245,7 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                 inicio: clase.inicio,
                 profesor_nombre: profNombre,
                 cant_alumnos,
-                total_recaudado: total_clase,
+                total_recaudado: total_bruto,
                 categoria
             });
         })
@@ -271,18 +297,16 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
 
     transaccionesVirtuales.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
-    // 🚀 HORAS DE RECEPCIÓN
     // 🚀 LÓGICA CORREGIDA: HORAS DE RECEPCIÓN (Mes Calendario Exacto)
     const yearNum = Number(yyyy);
     const monthNum = Number(mm);
-    // Calculamos el inicio exacto del mes (ej: 1 de Junio) y el fin exacto (1 de Julio)
     const inicioMesCalendario = new Date(yearNum, monthNum - 1, 1).toISOString();
     const finMesCalendario = new Date(yearNum, monthNum, 1).toISOString();
 
     const { data: turnosMes } = await supabase.from('caja_turnos')
         .select(`usuario_id, fecha_apertura, fecha_cierre, usuario:profiles(nombre_completo)`)
         .gte('fecha_apertura', inicioMesCalendario)
-        .lt('fecha_apertura', finMesCalendario) // Usamos .lt para que no incluya el primer día del mes siguiente
+        .lt('fecha_apertura', finMesCalendario)
         .not('fecha_cierre', 'is', null)
 
     const horasPorRecepcionista: Record<string, { id: string, nombre: string, horas: number, cantidad_turnos: number, total_pagado: number }> = {}
