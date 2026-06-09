@@ -5,12 +5,7 @@ import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import { format, isSameMonth, subMonths, addMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { Wallet, Calendar, Loader2, ChevronDown, ChevronUp, CheckCircle, Clock, Users } from 'lucide-react'
-
-type Inscripcion = {
-    valor_credito: number
-    presente: boolean
-}
+import { Wallet, Calendar, Loader2, ChevronDown, ChevronUp, CheckCircle, Clock, Users, X } from 'lucide-react'
 
 type ClaseLiquidacion = {
     id: string
@@ -19,23 +14,22 @@ type ClaseLiquidacion = {
     tipo_acuerdo: 'porcentaje' | 'fijo'
     valor_acuerdo: number
     estado: string
-    inscripciones: Inscripcion[]
-    // Valores calculados
     total_clase: number
     pago_profe: number
     cant_alumnos: number
+    alumnos_lista: { nombre: string; presente: boolean; metodo: string; pack_nombre: string; es_invitado: boolean }[]
 }
 
 type MesAgrupado = {
-    mesKey: string // ej: "2026-02"
-    nombreMes: string // ej: "Febrero 2026"
+    mesKey: string
+    nombreMes: string
     esActual: boolean
     clases: ClaseLiquidacion[]
     total_recaudado_mes: number
     total_profe_mes: number
 }
 
-// 🚀 FETCHER EXTERNO CON SWR Y BLINDAJE
+// 🚀 FETCHER EXTERNO CON SWR
 const fetchLiquidaciones = async () => {
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
@@ -43,27 +37,45 @@ const fetchLiquidaciones = async () => {
 
     if (!user) throw new Error("No autenticado")
 
-    // 1. Nombre del profe
     const { data: profile } = await supabase.from('profiles').select('nombre').eq('id', user.id).single()
     const userName = profile?.nombre || ''
 
-    // 2. Traer todas las clases
+    // 🚀 CONSULTA DEFINITIVA: Usamos los nombres reales de las tablas para el JOIN anidado
     const { data: clasesData, error } = await supabase
         .from('clases')
         .select(`
-            id, nombre, inicio, tipo_acuerdo, valor_acuerdo, estado,
-            inscripciones ( valor_credito, presente )
+            id, nombre, inicio, tipo_acuerdo, valor_acuerdo, estado, tipo_clase, compania_id, liga_nivel,
+            inscripciones ( 
+                valor_credito, 
+                presente,
+                nombre_invitado,
+                metodo_pago,
+                modalidad,
+                pack_usado_id,
+                user:profiles(nombre_completo),
+                alumno_packs (
+                    id,
+                    metodo_pago,
+                    producto_id,
+                    productos (
+                        id,
+                        nombre
+                    )
+                ) 
+            )
         `)
         .eq('profesor_id', user.id)
         .neq('estado', 'cancelada')
         .order('inicio', { ascending: false })
 
-    if (error) throw error
+    if (error) {
+        console.error("🚨 Error de Supabase:", error);
+        throw error;
+    }
 
     const agrupados: Record<string, MesAgrupado> = {}
     const hoy = new Date()
 
-    // Filtro de meses permitidos: 2 pasados, el actual, y 1 futuro
     const allowedMonths = [
         format(subMonths(hoy, 2), 'yyyy-MM'),
         format(subMonths(hoy, 1), 'yyyy-MM'),
@@ -72,22 +84,13 @@ const fetchLiquidaciones = async () => {
     ]
 
     if (clasesData) {
-        console.log(clasesData);
-
         clasesData.forEach((clase: any) => {
-            // Si la clase no tiene fecha, la saltamos para que no rompa nada
             if (!clase.inicio) return
 
-            // 🚀 ZONA HORARIA BLINDADA (SIN ROMPER EL STRING ORIGINAL)
-            // Extraemos solo el "2026-04-11" cortando por la "T"
             const soloFecha = clase.inicio.split('T')[0]
-
-            // Le clavamos las 12 del mediodía para saber el mes sin importar la zona horaria
             const fechaClase = new Date(`${soloFecha}T12:00:00`)
-
             const mesKey = format(fechaClase, 'yyyy-MM')
 
-            // Si el mes no está en la ventana (los 4 meses que filtramos), lo ignoramos
             if (!allowedMonths.includes(mesKey)) return
 
             const esActual = isSameMonth(fechaClase, hoy)
@@ -103,31 +106,100 @@ const fetchLiquidaciones = async () => {
                 }
             }
 
-            // 🛡️ BLINDAJE: Aseguramos que inscripciones sea un array
             const inscripcionesArreglo = Array.isArray(clase.inscripciones) ? clase.inscripciones : []
 
             const cant_alumnos = inscripcionesArreglo.filter((i: any) => i.presente).length
-            const total_clase = inscripcionesArreglo.reduce((acc: number, insc: any) => acc + (Number(insc.valor_credito) || 0), 0)
+
+            let total_bruto = 0;
+            let total_neto = 0;
+
+            inscripcionesArreglo.forEach((insc: any) => {
+                const valorInscripcion = Number(insc.valor_credito) || 0;
+                total_bruto += valorInscripcion;
+
+                const rawPack = insc.alumno_packs;
+                const infoPack = Array.isArray(rawPack) ? rawPack[0] : rawPack;
+                const metodo = (infoPack?.metodo_pago || insc.metodo_pago || 'efectivo').toLowerCase();
+                const esInvitado = insc.modalidad?.toLowerCase() === 'invitado';
+
+                if (metodo !== 'efectivo' && !esInvitado) {
+                    total_neto += valorInscripcion * 0.9;
+                } else {
+                    total_neto += valorInscripcion;
+                }
+            })
+
+            // 🚀 MAPEO "TODOTERRENO": Extrae el nombre venga como venga
+            const alumnos_lista = inscripcionesArreglo.map((i: any) => {
+                const nombreUsuario = Array.isArray(i.user) ? i.user[0]?.nombre_completo : i.user?.nombre_completo;
+                const nombreFinal = nombreUsuario || i.nombre_invitado || 'Alumno Desconocido';
+
+                const modalidadClean = (i.modalidad || '').toLowerCase();
+                const esInvitado = modalidadClean === 'invitado';
+                const esCredito = modalidadClean === 'credito' || modalidadClean === 'crédito';
+
+                const tipoClaseStr = (clase.tipo_clase || '').toLowerCase();
+                const esGrupo = tipoClaseStr === 'liga' || tipoClaseStr.includes('compa') || tipoClaseStr.includes('formacion') || !!clase.compania_id || !!clase.liga_nivel;
+
+                // 1. Atrapamos el pack
+                const rawPack = i.alumno_packs || i.pack || i.pack_usado;
+                const packObj = Array.isArray(rawPack) ? rawPack[0] : rawPack;
+
+                // 2. Atrapamos el producto
+                const rawProd = packObj?.productos || packObj?.producto;
+                const prodObj = Array.isArray(rawProd) ? rawProd[0] : rawProd;
+
+                // 3. Extraemos el nombre
+                const nombreProducto = prodObj?.nombre;
+
+                let packNombre = 'Crédito';
+
+                if (esGrupo) {
+                    packNombre = 'Crédito';
+                } else if (esCredito) {
+                    if (nombreProducto) {
+                        packNombre = nombreProducto; // 🚀 ACÁ SE MUESTRA "Pack 4 clases regulares"
+                    } else if (i.pack_usado_id || packObj) {
+                        packNombre = 'Pase / Pack';
+                    } else {
+                        packNombre = 'Crédito';
+                    }
+                } else if (esInvitado) {
+                    packNombre = 'Invitado';
+                } else {
+                    packNombre = 'Clase Suelta';
+                }
+
+                const metodo = esInvitado ? 'Invitado' : (packObj?.metodo_pago || i.metodo_pago || 'Efectivo');
+
+                return {
+                    nombre: nombreFinal,
+                    presente: i.presente,
+                    metodo,
+                    pack_nombre: packNombre,
+                    es_invitado: esInvitado
+                };
+            })
 
             let pago_profe = 0
             if (clase.tipo_acuerdo === 'fijo') {
                 pago_profe = Number(clase.valor_acuerdo) || 0
             } else {
                 const porcentaje = (Number(clase.valor_acuerdo) || 0) / 100
-                pago_profe = total_clase * porcentaje
+                pago_profe = total_neto * porcentaje
             }
 
             const claseProcesada: ClaseLiquidacion = {
                 ...clase,
-                inicio: clase.inicio, // 👈 MAGIA: Le dejamos su fecha original INTACTA
-                total_clase,
+                inicio: clase.inicio,
+                total_clase: total_bruto,
                 pago_profe,
                 cant_alumnos,
-                inscripciones: inscripcionesArreglo
+                alumnos_lista
             }
 
             agrupados[mesKey].clases.push(claseProcesada)
-            agrupados[mesKey].total_recaudado_mes += total_clase
+            agrupados[mesKey].total_recaudado_mes += total_bruto
             agrupados[mesKey].total_profe_mes += pago_profe
         })
     }
@@ -138,13 +210,12 @@ const fetchLiquidaciones = async () => {
 
 export default function MisPagosPage() {
     const [expandedMonth, setExpandedGroup] = useState<string | null>(null)
+    const [modalAlumnos, setModalAlumnos] = useState<{ isOpen: boolean; claseNombre: string; fecha: string; alumnos: { nombre: string, presente: boolean, metodo: string, pack_nombre: string, es_invitado: boolean }[] }>({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })
 
-    // 🚀 USAMOS SWR PARA CACHEO Y ESTADO DE CARGA
     const { data, isLoading, error } = useSWR('liquidaciones-profe', fetchLiquidaciones, {
         revalidateOnFocus: false
     })
 
-    // Expandir el primer mes automáticamente cuando llegan los datos
     useEffect(() => {
         if (data?.meses && data.meses.length > 0 && !expandedMonth) {
             setExpandedGroup(data.meses[0].mesKey)
@@ -163,9 +234,8 @@ export default function MisPagosPage() {
     const userName = data?.userName || ''
 
     return (
-        <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
+        <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in relative">
 
-            {/* HEADER */}
             <div className="mb-8 border-b border-white/10 pb-6">
                 <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-white mb-1">
                     Mis Pagos
@@ -175,7 +245,6 @@ export default function MisPagosPage() {
                 </p>
             </div>
 
-            {/* LISTA DE MESES (Historial) */}
             <div className="space-y-6 max-w-5xl">
                 {meses.length === 0 ? (
                     <div className="bg-[#111] border border-white/5 rounded-2xl p-12 text-center text-gray-500">
@@ -190,7 +259,6 @@ export default function MisPagosPage() {
                         return (
                             <div key={mes.mesKey} className={`bg-[#09090b] border ${mes.esActual ? 'border-[#D4E655]/30' : 'border-white/10'} rounded-2xl overflow-hidden transition-all duration-300 shadow-xl`}>
 
-                                {/* CABECERA DEL MES */}
                                 <button
                                     onClick={() => setExpandedGroup(isOpen ? null : mes.mesKey)}
                                     className="w-full p-5 flex flex-col md:flex-row justify-between items-start md:items-center bg-[#111]/50 hover:bg-[#111] transition-colors text-left gap-4"
@@ -224,11 +292,9 @@ export default function MisPagosPage() {
                                     </div>
                                 </button>
 
-                                {/* CUADRO TIPO EXCEL */}
-                                <div className={`transition-all duration-300 overflow-hidden ${isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                                <div className={`transition-all duration-300 overflow-hidden ${isOpen ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'}`}>
                                     <div className="p-4 md:p-6 border-t border-white/5 bg-[#09090b]">
 
-                                        {/* VERSIÓN DESKTOP (Tabla) */}
                                         <div className="hidden md:block overflow-x-auto">
                                             <table className="w-full text-left border-collapse">
                                                 <thead>
@@ -242,11 +308,8 @@ export default function MisPagosPage() {
                                                 </thead>
                                                 <tbody className="divide-y divide-white/5 text-sm">
                                                     {mes.clases.map((clase) => {
-                                                        // 🚀 MAGIA: Extraemos la hora directamente del texto para evitar el ajuste de zona horaria
                                                         const [fechaParte, horaParte] = clase.inicio.split('T');
                                                         const horaDisplay = horaParte ? horaParte.substring(0, 5) : '00:00';
-
-                                                        // Extraemos día/mes manualmente del string YYYY-MM-DD
                                                         const [anio, mesStr, dia] = fechaParte.split('-');
                                                         const fechaDisplay = `${dia}/${mesStr}`;
 
@@ -260,9 +323,13 @@ export default function MisPagosPage() {
                                                                     {clase.tipo_acuerdo === 'porcentaje' ? `${clase.valor_acuerdo}%` : `Fijo: $${clase.valor_acuerdo}`}
                                                                 </td>
                                                                 <td className="py-4 text-center">
-                                                                    <span className="bg-white/10 px-2 py-1 rounded text-xs font-bold flex items-center justify-center gap-1 w-fit mx-auto">
+                                                                    <button
+                                                                        onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${fechaDisplay} - ${horaDisplay}hs`, alumnos: clase.alumnos_lista })}
+                                                                        className="bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white transition-colors px-3 py-1 rounded text-xs font-bold flex items-center justify-center gap-1.5 w-fit mx-auto cursor-pointer"
+                                                                        title="Ver lista de inscriptos"
+                                                                    >
                                                                         <Users size={12} /> {clase.cant_alumnos}
-                                                                    </span>
+                                                                    </button>
                                                                 </td>
                                                                 <td className="py-4 text-right font-black text-[#D4E655]">${clase.pago_profe.toLocaleString()}</td>
                                                             </tr>
@@ -272,10 +339,8 @@ export default function MisPagosPage() {
                                             </table>
                                         </div>
 
-                                        {/* VERSIÓN MOBILE (Tarjetas Listadas) */}
                                         <div className="md:hidden space-y-3">
                                             {mes.clases.map((clase) => {
-                                                // 🚀 MISMA LÓGICA: Extracción manual de texto
                                                 const [fechaParte, horaParte] = clase.inicio.split('T');
                                                 const horaDisplay = horaParte ? horaParte.substring(0, 5) : '00:00';
                                                 const [anio, mesStr, dia] = fechaParte.split('-');
@@ -290,9 +355,12 @@ export default function MisPagosPage() {
                                                                     <Calendar size={10} /> {fechaDisplay} - {horaDisplay} hs
                                                                 </p>
                                                             </div>
-                                                            <span className="bg-white/10 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1">
-                                                                <Users size={10} /> {clase.cant_alumnos}
-                                                            </span>
+                                                            <button
+                                                                onClick={() => setModalAlumnos({ isOpen: true, claseNombre: clase.nombre, fecha: `${fechaDisplay} - ${horaDisplay}hs`, alumnos: clase.alumnos_lista })}
+                                                                className="bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 transition-colors"
+                                                            >
+                                                                <Users size={10} /> {clase.cant_alumnos} pax
+                                                            </button>
                                                         </div>
 
                                                         <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-white/5">
@@ -318,6 +386,59 @@ export default function MisPagosPage() {
                 )}
             </div>
 
+            {/* MODAL FLOTANTE DE ALUMNOS */}
+            {modalAlumnos.isOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setModalAlumnos({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })}>
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-sm rounded-3xl p-6 shadow-2xl relative flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setModalAlumnos({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                            <X size={20} />
+                        </button>
+
+                        <div className="mb-4 pr-6">
+                            <h3 className="text-lg font-black text-white uppercase tracking-tighter flex items-center gap-2">
+                                <Users className="text-[#D4E655]" size={20} />
+                                Alumnos Inscriptos
+                            </h3>
+                            <p className="text-xs text-gray-400 mt-1 font-medium">{modalAlumnos.claseNombre} • {modalAlumnos.fecha}</p>
+                        </div>
+
+                        <div className="bg-[#111] rounded-xl border border-white/5 overflow-y-auto custom-scrollbar flex-1 p-2">
+                            {modalAlumnos.alumnos.length > 0 ? (
+                                <ul className="divide-y divide-white/5">
+                                    {modalAlumnos.alumnos.sort((a, b) => a.nombre.localeCompare(b.nombre)).map((alumno, idx) => (
+                                        <li key={idx} className="py-4 px-3 flex items-center justify-between gap-3 hover:bg-white/5 transition-colors rounded-lg border-b border-white/5 last:border-0">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${alumno.presente ? 'bg-[#D4E655]' : 'bg-red-500'}`} />
+                                                <div className="flex flex-col">
+                                                    <span className={`font-bold uppercase tracking-wide text-xs flex flex-wrap items-center gap-2 ${alumno.presente ? 'text-gray-200' : 'text-gray-500'}`}>
+                                                        <span>{alumno.nombre} {!alumno.presente && '(Ausente)'}</span>
+                                                        {alumno.es_invitado && (
+                                                            <span className="text-[8px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded">
+                                                                INVITADO
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex flex-col items-end shrink-0">
+                                                <span className="bg-white/10 text-white font-black text-[10px] uppercase tracking-widest px-3 py-1 rounded-md mb-1 max-w-[120px] text-right truncate">
+                                                    {alumno.pack_nombre}
+                                                </span>
+                                                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">
+                                                    Pago: {alumno.metodo}
+                                                </span>
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="text-xs text-gray-500 text-center py-6 font-bold uppercase">Nadie se inscribió a esta clase</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

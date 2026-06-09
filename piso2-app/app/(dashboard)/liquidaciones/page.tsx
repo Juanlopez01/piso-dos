@@ -79,7 +79,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         .maybeSingle();
     const valorHoraConfig = configData && configData.valor ? Number(configData.valor) : 2500;
 
-    // 🚀 MODIFICACIÓN: Agregamos 'modalidad' dentro del select de inscripciones
     const { data: clasesData, error } = await supabase
         .from('clases')
         .select(`
@@ -183,12 +182,10 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                 }
             })
 
-            // 🚀 MAPEO DE ALUMNOS VALIDANDO LA MODALIDAD EXACTA
             const alumnos_lista = inscripcionesArreglo.map((i: any) => {
                 const nombreUsuario = Array.isArray(i.user) ? i.user[0]?.nombre_completo : i.user?.nombre_completo;
                 const nombreFinal = nombreUsuario || i.nombre_invitado || 'Alumno Desconocido';
 
-                // 🚀 Corregido: Ahora se fija si el campo modalidad dice "invitado"
                 const esInvitado = i.modalidad?.toLowerCase() === 'invitado';
 
                 const tipoClaseStr = (clase.tipo_clase || '').toLowerCase();
@@ -396,6 +393,7 @@ export default function AdminLiquidacionesPage() {
     const [rankingOrden, setRankingOrden] = useState<'alumnos' | 'recaudacion'>('alumnos')
 
     const [modalPago, setModalPago] = useState<{ isOpen: boolean; clase: ClaseLiquidacion | null; nombreProfe: string }>({ isOpen: false, clase: null, nombreProfe: '' })
+
     const [modalAlumnos, setModalAlumnos] = useState<{ isOpen: boolean; claseNombre: string; fecha: string; alumnos: { nombre: string, presente: boolean, metodo: string, pack_nombre: string, es_invitado: boolean }[] }>({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })
 
     const [modalPagoMasivo, setModalPagoMasivo] = useState<{ isOpen: boolean; clases: ClaseLiquidacion[]; nombreGrupo: string; nombreProfe: string; total: number }>({ isOpen: false, clases: [], nombreGrupo: '', nombreProfe: '', total: 0 })
@@ -467,7 +465,7 @@ export default function AdminLiquidacionesPage() {
         if (res.success) {
             toast.success(`Pago de $${modalPago.clase.pago_profe} registrado correctamente.`)
             mutate()
-            setModalPago({ isOpen: false, clase: null, fontProfe: '', nombreProfe: '' })
+            setModalPago({ isOpen: false, clase: null, nombreProfe: '' })
         } else {
             toast.error(res.error || 'Error al procesar el pago')
         }
@@ -716,6 +714,7 @@ export default function AdminLiquidacionesPage() {
                                         <div className="p-4 md:p-6 border-t border-white/5 bg-[#09090b]">
                                             {Object.entries(clasesAgrupadas).map(([nombreGrupo, clasesList], index) => {
 
+                                                // 🔥 CALCULAMOS EL SUBTOTAL SOLO DE LO QUE FALTA PAGAR DE ESTE GRUPO
                                                 const clasesPendientes = clasesList.filter(c => !c.pagado_profe)
                                                 const subtotalPendiente = clasesPendientes.reduce((acc, c) => acc + c.pago_profe, 0)
 
@@ -777,6 +776,7 @@ export default function AdminLiquidacionesPage() {
                                                                 </tbody>
                                                             </table>
 
+                                                            {/* 🔥 NUEVO FOOTER: SUBTOTAL Y BOTÓN DE PAGO MASIVO (ESCRITORIO) */}
                                                             {subtotalPendiente > 0 ? (
                                                                 <div className="bg-[#1a1a15] p-4 flex justify-between items-center border-t border-[#D4E655]/20">
                                                                     <div>
@@ -846,12 +846,13 @@ export default function AdminLiquidacionesPage() {
                                                                 )
                                                             })}
 
+                                                            {/* 🔥 NUEVO FOOTER: SUBTOTAL Y BOTÓN DE PAGO MASIVO (MOBILE) */}
                                                             {subtotalPendiente > 0 && (
                                                                 <div className="bg-[#1a1a15] p-4 mt-4 rounded-xl border border-[#D4E655]/30">
                                                                     <p className="text-[10px] text-[#D4E655] uppercase font-bold tracking-widest text-center mb-1">Subtotal Pendiente</p>
                                                                     <p className="text-2xl font-black text-white text-center mb-3">${subtotalPendiente.toLocaleString()}</p>
                                                                     <button
-                                                                        onClick={() => setModalPagoMasivo({ isOpen: true, clases: clasesPendientes, fontProfe: '', nombreGrupo, nombreProfe: profe.nombre, total: subtotalPendiente })}
+                                                                        onClick={() => setModalPagoMasivo({ isOpen: true, clases: clasesPendientes, nombreGrupo, nombreProfe: profe.nombre, total: subtotalPendiente })}
                                                                         className="w-full bg-[#D4E655] hover:bg-white text-black py-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
                                                                     >
                                                                         Liquidar Bloque
@@ -1086,7 +1087,7 @@ export default function AdminLiquidacionesPage() {
                                     <Smartphone className="text-[#D4E655]" />
                                     Detalle de Ingresos Virtuales
                                 </h3>
-                                <p className="text-xs text-gray-400 mt-1 font-medium">Transferencias y Mercado Pago reportados in este periodo</p>
+                                <p className="text-xs text-gray-400 mt-1 font-medium">Transferencias y Mercado Pago reportados en este periodo</p>
                             </div>
 
                             <div className="flex flex-col sm:flex-row items-center gap-4">
