@@ -9,8 +9,7 @@ import { Wallet, Search, Loader2, ChevronDown, ChevronUp, Users, Calendar, Dolla
 import { useCash } from '@/context/CashContext'
 import Link from 'next/link'
 import { toast, Toaster } from 'sonner'
-import { pagarClaseProfeAction } from '@/app/actions/liquidaciones'
-import { guardarValorHoraRecepAction, pagarStaffAction } from '@/app/actions/liquidaciones'
+import { pagarClaseProfeAction, guardarValorHoraRecepAction, pagarStaffAction } from '@/app/actions/liquidaciones'
 
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -26,7 +25,7 @@ type ClaseLiquidacion = {
     pago_profe: number
     pagado_profe: boolean
     profesor_nombre: string
-    alumnos_lista: { nombre: string; presente: boolean }[]
+    alumnos_lista: { nombre: string; presente: boolean; metodo: string; pack_nombre: string; es_invitado: boolean }[]
 }
 
 type ProfeLiquidacion = {
@@ -73,7 +72,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     const prevMonth = parseInt(mm) === 1 ? `${parseInt(yyyy) - 1}-12` : `${yyyy}-${String(parseInt(mm) - 1).padStart(2, '0')}`
     const nextMonth = parseInt(mm) === 12 ? `${parseInt(yyyy) + 1}-01` : `${yyyy}-${String(parseInt(mm) + 1).padStart(2, '0')}`
 
-    // 🚀 LECTURA DEL VALOR HORA GUARDADO
     const { data: configData } = await supabase
         .from('configuraciones')
         .select('valor')
@@ -81,7 +79,7 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         .maybeSingle();
     const valorHoraConfig = configData && configData.valor ? Number(configData.valor) : 2500;
 
-    // 🚀 MODIFICACIÓN: Agregamos metodo_pago en inscripciones para las clases sueltas
+    // 🚀 MODIFICACIÓN: Agregamos 'modalidad' dentro del select de inscripciones
     const { data: clasesData, error } = await supabase
         .from('clases')
         .select(`
@@ -92,8 +90,12 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                 presente, 
                 nombre_invitado,
                 metodo_pago,
+                modalidad,
                 user:profiles(nombre_completo),
-                pack:alumno_packs(metodo_pago) 
+                pack:alumno_packs(
+                    metodo_pago,
+                    producto:productos(nombre)
+                ) 
             )
         `)
         .neq('estado', 'cancelada')
@@ -109,7 +111,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         .gte('created_at', `${prevMonth}-25T00:00:00`)
         .lte('created_at', `${nextMonth}-05T23:59:59`)
 
-    // 🚀 LECTURA DE PAGOS DE STAFF YA REALIZADOS ESTE MES
     const { data: pagosStaffData } = await supabase
         .from('caja_movimientos')
         .select('concepto, monto')
@@ -165,7 +166,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
             const inscripcionesArreglo = Array.isArray(clase.inscripciones) ? clase.inscripciones : []
             const cant_alumnos = inscripcionesArreglo.length
 
-            // 🚀 NUEVA LÓGICA: SEPARAMOS BRUTO DE NETO
             let total_bruto = 0;
             let total_neto = 0;
 
@@ -173,10 +173,9 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                 const valorInscripcion = Number(insc.valor_credito) || 0;
                 total_bruto += valorInscripcion;
 
-                // Buscamos el método de pago: priorizamos el del pack, si no hay, buscamos el de la clase suelta
-                const metodo = (insc.pack?.metodo_pago || insc.metodo_pago || 'efectivo').toLowerCase();
+                const infoPack = Array.isArray(insc.pack) ? insc.pack[0] : insc.pack;
+                const metodo = (infoPack?.metodo_pago || insc.metodo_pago || 'efectivo').toLowerCase();
 
-                // Si NO es efectivo, sumamos al neto con el 10% de descuento
                 if (metodo !== 'efectivo') {
                     total_neto += valorInscripcion * 0.9;
                 } else {
@@ -184,17 +183,41 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                 }
             })
 
+            // 🚀 MAPEO DE ALUMNOS VALIDANDO LA MODALIDAD EXACTA
             const alumnos_lista = inscripcionesArreglo.map((i: any) => {
-                const nombreUsuario = Array.isArray(i.user) ? i.user[0]?.nombre_completo : i.user?.nombre_completo
-                const nombreFinal = nombreUsuario || i.nombre_invitado || 'Alumno Desconocido'
-                return { nombre: nombreFinal, presente: i.presente }
+                const nombreUsuario = Array.isArray(i.user) ? i.user[0]?.nombre_completo : i.user?.nombre_completo;
+                const nombreFinal = nombreUsuario || i.nombre_invitado || 'Alumno Desconocido';
+
+                // 🚀 Corregido: Ahora se fija si el campo modalidad dice "invitado"
+                const esInvitado = i.modalidad?.toLowerCase() === 'invitado';
+
+                const tipoClaseStr = (clase.tipo_clase || '').toLowerCase();
+                const esGrupo = tipoClaseStr === 'liga' || tipoClaseStr.includes('compa') || tipoClaseStr.includes('formacion') || !!clase.compania_id || !!clase.liga_nivel;
+
+                const infoPack = Array.isArray(i.pack) ? i.pack[0] : i.pack;
+                const nombreProducto = infoPack?.producto?.nombre;
+
+                let packNombre = 'Crédito';
+
+                if (!esGrupo) {
+                    packNombre = nombreProducto ? nombreProducto : 'Clase Suelta';
+                }
+
+                const metodo = (infoPack?.metodo_pago || i.metodo_pago || 'Efectivo');
+
+                return {
+                    nombre: nombreFinal,
+                    presente: i.presente,
+                    metodo,
+                    pack_nombre: packNombre,
+                    es_invitado: esInvitado
+                };
             })
 
             let pago_profe = 0
             if (clase.tipo_acuerdo === 'fijo') {
                 pago_profe = Number(clase.valor_acuerdo) || 0
             } else {
-                // 🚀 EL PROFE COBRA SU PORCENTAJE SOBRE EL NETO (YA CON EL DESCUENTO APLICADO)
                 pago_profe = total_neto * ((Number(clase.valor_acuerdo) || 0) / 100)
             }
 
@@ -205,7 +228,7 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
                 tipo_acuerdo: clase.tipo_acuerdo,
                 valor_acuerdo: clase.valor_acuerdo,
                 cant_alumnos,
-                total_clase: total_bruto, // Mostramos el bruto en la tabla de recaudación
+                total_clase: total_bruto,
                 pago_profe,
                 pagado_profe: clase.pagado_profe || false,
                 profesor_nombre: profNombre,
@@ -297,7 +320,6 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
 
     transaccionesVirtuales.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
-    // 🚀 LÓGICA CORREGIDA: HORAS DE RECEPCIÓN (Mes Calendario Exacto)
     const yearNum = Number(yyyy);
     const monthNum = Number(mm);
     const inicioMesCalendario = new Date(yearNum, monthNum - 1, 1).toISOString();
@@ -374,11 +396,10 @@ export default function AdminLiquidacionesPage() {
     const [rankingOrden, setRankingOrden] = useState<'alumnos' | 'recaudacion'>('alumnos')
 
     const [modalPago, setModalPago] = useState<{ isOpen: boolean; clase: ClaseLiquidacion | null; nombreProfe: string }>({ isOpen: false, clase: null, nombreProfe: '' })
-    const [modalAlumnos, setModalAlumnos] = useState<{ isOpen: boolean; claseNombre: string; fecha: string; alumnos: { nombre: string, presente: boolean }[] }>({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })
+    const [modalAlumnos, setModalAlumnos] = useState<{ isOpen: boolean; claseNombre: string; fecha: string; alumnos: { nombre: string, presente: boolean, metodo: string, pack_nombre: string, es_invitado: boolean }[] }>({ isOpen: false, claseNombre: '', fecha: '', alumnos: [] })
 
     const [modalPagoMasivo, setModalPagoMasivo] = useState<{ isOpen: boolean; clases: ClaseLiquidacion[]; nombreGrupo: string; nombreProfe: string; total: number }>({ isOpen: false, clases: [], nombreGrupo: '', nombreProfe: '', total: 0 })
 
-    // 🔥 ESTADOS PARA EL STAFF
     const [valorHoraRecep, setValorHoraRecep] = useState<number>(0)
     const [guardandoValor, setGuardandoValor] = useState(false)
     const [modalPagoStaff, setModalPagoStaff] = useState<{ isOpen: boolean; staff: any; monto: number }>({ isOpen: false, staff: null, monto: 0 })
@@ -391,7 +412,6 @@ export default function AdminLiquidacionesPage() {
         { revalidateOnFocus: false }
     )
 
-    // Sincronizar el input de valor hora con el dato real de la BDD cuando cargue
     useEffect(() => {
         if (data && data.valorHoraConfig && valorHoraRecep === 0) {
             setValorHoraRecep(data.valorHoraConfig)
@@ -447,7 +467,7 @@ export default function AdminLiquidacionesPage() {
         if (res.success) {
             toast.success(`Pago de $${modalPago.clase.pago_profe} registrado correctamente.`)
             mutate()
-            setModalPago({ isOpen: false, clase: null, nombreProfe: '' })
+            setModalPago({ isOpen: false, clase: null, fontProfe: '', nombreProfe: '' })
         } else {
             toast.error(res.error || 'Error al procesar el pago')
         }
@@ -696,7 +716,6 @@ export default function AdminLiquidacionesPage() {
                                         <div className="p-4 md:p-6 border-t border-white/5 bg-[#09090b]">
                                             {Object.entries(clasesAgrupadas).map(([nombreGrupo, clasesList], index) => {
 
-                                                // 🔥 CALCULAMOS EL SUBTOTAL SOLO DE LO QUE FALTA PAGAR DE ESTE GRUPO
                                                 const clasesPendientes = clasesList.filter(c => !c.pagado_profe)
                                                 const subtotalPendiente = clasesPendientes.reduce((acc, c) => acc + c.pago_profe, 0)
 
@@ -758,7 +777,6 @@ export default function AdminLiquidacionesPage() {
                                                                 </tbody>
                                                             </table>
 
-                                                            {/* 🔥 NUEVO FOOTER: SUBTOTAL Y BOTÓN DE PAGO MASIVO (ESCRITORIO) */}
                                                             {subtotalPendiente > 0 ? (
                                                                 <div className="bg-[#1a1a15] p-4 flex justify-between items-center border-t border-[#D4E655]/20">
                                                                     <div>
@@ -828,13 +846,12 @@ export default function AdminLiquidacionesPage() {
                                                                 )
                                                             })}
 
-                                                            {/* 🔥 NUEVO FOOTER: SUBTOTAL Y BOTÓN DE PAGO MASIVO (MOBILE) */}
                                                             {subtotalPendiente > 0 && (
                                                                 <div className="bg-[#1a1a15] p-4 mt-4 rounded-xl border border-[#D4E655]/30">
                                                                     <p className="text-[10px] text-[#D4E655] uppercase font-bold tracking-widest text-center mb-1">Subtotal Pendiente</p>
                                                                     <p className="text-2xl font-black text-white text-center mb-3">${subtotalPendiente.toLocaleString()}</p>
                                                                     <button
-                                                                        onClick={() => setModalPagoMasivo({ isOpen: true, clases: clasesPendientes, nombreGrupo, nombreProfe: profe.nombre, total: subtotalPendiente })}
+                                                                        onClick={() => setModalPagoMasivo({ isOpen: true, clases: clasesPendientes, fontProfe: '', nombreGrupo, nombreProfe: profe.nombre, total: subtotalPendiente })}
                                                                         className="w-full bg-[#D4E655] hover:bg-white text-black py-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
                                                                     >
                                                                         Liquidar Bloque
@@ -1069,7 +1086,7 @@ export default function AdminLiquidacionesPage() {
                                     <Smartphone className="text-[#D4E655]" />
                                     Detalle de Ingresos Virtuales
                                 </h3>
-                                <p className="text-xs text-gray-400 mt-1 font-medium">Transferencias y Mercado Pago reportados en este periodo</p>
+                                <p className="text-xs text-gray-400 mt-1 font-medium">Transferencias y Mercado Pago reportados in este periodo</p>
                             </div>
 
                             <div className="flex flex-col sm:flex-row items-center gap-4">
@@ -1251,16 +1268,36 @@ export default function AdminLiquidacionesPage() {
                             <p className="text-xs text-gray-400 mt-1 font-medium">{modalAlumnos.claseNombre} • {modalAlumnos.fecha}</p>
                         </div>
 
+                        {/* 🚀 LISTADO DE ALUMNOS CON LOS PACKS Y COLORES */}
                         <div className="bg-[#111] rounded-xl border border-white/5 overflow-y-auto custom-scrollbar flex-1 p-2">
                             {modalAlumnos.alumnos.length > 0 ? (
                                 <ul className="divide-y divide-white/5">
                                     {modalAlumnos.alumnos.sort((a, b) => a.nombre.localeCompare(b.nombre)).map((alumno, idx) => (
-                                        <li key={idx} className={`py-3 px-3 text-xs font-bold uppercase tracking-wide flex items-center gap-3 ${alumno.presente ? 'text-gray-300' : 'text-gray-600'}`}>
-                                            <div className={`w-1.5 h-1.5 rounded-full ${alumno.presente ? 'bg-[#D4E655]' : 'bg-red-500'}`} />
-                                            {alumno.nombre}
-                                            {!alumno.presente && (
-                                                <span className="text-[9px] bg-red-500/10 text-red-500 px-1.5 py-0.5 rounded border border-red-500/20 ml-auto">Ausente</span>
-                                            )}
+                                        <li key={idx} className="py-4 px-3 flex items-center justify-between gap-3 hover:bg-white/5 transition-colors rounded-lg border-b border-white/5 last:border-0">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${alumno.presente ? 'bg-[#D4E655]' : 'bg-red-500'}`} />
+                                                <div className="flex flex-col">
+                                                    <span className={`font-bold uppercase tracking-wide text-xs flex flex-wrap items-center gap-2 ${alumno.presente ? 'text-gray-200' : 'text-gray-500'}`}>
+                                                        <span>{alumno.nombre} {!alumno.presente && '(Ausente)'}</span>
+                                                        {/* 🚀 ETIQUETA INVITADO (Ajustado por modalidad) */}
+                                                        {alumno.es_invitado && (
+                                                            <span className="text-[8px] bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded">
+                                                                INVITADO
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* 🚀 CARTELITO LLAMATIVO Y MÉTODO DE PAGO */}
+                                            <div className="flex flex-col items-end shrink-0">
+                                                <span className="bg-white/10 text-white font-black text-[10px] uppercase tracking-widest px-3 py-1 rounded-md mb-1 max-w-[120px] text-right truncate">
+                                                    {alumno.pack_nombre}
+                                                </span>
+                                                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">
+                                                    Pago: {alumno.metodo}
+                                                </span>
+                                            </div>
                                         </li>
                                     ))}
                                 </ul>
