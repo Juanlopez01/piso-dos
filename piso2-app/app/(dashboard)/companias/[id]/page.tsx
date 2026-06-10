@@ -9,8 +9,7 @@ import {
     Clock, MapPin, User, ChevronRight, Image as ImageIcon,
     Send, BellRing, X, Percent, CheckCircle2, AlertCircle, Coins,
     CalendarDays, Activity, XCircle, FileText, Eye, CheckSquare,
-    Phone,
-    Search
+    Phone, Search, Wallet
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
@@ -59,7 +58,7 @@ type ClaseCompania = {
     inicio: string
     fin: string
     imagen_url: string | null
-    profesor: { nombre_completo: string }
+    profesor: { fontProfe?: string; nombre_completo: string }
     sala: { nombre: string; sede: { nombre: string } }
 }
 
@@ -68,7 +67,7 @@ export default function CompaniaDetallePage() {
     const router = useRouter()
     const [supabase] = useState(() => createClient())
 
-    // 🚀 OBTENEMOS EL ROL Y EL LLAVERO DEL CONTEXTO GLOBAL
+    // 🚀 CONTEXTO GLOBAL
     const { userRole, userId, permisosCoordinador, isLoading: loadingContext } = useCash()
 
     const [compania, setCompania] = useState<Compania | null>(null)
@@ -78,9 +77,16 @@ export default function CompaniaDetallePage() {
 
     const [activeTab, setActiveTab] = useState<'muro' | 'clases' | 'miembros' | 'estadisticas'>('muro')
 
-    // ESTADOS MÁQUINA DEL TIEMPO 
+    // MAQUINA DEL TIEMPO
     const [mesDashboard, setMesDashboard] = useState(new Date().getMonth() + 1)
     const [anioDashboard, setAnioDashboard] = useState(new Date().getFullYear())
+
+    // COSTOS DINÁMICOS PARA LA HERRAMIENTA DE LIQUIDACIÓN
+    const [costoDocentesFijo, setCostoDocentesFijo] = useState(40000)
+    const [coordinacionFijaLiga, setCoordinacionFijaLiga] = useState(25000)
+    const [valorClaseDocenteLiga, setValorClaseDocenteLiga] = useState(6000)
+    const [liquidacionPagada, setLiquidacionPagada] = useState(false)
+    const [registrandoLiquidacion, setRegistrandoLiquidacion] = useState(false)
 
     const [notifMessage, setNotifMessage] = useState('')
     const [sendingNotif, setSendingNotif] = useState(false)
@@ -132,7 +138,15 @@ export default function CompaniaDetallePage() {
         }
         setCompania(dataCompania)
 
-        // 🚀 LÓGICA DE PERMISOS: Verificamos si tiene acceso a este ID específico
+        const mesKeyStr = `${mesDashboard}-${anioDashboard}`;
+        const { data: liqCheck } = await supabase
+            .from('caja_movimientos')
+            .select('id')
+            .eq('tipo', 'egreso')
+            .ilike('concepto', `%Liquidación Grupo | ID: ${companiaId} | Mes: ${mesKeyStr}%`)
+            .maybeSingle();
+        setLiquidacionPagada(!!liqCheck);
+
         const esAdminORecepOAuxiliar = ['admin', 'recepcion', 'auxiliar'].includes(userRole || '')
         const esProfeCoordinador = userRole === 'profesor' && dataCompania.coordinador_id === userId
         const esProfeComun = userRole === 'profesor' && dataCompania.coordinador_id !== userId
@@ -207,13 +221,13 @@ export default function CompaniaDetallePage() {
             const clasesIdsPasadas = dataClases.filter((c: any) => new Date(c.inicio).getTime() <= ahoraMs).map((c: any) => c.id)
 
             if (clasesIdsPasadas.length > 0) {
-                const { data: inscripcionesDelMes } = await supabase
+                const { data: iDelMes } = await supabase
                     .from('inscripciones')
                     .select('user_id, estado_asistencia')
                     .in('clase_id', clasesIdsPasadas)
 
-                if (inscripcionesDelMes) {
-                    inscripcionesDelMes.forEach((insc: any) => {
+                if (iDelMes) {
+                    iDelMes.forEach((insc: any) => {
                         if (!insc.user_id) return
                         if (!statsAsistencia[insc.user_id]) {
                             statsAsistencia[insc.user_id] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
@@ -451,29 +465,112 @@ export default function CompaniaDetallePage() {
         setIsIndividualNotifOpen(true)
     }
 
+    // 🚀 FUNCIÓN ACCIÓN REGISTRAR EN CAJA DIRECTO
+    const handlePagarLiquidacionGrupo = async (metodo: 'efectivo' | 'transferencia') => {
+        if (!compania || detalleLiquidacion.montoPagar <= 0) return;
+        setRegistrandoLiquidacion(true);
+
+        try {
+            const mesKeyStr = `${mesDashboard}-${anioDashboard}`;
+            const conceptoStr = `Liquidación Grupo | ID: ${compania.id} | Mes: ${mesKeyStr} | Destinatario: ${detalleLiquidacion.destinatario}`;
+
+            const { error: errorMov } = await supabase.from('caja_movimientos').insert([{
+                concepto: conceptoStr,
+                monto: detalleLiquidacion.montoPagar,
+                tipo: 'egreso',
+                metodo_pago: metodo,
+                created_at: new Date().toISOString()
+            }]);
+
+            if (errorMov) throw errorMov;
+
+            toast.success(`Liquidación de $${detalleLiquidacion.montoPagar.toLocaleString()} registrada de forma exitosa en Caja.`);
+            setLiquidacionPagada(true);
+        } catch (err: any) {
+            toast.error(err.message || 'Error al guardar movimiento de caja');
+        } finally {
+            setRegistrandoLiquidacion(false);
+        }
+    };
+
     if (loading || loadingContext) {
         return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-blue-500 w-12 h-12" /></div>
     }
 
     if (!compania) return null
 
+    // 🚀 DECLARACIÓN DE VARIABLES EN ORDEN SECUENCIAL CORRECTO 🚀
     const isStaff = ['admin', 'recepcion', 'auxiliar'].includes(userRole || '') ||
         (userRole === 'profesor' && compania.coordinador_id === userId) ||
         (userRole === 'coordinador' && permisosCoordinador.includes(compania.id))
 
     const canSeeFinance = ['admin', 'recepcion'].includes(userRole || '')
 
-    // 🎯 LÓGICA DE LIQUIDACIÓN DEL 60% PARA GRUPOS ESPECÍFICOS
-    const gruposLiquidables = ['ballroom', 'c.i.a', 'joven ballet'];
-    const aplicaLiquidacion = gruposLiquidables.some(nombre =>
-        compania.nombre.toLowerCase().includes(nombre)
-    );
-    const totalRecaudadoMes = miembros.reduce((acc, m) => acc + (m.totalAbonado || 0), 0);
-    const liquidacionDocente = totalRecaudadoMes * 0.60;
-
     const miPerfilInfo = miembros.find(m => m.id === userId)
     const deboCompania = !miPerfilInfo?.pago_compania_al_dia && userRole === 'alumno'
     const esProyectoStaff = compania.nombre.toLowerCase().trim() === 'proyecto staff'
+
+    // 🚀 LÓGICA DE REGLAS DE NEGOCIO Y POZO FINANCIERO DEL MES (SIEMPRE VALOR EFECTIVO)
+    const totalRecaudadoReal = miembros.reduce((acc, m) => acc + (m.totalAbonado || 0), 0);
+
+    const totalRecaudadoValorEfectivo = miembros.reduce((acc, m) => {
+        const abonado = m.totalAbonado || 0;
+        const precioEfectivo = m.precioEfectivo || 0;
+        // Solo ingresa al Pozo el equivalente al valor efectivo de la cuota
+        return acc + Math.min(abonado, precioEfectivo);
+    }, 0);
+
+    const nombreCiaLower = compania.nombre.toLowerCase();
+
+    let detalleLiquidacion = {
+        destinatario: 'Piso 2',
+        montoPagar: 0,
+        glosa: 'Cálculo general por defecto sin parámetros especiales asignados.',
+        tipo: 'general'
+    };
+
+    if (nombreCiaLower.includes('ballroom')) {
+        detalleLiquidacion = {
+            destinatario: 'Evelyn Nowak',
+            montoPagar: totalRecaudadoValorEfectivo * 0.60,
+            glosa: 'El 60% del pozo acumulado (calculado al Valor Efectivo) en el mes se abona a Evelyn Nowak, quien gestiona el pago interno de docentes.',
+            tipo: 'porcentaje'
+        };
+    } else if (nombreCiaLower.includes('c.i.a') || nombreCiaLower.includes('cia')) {
+        detalleLiquidacion = {
+            destinatario: 'Alexis Mirinda',
+            montoPagar: totalRecaudadoValorEfectivo * 0.60,
+            glosa: 'El 60% del pozo acumulado (calculado al Valor Efectivo) en el mes se abona a Alexis Mirinda, quien gestiona el pago interno de docentes.',
+            tipo: 'porcentaje'
+        };
+    } else if (nombreCiaLower.includes('joven ballet')) {
+        detalleLiquidacion = {
+            destinatario: 'Franco y Eugenia',
+            montoPagar: totalRecaudadoValorEfectivo * 0.60,
+            glosa: 'El 60% del pozo acumulado (calculado al Valor Efectivo) en el mes se abona a Franco y Eugenia, quienes gestionan el pago interno de docentes.',
+            tipo: 'porcentaje'
+        };
+    } else if (nombreCiaLower.includes('the show')) {
+        const saldo = totalRecaudadoValorEfectivo - costoDocentesFijo;
+        const pagoChiara = saldo > 0 ? saldo * 0.50 : 0;
+        detalleLiquidacion = {
+            destinatario: 'Chiara',
+            montoPagar: pagoChiara,
+            glosa: `Se restan los costos de Docentes Fijos ($${costoDocentesFijo.toLocaleString()}) al pozo de Valor Efectivo. Del remanente de $${saldo.toLocaleString()}, se abona el 50% a Chiara.`,
+            tipo: 'the_show'
+        };
+    } else if (nombreCiaLower.includes('liga')) {
+        const totalClasesDictadas = clases.length;
+        const costoDocentesLiga = totalClasesDictadas * valorClaseDocenteLiga;
+        const totalGastosLiga = costoDocentesLiga + coordinacionFijaLiga;
+        const saldoPiso2 = totalRecaudadoValorEfectivo - totalGastosLiga;
+        detalleLiquidacion = {
+            destinatario: 'Coordinación + Docentes Liga',
+            montoPagar: totalGastosLiga,
+            glosa: `Docentes (${totalClasesDictadas} clases dictadas x $${valorClaseDocenteLiga}): $${costoDocentesLiga.toLocaleString()}. Coordinación Fija: $${coordinacionFijaLiga.toLocaleString()}. El saldo neto restante de $${saldoPiso2.toLocaleString()} pertenece a Piso 2.`,
+            tipo: 'liga'
+        };
+    }
 
     return (
         <div className="min-h-screen bg-[#050505] text-white pb-24 selection:bg-blue-500 selection:text-white animate-in fade-in">
@@ -527,36 +624,10 @@ export default function CompaniaDetallePage() {
                     </div>
 
                     <div className="flex gap-6 relative z-10 overflow-x-auto custom-scrollbar">
-                        <button
-                            onClick={() => setActiveTab('muro')}
-                            className={`pb-4 text-xs font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${activeTab === 'muro' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
-                        >
-                            <MessageSquare size={14} /> Muro / Avisos
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('clases')}
-                            className={`pb-4 text-xs font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${activeTab === 'clases' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
-                        >
-                            <Calendar size={14} /> Clases del Mes
-                        </button>
-
-                        {canSeeFinance && (
-                            <button
-                                onClick={() => setActiveTab('miembros')}
-                                className={`pb-4 text-xs font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${activeTab === 'miembros' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
-                            >
-                                <Users size={14} /> Padrón y Cobros
-                            </button>
-                        )}
-
-                        {isStaff && (
-                            <button
-                                onClick={() => setActiveTab('estadisticas')}
-                                className={`pb-4 text-xs font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${activeTab === 'estadisticas' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
-                            >
-                                <Activity size={14} /> Estadísticas
-                            </button>
-                        )}
+                        <button onClick={() => setActiveTab('muro')} className={`pb-4 text-xs font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${activeTab === 'muro' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}><MessageSquare size={14} /> Muro / Avisos</button>
+                        <button onClick={() => setActiveTab('clases')} className={`pb-4 text-xs font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${activeTab === 'clases' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}><Calendar size={14} /> Clases del Mes</button>
+                        {canSeeFinance && <button onClick={() => setActiveTab('miembros')} className={`pb-4 text-xs font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${activeTab === 'miembros' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}><Users size={14} /> Padrón y Cobros</button>}
+                        {isStaff && <button onClick={() => setActiveTab('estadisticas')} className={`pb-4 text-xs font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${activeTab === 'estadisticas' ? 'border-blue-500 text-white' : 'border-transparent text-gray-500 hover:text-gray-300'}`}><Activity size={14} /> Estadísticas</button>}
                     </div>
                 </div>
             </div>
@@ -587,7 +658,7 @@ export default function CompaniaDetallePage() {
                     </div>
                 )}
 
-                {/* 1. PESTAÑA: MURO / AVISOS */}
+                {/* 1. PESTAÑA: MURO */}
                 {activeTab === 'muro' && (
                     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="bg-blue-500/10 border border-blue-500/20 rounded-2xl p-6 flex items-start gap-4">
@@ -605,20 +676,10 @@ export default function CompaniaDetallePage() {
                                     <MessageSquare size={18} className="text-blue-500" /> Publicar en el Muro (A todos)
                                 </h3>
                                 <form onSubmit={handleSendGlobalNotif} className="relative z-10 space-y-4">
-                                    <textarea
-                                        required
-                                        value={notifMessage}
-                                        onChange={e => setNotifMessage(e.target.value)}
-                                        placeholder="Escribí un aviso para todos los integrantes..."
-                                        className="w-full bg-[#09090b] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-blue-500 min-h-[120px] resize-none transition-colors"
-                                    />
+                                    <textarea required value={notifMessage} onChange={e => setNotifMessage(e.target.value)} placeholder="Escribí un aviso para todos los integrantes..." className="w-full bg-[#09090b] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-blue-500 min-h-[120px] resize-none transition-colors" />
                                     <div className="flex justify-end">
-                                        <button
-                                            disabled={sendingNotif}
-                                            type="submit"
-                                            className="w-full md:w-auto px-8 py-4 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-blue-500 transition-colors shadow-lg"
-                                        >
-                                            {sendingNotif ? <Loader2 className="animate-spin" /> : <><Send size={16} /> Enviar a {miembros.length} Alumnos</>}
+                                        <button disabled={sendingNotif} type="submit" className="w-full md:w-auto px-8 py-4 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-blue-500 transition-colors shadow-lg">
+                                            {sendingNotif ? <Loader2 size={16} className="animate-spin" /> : <><Send size={16} /> Enviar a {miembros.length} Alumnos</>}
                                         </button>
                                     </div>
                                 </form>
@@ -650,175 +711,114 @@ export default function CompaniaDetallePage() {
                                     return (
                                         <div key={clase.id} className={`bg-[#111] border border-white/5 rounded-2xl overflow-hidden hover:border-blue-500/30 transition-all group flex flex-col ${yaPaso ? 'opacity-70 hover:opacity-100' : ''}`}>
                                             <div className="h-32 w-full relative bg-[#1a1a1c] border-b border-white/5 flex items-center justify-center overflow-hidden">
-                                                {clase.imagen_url ? (
-                                                    <Image src={clase.imagen_url} alt={clase.nombre} fill className={`object-cover transition-transform duration-500 ${yaPaso ? 'grayscale-[50%]' : 'group-hover:scale-105'}`} />
-                                                ) : (
-                                                    <ImageIcon size={24} className="text-white/20" />
-                                                )}
+                                                {clase.imagen_url ? <Image src={clase.imagen_url} alt={clase.nombre} fill className={`object-cover transition-transform duration-500 ${yaPaso ? 'grayscale-[50%]' : 'group-hover:scale-105'}`} /> : <ImageIcon size={24} className="text-white/20" />}
                                                 {esHoy && <span className="absolute top-3 left-3 bg-blue-500 text-white text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg shadow-blue-500/40">⚡ Hoy</span>}
                                                 {yaPaso && <span className="absolute top-3 left-3 bg-gray-800 text-gray-400 text-[9px] font-black uppercase px-2 py-1 rounded shadow-lg">Completada</span>}
                                             </div>
-
                                             <div className="p-5 flex-1">
                                                 <h4 className="font-black uppercase text-white mb-1 truncate text-lg">{clase.nombre}</h4>
-                                                <p className="text-[10px] text-gray-400 flex items-center gap-1.5 mb-4">
-                                                    <User size={12} className="text-blue-400" /> {clase.profesor?.nombre_completo}
-                                                </p>
+                                                <p className="text-[10px] text-gray-400 flex items-center gap-1.5 mb-4"><User size={12} className="text-blue-400" /> {clase.profesor?.nombre_completo}</p>
                                                 <div className="space-y-2 border-t border-white/5 pt-4">
                                                     <p className="text-[10px] uppercase font-bold text-gray-500">Día de Ensayo:</p>
-                                                    <div className="flex items-center gap-3 text-xs text-gray-300 font-bold">
-                                                        <Calendar size={14} className="text-blue-400" />
-                                                        <span className="capitalize">{format(dateObj, "EEEE d MMMM", { locale: es })}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-3 text-xs text-gray-400">
-                                                        <Clock size={14} className="text-white/30" />
-                                                        <span>{horaDisplay} a {finDisplay} hs</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-3 text-xs text-gray-400">
-                                                        <MapPin size={14} className="text-white/30" />
-                                                        <span>{clase.sala?.nombre} <span className="text-[9px] opacity-50 uppercase border border-white/20 px-1 rounded ml-1">Sede {clase.sala?.sede?.nombre}</span></span>
-                                                    </div>
+                                                    <div className="flex items-center gap-3 text-xs text-gray-300 font-bold"><Calendar size={14} className="text-blue-400" /><span className="capitalize">{format(dateObj, "EEEE d MMMM", { locale: es })}</span></div>
+                                                    <div className="flex items-center gap-3 text-xs text-gray-400"><Clock size={14} /><span>{horaDisplay} a {finDisplay} hs</span></div>
+                                                    <div className="flex items-center gap-3 text-xs text-gray-400"><MapPin size={14} /><span>{clase.sala?.nombre} <span className="text-[9px] opacity-50 uppercase border border-white/20 px-1 rounded ml-1">Sede {clase.sala?.sede?.nombre}</span></span></div>
                                                 </div>
                                             </div>
-
                                             <div className="p-4 bg-[#09090b] border-t border-white/5 mt-auto">
-                                                <Link href={isStaff ? `/clase/${clase.id}` : `/mis-clases`} className="w-full bg-blue-600/10 text-blue-400 border border-blue-600/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">
-                                                    {isStaff ? 'Gestionar / Lista' : 'Ir a Mis Clases'} <ChevronRight size={14} />
-                                                </Link>
+                                                <Link href={isStaff ? `/clase/${clase.id}` : `/mis-clases`} className="w-full bg-blue-600/10 text-blue-400 border border-blue-600/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">{isStaff ? 'Gestionar / Lista' : 'Ir a Mis Clases'} <ChevronRight size={14} /></Link>
                                             </div>
                                         </div>
                                     )
                                 })}
                             </div>
                         ) : (
-                            <div className="text-center py-20 border border-dashed border-white/10 rounded-3xl bg-[#111]/50">
-                                <Calendar size={32} className="mx-auto mb-3 text-gray-600" />
-                                <p className="text-gray-500 font-bold uppercase text-sm">Sin clases en {mesDashboard}/{anioDashboard}</p>
-                                <p className="text-xs text-gray-600 mt-1">Podés buscar clases en otros meses cambiando el selector de arriba.</p>
-                            </div>
+                            <div className="text-center py-20 border border-dashed border-white/10 rounded-3xl bg-[#111]/50"><Calendar size={32} className="mx-auto mb-3 text-gray-600" /><p className="text-gray-500 font-bold uppercase text-sm">Sin clases en {mesDashboard}/{anioDashboard}</p></div>
                         )}
                     </div>
                 )}
 
-                {/* 3. PESTAÑA: MIEMBROS */}
+                {/* 3. PESTAÑA: MIEMBROS Y COBROS */}
                 {canSeeFinance && activeTab === 'miembros' && (
-                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
 
-                        {/* 🎯 TARJETA DE LIQUIDACIÓN DOCENTE (SOLO BALLROOM, CIA, JOVEN BALLET) */}
-                        {aplicaLiquidacion && (
-                            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 shadow-lg shadow-emerald-500/5 animate-in zoom-in-95 duration-200">
+                        {/* 🚀 PANEL DINÁMICO DE LIQUIDACIÓN DE GRUPO */}
+                        <div className="bg-[#09090b] border border-white/10 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-white/5 pb-4 mb-6 relative z-10">
                                 <div>
-                                    <h4 className="text-white font-black uppercase text-sm flex items-center gap-2">
-                                        <Coins size={16} className="text-emerald-500" /> Liquidación Docente (60%)
-                                    </h4>
-                                    <p className="text-gray-400 text-[10px] sm:text-xs mt-1">
-                                        Porcentaje fijo calculado sobre el pozo total del mes seleccionado
-                                    </p>
-                                </div>
-                                <div className="flex gap-6 text-right items-center">
-                                    <div>
-                                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Recaudado</p>
-                                        <p className="text-sm font-black text-white">${totalRecaudadoMes.toLocaleString()}</p>
-                                    </div>
-                                    <div className="h-8 w-px bg-white/10 hidden sm:block"></div>
-                                    <div>
-                                        <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider">A Pagar al Profe</p>
-                                        <p className="text-xl font-black text-emerald-400">${liquidacionDocente.toLocaleString()}</p>
+                                    <h3 className="text-lg font-black uppercase text-white flex items-center gap-2"><Wallet className="text-emerald-400" size={20} /> Cierre Financiero de Grupo</h3>
+                                    <div className="mt-1 space-y-0.5">
+                                        <p className="text-xs text-gray-500 font-medium">Ingreso Bruto Total: <strong className="text-white">${totalRecaudadoReal.toLocaleString()}</strong></p>
+                                        <p className="text-[11px] text-emerald-400/80 font-bold uppercase tracking-widest">Pozo Valor Efectivo: <strong className="text-emerald-400">${totalRecaudadoValorEfectivo.toLocaleString()}</strong></p>
                                     </div>
                                 </div>
-                            </div>
-                        )}
-
-                        {/* 🚀 BOTÓN MÁGICO DE INSCRIPCIÓN MASIVA AL PADRÓN */}
-                        {miembros.length > 0 && (
-                            <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6 shadow-lg shadow-blue-500/5">
-                                <div>
-                                    <h4 className="text-white font-black uppercase text-sm flex items-center gap-2"><CheckSquare size={16} className="text-blue-500" /> Asignación de Clases</h4>
-                                    <p className="text-gray-400 text-[10px] sm:text-xs mt-1">Inscribir a todos los alumnos del padrón a las clases del mes {mesDashboard}/{anioDashboard}</p>
+                                <div className="bg-white/5 px-4 py-2 rounded-xl border border-white/5 text-right w-full sm:w-auto">
+                                    <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest">A Liquidar</p>
+                                    <p className="text-xl font-black text-emerald-400">${detalleLiquidacion.montoPagar.toLocaleString()}</p>
                                 </div>
-                                <button
-                                    onClick={handleInscripcionMasiva}
-                                    disabled={inscribiendoMasivo || clases.length === 0}
-                                    className={`shrink-0 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${clases.length === 0 ? 'bg-gray-800 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-500'}`}
-                                >
-                                    {inscribiendoMasivo ? <Loader2 size={16} className="animate-spin" /> : <><CalendarDays size={16} /> Inscribir al Mes</>}
-                                </button>
                             </div>
-                        )}
 
-                        <div className="p-4 border-b border-white/5 shrink-0 bg-[#09090b] mb-4 rounded-xl">
-                            <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
-                                <input type="text" placeholder="Buscar alumno..." value={searchAlumno} onChange={(e) => setSearchAlumno(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white text-sm outline-none focus:border-blue-500 transition-colors" />
+                            {detalleLiquidacion.tipo === 'the_show' && (
+                                <div className="bg-[#111] p-3 rounded-xl border border-white/5 mb-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 text-xs relative z-10">
+                                    <label className="font-bold text-gray-400 uppercase tracking-wider">Costo Fijo Docentes ($):</label>
+                                    <input type="number" value={costoDocentesFijo} onChange={e => setCostoDocentesFijo(Number(e.target.value))} className="bg-black border border-white/10 text-white rounded-lg p-2 font-black w-full sm:w-32 outline-none focus:border-blue-500" />
+                                </div>
+                            )}
+
+                            {detalleLiquidacion.tipo === 'liga' && (
+                                <div className="bg-[#111] p-4 rounded-xl border border-white/5 mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs relative z-10">
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2"><label className="font-bold text-gray-400 uppercase">Coordinación Fija ($):</label><input type="number" value={coordinacionFijaLiga} onChange={e => setCoordinacionFijaLiga(Number(e.target.value))} className="bg-black border border-white/10 text-white rounded-lg p-2 font-black w-full sm:w-28 outline-none focus:border-blue-500" /></div>
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2"><label className="font-bold text-gray-400 uppercase">Valor por Clase ($):</label><input type="number" value={valorClaseDocenteLiga} onChange={e => setValorClaseDocenteLiga(Number(e.target.value))} className="bg-black border border-white/10 text-white rounded-lg p-2 font-black w-full sm:w-28 outline-none focus:border-blue-500" /></div>
+                                </div>
+                            )}
+
+                            <div className="bg-white/5 p-4 rounded-xl border border-white/5 text-xs text-gray-400 leading-relaxed mb-6 relative z-10">
+                                <span className="font-bold text-white uppercase block mb-1">Regla de Distribución Activa:</span>
+                                {detalleLiquidacion.glosa}
                             </div>
+
+                            {liquidacionPagada ? (
+                                <div className="w-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-black py-4 rounded-xl flex items-center justify-center gap-2 uppercase tracking-widest text-xs cursor-not-allowed relative z-10"><CheckCircle2 size={16} /> Liquidación Registrada en Caja</div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative z-10">
+                                    <button disabled={registrandoLiquidacion || detalleLiquidacion.montoPagar <= 0} onClick={() => handlePagarLiquidacionGrupo('efectivo')} className="bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3.5 rounded-xl uppercase tracking-widest text-[10px] transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50">{registrandoLiquidacion ? <Loader2 className="animate-spin" /> : <>💵 Abonar en Efectivo (Caja)</>}</button>
+                                    <button disabled={registrandoLiquidacion || detalleLiquidacion.montoPagar <= 0} onClick={() => handlePagarLiquidacionGrupo('transferencia')} className="bg-blue-600 hover:bg-blue-500 text-white font-black py-3.5 rounded-xl uppercase tracking-widest text-[10px] transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-50">{registrandoLiquidacion ? <Loader2 className="animate-spin" /> : <>📱 Pagar por Transferencia</>}</button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* ASIGNACIÓN MASIVA */}
+                        <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg shadow-blue-500/5">
+                            <div><h4 className="text-white font-black uppercase text-sm flex items-center gap-2"><CheckSquare size={16} className="text-blue-500" /> Asignación de Clases</h4><p className="text-gray-400 text-[10px] sm:text-xs mt-1">Inscribir a todos los alumnos del padrón a las clases del mes {mesDashboard}/{anioDashboard}</p></div>
+                            <button onClick={handleInscripcionMasiva} disabled={inscribiendoMasivo || clases.length === 0} className="shrink-0 bg-blue-600 text-white hover:bg-blue-500 px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2">{inscribiendoMasivo ? <Loader2 size={16} className="animate-spin" /> : <><CalendarDays size={16} /> Inscribir al Mes</>}</button>
+                        </div>
+
+                        <div className="p-4 border-b border-white/5 bg-[#09090b] rounded-xl">
+                            <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} /><input type="text" placeholder="Buscar alumno..." value={searchAlumno} onChange={(e) => setSearchAlumno(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white text-sm outline-none focus:border-blue-500 transition-colors" /></div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {miembros.length > 0 ? (
-                                miembros.filter(a => a.nombre_completo?.toLowerCase().includes(searchAlumno.toLowerCase()) || a.email?.toLowerCase().includes(searchAlumno.toLowerCase())).map((miembro) => (
-                                    <div key={miembro.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex flex-col justify-between gap-3 hover:border-blue-500/30 transition-colors">
-                                        <div className="flex items-start justify-between">
-                                            <div className="flex items-center gap-4 overflow-hidden">
-                                                <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 font-black text-sm uppercase shrink-0 border border-blue-500/20">
-                                                    {miembro.nombre_completo?.[0] || '?'}
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-bold text-white uppercase truncate">{miembro.nombre_completo}</p>
-                                                    <p className="text-[10px] text-gray-500 truncate flex items-center gap-1 mt-0.5">
-                                                        <Phone size={10} className="text-blue-400" />
-                                                        {miembro.telefono || 'Sin teléfono'}
-                                                    </p>
-                                                </div>
-                                            </div>
-
-                                            <div className="flex items-center gap-2 shrink-0">
-                                                <button
-                                                    onClick={() => openPagoModal(miembro)}
-                                                    className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-emerald-600 rounded-xl transition-all border border-transparent hover:border-emerald-500/30"
-                                                    title={`Anotar pago de ${miembro.nombre_completo}`}
-                                                >
-                                                    <Coins size={14} />
-                                                </button>
-
-                                                <button
-                                                    onClick={() => openIndividualModal(miembro)}
-                                                    className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-blue-600 rounded-xl transition-all"
-                                                    title={`Enviar aviso a ${miembro.nombre_completo}`}
-                                                >
-                                                    <BellRing size={14} />
-                                                </button>
-                                            </div>
+                            {miembros.filter(a => a.nombre_completo?.toLowerCase().includes(searchAlumno.toLowerCase()) || a.email?.toLowerCase().includes(searchAlumno.toLowerCase())).map((miembro) => (
+                                <div key={miembro.id} className="bg-[#111] border border-white/5 rounded-2xl p-4 flex flex-col justify-between gap-3 hover:border-blue-500/30 transition-colors">
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex items-center gap-4 overflow-hidden">
+                                            <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 font-black text-sm uppercase shrink-0 border border-blue-500/20">{miembro.nombre_completo?.[0] || '?'}</div>
+                                            <div className="min-w-0"><p className="text-sm font-bold text-white uppercase truncate">{miembro.nombre_completo}</p><p className="text-[10px] text-gray-500 truncate flex items-center gap-1 mt-0.5"><Phone size={10} className="text-blue-400" />{miembro.telefono || 'Sin teléfono'}</p></div>
                                         </div>
-
-                                        <div className="flex flex-wrap gap-2 pt-2 border-t border-white/5 mt-2">
-                                            {(miembro.porcentaje_beca_compania ?? 0) > 0 && (
-                                                <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                                    <Percent size={10} /> Beca {miembro.porcentaje_beca_compania}%
-                                                </span>
-                                            )}
-
-                                            <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${miembro.pago_compania_al_dia ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}>
-                                                <Coins size={10} /> Abonó ${miembro.totalAbonado} / ${miembro.precioEfectivo}
-                                            </span>
-
-                                            {!miembro.pago_compania_al_dia ? (
-                                                <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                                    <AlertCircle size={10} /> Debe Efvo: ${miembro.saldoPendienteEfectivo} | Transf: ${miembro.saldoPendiente}
-                                                </span>
-                                            ) : (
-                                                <span className="inline-flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
-                                                    <CheckCircle2 size={10} /> Al Día
-                                                </span>
-                                            )}
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <button onClick={() => openPagoModal(miembro)} className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-emerald-600 rounded-xl transition-all border border-transparent"><Coins size={14} /></button>
+                                            <button onClick={() => openIndividualModal(miembro)} className="p-2.5 bg-white/5 text-gray-400 hover:text-white hover:bg-blue-600 rounded-xl transition-all"><BellRing size={14} /></button>
                                         </div>
                                     </div>
-                                ))
-                            ) : (
-                                <div className="col-span-full text-center py-20 border border-dashed border-white/10 rounded-3xl bg-[#111]/50">
-                                    <UsersRound size={32} className="mx-auto mb-3 text-gray-600" />
-                                    <p className="text-gray-500 font-bold uppercase text-sm">Grupo sin integrantes</p>
+                                    <div className="flex flex-wrap gap-2 pt-2 border-t border-white/5 mt-2">
+                                        {(miembro.porcentaje_beca_compania ?? 0) > 0 && <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest"><Percent size={10} /> Beca {miembro.porcentaje_beca_compania}%</span>}
+                                        <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${miembro.pago_compania_al_dia ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}><Coins size={10} /> Abonó ${miembro.totalAbonado} / ${miembro.precioEfectivo}</span>
+                                        {!miembro.pago_compania_al_dia ? <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest"><AlertCircle size={10} /> Debe Efvo: ${miembro.saldoPendienteEfectivo} | Transf: ${miembro.saldoPendiente}</span> : <span className="inline-flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest"><CheckCircle2 size={10} /> Al Día</span>}
+                                    </div>
                                 </div>
-                            )}
+                            ))}
                         </div>
                     </div>
                 )}
@@ -828,70 +828,36 @@ export default function CompaniaDetallePage() {
                     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 md:p-8 shadow-xl">
                             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 border-b border-white/5 pb-6">
-                                <div>
-                                    <h3 className="text-xl font-black uppercase text-white flex items-center gap-2">
-                                        <Activity className="text-blue-500" /> Control de Asistencias
-                                    </h3>
-                                    <p className="text-xs text-gray-500 uppercase tracking-widest mt-1 font-bold">Mes analizado: {mesDashboard}/{anioDashboard}</p>
-                                </div>
-                                <span className="bg-white/5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase text-gray-400 border border-white/10 shrink-0">
-                                    Clases Pasadas: {clases.filter(c => new Date(c.inicio).getTime() <= new Date().getTime()).length}
-                                </span>
+                                <div><h3 className="text-xl font-black uppercase text-white flex items-center gap-2"><Activity className="text-blue-500" /> Control de Asistencias</h3><p className="text-xs text-gray-500 uppercase tracking-widest mt-1 font-bold">Mes analizado: {mesDashboard}/{anioDashboard}</p></div>
+                                <span className="bg-white/5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase text-gray-400 border border-white/10 shrink-0">Clases Pasadas: {clases.filter(c => new Date(c.inicio).getTime() <= new Date().getTime()).length}</span>
                             </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {miembros.map(m => {
+                                    const total = m.estadisticas?.total || 0;
+                                    const presentes = m.estadisticas?.presentes || 0;
+                                    const saf = m.estadisticas?.saf || 0;
+                                    const porcentaje = total > 0 ? Math.round(((presentes + saf) / total) * 100) : 0;
 
-                            {clases.filter(c => new Date(c.inicio).getTime() <= new Date().getTime()).length === 0 ? (
-                                <div className="text-center py-10 bg-[#111] rounded-2xl border border-white/5">
-                                    <p className="text-xs font-bold text-gray-500 uppercase">Aún no hay clases dictadas en este mes.</p>
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {miembros.map(m => {
-                                        const total = m.estadisticas?.total || 0;
-                                        const presentes = m.estadisticas?.presentes || 0;
-                                        const saf = m.estadisticas?.saf || 0;
-                                        const asistenciasReales = presentes + saf;
-                                        const porcentaje = total > 0 ? Math.round((asistenciasReales / total) * 100) : 0;
-
-                                        return (
-                                            <div key={m.id} className="bg-[#111] p-4 rounded-xl border border-white/5 flex flex-col gap-4 hover:border-white/20 transition-all group">
-                                                <div className="flex justify-between items-center border-b border-white/5 pb-3">
-                                                    <h4 className="font-bold text-sm uppercase text-white truncate max-w-[65%]">{m.nombre_completo}</h4>
-                                                    <span className={`text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest shrink-0 ${porcentaje >= 60 ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
-                                                        {porcentaje}% Asist.
-                                                    </span>
-                                                </div>
-
-                                                <div className="grid grid-cols-5 gap-2 text-[10px] font-black uppercase tracking-widest">
-                                                    <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-green-500/5 text-green-500" title="Presentes">
-                                                        <CheckCircle2 size={14} />
-                                                        <span>{presentes} P</span>
-                                                    </div>
-                                                    <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-red-500/5 text-red-500" title="Ausentes">
-                                                        <XCircle size={14} />
-                                                        <span>{m.estadisticas?.ausentes} A</span>
-                                                    </div>
-                                                    <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-yellow-500/5 text-yellow-500" title="Medias Faltas">
-                                                        <Clock size={14} />
-                                                        <span>{m.estadisticas?.medias_faltas} MF</span>
-                                                    </div>
-                                                    <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-blue-500/5 text-blue-500" title="Justificadas">
-                                                        <FileText size={14} />
-                                                        <span>{m.estadisticas?.justificadas} J</span>
-                                                    </div>
-                                                    <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-purple-500/5 text-purple-500" title="SAF (Asistió pero no bailó)">
-                                                        <Eye size={14} />
-                                                        <span>{saf} SAF</span>
-                                                    </div>
-                                                </div>
-
-                                                <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden mt-1">
-                                                    <div className={`h-full rounded-full transition-all duration-1000 ${porcentaje >= 60 ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${porcentaje}%` }} />
-                                                </div>
+                                    return (
+                                        <div key={m.id} className="bg-[#111] p-4 rounded-xl border border-white/5 flex flex-col gap-4 hover:border-white/20 transition-all group">
+                                            <div className="flex justify-between items-center border-b border-white/5 pb-3">
+                                                <h4 className="font-bold text-sm uppercase text-white truncate max-w-[65%]">{m.nombre_completo}</h4>
+                                                <span className={`text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest shrink-0 ${porcentaje >= 60 ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>{porcentaje}% Asist.</span>
                                             </div>
-                                        )
-                                    })}
-                                </div>
-                            )}
+                                            <div className="grid grid-cols-5 gap-2 text-[10px] font-black uppercase tracking-widest">
+                                                <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-green-500/5 text-green-500" title="Presentes"><CheckCircle2 size={14} /><span>{presentes} P</span></div>
+                                                <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-red-500/5 text-red-500" title="Ausentes"><XCircle size={14} /><span>{m.estadisticas?.ausentes} A</span></div>
+                                                <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-yellow-500/5 text-yellow-500" title="Medias Faltas"><Clock size={14} /><span>{m.estadisticas?.medias_faltas} MF</span></div>
+                                                <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-blue-500/5 text-blue-500" title="Justificadas"><FileText size={14} /><span>{m.estadisticas?.justificadas} J</span></div>
+                                                <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-purple-500/5 text-purple-500" title="SAF"><Eye size={14} /><span>{saf} SAF</span></div>
+                                            </div>
+                                            <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden mt-1">
+                                                <div className={`h-full rounded-full transition-all duration-1000 ${porcentaje >= 60 ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${porcentaje}%` }} />
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -908,7 +874,6 @@ export default function CompaniaDetallePage() {
                             </div>
                             <button onClick={() => setIsPagoModalOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
                         </div>
-
                         <form onSubmit={handleRegistrarPago} className="space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
@@ -926,46 +891,16 @@ export default function CompaniaDetallePage() {
                                     </select>
                                 </div>
                             </div>
-
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
-                                <select
-                                    value={metodoPago}
-                                    onChange={e => {
-                                        const newMethod = e.target.value;
-                                        setMetodoPago(newMethod);
-                                        if (alumnoPago) {
-                                            setMontoPago(newMethod === 'efectivo' ? (alumnoPago.saldoPendienteEfectivo || 0) : (alumnoPago.saldoPendiente || 0));
-                                        }
-                                    }}
-                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors appearance-none"
-                                >
-                                    <option value="efectivo">Efectivo (Recepción)</option>
-                                    <option value="transferencia">Transferencia Bancaria</option>
-                                    <option value="mercadopago_manual">Mercado Pago (QR Físico)</option>
-                                    <option value="otro">Otro</option>
-                                </select>
+                                <select value={metodoPago} onChange={e => { const newMethod = e.target.value; setMetodoPago(newMethod); if (alumnoPago) { setMontoPago(newMethod === 'efectivo' ? (alumnoPago.saldoPendienteEfectivo || 0) : (alumnoPago.saldoPendiente || 0)); } }} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-colors appearance-none"><option value="efectivo">Efectivo (Recepción)</option><option value="transferencia">Transferencia Bancaria</option><option value="mercadopago_manual">Mercado Pago (QR Físico)</option><option value="otro">Otro</option></select>
                             </div>
-
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Monto a Registrar ($)</label>
-                                <div className="relative">
-                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
-                                    <input
-                                        type="number"
-                                        required
-                                        min="1"
-                                        value={montoPago}
-                                        onChange={e => setMontoPago(e.target.value === '' ? '' : Number(e.target.value))}
-                                        className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white font-black outline-none focus:border-emerald-500 transition-colors"
-                                    />
-                                </div>
-                                <p className="text-[10px] text-gray-500 text-right mt-1">Saldo sugerido: Efvo ${alumnoPago.saldoPendienteEfectivo} / Otros ${alumnoPago.saldoPendiente}</p>
+                                <div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span><input type="number" required min="1" value={montoPago} onChange={e => setMontoPago(e.target.value === '' ? '' : Number(e.target.value))} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white font-black outline-none focus:border-emerald-500 transition-colors" /></div>
+                                <p className="text-[10px] text-gray-500 text-right mt-1">Saldo sugerido: Efvo {alumnoPago.saldoPendienteEfectivo} / Otros {alumnoPago.saldoPendiente}</p>
                             </div>
-
-                            <button disabled={registrandoPago} type="submit" className="w-full bg-emerald-600 text-white font-black uppercase py-4 rounded-xl hover:bg-emerald-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg mt-4">
-                                {registrandoPago ? <Loader2 className="animate-spin" /> : <><CheckCircle2 size={16} /> Guardar Registro</>}
-                            </button>
+                            <button disabled={registrandoPago} type="submit" className="w-full bg-emerald-600 text-white font-black uppercase py-4 rounded-xl hover:bg-emerald-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg mt-4">{registrandoPago ? <Loader2 className="animate-spin mx-auto" /> : <><CheckCircle2 size={16} /> Guardar Registro</>}</button>
                         </form>
                     </div>
                 </div>
@@ -973,27 +908,15 @@ export default function CompaniaDetallePage() {
 
             {/* MODAL: AVISO INDIVIDUAL */}
             {isIndividualNotifOpen && selectedAlumno && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setIsIndividualNotifOpen(false)}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => setIsIndividualNotifOpen(false)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setIsIndividualNotifOpen(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"><X size={20} /></button>
                         <div className="flex justify-between items-start mb-6 border-b border-white/10 pb-4">
-                            <div>
-                                <h3 className="text-lg font-black text-white uppercase flex items-center gap-2"><BellRing className="text-blue-500" size={18} /> Aviso Directo</h3>
-                                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-1">Para: {selectedAlumno.nombre_completo}</p>
-                            </div>
-                            <button onClick={() => setIsIndividualNotifOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
+                            <div><h3 className="text-lg font-black text-white uppercase flex items-center gap-2"><BellRing className="text-blue-500" size={18} /> Aviso Directo</h3><p className="text-xs text-gray-500 mt-1">Para: {selectedAlumno.nombre_completo}</p></div>
                         </div>
-
                         <form onSubmit={handleSendIndividualNotif} className="space-y-4">
-                            <textarea
-                                required
-                                value={individualMessage}
-                                onChange={e => setIndividualMessage(e.target.value)}
-                                placeholder={`Escribí un mensaje solo para ${selectedAlumno.nombre_completo}...`}
-                                className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-blue-500 min-h-[120px] resize-none transition-colors"
-                            />
-                            <button disabled={sendingNotif} type="submit" className="w-full bg-blue-600 text-white font-black uppercase py-4 rounded-xl hover:bg-blue-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg">
-                                {sendingNotif ? <Loader2 className="animate-spin" /> : <><Send size={16} /> Enviar Mensaje</>}
-                            </button>
+                            <textarea required value={individualMessage} onChange={e => setIndividualMessage(e.target.value)} placeholder={`Escribí un mensaje solo para ${selectedAlumno.nombre_completo}...`} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-blue-500 min-h-[120px] resize-none" />
+                            <button disabled={sendingNotif} type="submit" className="w-full bg-blue-600 text-white font-black uppercase py-4 rounded-xl text-xs flex items-center justify-center gap-2">{sendingNotif ? <Loader2 className="animate-spin" /> : <><Send size={14} /> Enviar Mensaje</>}</button>
                         </form>
                     </div>
                 </div>

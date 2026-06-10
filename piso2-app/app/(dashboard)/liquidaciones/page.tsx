@@ -45,6 +45,14 @@ type GrupoClaseLiquidacion = {
     cant_alumnos_total: number
 }
 
+type GrupoRaw = {
+    id: string
+    nombre: string
+    totalRecaudado: number
+    cantClases: number
+    yaLiquidado: boolean
+}
+
 type TransaccionVirtual = {
     id: string
     concepto: string
@@ -387,7 +395,7 @@ export default function AdminLiquidacionesPage() {
     const [expandedProf, setExpandedProf] = useState<string | null>(null)
     const [expandedClase, setExpandedClase] = useState<string | null>(null)
 
-    const [vistaActiva, setVistaActiva] = useState<'docentes' | 'clases' | 'virtual' | 'ranking' | 'recepcion'>('docentes')
+    const [vistaActiva, setVistaActiva] = useState<'docentes' | 'clases' | 'virtual' | 'ranking' | 'recepcion' | 'grupos'>('docentes')
 
     const [rankingCategoria, setRankingCategoria] = useState<'regular' | 'especial' | 'grupo'>('regular')
     const [rankingOrden, setRankingOrden] = useState<'alumnos' | 'recaudacion'>('alumnos')
@@ -404,6 +412,14 @@ export default function AdminLiquidacionesPage() {
 
     const [procesandoPago, setProcesandoPago] = useState(false)
 
+    const [gruposRaw, setGruposRaw] = useState<GrupoRaw[]>([])
+    const [loadingGrupos, setLoadingGrupos] = useState(false)
+    const [costoDocTheShow, setCostoDocTheShow] = useState(40000)
+    const [coordFijaLiga, setCoordFijaLiga] = useState(25000)
+    const [valorClaseLiga, setValorClaseLiga] = useState(6000)
+    const [pagandoGrupoId, setPagandoGrupoId] = useState<string | null>(null)
+    const [modalLiqGrupo, setModalLiqGrupo] = useState<{ isOpen: boolean; grupo: GrupoRaw | null; montoPagar: number; destinatario: string }>({ isOpen: false, grupo: null, montoPagar: 0, destinatario: '' })
+
     const { data, isLoading, error, mutate } = useSWR(
         userRole && ['admin', 'recepcion'].includes(userRole) ? ['liquidaciones-global', selectedMonth] : null,
         fetchLiquidacionesGlobales,
@@ -415,6 +431,78 @@ export default function AdminLiquidacionesPage() {
             setValorHoraRecep(data.valorHoraConfig)
         }
     }, [data])
+
+    useEffect(() => {
+        if (vistaActiva !== 'grupos' || !userRole || !['admin', 'recepcion'].includes(userRole)) return
+
+        setLoadingGrupos(true)
+        const supabase = createClient()
+        const [yyyy, mm] = selectedMonth.split('-')
+        const mes = Number(mm)
+        const anio = Number(yyyy)
+
+        Promise.all([
+            supabase.from('companias').select('id, nombre').order('nombre'),
+            supabase.from('companias_pagos').select('compania_id, monto, metodo_pago').eq('mes', mes).eq('anio', anio),
+            supabase.from('clases').select('compania_id')
+                .not('compania_id', 'is', null)
+                .gte('inicio', new Date(anio, mes - 1, 1).toISOString())
+                .lte('inicio', new Date(anio, mes, 0, 23, 59, 59, 999).toISOString())
+                .neq('estado', 'cancelada'),
+            supabase.from('caja_movimientos').select('concepto')
+                .eq('tipo', 'egreso')
+                .ilike('concepto', `%Liquidación Grupo | ID: % | Mes: ${mes}-${anio}%`)
+        ]).then(([{ data: companias }, { data: pagos }, { data: clasesMes }, { data: movLiquidadas }]) => {
+            if (!companias) { setLoadingGrupos(false); return }
+
+            const liquidadasIds = new Set<string>()
+            movLiquidadas?.forEach((l: any) => {
+                const match = l.concepto?.match(/ID: ([a-zA-Z0-9-]+) /)
+                if (match?.[1]) liquidadasIds.add(match[1])
+            })
+
+            const result: GrupoRaw[] = companias.map((c: any) => ({
+                id: c.id,
+                nombre: c.nombre,
+                totalRecaudado: pagos?.filter((p: any) => p.compania_id === c.id)
+                    .reduce((acc: number, p: any) => {
+                        const monto = Number(p.monto)
+                        return acc + (p.metodo_pago === 'efectivo' ? monto : monto / 1.1)
+                    }, 0) || 0,
+                cantClases: clasesMes?.filter((cl: any) => cl.compania_id === c.id).length || 0,
+                yaLiquidado: liquidadasIds.has(c.id)
+            }))
+
+            setGruposRaw(result.filter(g => g.totalRecaudado > 0 || g.cantClases > 0))
+            setLoadingGrupos(false)
+        }).catch(() => setLoadingGrupos(false))
+    }, [vistaActiva, selectedMonth])
+
+    const handlePagarGrupoAdmin = async (
+        grupo: GrupoRaw, montoPagar: number, destinatario: string,
+        metodo: 'efectivo' | 'transferencia'
+    ) => {
+        if (montoPagar <= 0) return
+        setPagandoGrupoId(grupo.id)
+        const supabase = createClient()
+        const [yyyy, mm] = selectedMonth.split('-')
+        const mesKeyStr = `${Number(mm)}-${Number(yyyy)}`
+        const concepto = `Liquidación Grupo | ID: ${grupo.id} | Mes: ${mesKeyStr} | Destinatario: ${destinatario}`
+
+        const { error } = await supabase.from('caja_movimientos').insert([{
+            concepto, monto: montoPagar, tipo: 'egreso',
+            metodo_pago: metodo, created_at: new Date().toISOString()
+        }])
+
+        if (error) {
+            toast.error('Error: ' + error.message)
+        } else {
+            toast.success(`Liquidación de $${montoPagar.toLocaleString()} registrada en Caja.`)
+            setGruposRaw(prev => prev.map(g => g.id === grupo.id ? { ...g, yaLiquidado: true } : g))
+            setModalLiqGrupo({ isOpen: false, grupo: null, montoPagar: 0, destinatario: '' })
+        }
+        setPagandoGrupoId(null)
+    }
 
     const handleGuardarValorHora = async () => {
         setGuardandoValor(true)
@@ -606,7 +694,7 @@ export default function AdminLiquidacionesPage() {
                     {vistaActiva !== 'ranking' && vistaActiva !== 'recepcion' && (
                         <div className="relative w-full sm:w-64">
                             <Search className="absolute left-3 top-3.5 text-gray-500" size={16} />
-                            <input type="text" placeholder={vistaActiva === 'docentes' ? "Buscar profesor..." : vistaActiva === 'clases' ? "Buscar clase o profe..." : "Buscar concepto..."} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-10 text-white text-sm outline-none focus:border-[#D4E655] transition-colors" />
+                            <input type="text" placeholder={vistaActiva === 'docentes' ? "Buscar profesor..." : vistaActiva === 'clases' ? "Buscar clase o profe..." : vistaActiva === 'grupos' ? "Buscar grupo..." : "Buscar concepto..."} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-10 text-white text-sm outline-none focus:border-[#D4E655] transition-colors" />
                         </div>
                     )}
                     <select value={selectedMonth} onChange={(e) => { setSelectedMonth(e.target.value); setExpandedProf(null); setExpandedClase(null); }} className="w-full sm:w-auto bg-[#111] border border-[#D4E655]/30 rounded-xl p-3 text-white text-sm font-bold uppercase outline-none focus:border-[#D4E655] appearance-none">
@@ -669,6 +757,12 @@ export default function AdminLiquidacionesPage() {
                         <Clock size={16} /> Staff / Recepción
                     </button>
                 )}
+                <button
+                    onClick={() => setVistaActiva('grupos')}
+                    className={`flex items-center gap-2 text-xs font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all whitespace-nowrap ${vistaActiva === 'grupos' ? 'bg-emerald-500 text-black' : 'text-gray-500 hover:text-white bg-[#111]'}`}
+                >
+                    <Users size={16} /> Grupos
+                </button>
             </div>
 
             <div className="space-y-4">
@@ -1251,6 +1345,139 @@ export default function AdminLiquidacionesPage() {
                         </div>
                     </div>
                 )}
+
+                {/* VISTA 6: LIQUIDACIONES DE GRUPOS */}
+                {vistaActiva === 'grupos' && (
+                    <div className="animate-in fade-in space-y-4">
+                        {loadingGrupos ? (
+                            <div className="flex items-center justify-center py-20">
+                                <Loader2 className="animate-spin text-emerald-400 w-8 h-8" />
+                            </div>
+                        ) : gruposRaw.length === 0 ? (
+                            <div className="text-center py-20 bg-[#111]/50 rounded-3xl border border-dashed border-white/10">
+                                <Users className="mx-auto mb-3 text-gray-600" size={32} />
+                                <p className="text-sm font-bold uppercase text-gray-500">Sin actividad en grupos</p>
+                                <p className="text-xs text-gray-600">No hubo recaudación ni clases en grupos para este mes.</p>
+                            </div>
+                        ) : (
+                            gruposRaw
+                                .filter(g => g.nombre.toLowerCase().includes(searchQuery.toLowerCase()))
+                                .map(grupo => {
+                                    const nombreLow = grupo.nombre.toLowerCase()
+                                    let destinatario = 'Piso 2', montoPagar = 0, glosa = 'Sin regla definida.', tipo = 'general'
+
+                                    if (nombreLow.includes('ballroom')) {
+                                        destinatario = 'Evelyn Nowak'
+                                        montoPagar = grupo.totalRecaudado * 0.60
+                                        glosa = `60% del pozo (Valor Efectivo) de $${grupo.totalRecaudado.toLocaleString()} para Evelyn Nowak.`
+                                        tipo = 'porcentaje'
+                                    } else if (nombreLow.includes('c.i.a') || nombreLow.includes('cia')) {
+                                        destinatario = 'Alexis Mirinda'
+                                        montoPagar = grupo.totalRecaudado * 0.60
+                                        glosa = `60% del pozo (Valor Efectivo) de $${grupo.totalRecaudado.toLocaleString()} para Alexis Mirinda.`
+                                        tipo = 'porcentaje'
+                                    } else if (nombreLow.includes('joven ballet')) {
+                                        destinatario = 'Franco y Eugenia'
+                                        montoPagar = grupo.totalRecaudado * 0.60
+                                        glosa = `60% del pozo (Valor Efectivo) de $${grupo.totalRecaudado.toLocaleString()} para Franco y Eugenia.`
+                                        tipo = 'porcentaje'
+                                    } else if (nombreLow.includes('the show')) {
+                                        const saldo = grupo.totalRecaudado - costoDocTheShow
+                                        montoPagar = saldo > 0 ? saldo * 0.50 : 0
+                                        destinatario = 'Chiara'
+                                        glosa = `Pozo efectivo $${grupo.totalRecaudado.toLocaleString()} − Docentes $${costoDocTheShow.toLocaleString()} = $${Math.max(0, saldo).toLocaleString()} → 50% para Chiara.`
+                                        tipo = 'the_show'
+                                    } else if (nombreLow.includes('liga')) {
+                                        const costoDoc = grupo.cantClases * valorClaseLiga
+                                        montoPagar = costoDoc + coordFijaLiga
+                                        destinatario = 'Coordinación + Docentes Liga'
+                                        glosa = `${grupo.cantClases} clases × $${valorClaseLiga.toLocaleString()} + coord fija $${coordFijaLiga.toLocaleString()} = $${montoPagar.toLocaleString()}.`
+                                        tipo = 'liga'
+                                    }
+
+                                    return (
+                                        <div key={grupo.id} className={`bg-[#09090b] border ${grupo.yaLiquidado ? 'border-emerald-500/20' : 'border-white/10'} rounded-2xl p-5`}>
+                                            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                                                <div className="flex-1">
+                                                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                                                        <h3 className="text-lg font-black text-white uppercase">{grupo.nombre}</h3>
+                                                        {grupo.yaLiquidado && (
+                                                            <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black flex items-center gap-1">
+                                                                <CheckCircle2 size={10} /> Liquidado
+                                                            </span>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="flex flex-wrap gap-x-6 gap-y-2 mb-3 text-xs">
+                                                        <div>
+                                                            <p className="text-[9px] text-gray-500 uppercase font-bold tracking-widest">Recaudado</p>
+                                                            <p className="font-black text-white">${grupo.totalRecaudado.toLocaleString()}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-[9px] text-gray-500 uppercase font-bold tracking-widest">Para</p>
+                                                            <p className="font-black text-emerald-400">{destinatario}</p>
+                                                        </div>
+                                                        {tipo === 'liga' && (
+                                                            <div>
+                                                                <p className="text-[9px] text-gray-500 uppercase font-bold tracking-widest">Clases</p>
+                                                                <p className="font-black text-white">{grupo.cantClases}</p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <p className="text-[10px] text-gray-500 leading-relaxed mb-3">{glosa}</p>
+
+                                                    {tipo === 'the_show' && (
+                                                        <div className="flex items-center gap-3 bg-[#111] p-2 rounded-lg border border-white/5 w-fit">
+                                                            <label className="font-bold text-gray-400 uppercase tracking-wider text-[9px]">Costo Docentes:</label>
+                                                            <span className="text-gray-500 text-xs">$</span>
+                                                            <input type="number" value={costoDocTheShow} onChange={e => setCostoDocTheShow(Number(e.target.value))} className="bg-black border border-white/10 text-white rounded-lg px-2 py-1 font-black w-24 outline-none focus:border-emerald-500 text-xs" />
+                                                        </div>
+                                                    )}
+
+                                                    {tipo === 'liga' && (
+                                                        <div className="flex flex-wrap gap-3 bg-[#111] p-2 rounded-lg border border-white/5">
+                                                            <div className="flex items-center gap-2">
+                                                                <label className="font-bold text-gray-400 uppercase tracking-wider text-[9px]">Coord ($):</label>
+                                                                <input type="number" value={coordFijaLiga} onChange={e => setCoordFijaLiga(Number(e.target.value))} className="bg-black border border-white/10 text-white rounded-lg px-2 py-1 font-black w-24 outline-none focus:border-emerald-500 text-xs" />
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <label className="font-bold text-gray-400 uppercase tracking-wider text-[9px]">$/Clase:</label>
+                                                                <input type="number" value={valorClaseLiga} onChange={e => setValorClaseLiga(Number(e.target.value))} className="bg-black border border-white/10 text-white rounded-lg px-2 py-1 font-black w-20 outline-none focus:border-emerald-500 text-xs" />
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex flex-col items-start md:items-end gap-3 shrink-0 border-t md:border-t-0 md:border-l border-white/5 pt-4 md:pt-0 md:pl-6">
+                                                    <div className="md:text-right">
+                                                        <p className="text-[9px] text-gray-500 uppercase font-bold tracking-widest">A Pagar</p>
+                                                        <p className="text-2xl font-black text-emerald-400">${montoPagar.toLocaleString()}</p>
+                                                    </div>
+
+                                                    {grupo.yaLiquidado ? (
+                                                        <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[9px] font-black uppercase px-4 py-2 rounded-xl flex items-center gap-1.5 cursor-not-allowed">
+                                                            <CheckCircle2 size={12} /> En Caja
+                                                        </div>
+                                                    ) : montoPagar > 0 ? (
+                                                        <button
+                                                            onClick={() => setModalLiqGrupo({ isOpen: true, grupo, montoPagar, destinatario })}
+                                                            disabled={!!pagandoGrupoId}
+                                                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase py-2.5 px-5 rounded-xl text-[10px] tracking-widest transition-all flex items-center gap-2 shadow-lg"
+                                                        >
+                                                            <DollarSign size={14} /> Registrar Pago
+                                                        </button>
+                                                    ) : (
+                                                        <span className="text-[9px] text-gray-500 font-bold uppercase">Sin monto</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )
+                                })
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* MODAL FLOTANTE DE ALUMNOS INSCRIPTOS */}
@@ -1407,6 +1634,40 @@ export default function AdminLiquidacionesPage() {
                             </button>
                             <button onClick={() => handleProcesarPago('transferencia')} disabled={procesandoPago} className="w-full bg-[#D4E655] hover:bg-white text-black font-black uppercase py-4 rounded-xl transition-all text-xs tracking-widest flex items-center justify-center gap-2">
                                 {procesandoPago ? <Loader2 size={16} className="animate-spin" /> : '📱 Hice Transferencia'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL: LIQUIDAR GRUPO */}
+            {modalLiqGrupo.isOpen && modalLiqGrupo.grupo && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in" onClick={() => !pagandoGrupoId && setModalLiqGrupo({ isOpen: false, grupo: null, montoPagar: 0, destinatario: '' })}>
+                    <div className="bg-[#09090b] border border-emerald-500/20 w-full max-w-sm rounded-3xl p-6 shadow-[0_0_50px_rgba(16,185,129,0.1)] relative" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => !pagandoGrupoId && setModalLiqGrupo({ isOpen: false, grupo: null, montoPagar: 0, destinatario: '' })} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                            <X size={20} />
+                        </button>
+                        <div className="text-center mb-6">
+                            <div className="w-12 h-12 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/30">
+                                <DollarSign className="text-emerald-500" size={24} />
+                            </div>
+                            <h3 className="text-xl font-black text-white uppercase tracking-tighter">Liquidar Grupo</h3>
+                            <p className="text-xs text-gray-400 mt-2 font-medium leading-relaxed">
+                                Pago de <strong className="text-white">{modalLiqGrupo.grupo.nombre}</strong> a{' '}
+                                <strong className="text-emerald-400">{modalLiqGrupo.destinatario}</strong>.
+                            </p>
+                            <div className="mt-4 p-3 bg-white/5 rounded-xl">
+                                <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Monto a Pagar</p>
+                                <p className="text-3xl font-black text-emerald-400 mt-1">${modalLiqGrupo.montoPagar.toLocaleString()}</p>
+                            </div>
+                        </div>
+                        <div className="space-y-3">
+                            <p className="text-[10px] font-black uppercase text-gray-500 tracking-widest text-center">¿Cómo le pagaste?</p>
+                            <button onClick={() => handlePagarGrupoAdmin(modalLiqGrupo.grupo!, modalLiqGrupo.montoPagar, modalLiqGrupo.destinatario, 'efectivo')} disabled={!!pagandoGrupoId} className="w-full bg-[#111] hover:bg-white/10 border border-white/10 text-white font-black uppercase py-4 rounded-xl transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                {pagandoGrupoId ? <Loader2 size={16} className="animate-spin" /> : '💵 Aboné en Efectivo'}
+                            </button>
+                            <button onClick={() => handlePagarGrupoAdmin(modalLiqGrupo.grupo!, modalLiqGrupo.montoPagar, modalLiqGrupo.destinatario, 'transferencia')} disabled={!!pagandoGrupoId} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase py-4 rounded-xl transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                {pagandoGrupoId ? <Loader2 size={16} className="animate-spin" /> : '📱 Hice Transferencia'}
                             </button>
                         </div>
                     </div>
