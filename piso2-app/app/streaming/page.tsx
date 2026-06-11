@@ -227,11 +227,11 @@ export default function CotizadorPage() {
             <div className="w-full max-w-4xl p-6 relative z-10">
                 <Toaster position="top-center" richColors theme="dark" />
 
-                {step > 1 && step < 8 && (
+                {(step > 1 && step < 8) || (step === 8 && formData.tipo === 'Cobertura de Eventos Externos') ? (
                     <button onClick={handleBack} className="absolute top-8 left-8 text-gray-400 hover:text-white flex items-center gap-2 transition-colors z-20 font-bold uppercase text-xs tracking-wider">
                         <ChevronLeft size={20} /> Volver
                     </button>
-                )}
+                ) : null}
 
                 <div className="w-full max-w-4xl p-6 relative z-10">
 
@@ -245,26 +245,40 @@ export default function CotizadorPage() {
                                 <h2 className="text-2xl font-black mb-6 text-center uppercase tracking-tighter text-white">Contanos de tu proyecto</h2>
                                 <div className="space-y-4">
                                     <div>
-                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Nombre completo</label>
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 flex items-center gap-1 block">
+                                            Nombre y Apellido <span className="text-[#1ed760]">*</span>
+                                        </label>
                                         <input value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="Ej: Juan Pérez" />
                                     </div>
                                     <div>
-                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Marca / Nombre del Programa</label>
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Marca / Nombre del Programa <span className="text-gray-700">(Opcional)</span></label>
                                         <input value={formData.marca} onChange={e => setFormData({ ...formData, marca: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="Ej: Piso 2 Stream" />
                                     </div>
                                     <div>
-                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Usuario de Instagram</label>
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Usuario de Instagram <span className="text-gray-700">(Opcional)</span></label>
                                         <input value={formData.instagram} onChange={e => setFormData({ ...formData, instagram: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="@usuario" />
                                     </div>
                                     <div>
-                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">WhatsApp de contacto</label>
-                                        <input value={formData.whatsapp} onChange={e => setFormData({ ...formData, whatsapp: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="+54 9..." />
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 flex items-center gap-1 block">
+                                            Número de celular (WhatsApp) <span className="text-[#1ed760]">*</span>
+                                        </label>
+                                        <input
+                                            type="tel"
+                                            inputMode="numeric"
+                                            value={formData.whatsapp}
+                                            onChange={e => {
+                                                const soloNumeros = e.target.value.replace(/[^0-9+\s\-()]/g, '')
+                                                setFormData({ ...formData, whatsapp: soloNumeros })
+                                            }}
+                                            className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm"
+                                            placeholder="+54 9 11..."
+                                        />
                                     </div>
                                     <div>
-                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Productora / Empresa (Opcional)</label>
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Productora / Empresa <span className="text-gray-700">(Opcional)</span></label>
                                         <input value={formData.empresa} onChange={e => setFormData({ ...formData, empresa: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] focus:shadow-[0_0_15px_rgba(30,215,96,0.15)] transition-all text-sm" placeholder="Compañía" />
                                     </div>
-                                    <button onClick={handleNext} disabled={!formData.nombre || !formData.whatsapp} className="w-full bg-[#1ed760] text-black font-black uppercase tracking-widest py-4 rounded-xl mt-4 hover:bg-white hover:shadow-[0_0_25px_rgba(30,215,96,0.3)] transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed">
+                                    <button onClick={handleNext} disabled={!formData.nombre.trim() || !formData.whatsapp.trim()} className="w-full bg-[#1ed760] text-black font-black uppercase tracking-widest py-4 rounded-xl mt-4 hover:bg-white hover:shadow-[0_0_25px_rgba(30,215,96,0.3)] transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed">
                                         Continuar
                                     </button>
                                 </div>
@@ -492,7 +506,10 @@ export default function CotizadorPage() {
                                     </div>
                                     <div>
                                         <h2 className="text-xl font-black uppercase tracking-tighter text-white leading-tight">¡Gracias por contactarte con 2S!</h2>
-                                        <p className="text-gray-500 text-xs mt-0.5">A la brevedad alguien del equipo se pondrá en contacto con vos.</p>
+                                        {formData.tipo === 'Cobertura de Eventos Externos'
+                                            ? <p className="text-gray-400 text-xs mt-0.5">Escribinos por WhatsApp y te damos todos los detalles.</p>
+                                            : <p className="text-gray-500 text-xs mt-0.5">A la brevedad alguien del equipo se pondrá en contacto con vos.</p>
+                                        }
                                     </div>
                                 </div>
 

@@ -84,6 +84,46 @@ export async function eliminarReservaAction(ids: string[]) {
     }
 }
 
+export async function editarAlquilerFechaHoraAction(
+    id: string,
+    nuevaFecha: string,
+    horaInicio: string,
+    horaFin: string
+) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
+
+    try {
+        // Validar que el alquiler original sea a más de 24h
+        const { data: alquiler } = await supabase
+            .from('alquileres')
+            .select('fecha, hora_inicio')
+            .eq('id', id)
+            .single()
+
+        if (!alquiler) return { success: false, error: 'Reserva no encontrada' }
+
+        const fechaOriginal = new Date(`${alquiler.fecha}T${alquiler.hora_inicio}`)
+        const diff = fechaOriginal.getTime() - Date.now()
+        if (diff < 24 * 60 * 60 * 1000) {
+            return { success: false, error: 'Solo se puede editar con más de 24 horas de anticipación.' }
+        }
+
+        const { error } = await supabase
+            .from('alquileres')
+            .update({ fecha: nuevaFecha, hora_inicio: horaInicio, hora_fin: horaFin })
+            .eq('id', id)
+
+        if (error) throw error
+
+        revalidatePath('/alquileres')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
 export async function actualizarTarifaAction(salaId: string, field: string, value: number) {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()

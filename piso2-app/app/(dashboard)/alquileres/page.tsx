@@ -7,8 +7,7 @@ import {
     Plus, Calendar, Clock, DollarSign, User, MapPin,
     Trash2, CheckCircle, Loader2, X, MessageCircle,
     Repeat, Settings, ChevronDown, ChevronUp, Layers, Sun, Moon, Zap, Copy, Tag,
-    Banknote, Landmark,
-    ShieldAlert
+    Banknote, Landmark, ShieldAlert, Pencil
 } from 'lucide-react'
 import { format, isSunday, isSaturday } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -18,7 +17,7 @@ import MultiDatePicker from '@/components/MultiDatePicker'
 import { useCash } from '@/context/CashContext'
 
 // 🚀 IMPORTAMOS LAS ACTIONS BLINDADAS
-import { crearAlquileresAction, cobrarAlquilerAction, eliminarReservaAction, actualizarTarifaAction } from '@/app/actions/alquileres'
+import { crearAlquileresAction, cobrarAlquilerAction, eliminarReservaAction, actualizarTarifaAction, editarAlquilerFechaHoraAction } from '@/app/actions/alquileres'
 
 // --- TIPOS ---
 type ReservaGroup = {
@@ -134,6 +133,11 @@ export default function AlquileresPage() {
     const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'transferencia'>('efectivo')
     const [customSena, setCustomSena] = useState<string>('') // 🚀 PARA EL MONTO MANUAL
     const [processingPayment, setProcessingPayment] = useState(false)
+
+    // Modal edición fecha/hora
+    const [modalEditar, setModalEditar] = useState<{ isOpen: boolean; item: any }>({ isOpen: false, item: null })
+    const [editForm, setEditForm] = useState({ fecha: '', hora_inicio: '', hora_fin: '' })
+    const [procesandoEdicion, setProcesandoEdicion] = useState(false)
 
     const [form, setForm] = useState({
         cliente_nombre: '',
@@ -469,6 +473,31 @@ export default function AlquileresPage() {
         }
     }
 
+    const abrirModalEditar = (item: any) => {
+        setEditForm({ fecha: item.fecha, hora_inicio: item.hora_inicio, hora_fin: item.hora_fin })
+        setModalEditar({ isOpen: true, item })
+    }
+
+    const handleEditarFechaHora = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!modalEditar.item) return
+        setProcesandoEdicion(true)
+        const res = await editarAlquilerFechaHoraAction(
+            modalEditar.item.id,
+            editForm.fecha,
+            editForm.hora_inicio,
+            editForm.hora_fin
+        )
+        if (res.success) {
+            toast.success('Reserva actualizada')
+            setModalEditar({ isOpen: false, item: null })
+            mutate()
+        } else {
+            toast.error(res.error || 'Error al editar')
+        }
+        setProcesandoEdicion(false)
+    }
+
     const handleDeleteGroup = async (group: ReservaGroup) => {
         if (!confirm('¿Eliminar reserva completa?')) return
 
@@ -564,18 +593,31 @@ export default function AlquileresPage() {
                                     </div>
 
                                     <div className={`space-y-1 overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-64 overflow-y-auto custom-scrollbar' : 'max-h-0'}`}>
-                                        {group.items.map(item => (
-                                            <div key={item.id} className="flex justify-between items-center text-[10px] p-2 rounded bg-white/5 border border-white/5">
-                                                <div className="flex items-center gap-2 text-gray-300">
-                                                    <Calendar size={10} />
-                                                    {format(new Date(item.fecha + 'T12:00:00'), "EEE d MMM", { locale: es })}
+                                        {group.items.map(item => {
+                                            const fechaItem = new Date(`${item.fecha}T${item.hora_inicio}`)
+                                            const puedeEditar = fechaItem.getTime() - Date.now() > 24 * 60 * 60 * 1000
+                                            return (
+                                                <div key={item.id} className="flex justify-between items-center text-[10px] p-2 rounded bg-white/5 border border-white/5">
+                                                    <div className="flex items-center gap-2 text-gray-300">
+                                                        <Calendar size={10} />
+                                                        {format(new Date(item.fecha + 'T12:00:00'), "EEE d MMM", { locale: es })}
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-mono text-gray-500">{item.hora_inicio}-{item.hora_fin}</span>
+                                                        <span className="font-bold text-[#D4E655]">${item.monto_total}</span>
+                                                        {puedeEditar && (
+                                                            <button
+                                                                onClick={() => abrirModalEditar(item)}
+                                                                className="p-1 text-gray-600 hover:text-[#D4E655] hover:bg-white/10 rounded transition-colors"
+                                                                title="Editar fecha y hora"
+                                                            >
+                                                                <Pencil size={11} />
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                                <div className="flex gap-2">
-                                                    <span className="font-mono text-gray-500">{item.hora_inicio}-{item.hora_fin}</span>
-                                                    <span className="font-bold text-[#D4E655]">${item.monto_total}</span>
-                                                </div>
-                                            </div>
-                                        ))}
+                                            )
+                                        })}
                                     </div>
 
                                     {group.notas_recepcion && isOpen && (
@@ -602,6 +644,59 @@ export default function AlquileresPage() {
                         )
                     })}
                     {grupos.length === 0 && <div className="col-span-full text-center py-20 opacity-50"><p className="text-gray-500 font-bold uppercase text-xs">No hay reservas activas.</p></div>}
+                </div>
+            )}
+
+            {/* MODAL EDITAR FECHA/HORA */}
+            {modalEditar.isOpen && modalEditar.item && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setModalEditar({ isOpen: false, item: null })}>
+                    <div className="bg-[#09090b] border border-[#D4E655]/30 w-full max-w-sm rounded-3xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-5">
+                            <h3 className="text-base font-black text-white uppercase flex items-center gap-2"><Pencil size={16} className="text-[#D4E655]" /> Editar Reserva</h3>
+                            <button onClick={() => setModalEditar({ isOpen: false, item: null })} className="p-2 hover:bg-white/10 rounded-full"><X className="text-gray-500" size={18} /></button>
+                        </div>
+                        <form onSubmit={handleEditarFechaHora} className="space-y-4">
+                            <div>
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nueva Fecha</label>
+                                <input
+                                    required
+                                    type="date"
+                                    value={editForm.fecha}
+                                    onChange={e => setEditForm({ ...editForm, fecha: e.target.value })}
+                                    className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-all"
+                                />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Hora Inicio</label>
+                                    <input
+                                        required
+                                        type="time"
+                                        value={editForm.hora_inicio}
+                                        onChange={e => setEditForm({ ...editForm, hora_inicio: e.target.value })}
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-all"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Hora Fin</label>
+                                    <input
+                                        required
+                                        type="time"
+                                        value={editForm.hora_fin}
+                                        onChange={e => setEditForm({ ...editForm, hora_fin: e.target.value })}
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-all"
+                                    />
+                                </div>
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={procesandoEdicion}
+                                className="w-full bg-[#D4E655] hover:bg-white text-black font-black uppercase py-3 rounded-xl text-xs tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-2"
+                            >
+                                {procesandoEdicion ? <Loader2 size={16} className="animate-spin" /> : <><Pencil size={14} /> Guardar Cambios</>}
+                            </button>
+                        </form>
+                    </div>
                 </div>
             )}
 
