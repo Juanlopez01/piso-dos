@@ -462,13 +462,22 @@ export default function CotizadorPage() {
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Hora de inicio</label>
-                                    <input
-                                        type="time"
-                                        value={formData.horario}
-                                        onChange={e => setFormData({ ...formData, horario: e.target.value })}
-                                        onClick={(e) => 'showPicker' in HTMLInputElement.prototype && (e.target as HTMLInputElement).showPicker()}
-                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] transition-colors text-sm text-white cursor-pointer [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
-                                    />
+                                    <div className="relative">
+                                        <select
+                                            value={formData.horario}
+                                            onChange={e => setFormData({ ...formData, horario: e.target.value })}
+                                            className="w-full bg-[#111] border border-white/10 rounded-xl p-3 outline-none focus:border-[#1ed760] transition-colors text-sm text-white appearance-none cursor-pointer"
+                                        >
+                                            <option value="">Seleccioná un horario</option>
+                                            {Array.from({ length: 48 }, (_, i) => {
+                                                const totalMins = i * 30
+                                                const h = String(Math.floor(totalMins / 60)).padStart(2, '0')
+                                                const m = String(totalMins % 60).padStart(2, '0')
+                                                return <option key={`${h}:${m}`} value={`${h}:${m}`}>{h}:{m} hs</option>
+                                            })}
+                                        </select>
+                                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1 block">Duración de la sesión</label>
