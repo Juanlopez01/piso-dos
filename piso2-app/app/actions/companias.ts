@@ -221,3 +221,93 @@ export async function obtenerPreciosCompaniaAction(companiaId: string) {
     ])
     return data || []
 }
+
+export async function fetchGruposLiquidacionAction(mes: number, anio: number) {
+    const admin = getAdminClient()
+
+    const [
+        { data: companias },
+        { data: pagos },
+        { data: clasesMes },
+        { data: movLiquidadas },
+        { data: configsGrupos },
+        { data: miembrosData }
+    ] = await Promise.all([
+        admin.from('companias').select('id, nombre').order('nombre'),
+        admin.from('companias_pagos').select('compania_id, alumno_id, monto').eq('mes', mes).eq('anio', anio),
+        admin.from('clases').select('compania_id')
+            .not('compania_id', 'is', null)
+            .gte('inicio', new Date(anio, mes - 1, 1).toISOString())
+            .lte('inicio', new Date(anio, mes, 0, 23, 59, 59, 999).toISOString())
+            .neq('estado', 'cancelada'),
+        admin.from('caja_movimientos').select('concepto')
+            .eq('tipo', 'egreso')
+            .ilike('concepto', `%Liquidación Grupo | ID: % | Mes: ${mes}-${anio}%`),
+        admin.from('configuraciones').select('clave, valor').ilike('clave', 'cuota_compania_%'),
+        admin.from('perfiles_companias').select('compania_id, perfil_id, perfil:profiles(id, porcentaje_beca_compania)')
+    ])
+
+    if (!companias) return []
+
+    const liquidadasIds = new Set<string>()
+    movLiquidadas?.forEach((l: any) => {
+        const match = l.concepto?.match(/ID: ([a-zA-Z0-9-]+) /)
+        if (match?.[1]) liquidadasIds.add(match[1])
+    })
+
+    const precioEfvoMap: Record<string, number> = {}
+    const baseMap: Record<string, number> = {}
+    configsGrupos?.forEach((c: any) => {
+        const key = c.clave.replace('cuota_compania_', '')
+        const val = Number(String(c.valor).replace(/\./g, '').trim())
+        if (key.endsWith('_efvo')) {
+            precioEfvoMap[key.replace('_efvo', '')] = val
+        } else if (!key.endsWith('_transf')) {
+            baseMap[key] = val
+        }
+    })
+
+    const becaMap: Record<string, Record<string, number>> = {}
+    miembrosData?.forEach((m: any) => {
+        const perfil = Array.isArray(m.perfil) ? m.perfil[0] : m.perfil
+        const beca = perfil?.porcentaje_beca_compania || 0
+        if (beca > 0) {
+            if (!becaMap[m.compania_id]) becaMap[m.compania_id] = {}
+            becaMap[m.compania_id][m.perfil_id] = beca
+        }
+    })
+
+    const pagosPorCompania: Record<string, Record<string, number>> = {}
+    pagos?.forEach((p: any) => {
+        if (!pagosPorCompania[p.compania_id]) pagosPorCompania[p.compania_id] = {}
+        pagosPorCompania[p.compania_id][p.alumno_id] =
+            (pagosPorCompania[p.compania_id][p.alumno_id] || 0) + Number(p.monto)
+    })
+
+    // Miembros actuales por compania (solo los que están en perfiles_companias)
+    const miembrosPorCompania: Record<string, Set<string>> = {}
+    miembrosData?.forEach((m: any) => {
+        if (!miembrosPorCompania[m.compania_id]) miembrosPorCompania[m.compania_id] = new Set()
+        miembrosPorCompania[m.compania_id].add(m.perfil_id)
+    })
+
+    return companias.map((c: any) => {
+        const precioEfvoBase = precioEfvoMap[c.id] ?? baseMap[c.id] ?? 15000
+        const memberPayments = pagosPorCompania[c.id] || {}
+        const miembrosActuales = miembrosPorCompania[c.id] || new Set()
+        const totalRecaudado = Object.entries(memberPayments)
+            .filter(([alumnoId]) => miembrosActuales.has(alumnoId))
+            .reduce((acc, [alumnoId, memberTotal]) => {
+                const beca = becaMap[c.id]?.[alumnoId] || 0
+                const precioConBeca = precioEfvoBase * (1 - beca / 100)
+                return acc + Math.min(memberTotal as number, precioConBeca)
+            }, 0)
+        return {
+            id: c.id,
+            nombre: c.nombre,
+            totalRecaudado,
+            cantClases: clasesMes?.filter((cl: any) => cl.compania_id === c.id).length || 0,
+            yaLiquidado: liquidadasIds.has(c.id)
+        }
+    }).filter((g: any) => g.totalRecaudado > 0 || g.cantClases > 0)
+}

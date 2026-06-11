@@ -10,6 +10,7 @@ import { useCash } from '@/context/CashContext'
 import Link from 'next/link'
 import { toast, Toaster } from 'sonner'
 import { pagarClaseProfeAction, guardarValorHoraRecepAction, pagarStaffAction } from '@/app/actions/liquidaciones'
+import { fetchGruposLiquidacionAction } from '@/app/actions/companias'
 
 import type {
     ClaseLiquidacion, ProfeLiquidacion, GrupoClaseLiquidacion, GrupoRaw,
@@ -332,46 +333,14 @@ export default function AdminLiquidacionesPage() {
         if (vistaActiva !== 'grupos' || !userRole || !['admin', 'recepcion'].includes(userRole)) return
 
         setLoadingGrupos(true)
-        const supabase = createClient()
         const [yyyy, mm] = selectedMonth.split('-')
-        const mes = Number(mm)
-        const anio = Number(yyyy)
 
-        Promise.all([
-            supabase.from('companias').select('id, nombre').order('nombre'),
-            supabase.from('companias_pagos').select('compania_id, monto, metodo_pago').eq('mes', mes).eq('anio', anio),
-            supabase.from('clases').select('compania_id')
-                .not('compania_id', 'is', null)
-                .gte('inicio', new Date(anio, mes - 1, 1).toISOString())
-                .lte('inicio', new Date(anio, mes, 0, 23, 59, 59, 999).toISOString())
-                .neq('estado', 'cancelada'),
-            supabase.from('caja_movimientos').select('concepto')
-                .eq('tipo', 'egreso')
-                .ilike('concepto', `%Liquidación Grupo | ID: % | Mes: ${mes}-${anio}%`)
-        ]).then(([{ data: companias }, { data: pagos }, { data: clasesMes }, { data: movLiquidadas }]) => {
-            if (!companias) { setLoadingGrupos(false); return }
-
-            const liquidadasIds = new Set<string>()
-            movLiquidadas?.forEach((l: any) => {
-                const match = l.concepto?.match(/ID: ([a-zA-Z0-9-]+) /)
-                if (match?.[1]) liquidadasIds.add(match[1])
+        fetchGruposLiquidacionAction(Number(mm), Number(yyyy))
+            .then(result => {
+                setGruposRaw(result as GrupoRaw[])
+                setLoadingGrupos(false)
             })
-
-            const result: GrupoRaw[] = companias.map((c: any) => ({
-                id: c.id,
-                nombre: c.nombre,
-                totalRecaudado: pagos?.filter((p: any) => p.compania_id === c.id)
-                    .reduce((acc: number, p: any) => {
-                        const monto = Number(p.monto)
-                        return acc + (p.metodo_pago === 'efectivo' ? monto : monto / 1.1)
-                    }, 0) || 0,
-                cantClases: clasesMes?.filter((cl: any) => cl.compania_id === c.id).length || 0,
-                yaLiquidado: liquidadasIds.has(c.id)
-            }))
-
-            setGruposRaw(result.filter(g => g.totalRecaudado > 0 || g.cantClases > 0))
-            setLoadingGrupos(false)
-        }).catch(() => setLoadingGrupos(false))
+            .catch(() => setLoadingGrupos(false))
     }, [vistaActiva, selectedMonth])
 
     const handlePagarGrupoAdmin = async (grupo: GrupoRaw, montoPagar: number, destinatario: string, metodo: 'efectivo' | 'transferencia') => {
