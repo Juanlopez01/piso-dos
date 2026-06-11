@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo, JSX } from 'react'
 import useSWR from 'swr'
 import { format, subMonths, addMonths } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { Wallet, Search, Loader2, Users, DollarSign, Lock, FileSpreadsheet, Library, Smartphone, Trophy, Clock } from 'lucide-react'
+import { Wallet, Search, Loader2, Users, DollarSign, Lock, FileSpreadsheet, Library, Smartphone, Trophy, Clock, TrendingDown, X, Info } from 'lucide-react'
 import { useCash } from '@/context/CashContext'
 import Link from 'next/link'
 import { toast, Toaster } from 'sonner'
@@ -13,7 +13,7 @@ import { pagarClaseProfeAction, guardarValorHoraRecepAction, pagarStaffAction } 
 
 import type {
     ClaseLiquidacion, ProfeLiquidacion, GrupoClaseLiquidacion, GrupoRaw,
-    TransaccionVirtual, ClaseRanking,
+    TransaccionVirtual, ClaseRanking, PozoData,
     ModalPagoState, ModalAlumnosState, ModalPagoMasivoState, ModalPagoStaffState, ModalLiqGrupoState
 } from './_components/_types'
 
@@ -71,7 +71,7 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
 
     const { data: movsData } = await supabase
         .from('caja_movimientos')
-        .select('id, concepto, monto, metodo_pago, created_at, tipo')
+        .select('id, concepto, monto, metodo_pago, created_at, tipo, turno:caja_turnos(sede:sedes(nombre))')
         .in('metodo_pago', ['transferencia', 'mercadopago', 'mercadopago_manual', 'mp', 'online'])
         .gte('created_at', `${prevMonth}-25T00:00:00`)
         .lte('created_at', `${nextMonth}-05T23:59:59`)
@@ -98,6 +98,25 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
         .eq('estado', 'approved')
         .gte('created_at', `${prevMonth}-25T00:00:00`)
         .lte('created_at', `${nextMonth}-05T23:59:59`)
+
+    const mesStart = `${yyyy}-${mm}-01T00:00:00`
+    const mesEnd = parseInt(mm) === 12
+        ? `${parseInt(yyyy) + 1}-01-01T00:00:00`
+        : `${yyyy}-${String(parseInt(mm) + 1).padStart(2, '0')}-01T00:00:00`
+
+    const { data: retirosAdminData } = await supabase
+        .from('caja_movimientos')
+        .select('monto')
+        .eq('origen_referencia', 'retiro_pozo_liq')
+        .gte('created_at', mesStart)
+        .lt('created_at', mesEnd)
+
+    const { data: pagosProfeAdminData } = await supabase
+        .from('caja_movimientos')
+        .select('monto')
+        .eq('origen_referencia', 'pago_profe_admin')
+        .gte('created_at', mesStart)
+        .lt('created_at', mesEnd)
 
     const liquidacionesPorProfe: Record<string, ProfeLiquidacion> = {}
     let totalGeneralPagar = 0
@@ -191,7 +210,10 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
             if (!mov.created_at) return
             const [anio, mes] = mov.created_at.split('T')[0].split('-')
             if (`${anio}-${mes}` === mesKey && mov.tipo !== 'egreso' && Number(mov.monto) > 0) {
-                transaccionesVirtuales.push({ id: mov.id, concepto: mov.concepto || 'Ingreso sin detalle', monto: Number(mov.monto), metodo_pago: mov.metodo_pago, created_at: mov.created_at })
+                const turno = Array.isArray(mov.turno) ? mov.turno[0] : mov.turno
+                const sede = Array.isArray(turno?.sede) ? turno.sede[0] : turno?.sede
+                const sede_nombre = sede?.nombre || 'Sin sede'
+                transaccionesVirtuales.push({ id: mov.id, concepto: mov.concepto || 'Ingreso sin detalle', monto: Number(mov.monto), metodo_pago: mov.metodo_pago, created_at: mov.created_at, sede_nombre })
                 totalVirtual += Number(mov.monto)
             }
         })
@@ -235,7 +257,23 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
     }
     const reporteRecepcion = Object.values(horasPorRecepcionista).sort((a: any, b: any) => b.horas - a.horas);
 
-    return { profesores: arrayProfes, totalGeneralPagar, totalGeneralRecaudado, transaccionesVirtuales, totalVirtual, rankingClases, reporteRecepcion, valorHoraConfig }
+    const totalRetiros = retirosAdminData?.reduce((a: number, b: any) => a + Number(b.monto), 0) || 0
+    const totalPagosAdmin = pagosProfeAdminData?.reduce((a: number, b: any) => a + Number(b.monto), 0) || 0
+    const transfersBySede: Record<string, number> = {}
+    let totalTransfCaja = 0
+    let totalOnline = 0
+    transaccionesVirtuales.forEach(t => {
+        if (t.metodo_pago === 'mercadopago_online') {
+            totalOnline += t.monto
+        } else {
+            totalTransfCaja += t.monto
+            const sede = t.sede_nombre || 'Sin sede'
+            transfersBySede[sede] = (transfersBySede[sede] || 0) + t.monto
+        }
+    })
+    const pozoData = { totalRetiros, totalTransfCaja, totalOnline, totalPagosAdmin, transfersBySede }
+
+    return { profesores: arrayProfes, totalGeneralPagar, totalGeneralRecaudado, transaccionesVirtuales, totalVirtual, rankingClases, reporteRecepcion, valorHoraConfig, pozoData }
 }
 
 export default function AdminLiquidacionesPage() {
@@ -265,6 +303,7 @@ export default function AdminLiquidacionesPage() {
     const [modalPagoMasivo, setModalPagoMasivo] = useState<ModalPagoMasivoState>({ isOpen: false, clases: [], nombreGrupo: '', nombreProfe: '', total: 0 })
     const [modalPagoStaff, setModalPagoStaff] = useState<ModalPagoStaffState>({ isOpen: false, staff: null, monto: 0 })
     const [modalLiqGrupo, setModalLiqGrupo] = useState<ModalLiqGrupoState>({ isOpen: false, grupo: null, montoPagar: 0, destinatario: '' })
+    const [modalPozo, setModalPozo] = useState(false)
 
     const [valorHoraRecep, setValorHoraRecep] = useState<number>(0)
     const [guardandoValor, setGuardandoValor] = useState(false)
@@ -508,7 +547,7 @@ export default function AdminLiquidacionesPage() {
             </div>
 
             {/* Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div className="bg-[#111] border border-white/5 p-6 rounded-2xl flex items-center justify-between">
                     <div>
                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">A Pagar este Mes</p>
@@ -524,6 +563,79 @@ export default function AdminLiquidacionesPage() {
                     <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center"><Wallet className="text-gray-400" /></div>
                 </div>
             </div>
+
+            {/* Pozo card — admin only */}
+            {userRole === 'admin' && data?.pozoData && (() => {
+                const pz = data.pozoData as PozoData
+                const pozoBruto = pz.totalRetiros + pz.totalTransfCaja + pz.totalOnline
+                const pozoDisponible = pozoBruto - pz.totalPagosAdmin
+                return (
+                    <>
+                        {modalPozo && (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setModalPozo(false)}>
+                                <div className="bg-[#09090b] border border-emerald-500/20 w-full max-w-md rounded-3xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+                                    <div className="flex justify-between items-center mb-6">
+                                        <h3 className="text-lg font-black text-white uppercase tracking-wider">Detalle del Pozo</h3>
+                                        <button onClick={() => setModalPozo(false)} className="p-2 hover:bg-white/10 rounded-full"><X className="text-gray-500" size={18} /></button>
+                                    </div>
+                                    <div className="space-y-3 mb-6">
+                                        <div className="flex justify-between items-center py-2 border-b border-white/5">
+                                            <span className="text-xs font-bold text-gray-400 uppercase">Retiros Admin (efectivo)</span>
+                                            <span className="text-sm font-black text-white">+${pz.totalRetiros.toLocaleString()}</span>
+                                        </div>
+                                        {Object.entries(pz.transfersBySede).map(([sede, monto]) => (
+                                            <div key={sede} className="flex justify-between items-center py-2 border-b border-white/5">
+                                                <span className="text-xs font-bold text-gray-400 uppercase">Transf. {sede}</span>
+                                                <span className="text-sm font-black text-white">+${(monto as number).toLocaleString()}</span>
+                                            </div>
+                                        ))}
+                                        {pz.totalOnline > 0 && (
+                                            <div className="flex justify-between items-center py-2 border-b border-white/5">
+                                                <span className="text-xs font-bold text-gray-400 uppercase">Pagos Online (App)</span>
+                                                <span className="text-sm font-black text-white">+${pz.totalOnline.toLocaleString()}</span>
+                                            </div>
+                                        )}
+                                        <div className="flex justify-between items-center py-2 border-b border-white/5">
+                                            <span className="text-xs font-bold text-gray-400 uppercase">Total Pozo</span>
+                                            <span className="text-base font-black text-emerald-400">${pozoBruto.toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center py-2 border-b border-white/5">
+                                            <span className="text-xs font-bold text-red-400 uppercase">Ya Pagado a Profes</span>
+                                            <span className="text-sm font-black text-red-400">-${pz.totalPagosAdmin.toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center py-3 bg-emerald-500/10 rounded-xl px-3 border border-emerald-500/20">
+                                            <span className="text-xs font-black text-emerald-400 uppercase">Disponible</span>
+                                            <span className="text-xl font-black text-emerald-400">${pozoDisponible.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        <div
+                            onClick={() => setModalPozo(true)}
+                            className="bg-emerald-500/5 border border-emerald-500/20 p-5 rounded-2xl flex items-center justify-between mb-8 cursor-pointer hover:border-emerald-500/40 hover:bg-emerald-500/10 transition-all group"
+                        >
+                            <div>
+                                <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                                    <Info size={10} /> Pozo del Mes
+                                </p>
+                                <p className={`text-3xl font-black ${pozoDisponible >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    ${pozoDisponible.toLocaleString()}
+                                </p>
+                                <p className="text-[10px] text-gray-500 mt-1 uppercase font-bold">
+                                    Bruto ${pozoBruto.toLocaleString()} · Pagado -${pz.totalPagosAdmin.toLocaleString()}
+                                </p>
+                            </div>
+                            <div className="flex flex-col items-end gap-1 text-right">
+                                <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 group-hover:bg-emerald-500/20 transition-colors">
+                                    <TrendingDown className="text-emerald-400" size={20} />
+                                </div>
+                                <span className="text-[9px] font-bold text-gray-500 uppercase">Ver detalle</span>
+                            </div>
+                        </div>
+                    </>
+                )
+            })()}
 
             {/* Tabs */}
             <div className="flex gap-4 border-b border-white/10 mb-6 pb-4 overflow-x-auto custom-scrollbar">

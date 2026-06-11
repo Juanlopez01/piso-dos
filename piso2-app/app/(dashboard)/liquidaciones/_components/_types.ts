@@ -51,6 +51,15 @@ export type TransaccionVirtual = {
     monto: number
     metodo_pago: string
     created_at: string
+    sede_nombre?: string
+}
+
+export type PozoData = {
+    totalRetiros: number
+    totalTransfCaja: number
+    totalOnline: number
+    totalPagosAdmin: number
+    transfersBySede: Record<string, number>
 }
 
 export type ClaseRanking = {

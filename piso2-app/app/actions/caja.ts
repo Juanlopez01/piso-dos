@@ -200,6 +200,37 @@ export async function editarMontoInicialAction(turnoId: string, nuevoMonto: numb
     }
 }
 
+export async function adminRetirarAction(monto: number, concepto: string) {
+    const supabase = await createClient()
+    const adminSupabase = getAdminClient()
+
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+
+        const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+        if (perfil?.rol !== 'admin') throw new Error('Solo administradores pueden hacer retiros al pozo.')
+
+        if (monto <= 0) throw new Error('El monto debe ser mayor a cero.')
+
+        const { error } = await adminSupabase.from('caja_movimientos').insert({
+            turno_id: null,
+            tipo: 'egreso',
+            concepto: concepto?.trim() || 'Retiro Admin → Pozo',
+            monto,
+            metodo_pago: 'efectivo',
+            origen_referencia: 'retiro_pozo_liq'
+        })
+
+        if (error) throw new Error(error.message)
+        revalidatePath('/caja')
+        revalidatePath('/liquidaciones')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
 export async function editarHorarioTurnoAction(turnoId: string, tipo: 'apertura' | 'cierre', nuevaFechaISO: string) {
     const supabaseAdmin = getAdminClient()
 

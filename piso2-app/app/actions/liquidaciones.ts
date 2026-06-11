@@ -1,6 +1,13 @@
 'use server'
 
-import { createClient } from '@/utils/supabase/server-helper' // Ajustá esta ruta si tu helper está en otro lado
+import { createClient } from '@/utils/supabase/server-helper'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
+
+const getAdminClient = () => createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+)
 
 export async function pagarClaseProfeAction(
     claseId: string,
@@ -42,10 +49,20 @@ export async function pagarClaseProfeAction(
                 origen_referencia: 'liquidacion_profe'
             })
             if (errCaja) throw new Error('Error al registrar la salida de dinero en la caja.')
-        } else if (rol !== 'admin') {
+        } else if (rol === 'admin') {
+            // Admin: registra el pago en el pozo (sin turno)
+            const adminSupabase = getAdminClient()
+            await adminSupabase.from('caja_movimientos').insert({
+                turno_id: null,
+                tipo: 'egreso',
+                concepto: `Liq Admin: ${nombreProfe} (${nombreClase})`,
+                monto,
+                metodo_pago: metodoPago,
+                origen_referencia: 'pago_profe_admin'
+            })
+        } else {
             return { success: false, error: 'No tenés permisos para realizar esta acción.' }
         }
-        // Admin: omite la caja, solo marca la clase como pagada
 
         const { error: errClase } = await supabase.from('clases')
             .update({ pagado_profe: true })

@@ -26,12 +26,13 @@ export default function TabVirtual({ filtradosVirtuales, totalVirtual, selectedM
             format(new Date(mov.created_at), "dd/MM/yyyy HH:mm"),
             mov.concepto,
             mov.metodo_pago === 'mp' ? 'MercadoPago' : mov.metodo_pago.replace('_', ' ').toUpperCase(),
+            mov.metodo_pago === 'mercadopago_online' ? 'App' : (mov.sede_nombre || '—'),
             `$${mov.monto.toLocaleString()}`
         ])
 
         autoTable(doc, {
             startY: 32,
-            head: [['Fecha / Hora', 'Concepto', 'Método', 'Monto']],
+            head: [['Fecha / Hora', 'Concepto', 'Método', 'Sede', 'Monto']],
             body: tableData,
             theme: 'grid',
             headStyles: { fillColor: [40, 40, 40], textColor: [212, 230, 85] },
@@ -80,8 +81,9 @@ export default function TabVirtual({ filtradosVirtuales, totalVirtual, selectedM
                             <tr className="text-[9px] font-black text-gray-500 uppercase tracking-widest border-b border-white/10 bg-[#111]">
                                 <th className="py-4 pl-6">Fecha / Hora</th>
                                 <th className="py-4">Concepto del Ingreso</th>
-                                <th className="py-4">Método de Pago</th>
-                                <th className="py-4 pr-6 text-right">Monto Registrado</th>
+                                <th className="py-4">Método</th>
+                                <th className="py-4">Sede</th>
+                                <th className="py-4 pr-6 text-right">Monto</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5 text-sm">
@@ -101,6 +103,13 @@ export default function TabVirtual({ filtradosVirtuales, totalVirtual, selectedM
                                                 }`}>
                                                 {mov.metodo_pago === 'mp' ? 'MercadoPago' : mov.metodo_pago.replace('_', ' ')}
                                             </span>
+                                        </td>
+                                        <td className="py-4 text-xs text-gray-400 font-bold">
+                                            {mov.metodo_pago === 'mercadopago_online' ? (
+                                                <span className="text-purple-400">App</span>
+                                            ) : (
+                                                mov.sede_nombre || '—'
+                                            )}
                                         </td>
                                         <td className="py-4 pr-6 text-right font-black text-white flex items-center justify-end gap-1.5">
                                             <ArrowDownRight size={14} className="text-[#D4E655]" />

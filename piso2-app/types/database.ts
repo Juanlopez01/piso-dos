@@ -163,7 +163,7 @@ export type Database = {
                 Row: {
                     id: string
                     created_at: string
-                    turno_id: string
+                    turno_id: string | null
                     tipo: 'ingreso' | 'egreso'
                     concepto: string
                     monto: number
