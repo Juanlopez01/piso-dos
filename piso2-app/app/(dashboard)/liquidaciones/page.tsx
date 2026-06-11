@@ -129,9 +129,9 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
             inscripcionesArreglo.forEach((insc: any) => {
                 const valorInscripcion = Number(insc.valor_credito) || 0;
                 total_bruto += valorInscripcion;
-                const infoPack = Array.isArray(insc.pack) ? insc.pack[0] : insc.pack;
-                const metodo = (infoPack?.metodo_pago || insc.metodo_pago || 'efectivo').toLowerCase();
-                total_neto += metodo !== 'efectivo' ? valorInscripcion * 0.9 : valorInscripcion;
+                const metodo = (insc.metodo_pago || '').toLowerCase();
+                const esPagoVirtual = ['transferencia', 'mercadopago', 'mp', 'online'].includes(metodo);
+                total_neto += esPagoVirtual ? valorInscripcion * 0.9 : valorInscripcion;
             })
 
             const alumnos_lista = inscripcionesArreglo.map((i: any) => {

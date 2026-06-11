@@ -117,12 +117,10 @@ const fetchLiquidaciones = async () => {
                 const valorInscripcion = Number(insc.valor_credito) || 0;
                 total_bruto += valorInscripcion;
 
-                const rawPack = insc.alumno_packs;
-                const infoPack = Array.isArray(rawPack) ? rawPack[0] : rawPack;
-                const metodo = (infoPack?.metodo_pago || insc.metodo_pago || 'efectivo').toLowerCase();
-                const esInvitado = insc.modalidad?.toLowerCase() === 'invitado';
+                const metodo = (insc.metodo_pago || '').toLowerCase();
+                const esPagoVirtual = ['transferencia', 'mercadopago', 'mp', 'online'].includes(metodo);
 
-                if (metodo !== 'efectivo' && !esInvitado) {
+                if (esPagoVirtual) {
                     total_neto += valorInscripcion * 0.9;
                 } else {
                     total_neto += valorInscripcion;

@@ -15,27 +15,38 @@ export async function pagarClaseProfeAction(
     if (!session?.user) return { success: false, error: 'No autorizado' }
 
     try {
-        // 1. Verificamos que el recepcionista tenga una caja abierta
-        const { data: turno } = await supabase.from('caja_turnos')
-            .select('id')
-            .eq('usuario_id', session.user.id)
-            .eq('estado', 'abierta')
-            .maybeSingle()
+        const { data: perfil } = await supabase
+            .from('profiles')
+            .select('rol')
+            .eq('id', session.user.id)
+            .single()
 
-        if (!turno) return { success: false, error: '¡Caja Cerrada! Abrí tu turno en Finanzas para poder pagar.' }
+        const rol = perfil?.rol
 
-        // 2. Anotamos el egreso en la caja
-        const { error: errCaja } = await supabase.from('caja_movimientos').insert({
-            turno_id: turno.id,
-            tipo: 'egreso',
-            concepto: `Liquidación Profe: ${nombreProfe} (${nombreClase})`,
-            monto: monto,
-            metodo_pago: metodoPago,
-            origen_referencia: 'liquidacion_profe'
-        })
-        if (errCaja) throw new Error('Error al registrar la salida de dinero en la caja.')
+        if (rol === 'recepcion') {
+            // Recepción: requiere caja abierta y registra el egreso
+            const { data: turno } = await supabase.from('caja_turnos')
+                .select('id')
+                .eq('usuario_id', session.user.id)
+                .eq('estado', 'abierta')
+                .maybeSingle()
 
-        // 3. Marcamos la clase como "Pagada" para que se bloquee el botón
+            if (!turno) return { success: false, error: '¡Caja Cerrada! Abrí tu turno en Finanzas para poder pagar.' }
+
+            const { error: errCaja } = await supabase.from('caja_movimientos').insert({
+                turno_id: turno.id,
+                tipo: 'egreso',
+                concepto: `Liquidación Profe: ${nombreProfe} (${nombreClase})`,
+                monto: monto,
+                metodo_pago: metodoPago,
+                origen_referencia: 'liquidacion_profe'
+            })
+            if (errCaja) throw new Error('Error al registrar la salida de dinero en la caja.')
+        } else if (rol !== 'admin') {
+            return { success: false, error: 'No tenés permisos para realizar esta acción.' }
+        }
+        // Admin: omite la caja, solo marca la clase como pagada
+
         const { error: errClase } = await supabase.from('clases')
             .update({ pagado_profe: true })
             .eq('id', claseId)
