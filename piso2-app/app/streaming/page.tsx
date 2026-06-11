@@ -95,7 +95,7 @@ export default function CotizadorPage() {
     // --- PANTALLA 1: TIPOS (orden 1-6) ---
     const tipos = [
         { nombre: 'Podcast', subtitulo: 'Solo Audio', image: '/podcast.jpg', esExterno: false },
-        { nombre: 'Streaming', subtitulo: '', image: '/streaming.jpg', esExterno: false },
+        { nombre: 'Streaming', subtitulo: '', image: '/streaming.jpeg', esExterno: false },
         { nombre: 'Grabaciones', subtitulo: 'On Demand', image: '/grabaciones.jpeg', esExterno: false },
         { nombre: 'Transmisión de Eventos', subtitulo: '', image: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273212/5C318F3E-0064-4DD1-802A-2301A6115FA6_2_iwwqs2.jpg', esExterno: false },
         { nombre: 'Cobertura de Eventos Externos', subtitulo: '', image: 'https://res.cloudinary.com/dceyxuuqa/image/upload/v1774273164/DSC08820_fkpapk.jpg', esExterno: true },
@@ -125,6 +125,7 @@ export default function CotizadorPage() {
         { value: 1, label: '1 hora' },
         { value: 2, label: '2 horas' },
         { value: 3, label: '3 horas' },
+        { value: 4, label: '4 horas o más' },
     ]
 
     // --- CÁLCULO: precio sala + extras con 20% markup + recargo oculto de salas no-streaming ---
@@ -504,7 +505,7 @@ export default function CotizadorPage() {
                                             { label: 'Adicionales', value: formData.tecnica.length > 0 ? formData.tecnica.join(', ') : 'Ninguno' },
                                             { label: 'Participantes', value: formData.participantes },
                                             { label: 'Fecha', value: formData.fecha ? `${formData.fecha} a las ${formData.horario} hs` : '—' },
-                                            { label: 'Duración', value: `${formData.duracion} hora${formData.duracion > 1 ? 's' : ''}` },
+                                            { label: 'Duración', value: formData.duracion === 4 ? '4 horas o más' : `${formData.duracion} hora${formData.duracion > 1 ? 's' : ''}` },
                                         ].map(({ label, value }) => (
                                             <div key={label} className="flex justify-between items-start gap-4">
                                                 <span className="text-[10px] font-bold text-gray-600 uppercase tracking-wider shrink-0">{label}</span>

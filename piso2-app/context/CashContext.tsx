@@ -2,25 +2,29 @@
 
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback, useRef, ReactNode } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { AuthChangeEvent, Session } from '@supabase/supabase-js'
+import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
+import type { UserRole } from '@/types/database'
 
 type CashContextType = {
     userId: string | null
     isBoxOpen: boolean
     currentTurnoId: string | null
     currentSedeId: string | null
-    userRole: string | null
+    userRole: UserRole | null
     userName: string | null
     nivelLiga: number | null
     hasLigaAccess: boolean
     hasCompaniaAccess: boolean
-    permisosCoordinador: string[] // 🚀 ESTE ES EL LLAVERO (Ej: ['liga', 'id-compania-1'])
+    permisosCoordinador: string[]
     checkStatus: () => Promise<void>
     isLoading: boolean
 }
 
 const CashContext = createContext<CashContextType>({
-    userId: null, isBoxOpen: false, currentTurnoId: null, currentSedeId: null, userRole: null, userName: null, nivelLiga: null, hasLigaAccess: false, hasCompaniaAccess: false, permisosCoordinador: [], checkStatus: async () => { }, isLoading: true
+    userId: null, isBoxOpen: false, currentTurnoId: null, currentSedeId: null,
+    userRole: null, userName: null, nivelLiga: null,
+    hasLigaAccess: false, hasCompaniaAccess: false,
+    permisosCoordinador: [], checkStatus: async () => { }, isLoading: true
 })
 
 export const useCash = () => useContext(CashContext)
@@ -32,159 +36,144 @@ export function CashProvider({ children }: { children: ReactNode }) {
     const [isBoxOpen, setIsBoxOpen] = useState(false)
     const [currentTurnoId, setCurrentTurnoId] = useState<string | null>(null)
     const [currentSedeId, setCurrentSedeId] = useState<string | null>(null)
-    const [userRole, setUserRole] = useState<string | null>(null)
+    const [userRole, setUserRole] = useState<UserRole | null>(null)
     const [userName, setUserName] = useState<string | null>(null)
     const [nivelLiga, setNivelLiga] = useState<number | null>(null)
     const [hasLigaAccess, setHasLigaAccess] = useState(false)
     const [hasCompaniaAccess, setHasCompaniaAccess] = useState(false)
-    const [permisosCoordinador, setPermisosCoordinador] = useState<string[]>([]) // 🚀 ESTADO DEL LLAVERO
+    const [permisosCoordinador, setPermisosCoordinador] = useState<string[]>([])
     const [isLoading, setIsLoading] = useState(true)
 
     const lastCheckedUser = useRef<string | null>(null)
     const isFetching = useRef(false)
 
-    console.log(`🟠 [CashContext] Render. isLoading=${isLoading} | userId=${userId} | isFetchingRef=${isFetching.current}`)
+    const fetchProfileAndBox = useCallback(async (uid: string, force = false) => {
+        if (isFetching.current) return
+        if (!force && lastCheckedUser.current === uid) return
 
-    const fetchProfileAndBox = useCallback(async (uid: string, force: boolean = false) => {
-        console.log(`🟠 [CashContext] -> Iniciando fetchProfileAndBox para UID: ${uid} | force: ${force}`)
-
-        if (isFetching.current) {
-            console.log("🟠 [CashContext] -> ABORTADO: Ya hay un fetch en progreso.")
-            return;
-        }
-        if (!force && lastCheckedUser.current === uid) {
-            console.log("🟠 [CashContext] -> ABORTADO: Info ya en caché.")
-            return;
-        }
-
-        isFetching.current = true;
-        console.log("🟠 [CashContext] -> Candado isFetching activado.")
+        isFetching.current = true
 
         try {
             const realizarConsulta = async () => {
-                console.log("🟠 [CashContext] -> Consultando tabla 'profiles'...")
-                // 🚀 BUSCAMOS LA COLUMNA DE PERMISOS
-                const { data: profile, error: profErr } = await supabase.from('profiles').select('rol, nombre_completo, nivel_liga, permisos_grupos').eq('id', uid).single();
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('rol, nombre_completo, nivel_liga, permisos_grupos')
+                    .eq('id', uid)
+                    .single()
 
-                if (profErr) console.error("❌ [CashContext] Error al buscar perfil:", profErr);
+                const rolReal = (profile?.rol ?? 'alumno') as UserRole
+                let ligaAccess = false
+                let compAccess = false
+                const misPermisos: string[] = (profile?.permisos_grupos as string[]) ?? []
 
-                const rolReal = profile?.rol || 'alumno'
-                console.log(`🟠 [CashContext] -> Perfil encontrado. Rol: ${rolReal}`)
-
-                let ligaAccess = false, compAccess = false;
-                let misPermisos: string[] = profile?.permisos_grupos || []; // 🚀 LLAVERO CARGADO DESDE LA BD
-
-                // 🚀 FIX ROL AUXILIAR Y COORDINADOR
                 if (rolReal === 'admin' || rolReal === 'recepcion' || rolReal === 'auxiliar') {
-                    ligaAccess = true; compAccess = true;
+                    ligaAccess = true
+                    compAccess = true
                 } else if (rolReal === 'coordinador') {
-                    // El coordinador entra si tiene las llaves específicas
-                    ligaAccess = misPermisos.includes('liga');
-                    compAccess = misPermisos.some(p => p !== 'liga'); // Si tiene alguna otra llave, es de una compañía
-                } else {
-                    if (rolReal === 'alumno' || rolReal === 'user') {
-                        ligaAccess = !!profile?.nivel_liga;
-                        console.log("🟠 [CashContext] -> Buscando permisos de compañía para alumno...")
-                        const { data: comp } = await supabase.from('perfiles_companias').select('compania_id').eq('perfil_id', uid).limit(1);
-                        compAccess = !!(comp && comp.length > 0);
-                    } else if (rolReal === 'profesor') {
-                        console.log("🟠 [CashContext] -> Buscando permisos de liga/compañía para profesor...")
-                        const [resLiga, resComp, resCoord] = await Promise.all([
-                            supabase.from('clases').select('id').eq('profesor_id', uid).eq('es_la_liga', true).limit(1),
-                            supabase.from('clases').select('id').eq('profesor_id', uid).not('compania_id', 'is', null).limit(1),
-                            supabase.from('companias').select('id').eq('coordinador_id', uid).limit(1)
-                        ]);
-
-                        ligaAccess = !!(resLiga.data && resLiga.data.length > 0);
-                        compAccess = !!(resComp.data && resComp.data.length > 0) || !!(resCoord.data && resCoord.data.length > 0);
-                    }
+                    ligaAccess = misPermisos.includes('liga')
+                    compAccess = misPermisos.some(p => p !== 'liga')
+                } else if (rolReal === 'alumno') {
+                    ligaAccess = !!profile?.nivel_liga
+                    const { data: comp } = await supabase
+                        .from('perfiles_companias')
+                        .select('compania_id')
+                        .eq('perfil_id', uid)
+                        .limit(1)
+                    compAccess = !!(comp && comp.length > 0)
+                } else if (rolReal === 'profesor') {
+                    const [resLiga, resComp, resCoord] = await Promise.all([
+                        supabase.from('clases').select('id').eq('profesor_id', uid).eq('es_la_liga', true).limit(1),
+                        supabase.from('clases').select('id').eq('profesor_id', uid).not('compania_id', 'is', null).limit(1),
+                        supabase.from('companias').select('id').eq('coordinador_id', uid).limit(1)
+                    ])
+                    ligaAccess = !!(resLiga.data?.length)
+                    compAccess = !!(resComp.data?.length) || !!(resCoord.data?.length)
                 }
 
-                console.log("🟠 [CashContext] -> Guardando estados en React...")
-                setUserId(uid);
-                setUserRole(rolReal);
-                setUserName(profile?.nombre_completo || 'Usuario');
-                setNivelLiga(profile?.nivel_liga || null);
-                setHasLigaAccess(ligaAccess);
-                setHasCompaniaAccess(compAccess);
-                setPermisosCoordinador(misPermisos); // 🚀 GUARDAMOS EL LLAVERO EN EL ESTADO GLOBAL
+                setUserId(uid)
+                setUserRole(rolReal)
+                setUserName(profile?.nombre_completo ?? 'Usuario')
+                setNivelLiga(profile?.nivel_liga ?? null)
+                setHasLigaAccess(ligaAccess)
+                setHasCompaniaAccess(compAccess)
+                setPermisosCoordinador(misPermisos)
 
-                // 🚀 FIX CAJA
                 if (rolReal === 'admin' || rolReal === 'recepcion' || rolReal === 'auxiliar') {
-                    console.log("🟠 [CashContext] -> Consultando turnos de caja...")
-                    const { data: turno } = await supabase.from('caja_turnos').select('id, sede_id').eq('usuario_id', uid).eq('estado', 'abierta').maybeSingle();
-                    setIsBoxOpen(!!turno);
-                    setCurrentTurnoId(turno?.id || null);
-                    setCurrentSedeId(turno?.sede_id || null);
+                    const { data: turno } = await supabase
+                        .from('caja_turnos')
+                        .select('id, sede_id')
+                        .eq('usuario_id', uid)
+                        .eq('estado', 'abierta')
+                        .maybeSingle()
+                    setIsBoxOpen(!!turno)
+                    setCurrentTurnoId(turno?.id ?? null)
+                    setCurrentSedeId(turno?.sede_id ?? null)
                 }
             }
 
-            console.log("🟠 [CashContext] -> Lanzando carrera contra el Timeout de 6s...")
             await Promise.race([
                 realizarConsulta(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT_SUPABASE")), 6000))
-            ]);
+                new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_SUPABASE')), 6000))
+            ])
 
-            lastCheckedUser.current = uid;
-            console.log("🟠 [CashContext] -> FETCH EXITOSO Y COMPLETADO.")
+            lastCheckedUser.current = uid
         } catch (err) {
-            console.error("❌ [CashContext] Error cargando perfil en CashContext:", err)
+            console.error('[CashContext] Error cargando perfil:', err)
         } finally {
-            isFetching.current = false;
-            console.log("🟠 [CashContext] -> Candado isFetching desactivado.")
+            isFetching.current = false
         }
     }, [supabase])
 
     useEffect(() => {
-        console.log("🟠 [CashContext] Montando useEffect principal de sesión...")
-        let isMounted = true;
+        let isMounted = true
 
-        console.log("🟠 [CashContext] Pidiendo sesión inicial a Supabase...")
         supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
-            console.log(`🟠 [CashContext] Resultado sesión inicial: ${session ? 'Usuario logueado' : 'No hay usuario'}`)
             if (session?.user) {
                 fetchProfileAndBox(session.user.id, true).finally(() => {
-                    if (isMounted) {
-                        console.log("🟠 [CashContext] Apagando isLoading general.")
-                        setIsLoading(false);
-                    }
-                });
+                    if (isMounted) setIsLoading(false)
+                })
             } else {
-                if (isMounted) setIsLoading(false);
+                if (isMounted) setIsLoading(false)
             }
-        }).catch((err: any) => {
-            console.error("❌ [CashContext] Error al pedir sesión inicial:", err)
-            if (isMounted) setIsLoading(false);
-        });
+        }).catch(() => {
+            if (isMounted) setIsLoading(false)
+        })
 
-        console.log("🟠 [CashContext] Suscribiendo a onAuthStateChange...")
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
-            console.log(`🟠 [CashContext] Auth event escuchado: ${event}`)
             if (event === 'SIGNED_OUT') {
-                console.log("🟠 [CashContext] Usuario deslogueado. Limpiando estados y redirigiendo...")
-                setUserId(null); setUserRole('visitante'); setUserName(null); setNivelLiga(null); setIsBoxOpen(false); setCurrentTurnoId(null); setCurrentSedeId(null); setHasLigaAccess(false); setHasCompaniaAccess(false); setPermisosCoordinador([]); lastCheckedUser.current = null;
+                setUserId(null)
+                setUserRole(null)
+                setUserName(null)
+                setNivelLiga(null)
+                setIsBoxOpen(false)
+                setCurrentTurnoId(null)
+                setCurrentSedeId(null)
+                setHasLigaAccess(false)
+                setHasCompaniaAccess(false)
+                setPermisosCoordinador([])
+                lastCheckedUser.current = null
                 window.location.href = '/login'
             } else if (event === 'SIGNED_IN' && session?.user) {
-                console.log("🟠 [CashContext] Usuario logueado. Fetching profile...")
-                fetchProfileAndBox(session.user.id, true);
+                fetchProfileAndBox(session.user.id, true)
             }
-        });
+        })
 
         return () => {
-            console.log("🟠 [CashContext] Desmontando componente...")
-            isMounted = false;
-            subscription.unsubscribe();
+            isMounted = false
+            subscription.unsubscribe()
         }
     }, [fetchProfileAndBox, supabase])
 
     const checkStatus = useCallback(async () => {
-        console.log("🟠 [CashContext] checkStatus forzado disparado.")
         const { data: { session } } = await supabase.auth.getSession()
         if (session?.user) await fetchProfileAndBox(session.user.id, true)
     }, [fetchProfileAndBox, supabase])
 
     const contextValue = useMemo(() => ({
-        userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, permisosCoordinador, checkStatus, isLoading
+        userId, isBoxOpen, currentTurnoId, currentSedeId,
+        userRole, userName, nivelLiga,
+        hasLigaAccess, hasCompaniaAccess, permisosCoordinador,
+        checkStatus, isLoading
     }), [userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, permisosCoordinador, checkStatus, isLoading])
 
     return <CashContext.Provider value={contextValue}>{children}</CashContext.Provider>

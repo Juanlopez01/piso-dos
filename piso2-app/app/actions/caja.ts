@@ -3,24 +3,23 @@
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
+import { abrirCajaSchema, cerrarCajaSchema, movimientoSchema, editarMovimientoSchema } from '@/lib/validations/caja'
 
-// 🚀 CLIENTE DIOS: Bypassea la seguridad RLS para poder mover plata entre distintas cajas/sedes libremente
-const getAdminClient = () => {
-    return createAdminClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        { auth: { persistSession: false, autoRefreshToken: false } }
-    )
-}
+const getAdminClient = () => createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+)
 
 export async function abrirCajaAction(sedeId: string, montoInicial: number) {
+    const parsed = abrirCajaSchema.safeParse({ sedeId, montoInicial })
+    if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+
     const supabase = await createClient()
     try {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
-        // 🚀 ACÁ ESTABA EL ERROR DE LAS SEDES CRUZADAS
-        // Verificamos que el usuario NO tenga otra caja abierta antes de dejarlo abrir una nueva.
         const { data: cajaAbierta } = await supabase
             .from('caja_turnos')
             .select('id')
@@ -29,14 +28,12 @@ export async function abrirCajaAction(sedeId: string, montoInicial: number) {
             .limit(1)
             .maybeSingle()
 
-        if (cajaAbierta) {
-            throw new Error('Ya tenés un turno de caja abierto. Por favor, cerralo antes de abrir uno nuevo en otra sede.')
-        }
+        if (cajaAbierta) throw new Error('Ya tenés un turno de caja abierto. Cerralo antes de abrir uno nuevo.')
 
         const { error } = await supabase.from('caja_turnos').insert({
             usuario_id: session.user.id,
-            sede_id: sedeId,
-            monto_inicial: montoInicial,
+            sede_id: parsed.data.sedeId,
+            monto_inicial: parsed.data.montoInicial,
             estado: 'abierta',
             fecha_apertura: new Date().toISOString()
         })
@@ -51,37 +48,38 @@ export async function abrirCajaAction(sedeId: string, montoInicial: number) {
 }
 
 export async function cerrarCajaAction(turnoId: string, efectivoReal?: number) {
+    const parsed = cerrarCajaSchema.safeParse({ turnoId, efectivoReal })
+    if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+
     const supabase = await createClient()
     try {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
-        // 1. Ejecutamos tu RPC original intacto para no romper tu lógica interna
-        const { data: res, error } = await supabase.rpc('cerrar_turno_caja', { p_turno_id: turnoId })
-        if (error || !res?.success) throw new Error(res?.message || 'Error al procesar el cierre de caja en la base de datos.')
+        const { data: res, error } = await supabase.rpc('cerrar_turno_caja', { p_turno_id: parsed.data.turnoId })
+        if (error || !res?.success) throw new Error(res?.message || 'Error al procesar el cierre de caja.')
 
-        // 2. MAGIA DEL ARQUEO: Si el frontend nos mandó el efectivo físico contado, 
-        // actualizamos el registro para que el historial refleje la realidad y no solo el teórico.
-        if (efectivoReal !== undefined) {
-            await supabase.from('caja_turnos')
-                .update({ monto_final: efectivoReal })
-                .eq('id', turnoId);
+        if (parsed.data.efectivoReal !== undefined) {
+            await supabase.from('caja_turnos').update({ monto_final: parsed.data.efectivoReal }).eq('id', parsed.data.turnoId)
         }
 
-        revalidatePath('/caja') // O la ruta que corresponda a tu dashboard
+        revalidatePath('/caja')
         return { success: true, message: res.message }
     } catch (error: any) {
         return { success: false, error: error.message }
     }
 }
 
-export async function registrarMovimientoAction(payload: any) {
+export async function registrarMovimientoAction(payload: unknown) {
+    const parsed = movimientoSchema.safeParse(payload)
+    if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+
     const supabase = await createClient()
     try {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
-        const { error } = await supabase.from('caja_movimientos').insert(payload)
+        const { error } = await supabase.from('caja_movimientos').insert(parsed.data)
         if (error) throw new Error(error.message)
 
         revalidatePath('/caja')
@@ -130,26 +128,25 @@ export async function cerrarTodasLasCajasAction() {
     }
 }
 
-// 🚀 NUEVA ACCIÓN: EDITAR Y REUBICAR MOVIMIENTOS
 export async function editarMovimientoAction(
     movimientoId: string,
-    payload: { concepto: string, monto: number, metodo_pago: string, tipo: string, turno_id: string }
+    payload: { concepto: string; monto: number; metodo_pago: string; tipo: string; turno_id: string }
 ) {
-    try {
-        // Usamos el cliente Dios (Admin) para que el escudo de seguridad (RLS) no bloquee
-        // la capacidad del administrador de sacar plata de un turno_id y meterlo en otro distinto.
-        const supabaseAdmin = getAdminClient()
+    const parsed = editarMovimientoSchema.safeParse({ movimientoId, ...payload })
+    if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
+    try {
+        const supabaseAdmin = getAdminClient()
         const { error } = await supabaseAdmin
             .from('caja_movimientos')
             .update({
-                concepto: payload.concepto,
-                monto: payload.monto,
-                metodo_pago: payload.metodo_pago,
-                tipo: payload.tipo,
-                turno_id: payload.turno_id
+                concepto: parsed.data.concepto,
+                monto: parsed.data.monto,
+                metodo_pago: parsed.data.metodo_pago,
+                tipo: parsed.data.tipo,
+                turno_id: parsed.data.turno_id,
             })
-            .eq('id', movimientoId)
+            .eq('id', parsed.data.movimientoId)
 
         if (error) throw new Error(error.message)
 
