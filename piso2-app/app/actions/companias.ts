@@ -212,6 +212,40 @@ export async function inscribirPadronCompaniaAction(companiaId: string, mes: num
 // ============================================================================
 // 🚀 OBTENER PRECIOS DE COMPAÑÍA (Bypass RLS para saltar bloqueos de seguridad)
 // ============================================================================
+export async function registrarPagoProfeCompaniaAction(
+    companiaId: string,
+    claseId: string,
+    nombreClase: string,
+    fecha: string,
+    monto: number,
+    metodoPago: string
+) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
+
+    const { data: profile } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (!profile || !['admin', 'recepcion'].includes(profile.rol)) {
+        return { success: false, error: 'Sin permisos' }
+    }
+
+    const admin = getAdminClient()
+    const { error } = await admin.from('caja_movimientos').insert({
+        turno_id: null,
+        tipo: 'egreso',
+        concepto: `Pago Docentes | Clase: ${claseId} | Grupo: ${companiaId} | ${nombreClase} (${fecha})`,
+        monto,
+        metodo_pago: metodoPago,
+        origen_referencia: 'pago_profe_compania'
+    })
+
+    if (error) return { success: false, error: error.message }
+
+    revalidatePath(`/companias/${companiaId}`)
+    revalidatePath('/caja')
+    return { success: true }
+}
+
 export async function obtenerPreciosCompaniaAction(companiaId: string) {
     const supabaseAdmin = getAdminClient()
     const { data } = await supabaseAdmin.from('configuraciones').select('clave, valor').in('clave', [

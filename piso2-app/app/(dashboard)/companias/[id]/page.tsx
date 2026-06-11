@@ -17,7 +17,7 @@ import Image from 'next/image'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
-import { inscribirPadronCompaniaAction, obtenerPreciosCompaniaAction } from '@/app/actions/companias'
+import { inscribirPadronCompaniaAction, obtenerPreciosCompaniaAction, registrarPagoProfeCompaniaAction } from '@/app/actions/companias'
 import { cobrarCompaniaAction } from '@/app/actions/usuarios'
 
 type Compania = {
@@ -105,6 +105,14 @@ export default function CompaniaDetallePage() {
 
     const [procesandoPago, setProcesandoPago] = useState(false)
     const [inscribiendoMasivo, setInscribiendoMasivo] = useState(false)
+
+    // Pago profe por clase (The Show)
+    const [pagoProfeModal, setPagoProfeModal] = useState<{ claseId: string; nombreClase: string; fecha: string } | null>(null)
+    const [pagoProfesMonto, setPagoProfesMonto] = useState<number | ''>(0)
+    const [pagoProfeMetodo, setPagoProfeMetodo] = useState('efectivo')
+    const [registrandoPagoProfe, setRegistrandoPagoProfe] = useState(false)
+    const [clasesPagoProfeRegistrado, setClasesPagoProfeRegistrado] = useState<Set<string>>(new Set())
+    const [totalPagadoProfesTheShow, setTotalPagadoProfesTheShow] = useState(0)
     const [searchAlumno, setSearchAlumno] = useState('')
     const [miembrosActuales, setMiembrosActuales] = useState<string[]>([])
     const [allAlumnos, setAllAlumnos] = useState<any[]>([])
@@ -250,6 +258,24 @@ export default function CompaniaDetallePage() {
             .from('perfiles_companias')
             .select('perfil_id, perfil:profiles(id, nombre_completo, email, telefono, porcentaje_beca_compania)')
             .eq('compania_id', companiaId)
+
+        // Pagos a profes registrados en caja para The Show
+        const { data: pagosProfesRegistrados } = await supabase
+            .from('caja_movimientos')
+            .select('concepto, monto')
+            .eq('tipo', 'egreso')
+            .eq('origen_referencia', 'pago_profe_compania')
+            .ilike('concepto', `%Grupo: ${companiaId}%`)
+
+        const clasesYaPagadas = new Set<string>()
+        let totalProfes = 0
+        pagosProfesRegistrados?.forEach((p: any) => {
+            const match = p.concepto?.match(/Clase: ([a-zA-Z0-9-]+) /)
+            if (match?.[1]) clasesYaPagadas.add(match[1])
+            totalProfes += Number(p.monto)
+        })
+        setClasesPagoProfeRegistrado(clasesYaPagadas)
+        setTotalPagadoProfesTheShow(totalProfes)
 
         const configData = await obtenerPreciosCompaniaAction(companiaId);
 
@@ -459,6 +485,30 @@ export default function CompaniaDetallePage() {
         }
     }
 
+    const handleRegistrarPagoProfe = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!pagoProfeModal || !pagoProfesMonto || Number(pagoProfesMonto) <= 0 || !compania) return
+        setRegistrandoPagoProfe(true)
+        try {
+            const res = await registrarPagoProfeCompaniaAction(
+                compania.id,
+                pagoProfeModal.claseId,
+                pagoProfeModal.nombreClase,
+                pagoProfeModal.fecha,
+                Number(pagoProfesMonto),
+                pagoProfeMetodo
+            )
+            if (!res.success) throw new Error(res.error)
+            toast.success('Pago a docentes registrado en caja')
+            setPagoProfeModal(null)
+            verificarAccesoYCargar()
+        } catch (err: any) {
+            toast.error(err.message || 'Error al registrar')
+        } finally {
+            setRegistrandoPagoProfe(false)
+        }
+    }
+
     const openIndividualModal = (alumno: Miembro) => {
         setSelectedAlumno(alumno)
         setIndividualMessage('')
@@ -551,12 +601,12 @@ export default function CompaniaDetallePage() {
             tipo: 'porcentaje'
         };
     } else if (nombreCiaLower.includes('the show')) {
-        const saldo = totalRecaudadoValorEfectivo - costoDocentesFijo;
+        const saldo = totalRecaudadoValorEfectivo - totalPagadoProfesTheShow;
         const pagoChiara = saldo > 0 ? saldo * 0.50 : 0;
         detalleLiquidacion = {
             destinatario: 'Chiara',
             montoPagar: pagoChiara,
-            glosa: `Se restan los costos de Docentes Fijos ($${costoDocentesFijo.toLocaleString()}) al pozo de Valor Efectivo. Del remanente de $${saldo.toLocaleString()}, se abona el 50% a Chiara.`,
+            glosa: `Se restan los pagos a docentes ya registrados ($${totalPagadoProfesTheShow.toLocaleString()}) al pozo de Valor Efectivo ($${totalRecaudadoValorEfectivo.toLocaleString()}). Del remanente de $${saldo.toLocaleString()}, se abona el 50% a Chiara.`,
             tipo: 'the_show'
         };
     } else if (nombreCiaLower.includes('liga')) {
@@ -725,8 +775,13 @@ export default function CompaniaDetallePage() {
                                                     <div className="flex items-center gap-3 text-xs text-gray-400"><MapPin size={14} /><span>{clase.sala?.nombre} <span className="text-[9px] opacity-50 uppercase border border-white/20 px-1 rounded ml-1">Sede {clase.sala?.sede?.nombre}</span></span></div>
                                                 </div>
                                             </div>
-                                            <div className="p-4 bg-[#09090b] border-t border-white/5 mt-auto">
+                                            <div className="p-4 bg-[#09090b] border-t border-white/5 mt-auto space-y-2">
                                                 <Link href={isStaff ? `/clase/${clase.id}` : `/mis-clases`} className="w-full bg-blue-600/10 text-blue-400 border border-blue-600/20 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all">{isStaff ? 'Gestionar / Lista' : 'Ir a Mis Clases'} <ChevronRight size={14} /></Link>
+                                                {canSeeFinance && nombreCiaLower.includes('the show') && yaPaso && (
+                                                    clasesPagoProfeRegistrado.has(clase.id)
+                                                        ? <div className="w-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 py-2.5 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase"><CheckCircle2 size={12} /> Profe Pagado</div>
+                                                        : <button onClick={() => { setPagoProfeModal({ claseId: clase.id, nombreClase: clase.nombre, fecha: fechaParte }); setPagoProfesMonto(costoDocentesFijo); setPagoProfeMetodo('efectivo') }} className="w-full bg-orange-500/10 text-orange-400 border border-orange-500/20 py-2.5 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase hover:bg-orange-500 hover:text-white transition-all"><Coins size={12} /> Registrar Pago Profe</button>
+                                                )}
                                             </div>
                                         </div>
                                     )
@@ -761,9 +816,9 @@ export default function CompaniaDetallePage() {
                             </div>
 
                             {detalleLiquidacion.tipo === 'the_show' && (
-                                <div className="bg-[#111] p-3 rounded-xl border border-white/5 mb-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 text-xs relative z-10">
-                                    <label className="font-bold text-gray-400 uppercase tracking-wider">Costo Fijo Docentes ($):</label>
-                                    <input type="number" value={costoDocentesFijo} onChange={e => setCostoDocentesFijo(Number(e.target.value))} className="bg-black border border-white/10 text-white rounded-lg p-2 font-black w-full sm:w-32 outline-none focus:border-blue-500" />
+                                <div className="bg-orange-500/5 border border-orange-500/20 p-3 rounded-xl mb-4 text-xs relative z-10 flex items-center justify-between gap-4">
+                                    <span className="font-bold text-orange-400 uppercase tracking-wider">Pagado a Docentes este mes:</span>
+                                    <span className="font-black text-white">${totalPagadoProfesTheShow.toLocaleString()}</span>
                                 </div>
                             )}
 
@@ -862,6 +917,40 @@ export default function CompaniaDetallePage() {
                     </div>
                 )}
             </div>
+
+            {/* MODAL: PAGO PROFE THE SHOW */}
+            {pagoProfeModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setPagoProfeModal(null)}>
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-start mb-6 border-b border-white/10 pb-4">
+                            <div>
+                                <h3 className="text-lg font-black text-white uppercase flex items-center gap-2"><Coins className="text-orange-400" size={18} /> Pago a Docentes</h3>
+                                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-1">{pagoProfeModal.nombreClase} · {pagoProfeModal.fecha}</p>
+                            </div>
+                            <button onClick={() => setPagoProfeModal(null)}><X className="text-gray-500 hover:text-white" /></button>
+                        </div>
+                        <form onSubmit={handleRegistrarPagoProfe} className="space-y-4">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
+                                <select value={pagoProfeMetodo} onChange={e => setPagoProfeMetodo(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-orange-500 transition-colors appearance-none">
+                                    <option value="efectivo">Efectivo</option>
+                                    <option value="transferencia">Transferencia</option>
+                                </select>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Monto ($)</label>
+                                <div className="relative">
+                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                    <input type="number" required min="1" value={pagoProfesMonto} onChange={e => setPagoProfesMonto(e.target.value === '' ? '' : Number(e.target.value))} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white font-black outline-none focus:border-orange-500 transition-colors" />
+                                </div>
+                            </div>
+                            <button disabled={registrandoPagoProfe} type="submit" className="w-full bg-orange-600 text-white font-black uppercase py-4 rounded-xl hover:bg-orange-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 shadow-lg mt-4">
+                                {registrandoPagoProfe ? <Loader2 className="animate-spin mx-auto" /> : <><CheckCircle2 size={16} /> Registrar Egreso en Caja</>}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL: REGISTRAR PAGO/SEÑA */}
             {isPagoModalOpen && alumnoPago && (
