@@ -157,8 +157,12 @@ export default function MisClasesPage() {
     // VISTA PARA PROFESORES
     // ==========================================
     if (userRole === 'profesor' || userRole === 'admin') {
-        const clasesActivas = clasesProfe.filter(c => c.estado !== 'cancelada' && parseFechaLocal(c.fin) > ahora)
-        const clasesInactivas = clasesProfe.filter(c => c.estado === 'cancelada' || parseFechaLocal(c.fin) <= ahora)
+        const esHoy = (dateStr: string) => {
+            const d = parseFechaLocal(dateStr)
+            return d.getFullYear() === ahora.getFullYear() && d.getMonth() === ahora.getMonth() && d.getDate() === ahora.getDate()
+        }
+        const clasesActivas = clasesProfe.filter(c => c.estado !== 'cancelada' && (parseFechaLocal(c.fin) > ahora || esHoy(c.inicio)))
+        const clasesInactivas = clasesProfe.filter(c => c.estado === 'cancelada' || (parseFechaLocal(c.fin) <= ahora && !esHoy(c.inicio)))
         clasesInactivas.sort((a, b) => parseFechaLocal(b.inicio).getTime() - parseFechaLocal(a.inicio).getTime())
 
         return (
