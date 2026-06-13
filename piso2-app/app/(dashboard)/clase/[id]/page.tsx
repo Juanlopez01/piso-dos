@@ -32,7 +32,7 @@ import {
     editarValorInscripcionAction
 } from '@/app/actions/inscripciones'
 
-import { toggleMiembroCompaniaAction } from '@/app/actions/companias'
+import { toggleMiembroCompaniaAction, getPlanesCompaniaAction, asignarPlanMiembroAction } from '@/app/actions/companias'
 import { cambiarLigaAction, crearAlumnoDesdeRecepcionAction } from '@/app/actions/usuarios'
 import { useCash } from '@/context/CashContext'
 
@@ -92,6 +92,16 @@ type ProductoPack = {
     tipo_clase: string
 }
 
+type PlanCompania = {
+    id: string
+    compania_id: string
+    nombre: string
+    tipo: 'full' | 'dias'
+    dias_semana: number | null
+    precio_transf: number
+    precio_efvo: number
+}
+
 const fetcher = async ([key, id]: [string, string]) => {
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
@@ -127,6 +137,11 @@ const fetcher = async ([key, id]: [string, string]) => {
         'precio_especial_efvo', 'precio_especial_transf'
     ])
 
+    let planesCompania: PlanCompania[] = []
+    if (dataClase?.compania_id) {
+        planesCompania = await getPlanesCompaniaAction(dataClase.compania_id) as PlanCompania[]
+    }
+
     return {
         clase: dataClase as ClaseDetalle,
         inscripciones: (dataInsc || []).map((i: any) => ({
@@ -134,7 +149,8 @@ const fetcher = async ([key, id]: [string, string]) => {
             estado_asistencia: i.estado_asistencia || (i.presente ? 'presente' : 'ausente')
         })) as Inscripcion[],
         packsDisponibles: packs,
-        configuraciones: configData || []
+        configuraciones: configData || [],
+        planesCompania
     }
 }
 
@@ -152,8 +168,8 @@ export default function ClaseDetallePage() {
         { revalidateOnFocus: false }
     )
 
-    const { clase, inscripciones, packsDisponibles, configuraciones } = data || {
-        clase: null, inscripciones: [], packsDisponibles: [], configuraciones: []
+    const { clase, inscripciones, packsDisponibles, configuraciones, planesCompania } = data || {
+        clase: null, inscripciones: [], packsDisponibles: [], configuraciones: [], planesCompania: []
     }
 
     const [busquedaAlumno, setBusquedaAlumno] = useState('')
@@ -169,9 +185,10 @@ export default function ClaseDetallePage() {
 
     const [guestForm, setGuestForm] = useState({
         nombre: '', apellido: '', email: '', telefono: '', dni: '',
-        tipo: 'usar_credito' as 'suelta' | 'pack' | 'invitado' | 'usar_credito',
+        tipo: 'usar_credito' as 'suelta' | 'pack' | 'invitado' | 'usar_credito' | 'plan',
         pago: 'efectivo' as 'efectivo' | 'transferencia',
         packSeleccionadoId: '',
+        planSeleccionadoId: '',
         montoManualPack: '',
         esSena: false
     })
@@ -246,6 +263,10 @@ export default function ClaseDetallePage() {
 
     const esGrupoOFormacion = clase?.es_la_liga || !!clase?.compania_id || clase?.tipo_clase?.toLowerCase().includes('compa') || clase?.tipo_clase?.toLowerCase().includes('formacion');
 
+    // 🚀 Grupo con compañía real (tiene planes y companias_pagos). La Liga NO entra acá.
+    const esGrupoConPlanes = !!clase?.compania_id;
+    const planSeleccionado = planesCompania.find(p => p.id === guestForm.planSeleccionadoId) || null;
+
     const packSueltaExclusiva = useMemo(() => {
         if (!clase?.es_combinable) return packsDisponibles.find(p => p.creditos === 1);
         return null;
@@ -274,6 +295,8 @@ export default function ClaseDetallePage() {
     const updateGuestForm = (updates: Partial<typeof guestForm>) => {
         setGuestForm(prev => {
             const next = { ...prev, ...updates };
+            // Al pasar a "plan" no autocompletamos monto (solo mostramos precio de referencia)
+            if (updates.tipo === 'plan') next.montoManualPack = '';
             if ('tipo' in updates || 'pago' in updates || 'packSeleccionadoId' in updates) {
                 const sugerido = getPrecioSugerido(next.tipo, next.pago, next.packSeleccionadoId);
                 if (sugerido !== '') next.montoManualPack = sugerido;
@@ -287,17 +310,23 @@ export default function ClaseDetallePage() {
             { id: 'suelta', label: 'Abonar Audición' },
             { id: 'invitado', label: 'Sin Cargo' }
         ]
-        : esGrupoOFormacion
+        : esGrupoConPlanes
             ? [
-                { id: 'suelta', label: 'Anotar y Pagar' },
-                { id: 'invitado', label: 'Invitado (Sin Cargo)' }
-            ]
-            : [
-                { id: 'usar_credito', label: 'Usar Crédito' },
+                { id: 'plan', label: 'Inscribir (Plan)' },
                 { id: 'suelta', label: 'Clase Suelta' },
-                { id: 'pack', label: 'Vender Pack' },
                 { id: 'invitado', label: 'Invitado' }
-            ];
+            ]
+            : esGrupoOFormacion
+                ? [
+                    { id: 'suelta', label: 'Anotar y Pagar' },
+                    { id: 'invitado', label: 'Invitado (Sin Cargo)' }
+                ]
+                : [
+                    { id: 'usar_credito', label: 'Usar Crédito' },
+                    { id: 'suelta', label: 'Clase Suelta' },
+                    { id: 'pack', label: 'Vender Pack' },
+                    { id: 'invitado', label: 'Invitado' }
+                ];
 
     const handleSetAsistencia = async (insc: Inscripcion, nuevoEstado: 'presente' | 'ausente' | 'media_falta' | 'justificada' | 'saf') => {
         const optimisticInscripciones = inscripciones.map(i => i.id === insc.id ? { ...i, estado_asistencia: nuevoEstado, presente: nuevoEstado === 'presente' } : i)
@@ -357,8 +386,12 @@ export default function ClaseDetallePage() {
             if (clase.es_combinable === false) tipoClaseRPC = 'exclusivo';
             else if (clase.tipo_clase === 'Especial') tipoClaseRPC = 'seminario';
 
-            if (['suelta', 'pack'].includes(guestForm.tipo)) {
+            if (['suelta', 'pack', 'plan'].includes(guestForm.tipo)) {
                 monto = guestForm.montoManualPack !== '' ? Number(guestForm.montoManualPack) : 0;
+            }
+
+            if (esGrupoConPlanes && guestForm.tipo === 'plan' && planesCompania.length > 0 && !guestForm.planSeleccionadoId) {
+                throw new Error('Seleccioná un plan para inscribir al alumno.');
             }
 
             if (!alumnoIdFinal) {
@@ -368,7 +401,7 @@ export default function ClaseDetallePage() {
                 }
             }
 
-            const isMandatoryAccount = guestForm.tipo === 'pack' || (esGrupoOFormacion && guestForm.tipo === 'suelta') || crearCuenta;
+            const isMandatoryAccount = guestForm.tipo === 'pack' || (esGrupoOFormacion && ['suelta', 'plan'].includes(guestForm.tipo)) || crearCuenta;
 
             if (isMandatoryAccount && !alumnoIdFinal) {
                 if (!guestForm.email || !guestForm.dni) throw new Error("Email y DNI son obligatorios para crear la cuenta.");
@@ -393,7 +426,7 @@ export default function ClaseDetallePage() {
                 p_clase_id: clase.id,
                 p_user_id: alumnoIdFinal,
                 p_nombre_invitado: nombreInvitadoStr,
-                p_tipo_operacion: guestForm.tipo,
+                p_tipo_operacion: guestForm.tipo === 'plan' ? 'suelta' : guestForm.tipo,
                 p_tipo_clase: tipoClaseRPC,
                 p_monto_caja: monto,
                 p_metodo_pago: guestForm.pago,
@@ -412,7 +445,15 @@ export default function ClaseDetallePage() {
                 const mesActual = new Date().getMonth() + 1;
                 const anioActual = new Date().getFullYear();
                 if (clase.compania_id) {
-                    await toggleMiembroCompaniaAction(clase.compania_id, alumnoIdFinal, 'agregar');
+                    // Plan = miembro del padrón con plan asignado. Clase suelta = drop-in (NO entra al padrón).
+                    if (guestForm.tipo === 'plan') {
+                        await toggleMiembroCompaniaAction(clase.compania_id, alumnoIdFinal, 'agregar');
+                        if (guestForm.planSeleccionadoId) {
+                            await asignarPlanMiembroAction(alumnoIdFinal, clase.compania_id, guestForm.planSeleccionadoId);
+                        }
+                    }
+                    // La plata SIEMPRE va a companias_pagos para que se liquide junto con el grupo
+                    // (incluso la clase suelta del drop-in, que no figura en el padrón).
                     if (monto > 0) {
                         const { data: p } = await supabase.from('companias_pagos').select('id, monto').eq('alumno_id', alumnoIdFinal).eq('compania_id', clase.compania_id).eq('mes', mesActual).eq('anio', anioActual).maybeSingle();
                         if (p) await supabase.from('companias_pagos').update({ monto: Number(p.monto) + monto, metodo_pago: guestForm.pago }).eq('id', p.id);
@@ -430,7 +471,7 @@ export default function ClaseDetallePage() {
 
             toast.success('Inscripción registrada con éxito');
             mutate(); setIsGuestOpen(false); setAlumnoSeleccionado(null); setCrearCuenta(false);
-            setGuestForm({ ...guestForm, nombre: '', apellido: '', email: '', telefono: '', dni: '', packSeleccionadoId: '', montoManualPack: '', tipo: (esGrupoOFormacion || clase.es_audicion) ? 'suelta' : 'usar_credito', esSena: false })
+            setGuestForm({ ...guestForm, nombre: '', apellido: '', email: '', telefono: '', dni: '', packSeleccionadoId: '', planSeleccionadoId: '', montoManualPack: '', tipo: esGrupoConPlanes ? 'plan' : (esGrupoOFormacion || clase.es_audicion) ? 'suelta' : 'usar_credito', esSena: false })
         } catch (err: any) { toast.error(err.message) } finally { setProcessing(false) }
     }
 
@@ -521,7 +562,9 @@ export default function ClaseDetallePage() {
                         </button>
                         <button
                             onClick={() => {
-                                if ((esGrupoOFormacion || clase?.es_audicion) && ['pack', 'usar_credito'].includes(guestForm.tipo)) {
+                                if (esGrupoConPlanes && ['pack', 'usar_credito', 'suelta'].includes(guestForm.tipo)) {
+                                    updateGuestForm({ tipo: 'plan' });
+                                } else if ((esGrupoOFormacion || clase?.es_audicion) && ['pack', 'usar_credito'].includes(guestForm.tipo)) {
                                     updateGuestForm({ tipo: 'suelta' });
                                 }
                                 setIsGuestOpen(true);
@@ -744,7 +787,7 @@ export default function ClaseDetallePage() {
                                             {resultadosBusqueda.map(alum => {
                                                 const creds = getCreditosParaEstaClase(alum);
                                                 return (
-                                                    <div key={alum.id} onClick={() => { setAlumnoSeleccionado({ ...alum, creditosActivos: creds }); setBusquedaAlumno(''); setResultadosBusqueda([]); updateGuestForm({ tipo: (esGrupoOFormacion || clase?.es_audicion) ? 'suelta' : (creds > 0 ? 'usar_credito' : 'suelta') }); }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
+                                                    <div key={alum.id} onClick={() => { setAlumnoSeleccionado({ ...alum, creditosActivos: creds }); setBusquedaAlumno(''); setResultadosBusqueda([]); updateGuestForm({ tipo: esGrupoConPlanes ? 'plan' : (esGrupoOFormacion || clase?.es_audicion) ? 'suelta' : (creds > 0 ? 'usar_credito' : 'suelta') }); }} className="p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer flex justify-between items-center">
                                                         <div><p className="text-xs font-bold text-white uppercase">{alum.nombre_completo || alum.nombre}</p><p className="text-[10px] text-gray-500">{alum.email}</p></div>
                                                         <span className={`text-[9px] font-black px-2 py-1 rounded ${creds > 0 ? 'bg-[#D4E655] text-black' : 'bg-white/10 text-gray-400'}`}>{creds} Disp.</span>
                                                     </div>
@@ -760,13 +803,13 @@ export default function ClaseDetallePage() {
                                 </div>
                             )}
 
-                            <div className={`grid ${tabsDisponibles.length === 2 ? 'grid-cols-2' : 'grid-cols-4'} gap-2 mt-4`}>
+                            <div className={`grid ${tabsDisponibles.length === 2 ? 'grid-cols-2' : tabsDisponibles.length === 3 ? 'grid-cols-3' : 'grid-cols-4'} gap-2 mt-4`}>
                                 {tabsDisponibles.map(tab => (
                                     <button key={tab.id} type="button" onClick={() => updateGuestForm({ tipo: tab.id as any })} className={`p-3 rounded-2xl border text-[8px] font-black uppercase transition-all ${guestForm.tipo === tab.id ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] border-white/5 text-gray-500 hover:border-white/20'}`}>{tab.label}</button>
                                 ))}
                             </div>
 
-                            {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack') && (
+                            {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack' || guestForm.tipo === 'plan') && (
                                 <div className="space-y-4 bg-white/5 p-4 rounded-2xl border border-white/10 mt-4 animate-in fade-in">
                                     <div className="space-y-4">
                                         {guestForm.tipo === 'pack' && (
@@ -774,6 +817,33 @@ export default function ClaseDetallePage() {
                                                 <option value="">Seleccionar Pase/Pack...</option>
                                                 {packsDisponibles.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.creditos} clases) - ${p.precio.toLocaleString()}</option>)}
                                             </select>
+                                        )}
+
+                                        {guestForm.tipo === 'plan' && esGrupoConPlanes && (
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-bold text-[#D4E655] uppercase tracking-widest ml-1 block">Plan del Grupo</label>
+                                                {planesCompania.length > 0 ? (
+                                                    <>
+                                                        <select required value={guestForm.planSeleccionadoId} onChange={e => updateGuestForm({ planSeleccionadoId: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655]">
+                                                            <option value="">Seleccionar plan...</option>
+                                                            {planesCompania.map(p => (
+                                                                <option key={p.id} value={p.id}>
+                                                                    {p.nombre} {p.tipo === 'dias' ? `(${p.dias_semana}d/sem)` : '(Full)'}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        {planSeleccionado && (
+                                                            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest ml-1">
+                                                                Precio referencia: <span className="text-green-500">Efvo ${planSeleccionado.precio_efvo.toLocaleString()}</span> · <span className="text-blue-500">Transf ${planSeleccionado.precio_transf.toLocaleString()}</span>
+                                                            </p>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <p className="text-[10px] text-orange-400 font-bold uppercase tracking-widest bg-orange-500/10 border border-orange-500/20 rounded-xl p-3">
+                                                        Este grupo no tiene planes cargados. Cargalos desde la ficha del grupo o continuá sin plan.
+                                                    </p>
+                                                )}
+                                            </div>
                                         )}
 
                                         <div className="flex gap-4">
@@ -793,28 +863,30 @@ export default function ClaseDetallePage() {
                                             </div>
                                         </div>
 
-                                        <div
-                                            onClick={() => updateGuestForm({ esSena: !guestForm.esSena })}
-                                            className={`flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer ${guestForm.esSena ? 'bg-orange-500/10 border-orange-500/50' : 'bg-white/5 border-white/5'}`}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className={`p-2 rounded-lg ${guestForm.esSena ? 'bg-orange-500 text-white' : 'bg-white/10 text-gray-500'}`}>
-                                                    <Receipt size={16} />
+                                        {!esGrupoOFormacion && (
+                                            <div
+                                                onClick={() => updateGuestForm({ esSena: !guestForm.esSena })}
+                                                className={`flex items-center justify-between p-4 rounded-2xl border transition-all cursor-pointer ${guestForm.esSena ? 'bg-orange-500/10 border-orange-500/50' : 'bg-white/5 border-white/5'}`}
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`p-2 rounded-lg ${guestForm.esSena ? 'bg-orange-500 text-white' : 'bg-white/10 text-gray-500'}`}>
+                                                        <Receipt size={16} />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[10px] font-black uppercase text-white tracking-widest">¿Es una seña?</p>
+                                                        <p className="text-[9px] text-gray-500 uppercase font-bold">Marcar como pago parcial</p>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <p className="text-[10px] font-black uppercase text-white tracking-widest">¿Es una seña?</p>
-                                                    <p className="text-[9px] text-gray-500 uppercase font-bold">Marcar como pago parcial</p>
+                                                <div className={`w-10 h-6 rounded-full relative transition-colors ${guestForm.esSena ? 'bg-orange-500' : 'bg-gray-700'}`}>
+                                                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${guestForm.esSena ? 'left-5' : 'left-1'}`} />
                                                 </div>
                                             </div>
-                                            <div className={`w-10 h-6 rounded-full relative transition-colors ${guestForm.esSena ? 'bg-orange-500' : 'bg-gray-700'}`}>
-                                                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${guestForm.esSena ? 'left-5' : 'left-1'}`} />
-                                            </div>
-                                        </div>
+                                        )}
                                     </div>
                                 </div>
                             )}
 
-                            {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack' || guestForm.tipo === 'invitado') && !alumnoSeleccionado && (
+                            {(guestForm.tipo === 'suelta' || guestForm.tipo === 'pack' || guestForm.tipo === 'invitado' || guestForm.tipo === 'plan') && !alumnoSeleccionado && (
                                 <div className="space-y-4 mt-4">
                                     <div className="grid grid-cols-2 gap-4">
                                         <input required placeholder="Nombre" value={guestForm.nombre} onChange={e => setGuestForm({ ...guestForm, nombre: e.target.value })} className="bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
@@ -829,7 +901,7 @@ export default function ClaseDetallePage() {
                                         </label>
                                     )}
 
-                                    {(crearCuenta || (esGrupoOFormacion && guestForm.tipo === 'suelta')) && (
+                                    {(crearCuenta || (esGrupoOFormacion && ['suelta', 'plan'].includes(guestForm.tipo))) && (
                                         <div className="space-y-4 pt-2 border-t border-white/10 mt-4 animate-in fade-in">
                                             <input required placeholder="Email (Obligatorio)" value={guestForm.email} onChange={e => setGuestForm({ ...guestForm, email: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />
                                             <input required placeholder="DNI (Será su clave)" value={guestForm.dni} onChange={e => setGuestForm({ ...guestForm, dni: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-[#D4E655]" />

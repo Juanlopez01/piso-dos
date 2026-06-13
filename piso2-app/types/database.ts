@@ -133,6 +133,35 @@ export type Database = {
                 Row: {
                     perfil_id: string
                     compania_id: string
+                    plan_id: string | null
+                }
+                Insert: any
+                Update: any
+            }
+            companias_planes: {
+                Row: {
+                    id: string
+                    compania_id: string
+                    nombre: string
+                    tipo: 'full' | 'dias'
+                    dias_semana: number | null
+                    precio_transf: number
+                    precio_efvo: number
+                    created_at: string
+                }
+                Insert: any
+                Update: any
+            }
+            materiales: {
+                Row: {
+                    id: string
+                    created_at: string
+                    titulo: string
+                    descripcion: string | null
+                    archivo_url: string
+                    subido_por: string | null
+                    compania_id: string | null
+                    liga_nivel: number | null
                 }
                 Insert: any
                 Update: any

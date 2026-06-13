@@ -1308,6 +1308,32 @@ export default function CajaPage() {
             {renderModalEdicion}
             {renderModalMontoInicial}
 
+            {/* Modal Admin Retira → Pozo (vista terminal) */}
+            {modalAdminRetira.isOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setModalAdminRetira({ isOpen: false, monto: '', concepto: '' })}>
+                    <div className="bg-[#09090b] border border-emerald-500/20 w-full max-w-sm rounded-3xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-5">
+                            <h3 className="text-base font-black text-white uppercase tracking-wider">Registrar Retiro al Pozo</h3>
+                            <button onClick={() => setModalAdminRetira({ isOpen: false, monto: '', concepto: '' })} className="p-2 hover:bg-white/10 rounded-full"><X className="text-gray-500" size={18} /></button>
+                        </div>
+                        <p className="text-[11px] text-gray-500 mb-5 leading-relaxed">Registra efectivo que retirás físicamente para el pozo de liquidaciones del mes.</p>
+                        <form onSubmit={handleAdminRetira} className="space-y-4">
+                            <div>
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Monto ($)</label>
+                                <input required type="number" min="1" value={modalAdminRetira.monto} onChange={e => setModalAdminRetira({ ...modalAdminRetira, monto: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-lg font-bold outline-none focus:border-emerald-500 transition-all" placeholder="0" />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Concepto (opcional)</label>
+                                <input type="text" value={modalAdminRetira.concepto} onChange={e => setModalAdminRetira({ ...modalAdminRetira, concepto: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-emerald-500 transition-all" placeholder="Retiro Admin → Pozo" />
+                            </div>
+                            <button type="submit" disabled={procesandoRetiro} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase py-3 rounded-xl text-xs tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+                                {procesandoRetiro ? <Loader2 size={16} className="animate-spin" /> : <><TrendingDown size={16} /> Confirmar Retiro</>}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8 border-b border-white/10 pb-6">
                 <div>
                     <div className="flex items-center gap-4 mb-1">
@@ -1405,6 +1431,15 @@ export default function CajaPage() {
                                 {procesando ? <Loader2 className="animate-spin" /> : 'Guardar Movimiento'}
                             </button>
                         </form>
+
+                        {['admin', 'recepcion'].includes(userRole || '') && (
+                            <button
+                                onClick={() => setModalAdminRetira({ isOpen: true, monto: '', concepto: '' })}
+                                className="w-full mt-4 bg-emerald-600/20 text-emerald-400 border border-emerald-600/30 px-6 py-3 rounded-xl font-black uppercase text-xs hover:bg-emerald-600 hover:text-white transition-all flex items-center justify-center gap-2"
+                            >
+                                <TrendingDown size={16} /> Admin Retira → Pozo
+                            </button>
+                        )}
                     </div>
                 </div>
 

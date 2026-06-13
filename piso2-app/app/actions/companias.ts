@@ -129,21 +129,77 @@ export async function eliminarCompaniaAction(companiaId: string) {
 // ============================================================================
 // 🚀 BOTÓN MÁGICO: INSCRIBIR A TODO EL PADRÓN A LAS CLASES DEL MES SELECCIONADO
 // ============================================================================
+export async function gestionarClasesCompaniaMiembroAction(
+    perfilId: string,
+    companiaId: string,
+    claseIdsSeleccionadas: string[],
+    todasLasClasesDelMes: string[]
+) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
+
+    const admin = getAdminClient()
+
+    // Inscripciones actuales del miembro en las clases del mes
+    const { data: inscripcionesActuales } = await admin
+        .from('inscripciones')
+        .select('id, clase_id')
+        .eq('user_id', perfilId)
+        .in('clase_id', todasLasClasesDelMes)
+
+    const idsActuales = new Set((inscripcionesActuales || []).map((i: any) => i.clase_id))
+    const idsNuevas = new Set(claseIdsSeleccionadas)
+
+    // Eliminar las que ya no están seleccionadas
+    const eliminar = (inscripcionesActuales || []).filter((i: any) => !idsNuevas.has(i.clase_id)).map((i: any) => i.id)
+    if (eliminar.length > 0) {
+        await admin.from('inscripciones').delete().in('id', eliminar)
+    }
+
+    // Agregar las nuevas
+    const agregar = claseIdsSeleccionadas.filter(id => !idsActuales.has(id))
+    if (agregar.length > 0) {
+        await admin.from('inscripciones').insert(agregar.map(clase_id => ({
+            user_id: perfilId,
+            clase_id,
+            modalidad: 'Compañía',
+            valor_credito: 0,
+            metodo_pago: 'credito',
+            presente: false,
+            es_invitado: false
+        })))
+    }
+
+    revalidatePath(`/companias/${companiaId}`)
+    return { success: true }
+}
+
 export async function inscribirPadronCompaniaAction(companiaId: string, mes: number, anio: number) {
     const supabaseAdmin = getAdminClient()
 
     try {
-        // 1. Traemos todo el padrón de la compañía
+        // 1. Traemos solo los miembros con plan Full o sin plan asignado
         const { data: padron, error: errPadron } = await supabaseAdmin
             .from('perfiles_companias')
-            .select('perfil_id')
+            .select('perfil_id, plan_id, plan:companias_planes(tipo)')
             .eq('compania_id', companiaId)
 
         if (errPadron || !padron || padron.length === 0) {
             return { success: false, error: 'El padrón está vacío o hubo un error al leerlo.' }
         }
 
-        const alumnosIds = padron.map(p => p.perfil_id)
+        // Solo inscribir miembros Full o sin plan (los de "dias" eligen sus clases manualmente)
+        const alumnosIds = padron
+            .filter((p: any) => {
+                const plan = Array.isArray(p.plan) ? p.plan[0] : p.plan
+                return !plan || plan.tipo === 'full'
+            })
+            .map((p: any) => p.perfil_id)
+
+        if (alumnosIds.length === 0) {
+            return { success: false, error: 'Todos los miembros tienen plan por días. Asigná sus clases manualmente.' }
+        }
 
         // 2. Buscamos todas las clases de ese mes exacto
         const primerDiaMes = new Date(anio, mes - 1, 1).toISOString()
@@ -246,6 +302,95 @@ export async function registrarPagoProfeCompaniaAction(
     return { success: true }
 }
 
+// ============================================================================
+// PLANES DE COMPAÑÍA
+// ============================================================================
+export async function getPlanesCompaniaAction(companiaId: string) {
+    const admin = getAdminClient()
+    const { data } = await admin
+        .from('companias_planes')
+        .select('*')
+        .eq('compania_id', companiaId)
+        .order('tipo', { ascending: false }) // full primero
+    return data || []
+}
+
+export async function upsertPlanCompaniaAction(plan: {
+    id?: string
+    compania_id: string
+    nombre: string
+    tipo: 'full' | 'dias'
+    dias_semana: number | null
+    precio_transf: number
+    precio_efvo: number
+}) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
+
+    const { data: profile } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (!profile || !['admin', 'recepcion'].includes(profile.rol)) return { success: false, error: 'Sin permisos' }
+
+    const admin = getAdminClient()
+    const { error } = plan.id
+        ? await admin.from('companias_planes').update({
+            nombre: plan.nombre,
+            tipo: plan.tipo,
+            dias_semana: plan.dias_semana,
+            precio_transf: plan.precio_transf,
+            precio_efvo: plan.precio_efvo
+        }).eq('id', plan.id)
+        : await admin.from('companias_planes').insert({
+            compania_id: plan.compania_id,
+            nombre: plan.nombre,
+            tipo: plan.tipo,
+            dias_semana: plan.dias_semana,
+            precio_transf: plan.precio_transf,
+            precio_efvo: plan.precio_efvo
+        })
+
+    if (error) return { success: false, error: error.message }
+    revalidatePath(`/companias/${plan.compania_id}`)
+    return { success: true }
+}
+
+export async function eliminarPlanCompaniaAction(planId: string, companiaId: string) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
+
+    const { data: profile } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (!profile || !['admin', 'recepcion'].includes(profile.rol)) return { success: false, error: 'Sin permisos' }
+
+    const admin = getAdminClient()
+    // Desasignar el plan de todos los miembros que lo tengan
+    await admin.from('perfiles_companias').update({ plan_id: null }).eq('plan_id', planId)
+    const { error } = await admin.from('companias_planes').delete().eq('id', planId)
+
+    if (error) return { success: false, error: error.message }
+    revalidatePath(`/companias/${companiaId}`)
+    return { success: true }
+}
+
+export async function asignarPlanMiembroAction(perfilId: string, companiaId: string, planId: string | null) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
+
+    const { data: profile } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (!profile || !['admin', 'recepcion'].includes(profile.rol)) return { success: false, error: 'Sin permisos' }
+
+    const admin = getAdminClient()
+    const { error } = await admin.from('perfiles_companias')
+        .update({ plan_id: planId })
+        .eq('perfil_id', perfilId)
+        .eq('compania_id', companiaId)
+
+    if (error) return { success: false, error: error.message }
+    revalidatePath(`/companias/${companiaId}`)
+    return { success: true }
+}
+
 export async function obtenerPreciosCompaniaAction(companiaId: string) {
     const supabaseAdmin = getAdminClient()
     const { data } = await supabaseAdmin.from('configuraciones').select('clave, valor').in('clave', [
@@ -265,7 +410,8 @@ export async function fetchGruposLiquidacionAction(mes: number, anio: number) {
         { data: clasesMes },
         { data: movLiquidadas },
         { data: configsGrupos },
-        { data: miembrosData }
+        { data: miembrosData },
+        { data: planesData }
     ] = await Promise.all([
         admin.from('companias').select('id, nombre').order('nombre'),
         admin.from('companias_pagos').select('compania_id, alumno_id, monto').eq('mes', mes).eq('anio', anio),
@@ -278,7 +424,8 @@ export async function fetchGruposLiquidacionAction(mes: number, anio: number) {
             .eq('tipo', 'egreso')
             .ilike('concepto', `%Liquidación Grupo | ID: % | Mes: ${mes}-${anio}%`),
         admin.from('configuraciones').select('clave, valor').ilike('clave', 'cuota_compania_%'),
-        admin.from('perfiles_companias').select('compania_id, perfil_id, perfil:profiles(id, porcentaje_beca_compania)')
+        admin.from('perfiles_companias').select('compania_id, perfil_id, plan_id, perfil:profiles(id, porcentaje_beca_compania)'),
+        admin.from('companias_planes').select('id, precio_efvo')
     ])
 
     if (!companias) return []
@@ -301,7 +448,13 @@ export async function fetchGruposLiquidacionAction(mes: number, anio: number) {
         }
     })
 
+    // Precio efvo por plan_id
+    const planPrecioMap: Record<string, number> = {}
+    planesData?.forEach((p: any) => { planPrecioMap[p.id] = p.precio_efvo })
+
+    // Beca y plan por miembro
     const becaMap: Record<string, Record<string, number>> = {}
+    const planMiembroMap: Record<string, Record<string, string | null>> = {}
     miembrosData?.forEach((m: any) => {
         const perfil = Array.isArray(m.perfil) ? m.perfil[0] : m.perfil
         const beca = perfil?.porcentaje_beca_compania || 0
@@ -309,6 +462,8 @@ export async function fetchGruposLiquidacionAction(mes: number, anio: number) {
             if (!becaMap[m.compania_id]) becaMap[m.compania_id] = {}
             becaMap[m.compania_id][m.perfil_id] = beca
         }
+        if (!planMiembroMap[m.compania_id]) planMiembroMap[m.compania_id] = {}
+        planMiembroMap[m.compania_id][m.perfil_id] = m.plan_id || null
     })
 
     const pagosPorCompania: Record<string, Record<string, number>> = {}
@@ -318,7 +473,6 @@ export async function fetchGruposLiquidacionAction(mes: number, anio: number) {
             (pagosPorCompania[p.compania_id][p.alumno_id] || 0) + Number(p.monto)
     })
 
-    // Miembros actuales por compania (solo los que están en perfiles_companias)
     const miembrosPorCompania: Record<string, Set<string>> = {}
     miembrosData?.forEach((m: any) => {
         if (!miembrosPorCompania[m.compania_id]) miembrosPorCompania[m.compania_id] = new Set()
@@ -326,14 +480,19 @@ export async function fetchGruposLiquidacionAction(mes: number, anio: number) {
     })
 
     return companias.map((c: any) => {
-        const precioEfvoBase = precioEfvoMap[c.id] ?? baseMap[c.id] ?? 15000
+        const precioEfvoGrupo = precioEfvoMap[c.id] ?? baseMap[c.id] ?? 15000
         const memberPayments = pagosPorCompania[c.id] || {}
         const miembrosActuales = miembrosPorCompania[c.id] || new Set()
         const totalRecaudado = Object.entries(memberPayments)
-            .filter(([alumnoId]) => miembrosActuales.has(alumnoId))
             .reduce((acc, [alumnoId, memberTotal]) => {
+                // Drop-in (clase suelta): no figura en el padrón → se suma a valor pleno.
+                if (!miembrosActuales.has(alumnoId)) {
+                    return acc + (memberTotal as number)
+                }
                 const beca = becaMap[c.id]?.[alumnoId] || 0
-                const precioConBeca = precioEfvoBase * (1 - beca / 100)
+                const planId = planMiembroMap[c.id]?.[alumnoId]
+                const precioEfvo = planId ? (planPrecioMap[planId] ?? precioEfvoGrupo) : precioEfvoGrupo
+                const precioConBeca = precioEfvo * (1 - beca / 100)
                 return acc + Math.min(memberTotal as number, precioConBeca)
             }, 0)
         return {

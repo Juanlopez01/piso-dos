@@ -9,7 +9,7 @@ import {
     Clock, MapPin, User, ChevronRight, Image as ImageIcon,
     Send, BellRing, X, Percent, CheckCircle2, AlertCircle, Coins,
     CalendarDays, Activity, XCircle, FileText, Eye, CheckSquare,
-    Phone, Search, Wallet
+    Phone, Search, Wallet, Pencil
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
@@ -17,8 +17,19 @@ import Image from 'next/image'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { useCash } from '@/context/CashContext'
-import { inscribirPadronCompaniaAction, obtenerPreciosCompaniaAction, registrarPagoProfeCompaniaAction } from '@/app/actions/companias'
+import { inscribirPadronCompaniaAction, obtenerPreciosCompaniaAction, registrarPagoProfeCompaniaAction, getPlanesCompaniaAction, upsertPlanCompaniaAction, eliminarPlanCompaniaAction, asignarPlanMiembroAction, gestionarClasesCompaniaMiembroAction } from '@/app/actions/companias'
 import { cobrarCompaniaAction } from '@/app/actions/usuarios'
+import MaterialesPanel from '@/components/MaterialesPanel'
+
+type PlanCompania = {
+    id: string
+    compania_id: string
+    nombre: string
+    tipo: 'full' | 'dias'
+    dias_semana: number | null
+    precio_transf: number
+    precio_efvo: number
+}
 
 type Compania = {
     id: string
@@ -50,6 +61,7 @@ type Miembro = {
     precioFinal?: number
     precioEfectivo?: number
     estadisticas?: Estadisticas
+    plan_id?: string | null
 }
 
 type ClaseCompania = {
@@ -106,6 +118,16 @@ export default function CompaniaDetallePage() {
     const [procesandoPago, setProcesandoPago] = useState(false)
     const [inscribiendoMasivo, setInscribiendoMasivo] = useState(false)
 
+    // Planes del grupo
+    const [planes, setPlanes] = useState<PlanCompania[]>([])
+    const [modalPlan, setModalPlan] = useState<{ isOpen: boolean; plan: Partial<PlanCompania> | null }>({ isOpen: false, plan: null })
+    const [guardandoPlan, setGuardandoPlan] = useState(false)
+    const [asignandoPlanId, setAsignandoPlanId] = useState<string | null>(null)
+
+    // Modal elegir clases (plan días)
+    const [modalClasesMiembro, setModalClasesMiembro] = useState<{ miembro: Miembro; clasesSeleccionadas: Set<string> } | null>(null)
+    const [guardandoClases, setGuardandoClases] = useState(false)
+
     // Pago profe por clase (The Show)
     const [pagoProfeModal, setPagoProfeModal] = useState<{ claseId: string; nombreClase: string; fecha: string } | null>(null)
     const [pagoProfesMonto, setPagoProfesMonto] = useState<number | ''>(0)
@@ -113,6 +135,8 @@ export default function CompaniaDetallePage() {
     const [registrandoPagoProfe, setRegistrandoPagoProfe] = useState(false)
     const [clasesPagoProfeRegistrado, setClasesPagoProfeRegistrado] = useState<Set<string>>(new Set())
     const [totalPagadoProfesTheShow, setTotalPagadoProfesTheShow] = useState(0)
+    // Pagos de drop-ins (clase suelta) que NO están en el padrón pero se liquidan con el grupo
+    const [totalDropIn, setTotalDropIn] = useState(0)
     const [searchAlumno, setSearchAlumno] = useState('')
     const [miembrosActuales, setMiembrosActuales] = useState<string[]>([])
     const [allAlumnos, setAllAlumnos] = useState<any[]>([])
@@ -254,10 +278,14 @@ export default function CompaniaDetallePage() {
             setClases([])
         }
 
-        const { data: dataMiembros } = await supabase
-            .from('perfiles_companias')
-            .select('perfil_id, perfil:profiles(id, nombre_completo, email, telefono, porcentaje_beca_compania)')
-            .eq('compania_id', companiaId)
+        const [{ data: dataMiembros }, planesLoaded] = await Promise.all([
+            supabase
+                .from('perfiles_companias')
+                .select('perfil_id, plan_id, perfil:profiles(id, nombre_completo, email, telefono, porcentaje_beca_compania)')
+                .eq('compania_id', companiaId),
+            getPlanesCompaniaAction(companiaId)
+        ])
+        setPlanes(planesLoaded as PlanCompania[])
 
         // Pagos a profes registrados en caja para The Show
         const { data: pagosProfesRegistrados } = await supabase
@@ -295,6 +323,11 @@ export default function CompaniaDetallePage() {
 
         if (dataMiembros) {
             setMiembrosActuales(dataMiembros.map((m: any) => m.perfil_id));
+
+            // Map plan_id por perfil
+            const planPorPerfil: Record<string, string | null> = {}
+            dataMiembros.forEach((m: any) => { planPorPerfil[m.perfil_id] = m.plan_id || null })
+
             let miembrosData = dataMiembros.map((m: any) => m.perfil).filter(Boolean)
 
             const { data: pagosCia } = await supabase
@@ -308,8 +341,13 @@ export default function CompaniaDetallePage() {
                 const totalAbonado = pagosCia?.filter((p: { alumno_id: string; monto: number | string }) => p.alumno_id === m.id).reduce((acc: number, curr: { monto: number | string }) => acc + Number(curr.monto), 0) || 0
                 const beca = m.porcentaje_beca_compania || 0
 
-                const precioFinal = finalPrecioTransf - (finalPrecioTransf * beca / 100)
-                const precioEfectivo = finalPrecioEfvo - (finalPrecioEfvo * beca / 100)
+                const planId = planPorPerfil[m.id] || null
+                const planMiembro = planesLoaded.find((p: any) => p.id === planId)
+                const precioTransfBase = planMiembro ? planMiembro.precio_transf : finalPrecioTransf
+                const precioEfvoBase = planMiembro ? planMiembro.precio_efvo : finalPrecioEfvo
+
+                const precioFinal = precioTransfBase - (precioTransfBase * beca / 100)
+                const precioEfectivo = precioEfvoBase - (precioEfvoBase * beca / 100)
 
                 const saldoPendiente = Math.max(0, precioFinal - totalAbonado)
                 const saldoPendienteEfectivo = Math.max(0, precioEfectivo - totalAbonado)
@@ -318,6 +356,7 @@ export default function CompaniaDetallePage() {
 
                 return {
                     ...m,
+                    plan_id: planId,
                     totalAbonado,
                     saldoPendiente,
                     saldoPendienteEfectivo,
@@ -330,6 +369,16 @@ export default function CompaniaDetallePage() {
 
             miembrosCompletos.sort((a: any, b: any) => (a.nombre_completo || '').localeCompare(b.nombre_completo || ''))
             setMiembros(miembrosCompletos)
+
+            // Drop-ins: pagos del mes cuyo alumno NO está en el padrón (clase suelta).
+            // Se suman a valor pleno porque se liquidan junto con el grupo.
+            const padronIds = new Set(dataMiembros.map((m: any) => m.perfil_id))
+            const dropInTotal = (pagosCia || [])
+                .filter((p: any) => !padronIds.has(p.alumno_id))
+                .reduce((acc: number, p: any) => acc + Number(p.monto), 0)
+            setTotalDropIn(dropInTotal)
+        } else {
+            setTotalDropIn(0)
         }
 
         if (['admin', 'recepcion'].includes(userRole || '')) {
@@ -485,6 +534,81 @@ export default function CompaniaDetallePage() {
         }
     }
 
+    const abrirModalClasesMiembro = async (miembro: Miembro) => {
+        if (!compania) return
+        const supabase = createClient()
+        const clasesIds = clases.map(c => c.id)
+        const { data: inscripciones } = await supabase
+            .from('inscripciones')
+            .select('clase_id')
+            .eq('user_id', miembro.id)
+            .in('clase_id', clasesIds)
+        const seleccionadas = new Set<string>((inscripciones || []).map((i: any) => i.clase_id as string))
+        setModalClasesMiembro({ miembro, clasesSeleccionadas: seleccionadas })
+    }
+
+    const handleGuardarClasesMiembro = async () => {
+        if (!modalClasesMiembro || !compania) return
+        setGuardandoClases(true)
+        try {
+            const res = await gestionarClasesCompaniaMiembroAction(
+                modalClasesMiembro.miembro.id,
+                compania.id,
+                Array.from(modalClasesMiembro.clasesSeleccionadas),
+                clases.map(c => c.id)
+            )
+            if (!res.success) throw new Error(res.error)
+            toast.success('Clases actualizadas')
+            setModalClasesMiembro(null)
+        } catch (err: any) {
+            toast.error(err.message)
+        } finally {
+            setGuardandoClases(false)
+        }
+    }
+
+    const handleGuardarPlan = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!compania || !modalPlan.plan) return
+        setGuardandoPlan(true)
+        try {
+            const p = modalPlan.plan
+            const res = await upsertPlanCompaniaAction({
+                id: p.id,
+                compania_id: compania.id,
+                nombre: p.nombre!,
+                tipo: p.tipo!,
+                dias_semana: p.tipo === 'dias' ? (p.dias_semana ?? null) : null,
+                precio_transf: p.precio_transf ?? 0,
+                precio_efvo: p.precio_efvo ?? 0
+            })
+            if (!res.success) throw new Error(res.error)
+            toast.success(p.id ? 'Plan actualizado' : 'Plan creado')
+            setModalPlan({ isOpen: false, plan: null })
+            verificarAccesoYCargar()
+        } catch (err: any) {
+            toast.error(err.message)
+        } finally {
+            setGuardandoPlan(false)
+        }
+    }
+
+    const handleEliminarPlan = async (planId: string) => {
+        if (!compania || !confirm('¿Eliminar este plan? Los miembros asignados quedarán sin plan.')) return
+        const res = await eliminarPlanCompaniaAction(planId, compania.id)
+        if (res.success) { toast.success('Plan eliminado'); verificarAccesoYCargar() }
+        else toast.error(res.error)
+    }
+
+    const handleAsignarPlan = async (miembroId: string, planId: string | null) => {
+        if (!compania) return
+        setAsignandoPlanId(miembroId)
+        const res = await asignarPlanMiembroAction(miembroId, compania.id, planId)
+        if (res.success) verificarAccesoYCargar()
+        else toast.error(res.error)
+        setAsignandoPlanId(null)
+    }
+
     const handleRegistrarPagoProfe = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!pagoProfeModal || !pagoProfesMonto || Number(pagoProfesMonto) <= 0 || !compania) return
@@ -561,14 +685,14 @@ export default function CompaniaDetallePage() {
     const esProyectoStaff = compania.nombre.toLowerCase().trim() === 'proyecto staff'
 
     // 🚀 LÓGICA DE REGLAS DE NEGOCIO Y POZO FINANCIERO DEL MES (SIEMPRE VALOR EFECTIVO)
-    const totalRecaudadoReal = miembros.reduce((acc, m) => acc + (m.totalAbonado || 0), 0);
+    const totalRecaudadoReal = miembros.reduce((acc, m) => acc + (m.totalAbonado || 0), 0) + totalDropIn;
 
     const totalRecaudadoValorEfectivo = miembros.reduce((acc, m) => {
         const abonado = m.totalAbonado || 0;
         const precioEfectivo = m.precioEfectivo || 0;
         // Solo ingresa al Pozo el equivalente al valor efectivo de la cuota
         return acc + Math.min(abonado, precioEfectivo);
-    }, 0);
+    }, 0) + totalDropIn; // Las clases sueltas (drop-in) se suman a valor pleno
 
     const nombreCiaLower = compania.nombre.toLowerCase();
 
@@ -719,6 +843,14 @@ export default function CompaniaDetallePage() {
                             </div>
                         </div>
 
+                        {/* MATERIAL DE ESTUDIO (PDFs) — lo ven todos; suben coordinador del grupo + recep/admin */}
+                        <MaterialesPanel
+                            tipo="compania"
+                            companiaId={compania.id}
+                            canUpload={['admin', 'recepcion'].includes(userRole || '') || (userRole === 'profesor' && compania.coordinador_id === userId)}
+                            accent="blue"
+                        />
+
                         {isStaff ? (
                             <div className="bg-[#111] border border-white/5 rounded-3xl p-6 relative overflow-hidden">
                                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
@@ -844,6 +976,41 @@ export default function CompaniaDetallePage() {
                             )}
                         </div>
 
+                        {/* PLANES DEL GRUPO */}
+                        <div className="bg-[#09090b] border border-white/10 rounded-2xl p-5 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <h4 className="text-white font-black uppercase text-sm flex items-center gap-2">
+                                    <Percent size={16} className="text-purple-400" /> Planes del Grupo
+                                </h4>
+                                {planes.length < 2 && (
+                                    <button
+                                        onClick={() => setModalPlan({ isOpen: true, plan: { compania_id: compania?.id, tipo: planes.length === 0 ? 'full' : 'dias', nombre: planes.length === 0 ? 'Full' : '', precio_transf: 0, precio_efvo: 0, dias_semana: null } })}
+                                        className="bg-purple-600/20 text-purple-400 border border-purple-600/30 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase hover:bg-purple-600 hover:text-white transition-all flex items-center gap-1.5"
+                                    >
+                                        + Agregar Plan
+                                    </button>
+                                )}
+                            </div>
+                            {planes.length === 0 && (
+                                <p className="text-gray-600 text-xs text-center py-3">Sin planes configurados. Se usa el precio global del grupo.</p>
+                            )}
+                            {planes.map(plan => (
+                                <div key={plan.id} className="bg-[#111] border border-white/5 rounded-xl p-3 flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-white font-black text-sm uppercase">{plan.nombre}</p>
+                                        <p className="text-gray-500 text-[10px] mt-0.5">
+                                            {plan.tipo === 'dias' ? `${plan.dias_semana} día${plan.dias_semana !== 1 ? 's' : ''}/semana · ` : 'Full · '}
+                                            Efvo: ${plan.precio_efvo.toLocaleString()} · Transf: ${plan.precio_transf.toLocaleString()}
+                                        </p>
+                                    </div>
+                                    <div className="flex gap-2 shrink-0">
+                                        <button onClick={() => setModalPlan({ isOpen: true, plan: { ...plan } })} className="p-2 bg-white/5 hover:bg-white/10 rounded-lg transition-all"><Pencil size={13} className="text-gray-400" /></button>
+                                        <button onClick={() => handleEliminarPlan(plan.id)} className="p-2 bg-red-500/10 hover:bg-red-500 rounded-lg transition-all"><X size={13} className="text-red-400 hover:text-white" /></button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
                         {/* ASIGNACIÓN MASIVA */}
                         <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg shadow-blue-500/5">
                             <div><h4 className="text-white font-black uppercase text-sm flex items-center gap-2"><CheckSquare size={16} className="text-blue-500" /> Asignación de Clases</h4><p className="text-gray-400 text-[10px] sm:text-xs mt-1">Inscribir a todos los alumnos del padrón a las clases del mes {mesDashboard}/{anioDashboard}</p></div>
@@ -872,6 +1039,29 @@ export default function CompaniaDetallePage() {
                                         <span className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest ${miembro.pago_compania_al_dia ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-orange-500/10 text-orange-400 border-orange-500/20'}`}><Coins size={10} /> Abonó ${miembro.totalAbonado} / ${miembro.precioEfectivo}</span>
                                         {!miembro.pago_compania_al_dia ? <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest"><AlertCircle size={10} /> Debe Efvo: ${miembro.saldoPendienteEfectivo} | Transf: ${miembro.saldoPendiente}</span> : <span className="inline-flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest"><CheckCircle2 size={10} /> Al Día</span>}
                                     </div>
+                                    {planes.length > 0 && (
+                                        <div className="pt-2 mt-1 space-y-2">
+                                            <select
+                                                disabled={asignandoPlanId === miembro.id}
+                                                value={miembro.plan_id || ''}
+                                                onChange={e => handleAsignarPlan(miembro.id, e.target.value || null)}
+                                                className="w-full bg-[#111] border border-purple-500/20 text-purple-300 text-[10px] font-black uppercase rounded-lg px-2 py-1.5 outline-none focus:border-purple-500 transition-all appearance-none cursor-pointer"
+                                            >
+                                                <option value="">Sin plan asignado</option>
+                                                {planes.map(p => (
+                                                    <option key={p.id} value={p.id}>{p.nombre}{p.tipo === 'dias' ? ` (${p.dias_semana}d/sem)` : ''}</option>
+                                                ))}
+                                            </select>
+                                            {planes.find(p => p.id === miembro.plan_id)?.tipo === 'dias' && clases.length > 0 && (
+                                                <button
+                                                    onClick={() => abrirModalClasesMiembro(miembro)}
+                                                    className="w-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 py-1.5 rounded-lg text-[10px] font-black uppercase hover:bg-yellow-500 hover:text-black transition-all flex items-center justify-center gap-1.5"
+                                                >
+                                                    <Calendar size={11} /> Elegir Clases del Mes
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -917,6 +1107,118 @@ export default function CompaniaDetallePage() {
                     </div>
                 )}
             </div>
+
+            {/* MODAL: ELEGIR CLASES DEL MES (plan días) */}
+            {modalClasesMiembro && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setModalClasesMiembro(null)}>
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-6 shadow-2xl flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-start mb-4 border-b border-white/10 pb-4 shrink-0">
+                            <div>
+                                <h3 className="text-base font-black text-white uppercase flex items-center gap-2">
+                                    <Calendar className="text-yellow-400" size={16} /> Clases del Mes
+                                </h3>
+                                <p className="text-xs text-gray-500 mt-0.5">{modalClasesMiembro.miembro.nombre_completo}</p>
+                                <p className="text-[10px] text-yellow-400 font-bold mt-1">
+                                    {modalClasesMiembro.clasesSeleccionadas.size} seleccionadas de {clases.length} clases
+                                </p>
+                            </div>
+                            <button onClick={() => setModalClasesMiembro(null)}><X className="text-gray-500 hover:text-white" /></button>
+                        </div>
+                        <div className="overflow-y-auto flex-1 space-y-2 pr-1">
+                            {clases.map(clase => {
+                                const [fechaParte, horaParte] = clase.inicio.split('T')
+                                const dateObj = new Date(`${fechaParte}T12:00:00`)
+                                const seleccionada = modalClasesMiembro.clasesSeleccionadas.has(clase.id)
+                                return (
+                                    <button
+                                        key={clase.id}
+                                        type="button"
+                                        onClick={() => {
+                                            const next = new Set(modalClasesMiembro.clasesSeleccionadas)
+                                            if (seleccionada) next.delete(clase.id)
+                                            else next.add(clase.id)
+                                            setModalClasesMiembro(prev => prev ? { ...prev, clasesSeleccionadas: next } : null)
+                                        }}
+                                        className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${seleccionada ? 'border-yellow-500/40 bg-yellow-500/10' : 'border-white/5 bg-[#111] hover:border-white/20'}`}
+                                    >
+                                        <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${seleccionada ? 'border-yellow-400 bg-yellow-400' : 'border-white/20'}`}>
+                                            {seleccionada && <CheckCircle2 size={12} className="text-black" />}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-white text-xs font-bold uppercase truncate">{clase.nombre}</p>
+                                            <p className="text-gray-500 text-[10px] capitalize">{format(dateObj, "EEEE d MMM", { locale: es })} · {horaParte?.substring(0, 5)} hs</p>
+                                        </div>
+                                    </button>
+                                )
+                            })}
+                        </div>
+                        <div className="pt-4 shrink-0 border-t border-white/10 mt-3">
+                            <button
+                                disabled={guardandoClases}
+                                onClick={handleGuardarClasesMiembro}
+                                className="w-full bg-yellow-500 text-black font-black uppercase py-3 rounded-xl hover:bg-yellow-400 transition-all text-xs tracking-widest flex items-center justify-center gap-2"
+                            >
+                                {guardandoClases ? <Loader2 className="animate-spin" size={16} /> : <><CheckCircle2 size={14} /> Guardar Selección</>}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL: PLAN */}
+            {modalPlan.isOpen && modalPlan.plan && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => setModalPlan({ isOpen: false, plan: null })}>
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-start mb-6 border-b border-white/10 pb-4">
+                            <h3 className="text-lg font-black text-white uppercase flex items-center gap-2">
+                                <Percent className="text-purple-400" size={18} /> {modalPlan.plan.id ? 'Editar Plan' : 'Nuevo Plan'}
+                            </h3>
+                            <button onClick={() => setModalPlan({ isOpen: false, plan: null })}><X className="text-gray-500 hover:text-white" /></button>
+                        </div>
+                        <form onSubmit={handleGuardarPlan} className="space-y-4">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Tipo de Plan</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {(['full', 'dias'] as const).map(tipo => (
+                                        <button key={tipo} type="button"
+                                            onClick={() => setModalPlan(prev => {
+                                                if (!prev.plan) return prev
+                                                return { ...prev, plan: { ...prev.plan, tipo, nombre: tipo === 'full' ? 'Full' : prev.plan.nombre === 'Full' ? '' : (prev.plan.nombre || ''), dias_semana: tipo === 'full' ? null : prev.plan.dias_semana } }
+                                            })}
+                                            className={`py-2.5 text-xs font-black uppercase rounded-xl border transition-all ${modalPlan.plan?.tipo === tipo ? 'border-purple-500 bg-purple-500/20 text-purple-300' : 'border-white/10 text-gray-500 hover:bg-white/5'}`}
+                                        >
+                                            {tipo === 'full' ? 'Full (ilimitado)' : 'X Días / Semana'}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Nombre del Plan</label>
+                                <input required value={modalPlan.plan.nombre || ''} onChange={e => setModalPlan(prev => ({ ...prev, plan: { ...prev.plan!, nombre: e.target.value } }))} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-purple-500 transition-colors" placeholder={modalPlan.plan.tipo === 'full' ? 'Full' : 'Ej: 2 días'} />
+                            </div>
+                            {modalPlan.plan.tipo === 'dias' && (
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Días por Semana</label>
+                                    <input required type="number" min="1" max="6" value={modalPlan.plan.dias_semana ?? ''} onChange={e => setModalPlan(prev => ({ ...prev, plan: { ...prev.plan!, dias_semana: Number(e.target.value) } }))} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-purple-500 transition-colors" placeholder="Ej: 2" />
+                                </div>
+                            )}
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Precio Efectivo ($)</label>
+                                    <input required type="number" min="0" value={modalPlan.plan.precio_efvo ?? ''} onChange={e => setModalPlan(prev => ({ ...prev, plan: { ...prev.plan!, precio_efvo: Number(e.target.value) } }))} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-purple-500 transition-colors" placeholder="0" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Precio Transf ($)</label>
+                                    <input required type="number" min="0" value={modalPlan.plan.precio_transf ?? ''} onChange={e => setModalPlan(prev => ({ ...prev, plan: { ...prev.plan!, precio_transf: Number(e.target.value) } }))} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-purple-500 transition-colors" placeholder="0" />
+                                </div>
+                            </div>
+                            <button disabled={guardandoPlan} type="submit" className="w-full bg-purple-600 text-white font-black uppercase py-4 rounded-xl hover:bg-purple-500 transition-all text-xs tracking-widest flex items-center justify-center gap-2 mt-2">
+                                {guardandoPlan ? <Loader2 className="animate-spin mx-auto" /> : <><CheckCircle2 size={16} /> {modalPlan.plan.id ? 'Guardar Cambios' : 'Crear Plan'}</>}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL: PAGO PROFE THE SHOW */}
             {pagoProfeModal && (

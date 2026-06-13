@@ -33,6 +33,8 @@ import {
     cobrarLigaAction
 } from '@/app/actions/usuarios'
 
+import MaterialesPanel from '@/components/MaterialesPanel'
+
 const parseSafeDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return new Date()
     const cleanStr = dateStr.replace('+00:00', '').replace('+00', '').replace('Z', '').replace(' ', 'T')
@@ -919,7 +921,15 @@ function LaLigaContent() {
 
                 {/* --- VISTA CLASES DEL MES (STAFF) --- */}
                 {isStaff && adminTab === 'clases' && (
-                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
+                        {/* MATERIAL DE ESTUDIO (PDFs) por nivel — suben admin/recep/coordinador/profesor */}
+                        <MaterialesPanel
+                            tipo="liga"
+                            nivelesUpload={[1, 2]}
+                            canUpload={['admin', 'recepcion', 'coordinador', 'profesor'].includes(userRole || '')}
+                            accent="lime"
+                        />
+
                         {clasesDelMes.length > 0 ? (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {clasesDelMes.map((clase: any) => {
@@ -1198,6 +1208,9 @@ function LaLigaContent() {
                 {/* --- VISTA ALUMNO DASHBOARD --- */}
                 {!isStaff && (
                     <div className="space-y-6 animate-in fade-in">
+                        {/* MATERIAL DE ESTUDIO (PDFs) de su nivel — solo lectura */}
+                        <MaterialesPanel tipo="liga" ligaNivel={nivelActual} canUpload={false} accent="lime" />
+
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                             <div className="lg:col-span-2 space-y-6">
 
