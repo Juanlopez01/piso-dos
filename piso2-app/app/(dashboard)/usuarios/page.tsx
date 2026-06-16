@@ -3,6 +3,7 @@
 import { createClient } from '@/utils/supabase/client'
 import { useState, Suspense, useEffect } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { optimizeImage } from '@/utils/optimizeImage'
 import useSWR from 'swr'
 import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
@@ -282,9 +283,10 @@ function UsuariosContent() {
         if (!file) return
         setUploadingAvatar(true)
         try {
-            const fileExt = file.name.split('.').pop()
+            const fileToUpload = await optimizeImage(file, { maxDim: 512 })
+            const fileExt = fileToUpload.name.split('.').pop()
             const fileName = `${userId}-${Math.random()}.${fileExt}`
-            const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file)
+            const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, fileToUpload)
             if (uploadError) throw uploadError
 
             const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName)
@@ -926,7 +928,7 @@ function UsuariosContent() {
                                 </div>
                                 <label className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-3xl text-[#D4E655]">
                                     {uploadingAvatar ? <Loader2 className="animate-spin" /> : <><Camera size={24} className="mb-2" /><span className="text-[10px] font-black uppercase tracking-widest">Cambiar</span></>}
-                                    <input type="file" accept="image/*" className="hidden" disabled={uploadingAvatar} onChange={(e) => handleUploadAvatar(e, selectedUser.id)} />
+                                    <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={uploadingAvatar} onChange={(e) => handleUploadAvatar(e, selectedUser.id)} />
                                 </label>
                             </div>
 

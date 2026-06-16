@@ -3,6 +3,7 @@
 import { createClient } from '@/utils/supabase/client'
 import { useState, useEffect } from 'react'
 import { crearClasesAction, duplicarMesAction } from '@/app/actions/clases'
+import { optimizeImage } from '@/utils/optimizeImage'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import {
@@ -404,10 +405,11 @@ export default function CalendarioPage() {
             let publicUrl = null
 
             if (formFile) {
-                const fileExt = formFile.name.split('.').pop()
+                const fileToUpload = await optimizeImage(formFile)
+                const fileExt = fileToUpload.name.split('.').pop()
                 const fileName = `${Date.now()}.${fileExt}`
 
-                const { error: uploadError } = await supabase.storage.from('clases').upload(fileName, formFile)
+                const { error: uploadError } = await supabase.storage.from('clases').upload(fileName, fileToUpload)
                 if (uploadError) throw new Error('Error al subir imagen')
 
                 publicUrl = supabase.storage.from('clases').getPublicUrl(fileName).data.publicUrl
@@ -878,7 +880,7 @@ export default function CalendarioPage() {
                                                     <label className="text-[9px] font-bold text-gray-500 uppercase block mb-1">Flyer / Foto</label>
                                                     <label className="h-44 w-full bg-[#111] border border-dashed border-white/10 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-[#D4E655] transition-colors relative overflow-hidden">
                                                         {formFile ? <Image src={URL.createObjectURL(formFile)} alt="Preview" fill className="object-cover" /> : <><ImageIcon className="text-gray-600 mb-2" size={24} /><span className="text-[10px] text-gray-500 uppercase font-black">Subir</span></>}
-                                                        <input type="file" className="hidden" accept="image/*" onChange={e => e.target.files && setFormFile(e.target.files[0])} />
+                                                        <input type="file" className="hidden" accept="image/jpeg,image/png,image/webp" onChange={e => e.target.files && setFormFile(e.target.files[0])} />
                                                     </label>
                                                 </div>
                                             </div>
