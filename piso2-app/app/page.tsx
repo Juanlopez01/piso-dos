@@ -92,6 +92,7 @@ export default function LandingPage() {
             <button onClick={() => window.scrollTo(0, 0)} className="hover:text-white transition-colors">INICIO</button>
             <button onClick={() => scrollTo('ecosistema')} className="hover:text-white transition-colors">ECOSISTEMA</button>
             <Link href="/alquiler" className="hover:text-white transition-colors">Salas</Link>
+            <Link href="/nueva-generacion" className="text-[#D4E655] hover:text-white transition-colors">NUEVA GEN</Link>
             <button onClick={() => scrollTo('contacto')} className="hover:text-white transition-colors">CONTACTO</button>
             {loggedUser ? (
               <Link href={loggedUser.url} className="ml-4 px-6 py-2 rounded-full border border-[#D4E655]/50 bg-[#D4E655]/10 text-[#D4E655] hover:bg-[#D4E655] hover:text-black transition-all duration-300 shadow-[0_0_10px_rgba(212,230,85,0.1)] hover:shadow-[0_0_20px_rgba(212,230,85,0.4)] flex items-center gap-2">
@@ -115,6 +116,7 @@ export default function LandingPage() {
         <button onClick={() => { window.scrollTo(0, 0); setIsMobileMenuOpen(false) }} className="text-2xl font-black text-white uppercase tracking-widest hover:text-[#D4E655]">INICIO</button>
         <button onClick={() => scrollTo('ecosistema')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">ECOSISTEMA</button>
         <Link href="/alquiler" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Salas</Link>
+        <Link href="/nueva-generacion" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-[#D4E655] uppercase tracking-widest hover:text-white">Nueva Generación</Link>
         <button onClick={() => scrollTo('contacto')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">CONTACTO</button>
         {loggedUser ? (
           <Link href={loggedUser.url} onClick={() => setIsMobileMenuOpen(false)} className="mt-4 px-10 py-4 rounded-full border border-[#D4E655] text-[#D4E655] flex items-center gap-3 text-xl font-black uppercase tracking-widest">
@@ -295,6 +297,34 @@ export default function LandingPage() {
 
           </div>
 
+        </div>
+      </section>
+
+      {/* --- BANDA: NUEVA GENERACIÓN (profes que quieren dar clases) --- */}
+      <section className="py-20 px-6 border-t border-white/5 relative overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] bg-[#D4E655]/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="max-w-5xl mx-auto relative z-10">
+          <Link href="/nueva-generacion" className="group block bg-[#09090b]/60 backdrop-blur-md border border-white/10 hover:border-[#D4E655]/40 rounded-3xl p-10 md:p-14 transition-all duration-300">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <Triangle className="text-[#D4E655] fill-[#D4E655]" size={14} />
+                  <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">Nueva Generación</span>
+                </div>
+                <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tighter leading-[0.95] mb-4">
+                  ¿Sos profe y querés <br /><span className="text-[#D4E655]">dar clases acá?</span>
+                </h2>
+                <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed font-medium">
+                  Mandanos tu propuesta de clase. Buscamos sumar nuevos talentos al espacio.
+                </p>
+              </div>
+              <div className="shrink-0">
+                <span className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl group-hover:bg-white transition-colors">
+                  Enviar propuesta <ArrowRight size={16} />
+                </span>
+              </div>
+            </div>
+          </Link>
         </div>
       </section>
 
