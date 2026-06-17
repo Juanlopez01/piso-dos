@@ -285,6 +285,68 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
     }
 }
 
+// Límites (primer y último día) de un mes/año dado, en formato YYYY-MM-DD.
+const boundsDelMes = (mes: number, anio: number) => {
+    const mm = String(mes).padStart(2, '0')
+    const ultimo = new Date(anio, mes, 0).getDate()
+    return { desde: `${anio}-${mm}-01`, hasta: `${anio}-${mm}-${String(ultimo).padStart(2, '0')}` }
+}
+
+// 🚀 Fetcher independiente: calcula asistencias para un RANGO de fechas arbitrario.
+// No toca el fetcher mensual (cuotas/clases/evaluaciones siguen por mes).
+const fetcherAsistenciasRango = async (uid: string, desde: string, hasta: string, supabase: any) => {
+    const { data: profile } = await supabase.from('profiles').select('rol, nivel_liga, nivel').eq('id', uid).single()
+    const isStaff = ['admin', 'recepcion', 'auxiliar', 'coordinador', 'profesor'].includes(profile?.rol)
+    const nivelAlumno = profile?.nivel_liga || profile?.nivel || 1
+
+    const desdeIso = new Date(`${desde}T00:00:00`).toISOString()
+    const hastaIso = new Date(`${hasta}T23:59:59`).toISOString()
+
+    let q = supabase.from('clases')
+        .select('id, nombre, inicio, liga_nivel, profesor_id')
+        .eq('es_la_liga', true)
+        .gte('inicio', desdeIso)
+        .lte('inicio', hastaIso)
+        .neq('estado', 'cancelada')
+
+    if (profile?.rol === 'profesor') q = q.eq('profesor_id', uid)
+    else if (!isStaff) q = q.eq('liga_nivel', nivelAlumno)
+
+    const { data: clases } = await q
+
+    const vacio = (): Estadisticas => ({ presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0, desglose: {} })
+    const statsAsistencia: Record<string, Estadisticas> = {}
+
+    if (clases && clases.length > 0) {
+        const ids = clases.map((c: any) => c.id)
+        const { data: insc } = await supabase.from('inscripciones').select('user_id, clase_id, estado_asistencia').in('clase_id', ids)
+        const ahora = new Date().getTime()
+        const keyMap: Record<string, keyof Estadisticas> = {
+            presente: 'presentes', ausente: 'ausentes', justificada: 'justificadas', saf: 'saf', media_falta: 'medias_faltas'
+        }
+
+        insc?.forEach((i: any) => {
+            const clase = clases.find((c: any) => c.id === i.clase_id)
+            const yaPaso = clase && new Date(clase.inicio).getTime() <= ahora
+            if (!yaPaso || !i.user_id) return
+            const mat = clase.nombre
+
+            if (!statsAsistencia[i.user_id]) statsAsistencia[i.user_id] = vacio()
+            if (!statsAsistencia[i.user_id].desglose![mat]) statsAsistencia[i.user_id].desglose![mat] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
+
+            statsAsistencia[i.user_id].total++
+            statsAsistencia[i.user_id].desglose![mat].total++
+            const k = keyMap[i.estado_asistencia]
+            if (k) {
+                (statsAsistencia[i.user_id][k] as number)++
+                statsAsistencia[i.user_id].desglose![mat][k]++
+            }
+        })
+    }
+
+    return { statsAsistencia, miAsistencia: statsAsistencia[uid] || vacio() }
+}
+
 function LaLigaContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
@@ -344,6 +406,32 @@ function LaLigaContent() {
 
     const [inscribiendoNivel, setInscribiendoNivel] = useState<number | null>(null)
     const [expandedStudentStats, setExpandedStudentStats] = useState<string | null>(null)
+
+    // 🚀 RANGO DE FECHAS para asistencias (filtro extra, no toca el mes/cuotas)
+    // Arranca activo y pre-cargado con el rango del mes actual.
+    const [rangoActivo, setRangoActivo] = useState(true)
+    const [rangoManual, setRangoManual] = useState(false)
+    const [fechaDesde, setFechaDesde] = useState(() => boundsDelMes(new Date().getMonth() + 1, new Date().getFullYear()).desde)
+    const [fechaHasta, setFechaHasta] = useState(() => boundsDelMes(new Date().getMonth() + 1, new Date().getFullYear()).hasta)
+
+    // Si el usuario no editó las fechas a mano, el rango sigue al selector de mes.
+    useEffect(() => {
+        if (rangoManual) return
+        const b = boundsDelMes(mesDashboard, anioDashboard)
+        setFechaDesde(b.desde)
+        setFechaHasta(b.hasta)
+    }, [mesDashboard, anioDashboard, rangoManual])
+
+    const onChangeDesde = (v: string) => { setFechaDesde(v); setRangoManual(true) }
+    const onChangeHasta = (v: string) => { setFechaHasta(v); setRangoManual(true) }
+
+    const { data: rangoData } = useSWR(
+        (!loadingContext && userId && rangoActivo && fechaDesde && fechaHasta && fechaDesde <= fechaHasta)
+            ? ['liga-asist-rango', userId, fechaDesde, fechaHasta]
+            : null,
+        ([_, uid, d, h]) => fetcherAsistenciasRango(uid as string, d as string, h as string, supabase),
+        { revalidateOnFocus: false }
+    )
 
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
@@ -607,6 +695,16 @@ function LaLigaContent() {
     const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo, allStudents, criterios, clasesDelMes, miAsistencia } = data
     const nivelActual = profile.nivel_liga || profile.nivel || 1
 
+    // 🚀 Asistencia a mostrar: por mes (default) o por rango si está activo
+    const statsVacio: Estadisticas = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0, desglose: {} }
+    const asistenciaAlumna: Estadisticas = rangoActivo ? (rangoData?.miAsistencia || statsVacio) : miAsistencia
+    const statsStaffRango: Record<string, Estadisticas> | null = rangoActivo ? (rangoData?.statsAsistencia || {}) : null
+    const etiquetaPeriodo = rangoActivo ? `${fechaDesde} → ${fechaHasta}` : `${mesDashboard}/${anioDashboard}`
+    const clasesPasadasMes = clasesDelMes.filter((c: any) => new Date(c.inicio).getTime() <= new Date().getTime()).length
+    const hayDatosAsistencia = rangoActivo
+        ? Object.values(statsStaffRango || {}).some((s) => (s.total || 0) > 0)
+        : clasesPasadasMes > 0
+
     const filteredStudents = allStudents.filter((s: any) => {
         const matchesSearch = (s.nombre_completo || '').toLowerCase().includes(searchStudent.toLowerCase())
         const matchesLevel = levelFilter === 'todos' ? true : String(s.nivel_liga) === levelFilter
@@ -817,23 +915,33 @@ function LaLigaContent() {
                                     <h3 className="text-xl font-black uppercase text-white flex items-center gap-2">
                                         <Activity className="text-[#D4E655]" /> Control de Asistencias
                                     </h3>
-                                    <p className="text-xs text-gray-500 uppercase tracking-widest mt-1 font-bold">Mes analizado: {mesDashboard}/{anioDashboard}</p>
+                                    <p className="text-xs text-gray-500 uppercase tracking-widest mt-1 font-bold">Período analizado: {etiquetaPeriodo}</p>
                                 </div>
-                                <span className="bg-white/5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase text-gray-400 border border-white/10 shrink-0">
-                                    Clases Pasadas: {clasesDelMes.filter((c: any) => new Date(c.inicio).getTime() <= new Date().getTime()).length}
-                                </span>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button onClick={() => setRangoActivo(v => !v)} className={`text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg border transition-all ${rangoActivo ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
+                                        {rangoActivo ? 'Por Rango' : 'Por Mes'}
+                                    </button>
+                                    {rangoActivo && (
+                                        <div className="flex items-center gap-1.5">
+                                            <input type="date" value={fechaDesde} max={fechaHasta} onChange={e => onChangeDesde(e.target.value)} className="bg-[#111] border border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-white outline-none focus:border-[#D4E655] [color-scheme:dark]" />
+                                            <span className="text-gray-600 text-xs">→</span>
+                                            <input type="date" value={fechaHasta} min={fechaDesde} onChange={e => onChangeHasta(e.target.value)} className="bg-[#111] border border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-white outline-none focus:border-[#D4E655] [color-scheme:dark]" />
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
-                            {clasesDelMes.filter((c: any) => new Date(c.inicio).getTime() <= new Date().getTime()).length === 0 ? (
+                            {!hayDatosAsistencia ? (
                                 <div className="text-center py-10 bg-[#111] rounded-2xl border border-white/5">
-                                    <p className="text-gray-500 text-xs font-bold uppercase">No hay clases dictadas este mes para analizar.</p>
+                                    <p className="text-gray-500 text-xs font-bold uppercase">{rangoActivo ? 'No hay asistencias registradas en este rango.' : 'No hay clases dictadas este mes para analizar.'}</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {allStudents.map(m => {
-                                        const total = m.estadisticas?.total || 0;
-                                        const presentes = m.estadisticas?.presentes || 0;
-                                        const saf = m.estadisticas?.saf || 0;
+                                        const est = rangoActivo ? (statsStaffRango?.[m.id] || statsVacio) : m.estadisticas;
+                                        const total = est?.total || 0;
+                                        const presentes = est?.presentes || 0;
+                                        const saf = est?.saf || 0;
                                         const asistenciasReales = presentes + saf;
                                         const porcentaje = total > 0 ? Math.round((asistenciasReales / total) * 100) : 0;
 
@@ -867,15 +975,15 @@ function LaLigaContent() {
                                                     </div>
                                                     <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-red-500/5 text-red-500" title="Ausentes">
                                                         <XCircle size={14} />
-                                                        <span>{m.estadisticas?.ausentes} A</span>
+                                                        <span>{est?.ausentes} A</span>
                                                     </div>
                                                     <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-yellow-500/5 text-yellow-500" title="Medias Faltas">
                                                         <Clock size={14} />
-                                                        <span>{m.estadisticas?.medias_faltas} MF</span>
+                                                        <span>{est?.medias_faltas} MF</span>
                                                     </div>
                                                     <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-blue-500/5 text-blue-500" title="Justificadas">
                                                         <FileText size={14} />
-                                                        <span>{m.estadisticas?.justificadas} J</span>
+                                                        <span>{est?.justificadas} J</span>
                                                     </div>
                                                     <div className="flex flex-col items-center gap-1 p-2 rounded-lg bg-purple-500/5 text-purple-500" title="SAF (Asistió pero no bailó)">
                                                         <Eye size={14} />
@@ -890,9 +998,9 @@ function LaLigaContent() {
                                                 {isExpanded && (
                                                     <div className="mt-2 pt-4 border-t border-white/5 animate-in fade-in slide-in-from-top-2">
                                                         <h5 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Detalle por Materia</h5>
-                                                        {m.estadisticas?.desglose && Object.keys(m.estadisticas.desglose).length > 0 ? (
+                                                        {est?.desglose && Object.keys(est.desglose).length > 0 ? (
                                                             <div className="space-y-2">
-                                                                {Object.entries(m.estadisticas.desglose).map(([nombreMateria, statsMat]: [string, any]) => (
+                                                                {Object.entries(est.desglose).map(([nombreMateria, statsMat]: [string, any]) => (
                                                                     <div key={nombreMateria} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-black/50 p-3 rounded-lg border border-white/5">
                                                                         <span className="text-[10px] font-bold text-white uppercase truncate flex-1 leading-tight pr-2">{nombreMateria}</span>
                                                                         <div className="flex items-center justify-end gap-2.5 shrink-0 text-[9px] font-black tracking-widest uppercase">
@@ -1216,38 +1324,73 @@ function LaLigaContent() {
 
                                 <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6 shadow-xl relative overflow-hidden">
                                     <div className="absolute top-0 right-0 w-32 h-32 bg-[#D4E655]/5 rounded-full blur-2xl -mr-10 -mt-10" />
-                                    <div className="flex justify-between items-center mb-6">
+                                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6 relative z-10">
                                         <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2"><Activity size={20} className="text-[#D4E655]" /> Mi Asistencia</h3>
-                                        <span className="text-[9px] font-bold text-gray-400 bg-white/5 px-2 py-1 rounded-md border border-white/10 uppercase tracking-widest">Mes {mesDashboard}/{anioDashboard}</span>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <button onClick={() => setRangoActivo(v => !v)} className={`text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg border transition-all ${rangoActivo ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-white/5 text-gray-400 border-white/10 hover:text-white'}`}>
+                                                {rangoActivo ? 'Por Rango' : 'Por Mes'}
+                                            </button>
+                                            {rangoActivo ? (
+                                                <div className="flex items-center gap-1.5">
+                                                    <input type="date" value={fechaDesde} max={fechaHasta} onChange={e => onChangeDesde(e.target.value)} className="bg-[#111] border border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-white outline-none focus:border-[#D4E655] [color-scheme:dark]" />
+                                                    <span className="text-gray-600 text-xs">→</span>
+                                                    <input type="date" value={fechaHasta} min={fechaDesde} onChange={e => onChangeHasta(e.target.value)} className="bg-[#111] border border-white/10 rounded-lg px-2 py-1.5 text-[10px] text-white outline-none focus:border-[#D4E655] [color-scheme:dark]" />
+                                                </div>
+                                            ) : (
+                                                <span className="text-[9px] font-bold text-gray-400 bg-white/5 px-2 py-1 rounded-md border border-white/10 uppercase tracking-widest">Mes {mesDashboard}/{anioDashboard}</span>
+                                            )}
+                                        </div>
                                     </div>
 
                                     <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-[10px] font-black uppercase tracking-widest relative z-10">
                                         <div className="flex flex-col items-center justify-center gap-1 p-3 rounded-2xl bg-green-500/10 text-green-500 border border-green-500/20">
                                             <CheckCircle2 size={18} className="mb-1" />
-                                            <span className="text-lg leading-none">{miAsistencia.presentes}</span>
+                                            <span className="text-lg leading-none">{asistenciaAlumna.presentes}</span>
                                             <span className="opacity-70">Presentes</span>
                                         </div>
                                         <div className="flex flex-col items-center justify-center gap-1 p-3 rounded-2xl bg-red-500/10 text-red-500 border border-red-500/20">
                                             <XCircle size={18} className="mb-1" />
-                                            <span className="text-lg leading-none">{miAsistencia.ausentes}</span>
+                                            <span className="text-lg leading-none">{asistenciaAlumna.ausentes}</span>
                                             <span className="opacity-70">Ausentes</span>
                                         </div>
                                         <div className="flex flex-col items-center justify-center gap-1 p-3 rounded-2xl bg-yellow-500/10 text-yellow-500 border border-yellow-500/20">
                                             <Clock size={18} className="mb-1" />
-                                            <span className="text-lg leading-none">{miAsistencia.medias_faltas}</span>
+                                            <span className="text-lg leading-none">{asistenciaAlumna.medias_faltas}</span>
                                             <span className="opacity-70 text-center">Medias<br />Faltas</span>
                                         </div>
                                         <div className="flex flex-col items-center justify-center gap-1 p-3 rounded-2xl bg-blue-500/10 text-blue-500 border border-blue-500/20">
                                             <FileText size={18} className="mb-1" />
-                                            <span className="text-lg leading-none">{miAsistencia.justificadas}</span>
+                                            <span className="text-lg leading-none">{asistenciaAlumna.justificadas}</span>
                                             <span className="opacity-70">Justific.</span>
                                         </div>
                                         <div className="flex flex-col items-center justify-center gap-1 p-3 rounded-2xl bg-purple-500/10 text-purple-400 border border-purple-500/20 col-span-2 md:col-span-1">
                                             <Eye size={18} className="mb-1" />
-                                            <span className="text-lg leading-none">{miAsistencia.saf}</span>
+                                            <span className="text-lg leading-none">{asistenciaAlumna.saf}</span>
                                             <span className="opacity-70">S.A.F.</span>
                                         </div>
                                     </div>
+
+                                    {/* 🚀 DESGLOSE POR MATERIA (para que no aparezca todo mezclado) */}
+                                    {asistenciaAlumna.desglose && Object.keys(asistenciaAlumna.desglose).length > 0 && (
+                                        <div className="mt-6 pt-6 border-t border-white/5 relative z-10">
+                                            <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-3">Detalle por Materia</h4>
+                                            <div className="space-y-2">
+                                                {Object.entries(asistenciaAlumna.desglose).map(([nombreMateria, statsMat]: [string, any]) => (
+                                                    <div key={nombreMateria} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[#111] p-3 rounded-xl border border-white/5">
+                                                        <span className="text-[10px] font-bold text-white uppercase truncate flex-1 leading-tight pr-2">{nombreMateria}</span>
+                                                        <div className="flex items-center justify-end gap-2.5 shrink-0 text-[9px] font-black tracking-widest uppercase">
+                                                            {statsMat.presentes > 0 && <span className="text-green-500 flex items-center gap-0.5" title="Presentes"><CheckCircle2 size={10} /> {statsMat.presentes}</span>}
+                                                            {statsMat.ausentes > 0 && <span className="text-red-500 flex items-center gap-0.5" title="Ausentes"><XCircle size={10} /> {statsMat.ausentes}</span>}
+                                                            {statsMat.medias_faltas > 0 && <span className="text-yellow-500 flex items-center gap-0.5" title="Media Falta"><Clock size={10} /> {statsMat.medias_faltas}</span>}
+                                                            {statsMat.justificadas > 0 && <span className="text-blue-500 flex items-center gap-0.5" title="Justificadas"><FileText size={10} /> {statsMat.justificadas}</span>}
+                                                            {statsMat.saf > 0 && <span className="text-purple-400 flex items-center gap-0.5" title="SAF"><Eye size={10} /> {statsMat.saf}</span>}
+                                                            {statsMat.total > 0 && <span className="text-gray-500 flex items-center gap-0.5" title="Total clases">/ {statsMat.total}</span>}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6">
