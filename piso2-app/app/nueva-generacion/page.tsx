@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { ChevronLeft, Sparkles, Send, Users, Clock, Target, GraduationCap, User as UserIcon, Phone, Lightbulb } from 'lucide-react'
+import { ChevronLeft, Sparkles, Send, Users, Clock, Target, GraduationCap, User as UserIcon, Phone, Lightbulb, Instagram } from 'lucide-react'
 import { Montserrat } from 'next/font/google'
 
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['400', '700', '900'] })
@@ -14,6 +14,7 @@ export default function NuevaGeneracionPage() {
     const [form, setForm] = useState({
         nombre: '',
         contacto: '',
+        instagram: '',
         experiencia: '',
         nombreClase: '',
         propuesta: '',
@@ -26,8 +27,8 @@ export default function NuevaGeneracionPage() {
     const set = (k: keyof typeof form, v: string) => setForm(prev => ({ ...prev, [k]: v }))
 
     const handleEnviar = () => {
-        const { nombre, contacto, experiencia, nombreClase, propuesta, publico, tieneAlumnos, horarios } = form
-        if (!nombre.trim() || !contacto.trim() || !experiencia.trim() || !nombreClase.trim() || !propuesta.trim() || !publico.trim() || !tieneAlumnos || !horarios.trim()) {
+        const { nombre, contacto, instagram, experiencia, nombreClase, propuesta, publico, tieneAlumnos, horarios } = form
+        if (!nombre.trim() || !contacto.trim() || !instagram.trim() || !experiencia.trim() || !nombreClase.trim() || !propuesta.trim() || !publico.trim() || !tieneAlumnos || !horarios.trim()) {
             setError('Completá todos los campos antes de enviar.')
             return
         }
@@ -36,7 +37,8 @@ export default function NuevaGeneracionPage() {
         const mensaje =
             `*NUEVA GENERACIÓN — Propuesta para dar clases en Piso 2*\n\n` +
             `👤 *Nombre:* ${nombre}\n` +
-            `📱 *Contacto:* ${contacto}\n\n` +
+            `📱 *Contacto:* ${contacto}\n` +
+            `📷 *Instagram:* ${instagram}\n\n` +
             `🎓 *Experiencia / Formación:*\n${experiencia}\n\n` +
             `💡 *Clase propuesta:* ${nombreClase}\n${propuesta}\n\n` +
             `🎯 *Público objetivo:* ${publico}\n\n` +
@@ -87,7 +89,13 @@ export default function NuevaGeneracionPage() {
 
                     <div>
                         <label className={labelClass}><Phone size={12} /> Contacto</label>
-                        <input className={inputClass} value={form.contacto} onChange={e => set('contacto', e.target.value)} placeholder="Teléfono / email / Instagram" />
+                        <input className={inputClass} value={form.contacto} onChange={e => set('contacto', e.target.value)} placeholder="Teléfono / email" />
+                    </div>
+
+                    <div>
+                        <label className={labelClass}><Instagram size={12} /> Instagram</label>
+                        <input className={inputClass} value={form.instagram} onChange={e => set('instagram', e.target.value)} placeholder="@tuusuario" />
+                        <p className="text-[10px] text-gray-500 mt-2 ml-1 leading-relaxed">⚠️ El perfil tiene que ser <span className="text-[#D4E655] font-bold">público</span> para que podamos verlo.</p>
                     </div>
 
                     <div>
