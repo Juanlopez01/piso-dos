@@ -411,7 +411,8 @@ export async function fetchGruposLiquidacionAction(mes: number, anio: number) {
         { data: movLiquidadas },
         { data: configsGrupos },
         { data: miembrosData },
-        { data: planesData }
+        { data: planesData },
+        { data: egresosProfeData }
     ] = await Promise.all([
         admin.from('companias').select('id, nombre').order('nombre'),
         admin.from('companias_pagos').select('compania_id, alumno_id, monto').eq('mes', mes).eq('anio', anio),
@@ -425,8 +426,30 @@ export async function fetchGruposLiquidacionAction(mes: number, anio: number) {
             .ilike('concepto', `%Liquidación Grupo | ID: % | Mes: ${mes}-${anio}%`),
         admin.from('configuraciones').select('clave, valor').ilike('clave', 'cuota_compania_%'),
         admin.from('perfiles_companias').select('compania_id, perfil_id, plan_id, perfil:profiles(id, porcentaje_beca_compania)'),
-        admin.from('companias_planes').select('id, precio_efvo')
+        admin.from('companias_planes').select('id, precio_efvo'),
+        // Pagos a docentes registrados por clase (egresos) en el mes liquidado
+        admin.from('caja_movimientos').select('concepto, monto, metodo_pago, created_at')
+            .eq('tipo', 'egreso')
+            .eq('origen_referencia', 'pago_profe_compania')
+            .gte('created_at', new Date(anio, mes - 1, 1).toISOString())
+            .lte('created_at', new Date(anio, mes, 0, 23, 59, 59, 999).toISOString())
     ])
+
+    // Egresos a docentes por compañía (parseados del concepto)
+    const egresosPorCompania: Record<string, { clase: string; fecha: string; monto: number; metodo: string }[]> = {}
+    egresosProfeData?.forEach((e: any) => {
+        const idMatch = e.concepto?.match(/Grupo:\s*([\w-]+)/)
+        const companiaId = idMatch?.[1]
+        if (!companiaId) return
+        const detMatch = e.concepto?.match(/Grupo:\s*[\w-]+\s*\|\s*(.+?)\s*\(([^)]*)\)\s*$/)
+        if (!egresosPorCompania[companiaId]) egresosPorCompania[companiaId] = []
+        egresosPorCompania[companiaId].push({
+            clase: detMatch?.[1]?.trim() || 'Clase',
+            fecha: detMatch?.[2] || '',
+            monto: Number(e.monto),
+            metodo: e.metodo_pago || 'efectivo'
+        })
+    })
 
     if (!companias) return []
 
@@ -495,12 +518,17 @@ export async function fetchGruposLiquidacionAction(mes: number, anio: number) {
                 const precioConBeca = precioEfvo * (1 - beca / 100)
                 return acc + Math.min(memberTotal as number, precioConBeca)
             }, 0)
+        const egresosProfe = egresosPorCompania[c.id] || []
+        const totalEgresosProfe = egresosProfe.reduce((acc, e) => acc + e.monto, 0)
+
         return {
             id: c.id,
             nombre: c.nombre,
             totalRecaudado,
             cantClases: clasesMes?.filter((cl: any) => cl.compania_id === c.id).length || 0,
-            yaLiquidado: liquidadasIds.has(c.id)
+            yaLiquidado: liquidadasIds.has(c.id),
+            egresosProfe,
+            totalEgresosProfe
         }
-    }).filter((g: any) => g.totalRecaudado > 0 || g.cantClases > 0)
+    }).filter((g: any) => g.totalRecaudado > 0 || g.cantClases > 0 || g.totalEgresosProfe > 0)
 }

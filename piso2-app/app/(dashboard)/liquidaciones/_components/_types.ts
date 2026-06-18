@@ -37,12 +37,21 @@ export type GrupoClaseLiquidacion = {
     cant_alumnos_total: number
 }
 
+export type EgresoProfe = {
+    clase: string
+    fecha: string
+    monto: number
+    metodo: string
+}
+
 export type GrupoRaw = {
     id: string
     nombre: string
     totalRecaudado: number
     cantClases: number
     yaLiquidado: boolean
+    egresosProfe?: EgresoProfe[]
+    totalEgresosProfe?: number
 }
 
 export type TransaccionVirtual = {
@@ -60,6 +69,7 @@ export type PozoData = {
     totalOnline: number
     totalPagosAdmin: number
     transfersBySede: Record<string, number>
+    pagosProfeDetalle?: { concepto: string; monto: number; metodo: string; fecha: string }[]
 }
 
 export type ClaseRanking = {

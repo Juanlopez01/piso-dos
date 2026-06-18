@@ -114,10 +114,11 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
 
     const { data: pagosProfeAdminData } = await supabase
         .from('caja_movimientos')
-        .select('monto')
+        .select('concepto, monto, metodo_pago, created_at')
         .eq('origen_referencia', 'pago_profe_admin')
         .gte('created_at', mesStart)
         .lt('created_at', mesEnd)
+        .order('created_at', { ascending: false })
 
     const liquidacionesPorProfe: Record<string, ProfeLiquidacion> = {}
     let totalGeneralPagar = 0
@@ -272,7 +273,13 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
             transfersBySede[sede] = (transfersBySede[sede] || 0) + t.monto
         }
     })
-    const pozoData = { totalRetiros, totalTransfCaja, totalOnline, totalPagosAdmin, transfersBySede }
+    const pagosProfeDetalle = (pagosProfeAdminData || []).map((p: any) => ({
+        concepto: p.concepto || 'Pago a profe',
+        monto: Number(p.monto),
+        metodo: p.metodo_pago || 'efectivo',
+        fecha: p.created_at
+    }))
+    const pozoData = { totalRetiros, totalTransfCaja, totalOnline, totalPagosAdmin, transfersBySede, pagosProfeDetalle }
 
     return { profesores: arrayProfes, totalGeneralPagar, totalGeneralRecaudado, transaccionesVirtuales, totalVirtual, rankingClases, reporteRecepcion, valorHoraConfig, pozoData }
 }
@@ -305,6 +312,7 @@ export default function AdminLiquidacionesPage() {
     const [modalPagoStaff, setModalPagoStaff] = useState<ModalPagoStaffState>({ isOpen: false, staff: null, monto: 0 })
     const [modalLiqGrupo, setModalLiqGrupo] = useState<ModalLiqGrupoState>({ isOpen: false, grupo: null, montoPagar: 0, destinatario: '' })
     const [modalPozo, setModalPozo] = useState(false)
+    const [verEgresosPozo, setVerEgresosPozo] = useState(false)
 
     const [valorHoraRecep, setValorHoraRecep] = useState<number>(0)
     const [guardandoValor, setGuardandoValor] = useState(false)
@@ -313,6 +321,7 @@ export default function AdminLiquidacionesPage() {
     const [gruposRaw, setGruposRaw] = useState<GrupoRaw[]>([])
     const [loadingGrupos, setLoadingGrupos] = useState(false)
     const [costoDocTheShow, setCostoDocTheShow] = useState(40000)
+    const [gastosTheShow, setGastosTheShow] = useState(0)
     const [coordFijaLiga, setCoordFijaLiga] = useState(25000)
     const [valorClaseLiga, setValorClaseLiga] = useState(6000)
     const [pagandoGrupoId, setPagandoGrupoId] = useState<string | null>(null)
@@ -337,7 +346,12 @@ export default function AdminLiquidacionesPage() {
 
         fetchGruposLiquidacionAction(Number(mm), Number(yyyy))
             .then(result => {
-                setGruposRaw(result as GrupoRaw[])
+                const grupos = result as GrupoRaw[]
+                setGruposRaw(grupos)
+                // Autocompletamos el costo de docentes de The Show con los pagos ya registrados ese mes
+                const show = grupos.find(g => g.nombre.toLowerCase().includes('the show'))
+                setCostoDocTheShow(show?.totalEgresosProfe || 0)
+                setGastosTheShow(0)
                 setLoadingGrupos(false)
             })
             .catch(() => setLoadingGrupos(false))
@@ -568,10 +582,37 @@ export default function AdminLiquidacionesPage() {
                                             <span className="text-xs font-bold text-gray-400 uppercase">Total Pozo</span>
                                             <span className="text-base font-black text-emerald-400">${pozoBruto.toLocaleString()}</span>
                                         </div>
-                                        <div className="flex justify-between items-center py-2 border-b border-white/5">
-                                            <span className="text-xs font-bold text-red-400 uppercase">Ya Pagado a Profes</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setVerEgresosPozo(v => !v)}
+                                            className="w-full flex justify-between items-center py-2 border-b border-white/5 text-left"
+                                            disabled={!pz.pagosProfeDetalle || pz.pagosProfeDetalle.length === 0}
+                                        >
+                                            <span className="text-xs font-bold text-red-400 uppercase flex items-center gap-1.5">
+                                                Ya Pagado a Profes
+                                                {pz.pagosProfeDetalle && pz.pagosProfeDetalle.length > 0 && (
+                                                    <span className="text-gray-500">{verEgresosPozo ? '▲' : '▼'}</span>
+                                                )}
+                                            </span>
                                             <span className="text-sm font-black text-red-400">-${pz.totalPagosAdmin.toLocaleString()}</span>
-                                        </div>
+                                        </button>
+
+                                        {verEgresosPozo && pz.pagosProfeDetalle && pz.pagosProfeDetalle.length > 0 && (
+                                            <div className="bg-[#111] border border-white/5 rounded-xl p-3 space-y-2 max-h-56 overflow-y-auto custom-scrollbar animate-in fade-in">
+                                                {pz.pagosProfeDetalle.map((e, i) => (
+                                                    <div key={i} className="flex justify-between items-start gap-3 text-[10px]">
+                                                        <div className="min-w-0">
+                                                            <p className="text-gray-300 font-bold truncate">{e.concepto}</p>
+                                                            <p className="text-gray-600 uppercase tracking-wider">
+                                                                {e.metodo}{e.fecha ? ` · ${format(new Date(e.fecha), 'd MMM', { locale: es })}` : ''}
+                                                            </p>
+                                                        </div>
+                                                        <span className="text-red-400 font-bold shrink-0">-${e.monto.toLocaleString()}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
                                         <div className="flex justify-between items-center py-3 bg-emerald-500/10 rounded-xl px-3 border border-emerald-500/20">
                                             <span className="text-xs font-black text-emerald-400 uppercase">Disponible</span>
                                             <span className="text-xl font-black text-emerald-400">${pozoDisponible.toLocaleString()}</span>
@@ -695,6 +736,8 @@ export default function AdminLiquidacionesPage() {
                         searchQuery={searchQuery}
                         costoDocTheShow={costoDocTheShow}
                         setCostoDocTheShow={setCostoDocTheShow}
+                        gastosTheShow={gastosTheShow}
+                        setGastosTheShow={setGastosTheShow}
                         coordFijaLiga={coordFijaLiga}
                         setCoordFijaLiga={setCoordFijaLiga}
                         valorClaseLiga={valorClaseLiga}

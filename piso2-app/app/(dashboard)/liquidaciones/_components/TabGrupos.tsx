@@ -1,5 +1,6 @@
 'use client'
-import { Loader2, Users, CheckCircle2, DollarSign } from 'lucide-react'
+import { useState } from 'react'
+import { Loader2, Users, CheckCircle2, DollarSign, ChevronDown, ChevronUp, TrendingUp, TrendingDown } from 'lucide-react'
 import type { GrupoRaw, ModalLiqGrupoState } from './_types'
 
 type Props = {
@@ -8,6 +9,8 @@ type Props = {
     searchQuery: string
     costoDocTheShow: number
     setCostoDocTheShow: (v: number) => void
+    gastosTheShow: number
+    setGastosTheShow: (v: number) => void
     coordFijaLiga: number
     setCoordFijaLiga: (v: number) => void
     valorClaseLiga: number
@@ -19,10 +22,13 @@ type Props = {
 export default function TabGrupos({
     gruposRaw, loadingGrupos, searchQuery,
     costoDocTheShow, setCostoDocTheShow,
+    gastosTheShow, setGastosTheShow,
     coordFijaLiga, setCoordFijaLiga,
     valorClaseLiga, setValorClaseLiga,
     pagandoGrupoId, setModalLiqGrupo
 }: Props) {
+    const [expandedId, setExpandedId] = useState<string | null>(null)
+
     if (loadingGrupos) {
         return (
             <div className="flex items-center justify-center py-20">
@@ -65,10 +71,10 @@ export default function TabGrupos({
                         glosa = `60% del pozo (Valor Efectivo) de $${grupo.totalRecaudado.toLocaleString()} para Franco y Eugenia.`
                         tipo = 'porcentaje'
                     } else if (nombreLow.includes('the show')) {
-                        const saldo = grupo.totalRecaudado - costoDocTheShow
+                        const saldo = grupo.totalRecaudado - costoDocTheShow - gastosTheShow
                         montoPagar = saldo > 0 ? saldo * 0.50 : 0
                         destinatario = 'Chiara'
-                        glosa = `Pozo efectivo $${grupo.totalRecaudado.toLocaleString()} − Docentes $${costoDocTheShow.toLocaleString()} = $${Math.max(0, saldo).toLocaleString()} → 50% para Chiara.`
+                        glosa = `Pozo efectivo $${grupo.totalRecaudado.toLocaleString()} − Docentes $${costoDocTheShow.toLocaleString()} − Gastos $${gastosTheShow.toLocaleString()} = $${Math.max(0, saldo).toLocaleString()} → 50% para Chiara.`
                         tipo = 'the_show'
                     } else if (nombreLow.includes('liga')) {
                         const costoDoc = grupo.cantClases * valorClaseLiga
@@ -111,15 +117,27 @@ export default function TabGrupos({
                                     <p className="text-[10px] text-gray-500 leading-relaxed mb-3">{glosa}</p>
 
                                     {tipo === 'the_show' && (
-                                        <div className="flex items-center gap-3 bg-[#111] p-2 rounded-lg border border-white/5 w-fit">
-                                            <label className="font-bold text-gray-400 uppercase tracking-wider text-[9px]">Costo Docentes:</label>
-                                            <span className="text-gray-500 text-xs">$</span>
-                                            <input
-                                                type="number"
-                                                value={costoDocTheShow}
-                                                onChange={e => setCostoDocTheShow(Number(e.target.value))}
-                                                className="bg-black border border-white/10 text-white rounded-lg px-2 py-1 font-black w-24 outline-none focus:border-emerald-500 text-xs"
-                                            />
+                                        <div className="flex flex-wrap items-center gap-3">
+                                            <div className="flex items-center gap-3 bg-[#111] p-2 rounded-lg border border-white/5 w-fit">
+                                                <label className="font-bold text-gray-400 uppercase tracking-wider text-[9px]">Costo Docentes:</label>
+                                                <span className="text-gray-500 text-xs">$</span>
+                                                <input
+                                                    type="number"
+                                                    value={costoDocTheShow}
+                                                    onChange={e => setCostoDocTheShow(Number(e.target.value))}
+                                                    className="bg-black border border-white/10 text-white rounded-lg px-2 py-1 font-black w-24 outline-none focus:border-emerald-500 text-xs"
+                                                />
+                                            </div>
+                                            <div className="flex items-center gap-3 bg-[#111] p-2 rounded-lg border border-white/5 w-fit">
+                                                <label className="font-bold text-gray-400 uppercase tracking-wider text-[9px]">Gastos:</label>
+                                                <span className="text-gray-500 text-xs">$</span>
+                                                <input
+                                                    type="number"
+                                                    value={gastosTheShow}
+                                                    onChange={e => setGastosTheShow(Number(e.target.value))}
+                                                    className="bg-black border border-white/10 text-white rounded-lg px-2 py-1 font-black w-24 outline-none focus:border-emerald-500 text-xs"
+                                                />
+                                            </div>
                                         </div>
                                     )}
 
@@ -169,6 +187,53 @@ export default function TabGrupos({
                                         <span className="text-[9px] text-gray-500 font-bold uppercase">Sin monto</span>
                                     )}
                                 </div>
+                            </div>
+
+                            {/* DETALLE INGRESOS / EGRESOS */}
+                            <div className="mt-4 pt-4 border-t border-white/5">
+                                <button
+                                    onClick={() => setExpandedId(expandedId === grupo.id ? null : grupo.id)}
+                                    className="text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-white flex items-center gap-1.5 transition-colors"
+                                >
+                                    {expandedId === grupo.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                    Ver detalle (ingresos / egresos)
+                                </button>
+
+                                {expandedId === grupo.id && (
+                                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 animate-in fade-in">
+                                        {/* INGRESOS */}
+                                        <div className="bg-[#111] border border-white/5 rounded-xl p-3">
+                                            <p className="text-[9px] font-black uppercase tracking-widest text-emerald-400 mb-2 flex items-center gap-1"><TrendingUp size={12} /> Ingresos (Pozo)</p>
+                                            <div className="flex justify-between text-xs">
+                                                <span className="text-gray-400">Recaudado (valor efvo)</span>
+                                                <span className="font-black text-white">${grupo.totalRecaudado.toLocaleString()}</span>
+                                            </div>
+                                        </div>
+
+                                        {/* EGRESOS */}
+                                        <div className="bg-[#111] border border-white/5 rounded-xl p-3">
+                                            <p className="text-[9px] font-black uppercase tracking-widest text-red-400 mb-2 flex items-center gap-1"><TrendingDown size={12} /> Egresos (Docentes)</p>
+                                            {grupo.egresosProfe && grupo.egresosProfe.length > 0 ? (
+                                                <div className="space-y-1.5">
+                                                    {grupo.egresosProfe.map((e, i) => (
+                                                        <div key={i} className="flex justify-between items-center text-[10px] gap-2">
+                                                            <span className="text-gray-400 truncate">
+                                                                {e.clase}{e.fecha && <span className="text-gray-600"> ({e.fecha})</span>} · <span className="uppercase">{e.metodo}</span>
+                                                            </span>
+                                                            <span className="font-bold text-red-400 shrink-0">-${e.monto.toLocaleString()}</span>
+                                                        </div>
+                                                    ))}
+                                                    <div className="flex justify-between text-xs pt-1.5 mt-1.5 border-t border-white/5">
+                                                        <span className="text-gray-400 font-bold">Total egresos</span>
+                                                        <span className="font-black text-red-400">-${(grupo.totalEgresosProfe || 0).toLocaleString()}</span>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <p className="text-[10px] text-gray-600 italic">Sin pagos a docentes registrados este mes.</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )
