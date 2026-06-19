@@ -44,6 +44,7 @@ export async function proxy(request: NextRequest) {
             request.nextUrl.pathname.startsWith('/alquiler') ||
             request.nextUrl.pathname.startsWith('/pago-exito') ||
             request.nextUrl.pathname.startsWith('/streaming') ||
+            request.nextUrl.pathname.startsWith('/nueva-generacion') ||
             request.nextUrl.pathname.startsWith('/instalar') // 🚀 EL PASE VIP PARA MERCADO PAGO
 
         // 3. Si hay un error de token o no hay usuario, y quiere entrar a zona privada -> Al login
