@@ -285,17 +285,41 @@ export async function registrarPagoProfeCompaniaAction(
         return { success: false, error: 'Sin permisos' }
     }
 
-    const admin = getAdminClient()
-    const { error } = await admin.from('caja_movimientos').insert({
-        turno_id: null,
-        tipo: 'egreso',
-        concepto: `Pago Docentes | Clase: ${claseId} | Grupo: ${companiaId} | ${nombreClase} (${fecha})`,
-        monto,
-        metodo_pago: metodoPago,
-        origen_referencia: 'pago_profe_compania'
-    })
+    const concepto = `Pago Docentes | Clase: ${claseId} | Grupo: ${companiaId} | ${nombreClase} (${fecha})`
+    const esEfectivo = (metodoPago || '').toLowerCase() === 'efectivo'
 
-    if (error) return { success: false, error: error.message }
+    if (profile.rol === 'recepcion' && esEfectivo) {
+        // Recepción + efectivo: sale de la CAJA (turno abierto), descuenta el efectivo del cajón.
+        const { data: turno } = await supabase.from('caja_turnos')
+            .select('id')
+            .eq('usuario_id', session.user.id)
+            .eq('estado', 'abierta')
+            .maybeSingle()
+
+        if (!turno) return { success: false, error: '¡Caja Cerrada! Abrí tu turno para pagar en efectivo.' }
+
+        const { error } = await supabase.from('caja_movimientos').insert({
+            turno_id: turno.id,
+            tipo: 'egreso',
+            concepto,
+            monto,
+            metodo_pago: metodoPago,
+            origen_referencia: 'pago_profe_compania'
+        })
+        if (error) return { success: false, error: error.message }
+    } else {
+        // Admin (cualquier método) o transferencia: sale del POZO (sin turno).
+        const admin = getAdminClient()
+        const { error } = await admin.from('caja_movimientos').insert({
+            turno_id: null,
+            tipo: 'egreso',
+            concepto,
+            monto,
+            metodo_pago: metodoPago,
+            origen_referencia: 'pago_profe_compania'
+        })
+        if (error) return { success: false, error: error.message }
+    }
 
     revalidatePath(`/companias/${companiaId}`)
     revalidatePath('/caja')

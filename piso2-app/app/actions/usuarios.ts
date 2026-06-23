@@ -31,7 +31,21 @@ export async function cambiarRolAction(usuarioId: string, nuevoRol: string) {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
-        const { error } = await supabase.from('profiles').update({ rol: nuevoRol as any }).eq('id', usuarioId)
+        // Rol de quien ejecuta la acción
+        const { data: actor } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+        const rolActor = actor?.rol
+        if (!['admin', 'recepcion'].includes(rolActor || '')) throw new Error('No tenés permisos para cambiar roles')
+
+        // Recepción puede cambiar el rol de todos MENOS admin (ni tocar admins ni promover a admin)
+        if (rolActor === 'recepcion') {
+            const { data: objetivo } = await supabase.from('profiles').select('rol').eq('id', usuarioId).single()
+            if (objetivo?.rol === 'admin') throw new Error('No podés modificar el rol de un administrador')
+            if (nuevoRol === 'admin') throw new Error('No podés asignar el rol de administrador')
+        }
+
+        // Permisos ya validados → update con admin client (evita bloqueos de RLS)
+        const admin = getAdminClient()
+        const { error } = await admin.from('profiles').update({ rol: nuevoRol as any }).eq('id', usuarioId)
         if (error) throw new Error(error.message)
         revalidatePath('/usuarios')
         return { success: true }

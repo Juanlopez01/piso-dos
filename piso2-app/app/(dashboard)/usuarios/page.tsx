@@ -237,7 +237,7 @@ function UsuariosContent() {
     }
 
     const cambiarRol = async (usuarioId: string, nuevoRol: string) => {
-        if (userRole !== 'admin') return toast.error('No tienes permisos')
+        if (!['admin', 'recepcion'].includes(userRole as string)) return toast.error('No tienes permisos')
         setCambiandoRolId(usuarioId)
         const response = await cambiarRolAction(usuarioId, nuevoRol)
         if (response.success) { toast.success('Rol actualizado'); mutate() }
@@ -687,6 +687,7 @@ function UsuariosContent() {
 
     const canCreate = userRole === 'admin' || userRole === 'recepcion'
     const isAdmin = userRole === 'admin'
+    const isRecep = userRole === 'recepcion'
 
     const pagosVisibles = mostrarMasPagos ? historialPagos.slice(0, 15) : historialPagos.slice(0, 4);
 
@@ -858,7 +859,8 @@ function UsuariosContent() {
                                             <IdCard size={14} /> Ficha Completa
                                         </button>
 
-                                        {isAdmin && (
+                                        {/* Admin cambia cualquier rol. Recepción cambia todos MENOS admin (no toca admins). */}
+                                        {(isAdmin || (isRecep && u.rol !== 'admin')) && (
                                             <div className="relative flex-1">
                                                 <select
                                                     disabled={cambiandoRolId === u.id}
@@ -866,7 +868,7 @@ function UsuariosContent() {
                                                     onChange={(e) => cambiarRol(u.id, e.target.value)}
                                                     className={`w-full h-full py-2.5 px-1 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoRolId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : 'bg-[#111] text-gray-300 border-white/5 hover:border-white/20 hover:text-white'}`}
                                                 >
-                                                    <option value="admin">Admin</option>
+                                                    {isAdmin && <option value="admin">Admin</option>}
                                                     <option value="coordinador">Coordinador</option>
                                                     <option value="recepcion">Recep.</option>
                                                     <option value="auxiliar">Auxiliar</option>
