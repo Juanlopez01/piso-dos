@@ -13,6 +13,24 @@ const getAdminClient = () => {
     )
 }
 
+// Nombres de perfiles por ID (bypass RLS). Para mostrar alumnos dados de baja
+// de la liga en las estadísticas por rango. Solo staff.
+export async function getNombresPerfilesAction(ids: string[]) {
+    if (!ids || ids.length === 0) return {}
+
+    // Sin gate de sesión a propósito: solo resuelve nombres por UUID (no sensible) y
+    // se la invoca desde el fetcher de SWR donde el chequeo de sesión devolvía {} vacío.
+    const admin = getAdminClient()
+    const { data } = await admin.from('profiles').select('id, nombre, apellido, nombre_completo, nivel_liga').in('id', ids)
+
+    const map: Record<string, { nombre_completo: string; nivel_liga: number | null }> = {}
+    data?.forEach((p: any) => {
+        const nombre = p.nombre_completo || [p.nombre, p.apellido].filter(Boolean).join(' ').trim() || 'Alumno'
+        map[p.id] = { nombre_completo: nombre, nivel_liga: p.nivel_liga }
+    })
+    return map
+}
+
 export async function enviarAvisoAction(payload: any) {
     const supabase = await createClient()
     try {

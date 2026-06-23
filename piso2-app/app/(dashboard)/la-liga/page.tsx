@@ -25,7 +25,8 @@ import {
     guardarEvaluacionAction,
     actualizarPrecioGlobalAction,
     asignarBecaAction,
-    inscribirPadronLigaAction
+    inscribirPadronLigaAction,
+    getNombresPerfilesAction
 } from '@/app/actions/liga'
 
 import {
@@ -319,7 +320,25 @@ const fetcherAsistenciasRango = async (uid: string, desde: string, hasta: string
 
     if (clases && clases.length > 0) {
         const ids = clases.map((c: any) => c.id)
-        const { data: insc } = await supabase.from('inscripciones').select('user_id, clase_id, estado_asistencia').in('clase_id', ids)
+
+        // Paginamos porque Supabase devuelve máx 1000 filas por consulta.
+        // En rangos largos (ej: marzo → hoy) hay muchas más inscripciones y se truncaban.
+        const insc: any[] = []
+        const PAGE = 1000
+        let from = 0
+        while (true) {
+            const { data: pagina } = await supabase
+                .from('inscripciones')
+                .select('user_id, clase_id, estado_asistencia')
+                .in('clase_id', ids)
+                .order('id', { ascending: true })
+                .range(from, from + PAGE - 1)
+            if (!pagina || pagina.length === 0) break
+            insc.push(...pagina)
+            if (pagina.length < PAGE) break
+            from += PAGE
+        }
+
         const ahora = new Date().getTime()
         const keyMap: Record<string, keyof Estadisticas> = {
             presente: 'presentes', ausente: 'ausentes', justificada: 'justificadas', saf: 'saf', media_falta: 'medias_faltas'
@@ -344,7 +363,19 @@ const fetcherAsistenciasRango = async (uid: string, desde: string, hasta: string
         })
     }
 
-    return { statsAsistencia, miAsistencia: statsAsistencia[uid] || vacio() }
+    // Para staff: traemos nombre y nivel de TODOS los que tienen asistencia en el rango,
+    // así podemos mostrar también a los que ya no están en la liga (nivel_liga null).
+    // Traemos los nombres con admin client (bypass RLS), porque a los alumnos dados
+    // de baja de la liga el staff no los puede leer con una query directa.
+    let perfilesRango: Record<string, { nombre_completo: string; nivel_liga: number | null }> = {}
+    if (isStaff) {
+        const idsConAsistencia = Object.keys(statsAsistencia)
+        if (idsConAsistencia.length > 0) {
+            perfilesRango = await getNombresPerfilesAction(idsConAsistencia)
+        }
+    }
+
+    return { statsAsistencia, miAsistencia: statsAsistencia[uid] || vacio(), perfilesRango }
 }
 
 function LaLigaContent() {
@@ -705,6 +736,25 @@ function LaLigaContent() {
         ? Object.values(statsStaffRango || {}).some((s) => (s.total || 0) > 0)
         : clasesPasadasMes > 0
 
+    // Lista de estadísticas: alumnos actuales primero; al final, los que tienen
+    // asistencia en el rango pero ya no están en la liga (con cartelito).
+    const perfilesRango: Record<string, { nombre_completo: string; nivel_liga: number | null }> = (rangoActivo ? rangoData?.perfilesRango : null) || {}
+    const idsActuales = new Set(allStudents.map((s: any) => s.id))
+    const exLigaStudents = rangoActivo
+        ? Object.keys(statsStaffRango || {})
+            .filter(id => !idsActuales.has(id))
+            .map(id => ({
+                id,
+                nombre_completo: perfilesRango[id]?.nombre_completo || 'Alumno',
+                nivel_liga: perfilesRango[id]?.nivel_liga ?? null,
+                exLiga: true
+            }))
+        : []
+    const listaEstadisticas: any[] = [
+        ...allStudents.map((s: any) => ({ ...s, exLiga: false })),
+        ...exLigaStudents
+    ]
+
     const filteredStudents = allStudents.filter((s: any) => {
         const matchesSearch = (s.nombre_completo || '').toLowerCase().includes(searchStudent.toLowerCase())
         const matchesLevel = levelFilter === 'todos' ? true : String(s.nivel_liga) === levelFilter
@@ -937,7 +987,7 @@ function LaLigaContent() {
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {allStudents.map(m => {
+                                    {listaEstadisticas.map(m => {
                                         const est = rangoActivo ? (statsStaffRango?.[m.id] || statsVacio) : m.estadisticas;
                                         const total = est?.total || 0;
                                         const presentes = est?.presentes || 0;
@@ -953,12 +1003,18 @@ function LaLigaContent() {
                                             <div
                                                 key={m.id}
                                                 onClick={() => setExpandedStudentStats(isExpanded ? null : m.id)}
-                                                className="bg-[#111] p-4 rounded-xl border border-white/5 flex flex-col gap-4 hover:border-white/20 transition-all group cursor-pointer overflow-hidden"
+                                                className={`bg-[#111] p-4 rounded-xl border flex flex-col gap-4 hover:border-white/20 transition-all group cursor-pointer overflow-hidden ${m.exLiga ? 'border-orange-500/30 opacity-80' : 'border-white/5'}`}
                                             >
                                                 <div className="flex justify-between items-center border-b border-white/5 pb-3">
                                                     <div>
                                                         <h4 className="font-bold text-sm uppercase text-white truncate max-w-[200px]">{m.nombre_completo}</h4>
-                                                        <p className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest mt-0.5">Nivel {m.nivel_liga}</p>
+                                                        {m.exLiga ? (
+                                                            <span className="inline-block text-[8px] font-black uppercase tracking-widest mt-1 px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 border border-orange-500/30">
+                                                                Ya no está en la Liga
+                                                            </span>
+                                                        ) : (
+                                                            <p className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest mt-0.5">Nivel {m.nivel_liga}</p>
+                                                        )}
                                                     </div>
                                                     <div className="flex items-center gap-3">
                                                         <span className={`text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest shrink-0 ${porcentaje >= 60 ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
