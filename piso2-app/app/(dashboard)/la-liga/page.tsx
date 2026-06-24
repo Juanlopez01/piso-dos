@@ -296,10 +296,13 @@ const boundsDelMes = (mes: number, anio: number) => {
 // 🚀 Fetcher independiente: calcula asistencias para un RANGO de fechas arbitrario.
 // No toca el fetcher mensual (cuotas/clases/evaluaciones siguen por mes).
 const fetcherAsistenciasRango = async (uid: string, desde: string, hasta: string, supabase: any) => {
-    const { data: profile } = await supabase.from('profiles').select('rol, nivel_liga, nivel').eq('id', uid).single()
+    const { data: profile } = await supabase.from('profiles').select('rol, nivel_liga').eq('id', uid).single()
     const isStaff = ['admin', 'recepcion', 'auxiliar', 'coordinador', 'profesor'].includes(profile?.rol)
-    const nivelAlumno = profile?.nivel_liga || profile?.nivel || 1
+    const nivelAlumno = profile?.nivel_liga || 1
 
+    const vacio = (): Estadisticas => ({ presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0, desglose: {} })
+
+    // Mismo cálculo client-side que "Por Mes" (que funciona). Staff: TODOS los niveles.
     const desdeIso = new Date(`${desde}T00:00:00`).toISOString()
     const hastaIso = new Date(`${hasta}T23:59:59`).toISOString()
 
@@ -315,7 +318,6 @@ const fetcherAsistenciasRango = async (uid: string, desde: string, hasta: string
 
     const { data: clases } = await q
 
-    const vacio = (): Estadisticas => ({ presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0, desglose: {} })
     const statsAsistencia: Record<string, Estadisticas> = {}
 
     if (clases && clases.length > 0) {
@@ -363,16 +365,11 @@ const fetcherAsistenciasRango = async (uid: string, desde: string, hasta: string
         })
     }
 
-    // Para staff: traemos nombre y nivel de TODOS los que tienen asistencia en el rango,
-    // así podemos mostrar también a los que ya no están en la liga (nivel_liga null).
-    // Traemos los nombres con admin client (bypass RLS), porque a los alumnos dados
-    // de baja de la liga el staff no los puede leer con una query directa.
+    // Nombres de los ex-liga (nivel_liga null) que el cliente no puede leer por RLS.
     let perfilesRango: Record<string, { nombre_completo: string; nivel_liga: number | null }> = {}
     if (isStaff) {
         const idsConAsistencia = Object.keys(statsAsistencia)
-        if (idsConAsistencia.length > 0) {
-            perfilesRango = await getNombresPerfilesAction(idsConAsistencia)
-        }
+        if (idsConAsistencia.length > 0) perfilesRango = await getNombresPerfilesAction(idsConAsistencia)
     }
 
     return { statsAsistencia, miAsistencia: statsAsistencia[uid] || vacio(), perfilesRango }

@@ -31,6 +31,73 @@ export async function getNombresPerfilesAction(ids: string[]) {
     return map
 }
 
+// Estadísticas de asistencia por RANGO para staff, calculadas con admin client
+// (bypass RLS): garantiza que aparezcan TODOS los niveles sin importar el rol del que mira.
+export async function getAsistenciasRangoStaffAction(desde: string, hasta: string) {
+    // Sin gate de sesión a propósito: llamada desde el fetcher de SWR, donde el chequeo
+    // de sesión devolvía {} vacío (mismo problema que getNombresPerfilesAction).
+    // Solo devuelve estadísticas de asistencia por fecha (no sensible).
+    const admin = getAdminClient()
+    const desdeIso = new Date(`${desde}T00:00:00`).toISOString()
+    const hastaIso = new Date(`${hasta}T23:59:59`).toISOString()
+
+    const { data: clases } = await admin.from('clases')
+        .select('id, nombre, inicio')
+        .eq('es_la_liga', true)
+        .gte('inicio', desdeIso)
+        .lte('inicio', hastaIso)
+        .neq('estado', 'cancelada')
+
+    const stats: Record<string, any> = {}
+    if (clases && clases.length > 0) {
+        const ids = clases.map((c: any) => c.id)
+        const claseMap: Record<string, any> = Object.fromEntries(clases.map((c: any) => [c.id, c]))
+
+        const insc: any[] = []
+        let from = 0
+        while (true) {
+            const { data: pagina } = await admin.from('inscripciones')
+                .select('user_id, clase_id, estado_asistencia')
+                .in('clase_id', ids)
+                .order('id', { ascending: true })
+                .range(from, from + 999)
+            if (!pagina || pagina.length === 0) break
+            insc.push(...pagina)
+            if (pagina.length < 1000) break
+            from += 1000
+        }
+
+        const ahora = Date.now()
+        const keyMap: Record<string, string> = { presente: 'presentes', ausente: 'ausentes', justificada: 'justificadas', saf: 'saf', media_falta: 'medias_faltas' }
+
+        insc.forEach((i: any) => {
+            const c = claseMap[i.clase_id]
+            if (!c || new Date(c.inicio).getTime() > ahora || !i.user_id) return
+            const mat = c.nombre
+            if (!stats[i.user_id]) stats[i.user_id] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0, desglose: {} }
+            if (!stats[i.user_id].desglose[mat]) stats[i.user_id].desglose[mat] = { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0 }
+            stats[i.user_id].total++
+            stats[i.user_id].desglose[mat].total++
+            const k = keyMap[i.estado_asistencia]
+            if (k) { stats[i.user_id][k]++; stats[i.user_id].desglose[mat][k]++ }
+        })
+    }
+
+    const ids = Object.keys(stats)
+    const perfilesRango: Record<string, { nombre_completo: string; nivel_liga: number | null }> = {}
+    if (ids.length > 0) {
+        const { data: perfiles } = await admin.from('profiles').select('id, nombre, apellido, nombre_completo, nivel_liga').in('id', ids)
+        perfiles?.forEach((p: any) => {
+            perfilesRango[p.id] = {
+                nombre_completo: p.nombre_completo || [p.nombre, p.apellido].filter(Boolean).join(' ').trim() || 'Alumno',
+                nivel_liga: p.nivel_liga
+            }
+        })
+    }
+
+    return { statsAsistencia: stats, perfilesRango }
+}
+
 export async function enviarAvisoAction(payload: any) {
     const supabase = await createClient()
     try {
