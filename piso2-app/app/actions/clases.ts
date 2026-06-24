@@ -3,6 +3,7 @@
 
 // 👇 IMPORTAMOS EL LECTOR DE COOKIES
 import { createClient } from '@/utils/supabase/server-helper'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { v4 as uuidv4 } from 'uuid'
 import {
     startOfMonth,
@@ -15,6 +16,48 @@ import {
     addDays,
 } from 'date-fns'
 import { revalidatePath } from 'next/cache'
+
+const getAdminClient = () => createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+)
+
+// Cancela una clase (o toda la serie) y BORRA la asistencia marcada en esas clases,
+// para que un feriado/clase cancelada no le deje faltas a nadie.
+export async function cancelarClaseAction({ claseId, serieId }: { claseId?: string; serieId?: string }) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
+
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (!perfil || !['admin', 'recepcion', 'auxiliar', 'coordinador', 'profesor'].includes(perfil.rol)) {
+        return { success: false, error: 'Sin permisos' }
+    }
+
+    const admin = getAdminClient()
+
+    // IDs de las clases a cancelar (una sola o toda la serie)
+    let claseIds: string[] = []
+    if (serieId) {
+        const { data } = await admin.from('clases').select('id').eq('serie_id', serieId)
+        claseIds = (data || []).map((c: any) => c.id)
+    } else if (claseId) {
+        claseIds = [claseId]
+    }
+    if (claseIds.length === 0) return { success: false, error: 'No se encontró la clase a cancelar' }
+
+    // 1) Cancelar
+    const { error: errCancel } = await admin.from('clases').update({ estado: 'cancelada' }).in('id', claseIds)
+    if (errCancel) return { success: false, error: errCancel.message }
+
+    // 2) Limpiar la asistencia de esas clases (sin falta ni presente)
+    await admin.from('inscripciones').update({ estado_asistencia: null, presente: false }).in('clase_id', claseIds)
+
+    revalidatePath('/calendario')
+    revalidatePath('/la-liga')
+    return { success: true }
+}
 
 type EditarClaseInput = {
     id: string

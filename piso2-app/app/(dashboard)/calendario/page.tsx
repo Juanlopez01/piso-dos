@@ -2,7 +2,7 @@
 
 import { createClient } from '@/utils/supabase/client'
 import { useState, useEffect } from 'react'
-import { crearClasesAction, duplicarMesAction } from '@/app/actions/clases'
+import { crearClasesAction, duplicarMesAction, cancelarClaseAction } from '@/app/actions/clases'
 import { optimizeImage } from '@/utils/optimizeImage'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
@@ -484,16 +484,11 @@ export default function CalendarioPage() {
         const toastId = toast.loading('Eliminando...')
 
         try {
-            let err;
-            if (option === 'single') {
-                const { error } = await supabase.from('clases').update({ estado: 'cancelada' }).eq('id', deleteTarget.id)
-                err = error;
-            } else {
-                const { error } = await supabase.from('clases').update({ estado: 'cancelada' }).eq('serie_id', deleteTarget.serieId as string)
-                err = error;
-            }
+            const res = option === 'single'
+                ? await cancelarClaseAction({ claseId: deleteTarget.id })
+                : await cancelarClaseAction({ serieId: deleteTarget.serieId as string })
 
-            if (err) throw err
+            if (!res.success) throw new Error(res.error)
 
             toast.success('Clase cancelada/eliminada', { id: toastId })
             setDeleteTarget(null)
