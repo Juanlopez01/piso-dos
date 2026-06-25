@@ -40,7 +40,8 @@ function NotificacionItem({
     onClick: (id: string, leido: boolean, link: string | null) => void
 }) {
     const [expandido, setExpandido] = useState(false)
-    const esMensajeLargo = n.mensaje.length > 180
+    const mensaje = n.mensaje ?? ''
+    const esMensajeLargo = mensaje.length > 180
 
     return (
         <div
@@ -61,7 +62,7 @@ function NotificacionItem({
 
                     {/* 🚀 ACÁ ESTÁ LA MAGIA DEL TEXTO: pre-wrap para saltos de línea, line-clamp para resumir */}
                     <div className={`text-sm leading-relaxed mb-2 whitespace-pre-wrap ${n.leido ? 'text-gray-500' : 'text-gray-300'} ${!expandido ? 'line-clamp-4' : ''}`}>
-                        {n.mensaje}
+                        {mensaje}
                     </div>
 
                     {/* BOTÓN VER MÁS SOLO SI ES LARGO */}
@@ -78,7 +79,9 @@ function NotificacionItem({
                     )}
 
                     <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">
-                        {formatDistanceToNow(new Date(n.created_at), { addSuffix: true, locale: es })}
+                        {n.created_at && !isNaN(new Date(n.created_at).getTime())
+                            ? formatDistanceToNow(new Date(n.created_at), { addSuffix: true, locale: es })
+                            : ''}
                     </p>
                 </div>
             </div>
