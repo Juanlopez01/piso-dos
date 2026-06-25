@@ -22,7 +22,9 @@ export const movimientoSchema = z.object({
 export const editarMovimientoSchema = z.object({
     movimientoId: z.string().uuid(),
     concepto: z.string().min(1).max(500),
-    monto: z.number().positive().max(10_000_000),
+    // Permitimos 0 al editar: sirve para neutralizar un movimiento que en realidad
+    // se hizo por fuera de la caja (ej: transferencia que hizo otra persona).
+    monto: z.number().nonnegative('El monto no puede ser negativo').max(10_000_000),
     metodo_pago: z.string().max(50),
     tipo: z.enum(['ingreso', 'egreso']),
     turno_id: z.string().uuid(),
