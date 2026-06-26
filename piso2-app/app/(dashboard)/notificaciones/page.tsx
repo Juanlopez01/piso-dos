@@ -40,7 +40,10 @@ function NotificacionItem({
     onClick: (id: string, leido: boolean, link: string | null) => void
 }) {
     const [expandido, setExpandido] = useState(false)
-    const mensaje = n.mensaje ?? ''
+    // Fallback: el trigger de "Nueva Inscripción" crea la notif sin mensaje.
+    const mensaje = (n.mensaje && n.mensaje.trim())
+        ? n.mensaje
+        : (n.titulo === 'Nueva Inscripción' ? 'Un alumno se anotó a una de tus clases.' : '')
     const esMensajeLargo = mensaje.length > 180
 
     return (
