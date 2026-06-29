@@ -620,7 +620,7 @@ export default function ClaseDetallePage() {
                                                             error: (err) => `Error: ${err}`
                                                         });
                                                     }}
-                                                    className="bg-red-500 text-white text-[9px] md:text-[10px] font-black uppercase px-2 py-1 rounded flex items-center gap-1 animate-pulse hover:scale-105 transition-transform"
+                                                    className="bg-red-500 text-white text-[9px] md:text-[10px] font-black uppercase px-2 py-1 rounded flex items-center gap-1 hover:scale-105 transition-transform"
                                                     title="Cobrar deuda parcial o total"
                                                 >
                                                     <AlertTriangle size={12} /> Adeuda
