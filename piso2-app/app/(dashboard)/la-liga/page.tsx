@@ -26,7 +26,9 @@ import {
     actualizarPrecioGlobalAction,
     asignarBecaAction,
     inscribirPadronLigaAction,
-    getNombresPerfilesAction
+    getNombresPerfilesAction,
+    guardarCuotaLigaMesAction,
+    eliminarCuotaLigaMesAction
 } from '@/app/actions/liga'
 
 import {
@@ -178,7 +180,16 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
     ])
     preciosLiga = config || []
 
+    // 🚀 Override de cuota por mes (si existe fila para este mes/nivel, pisa el precio global)
+    const { data: cuotasMes } = await supabase.from('liga_cuotas')
+        .select('nivel, precio_transf, precio_efvo')
+        .eq('anio', anioActual).eq('mes', mesActual)
+    const cuotaMesOverride: Record<number, { transf: number; efvo: number }> = {}
+    cuotasMes?.forEach((c: any) => { cuotaMesOverride[c.nivel] = { transf: Number(c.precio_transf), efvo: Number(c.precio_efvo) } })
+
     const getPrecioBase = (nivel: number, metodo: 'efvo' | 'transf') => {
+        const ov = cuotaMesOverride[nivel]
+        if (ov) return metodo === 'transf' ? ov.transf : ov.efvo
         const p = preciosLiga.find(c => c.clave === `cuota_liga_${nivel}_${metodo}`)
         if (metodo === 'transf') return p ? Number(p.valor) : 15000
         return p ? Number(p.valor) : 13500
@@ -281,7 +292,7 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
         profile, isStaff, canManage, legajoCompleto, avisos: avisos || [],
         materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo,
         allStudents, preciosLiga, criterios: criteriosData || [],
-        clasesDelMes,
+        clasesDelMes, cuotaMesOverride,
         miAsistencia: statsAsistencia[uid] || { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0, desglose: {} }
     }
 }
@@ -406,6 +417,8 @@ function LaLigaContent() {
     const [preciosEdit, setPreciosEdit] = useState<Record<string, string>>({})
     const [guardandoPrecios, setGuardandoPrecios] = useState(false)
     const [nuevoCriterio, setNuevoCriterio] = useState('')
+    const [cuotaMesEdit, setCuotaMesEdit] = useState({ n1t: '', n1e: '', n2t: '', n2e: '' })
+    const [guardandoCuotaMes, setGuardandoCuotaMes] = useState(false)
 
     const [becaModalOpen, setBecaModalOpen] = useState(false)
     const [selectedAlumnoBeca, setSelectedAlumnoBeca] = useState<any>(null)
@@ -484,6 +497,22 @@ function LaLigaContent() {
         }
     }, [data?.preciosLiga])
 
+    // Prefill del editor de cuota del mes: usa el override si existe, si no el precio global
+    useEffect(() => {
+        if (!data) return
+        const ov: any = data.cuotaMesOverride || {}
+        const glob = (nivel: number, metodo: string) => {
+            const c = data.preciosLiga?.find((x: any) => x.clave === `cuota_liga_${nivel}_${metodo}`)
+            return c ? String(c.valor) : ''
+        }
+        setCuotaMesEdit({
+            n1t: ov[1] ? String(ov[1].transf) : glob(1, 'transf'),
+            n1e: ov[1] ? String(ov[1].efvo) : glob(1, 'efvo'),
+            n2t: ov[2] ? String(ov[2].transf) : glob(2, 'transf'),
+            n2e: ov[2] ? String(ov[2].efvo) : glob(2, 'efvo'),
+        })
+    }, [data?.cuotaMesOverride, data?.preciosLiga])
+
     const handleRegistrarPago = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!alumnoPago || !montoPago || Number(montoPago) <= 0) return
@@ -542,6 +571,35 @@ function LaLigaContent() {
             toast.error("Error de conexión al guardar precios")
         } finally {
             setGuardandoPrecios(false)
+        }
+    }
+
+    const handleGuardarCuotaMes = async () => {
+        setGuardandoCuotaMes(true)
+        try {
+            const r1 = await guardarCuotaLigaMesAction(anioDashboard, mesDashboard, 1, Number(cuotaMesEdit.n1t) || 0, Number(cuotaMesEdit.n1e) || 0)
+            const r2 = await guardarCuotaLigaMesAction(anioDashboard, mesDashboard, 2, Number(cuotaMesEdit.n2t) || 0, Number(cuotaMesEdit.n2e) || 0)
+            if (r1.success && r2.success) {
+                toast.success(`Cuota de ${mesDashboard}/${anioDashboard} guardada`)
+                mutate()
+            } else {
+                toast.error(r1.error || r2.error || 'Error al guardar')
+            }
+        } finally {
+            setGuardandoCuotaMes(false)
+        }
+    }
+
+    const handleQuitarCuotaMes = async () => {
+        if (!confirm(`¿Volver al precio por defecto para ${mesDashboard}/${anioDashboard}? Se quita el valor especial de este mes.`)) return
+        setGuardandoCuotaMes(true)
+        try {
+            await eliminarCuotaLigaMesAction(anioDashboard, mesDashboard, 1)
+            await eliminarCuotaLigaMesAction(anioDashboard, mesDashboard, 2)
+            toast.success('Volvió al precio por defecto')
+            mutate()
+        } finally {
+            setGuardandoCuotaMes(false)
         }
     }
 
@@ -869,10 +927,66 @@ function LaLigaContent() {
 
                 {/* --- VISTA CONFIGURACIÓN (PRECIOS Y CRITERIOS) --- */}
                 {!['auxiliar', 'coordinador'].includes(userRole || '') && canManage && adminTab === 'precios' && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-bottom-4">
+                    <div className="space-y-8 animate-in slide-in-from-bottom-4">
+
+                        {/* 🚀 CUOTA DE ESTE MES (override del precio por defecto) */}
+                        <div className="bg-[#09090b] border border-[#D4E655]/20 rounded-3xl p-6 md:p-8 shadow-xl relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-40 h-40 bg-[#D4E655]/10 rounded-full blur-3xl pointer-events-none" />
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2 relative z-10">
+                                <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2">
+                                    <CalendarDays className="text-[#D4E655]" /> Cuota de {['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'][mesDashboard]} {anioDashboard}
+                                </h3>
+                                {data?.cuotaMesOverride && Object.keys(data.cuotaMesOverride).length > 0 && (
+                                    <span className="text-[9px] font-black uppercase tracking-widest bg-[#D4E655] text-black px-2 py-1 rounded shrink-0">Precio especial activo</span>
+                                )}
+                            </div>
+                            <p className="text-xs text-gray-500 mb-6 relative z-10">Pisa el precio por defecto <strong>solo para este mes</strong> (ej: meses cortos). Cambiá el mes arriba para configurar otro. Si no cargás nada, se usa el arancel general.</p>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 relative z-10">
+                                <div className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-3">
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Nivel 1</p>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[9px] font-bold text-gray-500 uppercase">Transf.</label>
+                                            <div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span><input type="number" value={cuotaMesEdit.n1t} onChange={e => setCuotaMesEdit({ ...cuotaMesEdit, n1t: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg py-2.5 pl-7 pr-2 text-white font-bold text-sm outline-none focus:border-[#D4E655]" /></div>
+                                        </div>
+                                        <div>
+                                            <label className="text-[9px] font-bold text-[#D4E655] uppercase">Efvo.</label>
+                                            <div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span><input type="number" value={cuotaMesEdit.n1e} onChange={e => setCuotaMesEdit({ ...cuotaMesEdit, n1e: e.target.value })} className="w-full bg-[#111] border border-[#D4E655]/30 rounded-lg py-2.5 pl-7 pr-2 text-[#D4E655] font-bold text-sm outline-none focus:border-[#D4E655]" /></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-3">
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Nivel 2</p>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[9px] font-bold text-gray-500 uppercase">Transf.</label>
+                                            <div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span><input type="number" value={cuotaMesEdit.n2t} onChange={e => setCuotaMesEdit({ ...cuotaMesEdit, n2t: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg py-2.5 pl-7 pr-2 text-white font-bold text-sm outline-none focus:border-[#D4E655]" /></div>
+                                        </div>
+                                        <div>
+                                            <label className="text-[9px] font-bold text-[#D4E655] uppercase">Efvo.</label>
+                                            <div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span><input type="number" value={cuotaMesEdit.n2e} onChange={e => setCuotaMesEdit({ ...cuotaMesEdit, n2e: e.target.value })} className="w-full bg-[#111] border border-[#D4E655]/30 rounded-lg py-2.5 pl-7 pr-2 text-[#D4E655] font-bold text-sm outline-none focus:border-[#D4E655]" /></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row gap-3 mt-6 relative z-10">
+                                <button onClick={handleGuardarCuotaMes} disabled={guardandoCuotaMes} className="flex-1 bg-[#D4E655] text-black font-black uppercase py-4 rounded-xl hover:bg-white transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                    {guardandoCuotaMes ? <Loader2 className="animate-spin" size={16} /> : <><Save size={16} /> Guardar cuota de este mes</>}
+                                </button>
+                                {data?.cuotaMesOverride && Object.keys(data.cuotaMesOverride).length > 0 && (
+                                    <button onClick={handleQuitarCuotaMes} disabled={guardandoCuotaMes} className="bg-white/5 text-gray-400 border border-white/10 font-bold uppercase py-4 px-6 rounded-xl hover:bg-white/10 hover:text-white transition-all text-xs tracking-widest">
+                                        Usar precio por defecto
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="bg-[#09090b] border border-white/5 rounded-3xl p-8 shadow-xl">
                             <h3 className="text-xl font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-8">
-                                <Settings2 className="text-[#D4E655]" /> Configurar Aranceles
+                                <Settings2 className="text-[#D4E655]" /> Configurar Aranceles <span className="text-[9px] text-gray-500 normal-case tracking-normal">(por defecto)</span>
                             </h3>
 
                             <div className="space-y-6">
@@ -950,6 +1064,7 @@ function LaLigaContent() {
                                 ))}
                                 {criterios.length === 0 && <p className="text-xs text-gray-600 italic">No hay ítems cargados.</p>}
                             </div>
+                        </div>
                         </div>
                     </div>
                 )}
@@ -1105,13 +1220,12 @@ function LaLigaContent() {
                         {clasesDelMes.length > 0 ? (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {clasesDelMes.map((clase: any) => {
-                                    const [fechaParte, horaParte] = clase.inicio.split('T')
-                                    const horaDisplay = horaParte ? horaParte.substring(0, 5) : ''
+                                    const [fechaParte] = clase.inicio.split('T')
+                                    const horaDisplay = format(new Date(clase.inicio), 'HH:mm')
                                     const dateObj = new Date(`${fechaParte}T12:00:00`)
                                     const esHoy = isToday(dateObj)
                                     const yaPaso = dateObj < new Date(new Date().setHours(0, 0, 0, 0))
-                                    const [finFecha, finHora] = clase.fin.split('T')
-                                    const finDisplay = finHora ? finHora.substring(0, 5) : ''
+                                    const finDisplay = format(new Date(clase.fin), 'HH:mm')
 
                                     return (
                                         <div key={clase.id} className={`bg-[#111] border border-white/5 rounded-2xl overflow-hidden hover:border-[#D4E655]/30 transition-all group flex flex-col ${yaPaso ? 'opacity-70 hover:opacity-100' : ''}`}>
@@ -1521,13 +1635,12 @@ function LaLigaContent() {
                             {clasesDelMes.length > 0 ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                     {clasesDelMes.map((clase: any) => {
-                                        const [fechaParte, horaParte] = clase.inicio.split('T')
-                                        const horaDisplay = horaParte ? horaParte.substring(0, 5) : ''
+                                        const [fechaParte] = clase.inicio.split('T')
+                                        const horaDisplay = format(new Date(clase.inicio), 'HH:mm')
                                         const dateObj = new Date(`${fechaParte}T12:00:00`)
                                         const esHoy = isToday(dateObj)
                                         const yaPaso = dateObj < new Date(new Date().setHours(0, 0, 0, 0))
-                                        const [finFecha, finHora] = clase.fin.split('T')
-                                        const finDisplay = finHora ? finHora.substring(0, 5) : ''
+                                        const finDisplay = format(new Date(clase.fin), 'HH:mm')
 
                                         return (
                                             <div key={clase.id} className={`bg-[#111] border border-white/5 rounded-2xl overflow-hidden hover:border-[#D4E655]/30 transition-all group flex flex-col ${yaPaso ? 'opacity-70 hover:opacity-100' : ''}`}>

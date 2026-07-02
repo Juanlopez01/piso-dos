@@ -397,7 +397,7 @@ export default function CalendarioPage() {
         e.preventDefault()
         if (form.fechas.length === 0) return toast.error('Seleccioná al menos una fecha')
         if (!form.salaId || !form.profeId) return toast.error('Faltan datos (Sala o Profe)')
-        if (form.tipo === 'Compañía' && !form.companiaId) return toast.error('Falta seleccionar Compañía')
+        if (form.tipo === 'Compañía' && !form.companiaId) return toast.error('Falta seleccionar Grupo')
         if (!form.esCombinable && !form.ritmoId) return toast.error('Las clases exclusivas requieren seleccionar un Ritmo')
 
         setUploading(true)
@@ -605,7 +605,7 @@ export default function CalendarioPage() {
                 </div>
                 <div className="flex items-center gap-1.5">
                     <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]"></div>
-                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Compañía</span>
+                    <span className="text-[9px] font-black uppercase text-gray-400 tracking-widest">Grupo</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                     <div className="w-2 h-2 rounded-full bg-yellow-500 shadow-[0_0_8px_rgba(234,179,8,0.6)]"></div>
@@ -754,7 +754,7 @@ export default function CalendarioPage() {
                                                             <option value="Regular">Regular</option>
                                                             <option value="Especial">Especial</option>
                                                             <option value="Formacion">Formación</option>
-                                                            <option value="Compañía">Compañía</option>
+                                                            <option value="Compañía">Grupo</option>
                                                         </select>
                                                     </div>
                                                     <div className="space-y-1">
@@ -800,7 +800,7 @@ export default function CalendarioPage() {
                                                                 <UsersRound size={12} className="text-blue-500" /> Vincular a Grupo
                                                             </label>
                                                             <select required value={form.companiaId} onChange={e => setForm({ ...form, companiaId: e.target.value })} className="w-full bg-[#111] border border-blue-500/30 rounded-lg p-3 text-white text-xs font-bold outline-none focus:border-blue-500">
-                                                                <option value="">Seleccionar compañía...</option>
+                                                                <option value="">Seleccionar grupo...</option>
                                                                 {companias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                                                             </select>
                                                         </div>

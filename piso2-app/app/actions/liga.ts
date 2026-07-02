@@ -31,6 +31,42 @@ export async function getNombresPerfilesAction(ids: string[]) {
     return map
 }
 
+// Guarda la cuota de liga para un mes puntual (override del precio global).
+export async function guardarCuotaLigaMesAction(
+    anio: number, mes: number, nivel: number, precioTransf: number, precioEfvo: number
+) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (!perfil || !['admin', 'recepcion'].includes(perfil.rol)) return { success: false, error: 'Sin permisos' }
+
+    const admin = getAdminClient()
+    const { error } = await admin.from('liga_cuotas').upsert({
+        anio, mes, nivel,
+        precio_transf: precioTransf,
+        precio_efvo: precioEfvo,
+        updated_at: new Date().toISOString()
+    }, { onConflict: 'anio,mes,nivel' })
+
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+// Quita el override de un mes/nivel → vuelve a usar el precio global por defecto.
+export async function eliminarCuotaLigaMesAction(anio: number, mes: number, nivel: number) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (!perfil || !['admin', 'recepcion'].includes(perfil.rol)) return { success: false, error: 'Sin permisos' }
+
+    const admin = getAdminClient()
+    const { error } = await admin.from('liga_cuotas').delete().eq('anio', anio).eq('mes', mes).eq('nivel', nivel)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
 // Estadísticas de asistencia por RANGO para staff, calculadas con admin client
 // (bypass RLS): garantiza que aparezcan TODOS los niveles sin importar el rol del que mira.
 export async function getAsistenciasRangoStaffAction(desde: string, hasta: string) {

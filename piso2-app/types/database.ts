@@ -166,6 +166,38 @@ export type Database = {
                 Insert: any
                 Update: any
             }
+            talentos: {
+                Row: {
+                    id: string
+                    created_at: string
+                    nombre: string
+                    categoria: 'mujeres' | 'varones' | 'obras'
+                    disciplina: string | null
+                    bio: string | null
+                    fotos: string[]
+                    video_url: string | null
+                    destacado: boolean
+                    activo: boolean
+                    orden: number
+                }
+                Insert: any
+                Update: any
+            }
+            talent_solicitudes: {
+                Row: {
+                    id: string
+                    created_at: string
+                    talento_id: string | null
+                    talento_nombre: string | null
+                    cliente_nombre: string
+                    cliente_contacto: string
+                    cliente_empresa: string | null
+                    mensaje: string | null
+                    atendido: boolean
+                }
+                Insert: any
+                Update: any
+            }
             caja_turnos: {
                 Row: {
                     id: string

@@ -882,13 +882,12 @@ export default function CompaniaDetallePage() {
                         {clases.length > 0 ? (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {clases.map((clase) => {
-                                    const [fechaParte, horaParte] = clase.inicio.split('T')
-                                    const horaDisplay = horaParte ? horaParte.substring(0, 5) : ''
+                                    const [fechaParte] = clase.inicio.split('T')
+                                    const horaDisplay = format(new Date(clase.inicio), 'HH:mm')
                                     const dateObj = new Date(`${fechaParte}T12:00:00`)
                                     const esHoy = isToday(dateObj)
                                     const yaPaso = dateObj < new Date(new Date().setHours(0, 0, 0, 0))
-                                    const [finFecha, finHora] = clase.fin.split('T')
-                                    const finDisplay = finHora ? finHora.substring(0, 5) : ''
+                                    const finDisplay = format(new Date(clase.fin), 'HH:mm')
 
                                     return (
                                         <div key={clase.id} className={`bg-[#111] border border-white/5 rounded-2xl overflow-hidden hover:border-blue-500/30 transition-all group flex flex-col ${yaPaso ? 'opacity-70 hover:opacity-100' : ''}`}>
