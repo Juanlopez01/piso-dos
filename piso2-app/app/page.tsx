@@ -93,7 +93,6 @@ export default function LandingPage() {
             <button onClick={() => scrollTo('ecosistema')} className="hover:text-white transition-colors">ECOSISTEMA</button>
             <Link href="/alquiler" className="hover:text-white transition-colors">Salas</Link>
             <Link href="/nueva-generacion" className="text-[#D4E655] hover:text-white transition-colors">NUEVA GEN</Link>
-            <Link href="/talent" className="hover:text-white transition-colors">TALENT</Link>
             <button onClick={() => scrollTo('contacto')} className="hover:text-white transition-colors">CONTACTO</button>
             {loggedUser ? (
               <Link href={loggedUser.url} className="ml-4 px-6 py-2 rounded-full border border-[#D4E655]/50 bg-[#D4E655]/10 text-[#D4E655] hover:bg-[#D4E655] hover:text-black transition-all duration-300 shadow-[0_0_10px_rgba(212,230,85,0.1)] hover:shadow-[0_0_20px_rgba(212,230,85,0.4)] flex items-center gap-2">
@@ -118,7 +117,6 @@ export default function LandingPage() {
         <button onClick={() => scrollTo('ecosistema')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">ECOSISTEMA</button>
         <Link href="/alquiler" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Salas</Link>
         <Link href="/nueva-generacion" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-[#D4E655] uppercase tracking-widest hover:text-white">Nueva Generación</Link>
-        <Link href="/talent" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Piso2 Talent</Link>
         <button onClick={() => scrollTo('contacto')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">CONTACTO</button>
         {loggedUser ? (
           <Link href={loggedUser.url} onClick={() => setIsMobileMenuOpen(false)} className="mt-4 px-10 py-4 rounded-full border border-[#D4E655] text-[#D4E655] flex items-center gap-3 text-xl font-black uppercase tracking-widest">
