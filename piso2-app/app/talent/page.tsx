@@ -2,139 +2,189 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Loader2, ArrowUpRight } from 'lucide-react'
-import { Montserrat } from 'next/font/google'
-import { getTalentosPublicosAction, type TalentoPublico } from '@/app/actions/talent'
+import { Instagram, Mail, Loader2, ArrowLeft } from 'lucide-react'
+import { Playfair_Display, Montserrat } from 'next/font/google'
+import { getTalentosPublicosAction, getMarcasPublicasAction, type TalentoPublico, type MarcaPublica } from '@/app/actions/talent'
 
-const montserrat = Montserrat({ subsets: ['latin'], weight: ['300', '400', '700', '900'] })
+const serif = Playfair_Display({ subsets: ['latin'], weight: ['400', '500', '600', '700'] })
+const sans = Montserrat({ subsets: ['latin'], weight: ['300', '400', '500', '600'] })
 
-const CATEGORIAS: { key: 'mujeres' | 'varones' | 'obras'; label: string }[] = [
+const IG = 'https://www.instagram.com/piso2multiespacio/'
+const MAIL = 'mailto:info@piso2multiespacio.com'
+
+const CATS = [
     { key: 'mujeres', label: 'Mujeres' },
     { key: 'varones', label: 'Varones' },
     { key: 'obras', label: 'Obras / Compañías' },
-]
+] as const
 
-function TalentoCard({ t }: { t: TalentoPublico }) {
-    const portada = t.fotos?.[0]
-    const esObra = t.categoria === 'obras'
-    return (
-        <Link
-            href={`/talent/${t.id}`}
-            className="group block relative overflow-hidden bg-neutral-100"
-            style={{ aspectRatio: esObra ? '4 / 3' : '3 / 4' }}
-        >
-            {portada ? (
-                <img src={portada} alt={t.nombre} className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105" />
-            ) : (
-                <div className="w-full h-full flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin foto</div>
-            )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/0 to-black/0 opacity-90" />
-            {t.destacado && (
-                <span className="absolute top-3 left-3 bg-white/90 text-black text-[9px] font-bold uppercase tracking-[0.2em] px-2 py-1">Destacado</span>
-            )}
-            <div className="absolute bottom-0 left-0 right-0 p-4 md:p-5 flex items-end justify-between gap-2">
-                <div>
-                    <h3 className="text-white text-sm md:text-base font-bold uppercase tracking-wide leading-tight">{t.nombre}</h3>
-                    {t.disciplina && <p className="text-white/70 text-[10px] md:text-xs uppercase tracking-widest mt-0.5">{t.disciplina}</p>}
-                </div>
-                <ArrowUpRight className="text-white opacity-0 group-hover:opacity-100 transition-opacity shrink-0" size={18} />
-            </div>
-        </Link>
-    )
-}
-
-export default function TalentPage() {
+export default function TalentHome() {
     const [talentos, setTalentos] = useState<TalentoPublico[]>([])
+    const [marcas, setMarcas] = useState<MarcaPublica[]>([])
     const [loading, setLoading] = useState(true)
-    const [filtro, setFiltro] = useState<'todos' | 'mujeres' | 'varones' | 'obras'>('todos')
 
     useEffect(() => {
-        getTalentosPublicosAction()
-            .then(data => { setTalentos(data); setLoading(false) })
+        Promise.all([getTalentosPublicosAction(), getMarcasPublicasAction()])
+            .then(([t, m]) => { setTalentos(t); setMarcas(m); setLoading(false) })
             .catch(() => setLoading(false))
     }, [])
 
-    const categoriasVisibles = filtro === 'todos' ? CATEGORIAS : CATEGORIAS.filter(c => c.key === filtro)
+    // Fila hero = los 5 marcados "Destacado" (por Orden). Si no hay ninguno aún, muestra los primeros.
+    const destacados = talentos.filter(t => t.destacado)
+    const heroTalentos = (destacados.length > 0 ? destacados : talentos).slice(0, 5)
+    const gridTalentos = talentos.slice(0, 6)
 
     return (
-        <div className={`min-h-screen bg-white text-neutral-900 ${montserrat.className}`}>
-            {/* NAV */}
-            <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-neutral-200 h-16">
-                <div className="max-w-7xl mx-auto px-5 md:px-8 h-full flex items-center justify-between">
-                    <Link href="/" className="flex items-center gap-2 text-[10px] font-bold tracking-[0.2em] text-neutral-500 uppercase hover:text-black transition-colors">
-                        <ArrowLeft size={15} /> Piso 2
+        <div className={`min-h-screen bg-white text-neutral-900 ${sans.className}`}>
+
+            {/* BARRA SUPERIOR */}
+            <div className="bg-black text-white py-2.5">
+                <div className="max-w-6xl mx-auto px-5 flex items-center justify-between">
+                    <Link href="/" className="text-[10px] font-semibold tracking-[0.2em] uppercase text-white/70 hover:text-white flex items-center gap-1.5">
+                        <ArrowLeft size={13} /> Piso 2
                     </Link>
-                    <span className="text-xs font-black uppercase tracking-[0.35em]">Talent</span>
-                    <img src="/2-verde.png" alt="Piso 2" className="w-6" />
-                </div>
-            </nav>
-
-            {/* HERO */}
-            <header className="pt-32 pb-14 px-5 md:px-8 max-w-7xl mx-auto">
-                <p className="text-[11px] font-bold tracking-[0.5em] uppercase text-neutral-400 mb-5">Piso 2 Multiespacio</p>
-                <h1 className="text-5xl md:text-8xl font-black uppercase tracking-tighter leading-[0.9]">
-                    Piso2 <span className="font-light italic">Talent</span>
-                </h1>
-                <p className="mt-6 max-w-xl text-neutral-500 text-sm md:text-base leading-relaxed font-light">
-                    Selección curada de artistas, intérpretes y obras escénicas. Elegí el talento que buscás y
-                    envianos la solicitud — la contratación se gestiona a través de Piso 2.
-                </p>
-            </header>
-
-            {/* FILTRO */}
-            <div className="sticky top-16 z-40 bg-white/90 backdrop-blur-md border-y border-neutral-200">
-                <div className="max-w-7xl mx-auto px-5 md:px-8 flex gap-2 md:gap-6 overflow-x-auto py-4">
-                    {(['todos', ...CATEGORIAS.map(c => c.key)] as const).map(k => {
-                        const label = k === 'todos' ? 'Todos' : CATEGORIAS.find(c => c.key === k)!.label
-                        const activo = filtro === k
-                        return (
-                            <button
-                                key={k}
-                                onClick={() => setFiltro(k as any)}
-                                className={`text-[11px] font-bold uppercase tracking-[0.2em] whitespace-nowrap pb-1 border-b-2 transition-colors ${activo ? 'border-black text-black' : 'border-transparent text-neutral-400 hover:text-neutral-700'}`}
-                            >
-                                {label}
-                            </button>
-                        )
-                    })}
+                    <div className="flex items-center gap-4">
+                        <a href={IG} target="_blank" rel="noreferrer" className="hover:opacity-70"><Instagram size={15} /></a>
+                        <span className="text-white/30">|</span>
+                        <a href={MAIL} className="hover:opacity-70"><Mail size={15} /></a>
+                    </div>
                 </div>
             </div>
 
-            {/* CONTENIDO */}
-            <main className="max-w-7xl mx-auto px-5 md:px-8 py-14 pb-28">
-                {loading ? (
-                    <div className="flex justify-center py-24"><Loader2 className="animate-spin text-neutral-300" size={32} /></div>
-                ) : talentos.length === 0 ? (
-                    <p className="text-center text-neutral-400 text-sm uppercase tracking-widest py-24">Próximamente.</p>
-                ) : (
-                    <div className="space-y-20">
-                        {categoriasVisibles.map(cat => {
-                            const items = talentos.filter(t => t.categoria === cat.key)
-                            if (items.length === 0) return null
-                            return (
-                                <section key={cat.key}>
-                                    <div className="flex items-center gap-4 mb-8">
-                                        <h2 className="text-2xl md:text-4xl font-black uppercase tracking-tighter">{cat.label}</h2>
-                                        <span className="text-neutral-300 text-sm font-light">{String(items.length).padStart(2, '0')}</span>
-                                        <div className="flex-1 h-px bg-neutral-200" />
-                                    </div>
-                                    <div className={`grid gap-3 md:gap-4 ${cat.key === 'obras' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4'}`}>
-                                        {items.map(t => <TalentoCard key={t.id} t={t} />)}
-                                    </div>
-                                </section>
-                            )
-                        })}
-                    </div>
-                )}
-            </main>
-
-            {/* FOOTER */}
-            <footer className="border-t border-neutral-200 py-10 px-5 md:px-8">
-                <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-[10px] uppercase tracking-[0.2em] text-neutral-400">
-                    <span>© Piso 2 Multiespacio — Talent</span>
-                    <span>Contrataciones a través de Piso 2</span>
+            {/* LOGO + NAV */}
+            <header id="inicio" className="pt-14 pb-8 text-center">
+                <div className={`${serif.className} leading-none`}>
+                    <p className="text-[11px] md:text-sm tracking-[0.55em] text-neutral-500 uppercase">Piso 2</p>
+                    <h1 className="text-5xl md:text-7xl tracking-[0.15em] font-medium mt-1">TALENT</h1>
                 </div>
-            </footer>
+                <nav className="mt-8 flex flex-wrap items-center justify-center gap-6 md:gap-10 text-[10px] md:text-[11px] font-semibold tracking-[0.2em] uppercase text-neutral-600">
+                    <a href="#inicio" className="hover:text-black transition-colors">Inicio</a>
+                    <a href="#nosotros" className="hover:text-black transition-colors">Nosotros</a>
+                    <a href="#management" className="hover:text-black transition-colors">Management</a>
+                    <a href="#marcas" className="hover:text-black transition-colors">Con quién trabajamos</a>
+                </nav>
+            </header>
+
+            {loading ? (
+                <div className="flex justify-center py-32"><Loader2 className="animate-spin text-neutral-300" size={32} /></div>
+            ) : (
+                <>
+                    {/* HERO — fila de fotos */}
+                    <section className="pt-6 pb-2">
+                        <div className="flex gap-3 md:gap-4 overflow-x-auto no-scrollbar px-3 md:px-6 pb-2">
+                            {heroTalentos.map((t, i) => (
+                                <Link key={t.id} href={`/talent/${t.id}`} className={`relative shrink-0 w-[42vw] sm:w-[30vw] md:w-[19vw] group ${i % 2 === 1 ? 'mt-8 md:mt-12' : ''}`}>
+                                    <div className="aspect-[3/4] bg-neutral-100 overflow-hidden">
+                                        {t.fotos?.[0] && <img src={t.fotos[0]} alt={t.nombre} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700" />}
+                                    </div>
+                                    <p className="mt-2 text-[9px] tracking-[0.2em] uppercase text-neutral-500 text-center">{t.nombre}</p>
+                                </Link>
+                            ))}
+                        </div>
+                    </section>
+
+                    {/* TAGLINE */}
+                    <section className="py-16 md:py-24 px-6 text-center">
+                        <p className={`${serif.className} text-2xl md:text-4xl lg:text-5xl tracking-wide leading-snug max-w-3xl mx-auto`}>
+                            Conectando <span className="font-semibold">TALENTOS</span> de primer nivel con el mundo
+                        </p>
+                    </section>
+
+                    {/* QUIÉNES SOMOS */}
+                    <section id="nosotros" className="bg-neutral-100">
+                        <div className="max-w-5xl mx-auto px-6 md:px-10 py-16 md:py-20">
+                            <h2 className={`${serif.className} text-2xl md:text-4xl tracking-[0.15em] uppercase mb-8`}>Quiénes Somos</h2>
+                            <div className="space-y-5 text-neutral-600 text-sm md:text-[15px] leading-relaxed font-light max-w-3xl">
+                                <p>Piso2 Talent nace de un espacio dedicado al arte y al movimiento, con una idea simple: conectar a nuestros artistas con las marcas, producciones y proyectos que buscan talento de verdad.</p>
+                                <p>Representamos bailarines, intérpretes, modelos y obras escénicas. Gestionamos su vínculo con marcas, campañas, contenidos audiovisuales y eventos, cuidando la calidad y el detalle en cada propuesta.</p>
+                                <p>Creemos en el poder del arte, la comunicación y las relaciones humanas para crear negocios con propósito. Cada talento que presentamos está elegido y respaldado por Piso 2, para que trabajar con nosotros sea siempre una garantía.</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* CONECTAMOS TALENTOS Y MARCAS */}
+                    {gridTalentos.length > 0 && (
+                        <section className="max-w-6xl mx-auto px-6 md:px-10 py-16 md:py-24 grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16 items-center">
+                            <h3 className={`${serif.className} text-3xl md:text-5xl leading-tight tracking-wide uppercase`}>
+                                Conectamos<br />talentos y marcas<br />para crear impacto
+                            </h3>
+                            <div className="grid grid-cols-3 gap-2 md:gap-3">
+                                {gridTalentos.map(t => (
+                                    <Link key={t.id} href={`/talent/${t.id}`} className="aspect-square bg-neutral-100 overflow-hidden group">
+                                        {t.fotos?.[0] && <img src={t.fotos[0]} alt={t.nombre} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />}
+                                    </Link>
+                                ))}
+                            </div>
+                        </section>
+                    )}
+
+                    {/* MANAGEMENT — catálogo por categoría */}
+                    <section id="management" className="max-w-6xl mx-auto px-6 md:px-10 pb-8">
+                        <div className="text-center mb-12">
+                            <h2 className={`${serif.className} text-3xl md:text-5xl tracking-[0.2em] uppercase`}>Management</h2>
+                        </div>
+                        <div className="space-y-16">
+                            {CATS.map(cat => {
+                                const items = talentos.filter(t => t.categoria === cat.key)
+                                if (items.length === 0) return null
+                                return (
+                                    <div key={cat.key}>
+                                        <div className="flex items-center gap-4 mb-6">
+                                            <h3 className={`${serif.className} text-xl md:text-2xl tracking-[0.2em] uppercase`}>{cat.label}</h3>
+                                            <div className="flex-1 h-px bg-neutral-200" />
+                                        </div>
+                                        <div className={`grid gap-3 md:gap-4 ${cat.key === 'obras' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4'}`}>
+                                            {items.map(t => (
+                                                <Link key={t.id} href={`/talent/${t.id}`} className="group block">
+                                                    <div className="overflow-hidden bg-neutral-100" style={{ aspectRatio: cat.key === 'obras' ? '4 / 3' : '3 / 4' }}>
+                                                        {t.fotos?.[0] && <img src={t.fotos[0]} alt={t.nombre} className="w-full h-full object-cover grayscale group-hover:grayscale-0 group-hover:scale-105 transition-all duration-700" />}
+                                                    </div>
+                                                    <p className="mt-2 text-[11px] tracking-[0.15em] uppercase font-semibold">{t.nombre}</p>
+                                                    {t.disciplina && <p className="text-[9px] tracking-[0.2em] uppercase text-neutral-400">{t.disciplina}</p>}
+                                                </Link>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </section>
+
+                    {/* MARCAS QUE ACOMPAÑAMOS */}
+                    <section id="marcas" className="mt-16">
+                        <div className="bg-neutral-100 py-5 text-center">
+                            <h2 className={`${serif.className} text-xl md:text-2xl tracking-[0.25em] uppercase`}>Marcas que acompañamos</h2>
+                        </div>
+                        <div className="max-w-5xl mx-auto px-6 md:px-10 py-16">
+                            {marcas.length > 0 ? (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-8 gap-y-12 items-center justify-items-center">
+                                    {marcas.map(m => (
+                                        <img key={m.id} src={m.logo_url} alt={m.nombre} className="max-h-14 md:max-h-16 w-auto object-contain opacity-80 hover:opacity-100 transition-opacity" />
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-center text-neutral-400 text-xs uppercase tracking-[0.3em]">Próximamente</p>
+                            )}
+                        </div>
+                    </section>
+
+                    {/* FOOTER */}
+                    <footer className="bg-neutral-900 text-white py-12 text-center">
+                        <div className={`${serif.className} leading-none`}>
+                            <p className="text-[10px] tracking-[0.55em] text-white/50 uppercase">Piso 2</p>
+                            <p className="text-3xl tracking-[0.15em] font-medium mt-1">TALENT</p>
+                        </div>
+                        <div className="flex items-center justify-center gap-5 mt-5">
+                            <a href={IG} target="_blank" rel="noreferrer" className="hover:opacity-70"><Instagram size={16} /></a>
+                            <span className="text-white/30">|</span>
+                            <a href={MAIL} className="hover:opacity-70"><Mail size={16} /></a>
+                        </div>
+                        <p className="text-[9px] tracking-[0.2em] uppercase text-white/40 mt-6">Contrataciones a través de Piso 2</p>
+                    </footer>
+                </>
+            )}
+
+            <style dangerouslySetInnerHTML={{ __html: `.no-scrollbar::-webkit-scrollbar{display:none} .no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}` }} />
         </div>
     )
 }

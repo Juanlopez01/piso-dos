@@ -59,13 +59,3 @@ begin
             for delete to authenticated using (bucket_id = 'talent');
     end if;
 end $$;
-
--- 5. DATOS DE EJEMPLO (para ver la vitrina antes de cargar los reales; borrar luego)
-insert into public.talentos (nombre, categoria, disciplina, bio, fotos, destacado, orden) values
-('Valentina Ríos', 'mujeres', 'Bailarina Contemporánea', 'Intérprete y performer con base en Buenos Aires. Formación en danza contemporánea y teatro físico.', array['https://picsum.photos/seed/val1/800/1100','https://picsum.photos/seed/val2/800/1100','https://picsum.photos/seed/val3/800/1100'], true, 1),
-('Camila Ferrer', 'mujeres', 'Heels / Comercial', 'Bailarina comercial, campañas de moda y videoclips.', array['https://picsum.photos/seed/cam1/800/1100','https://picsum.photos/seed/cam2/800/1100'], false, 2),
-('Tomás Aguirre', 'varones', 'Urbano / Hip Hop', 'Bailarín y coreógrafo urbano. Shows en vivo y producciones audiovisuales.', array['https://picsum.photos/seed/tom1/800/1100','https://picsum.photos/seed/tom2/800/1100'], true, 1),
-('Lucas Peralta', 'varones', 'Contemporáneo', 'Intérprete de compañía, gira internacional.', array['https://picsum.photos/seed/luc1/800/1100'], false, 2),
-('ECOS', 'obras', 'Obra escénica para exportar', 'Pieza de danza-teatro de 45 min. Elenco de 6 intérpretes. Disponible para gira.', array['https://picsum.photos/seed/obra1/1200/800','https://picsum.photos/seed/obra2/1200/800'], true, 1),
-('RAÍZ', 'obras', 'Compañía / Espectáculo', 'Espectáculo de danza folklórica contemporánea.', array['https://picsum.photos/seed/obra3/1200/800'], false, 2)
-on conflict do nothing;

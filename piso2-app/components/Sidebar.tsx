@@ -42,7 +42,7 @@ function SidebarContent() {
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
         // Vistas base por rol
-        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Caja', 'Liquidaciones', 'Remarketing', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Talents', 'Caja', 'Liquidaciones', 'Remarketing', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         if (userRole === 'profesor') {

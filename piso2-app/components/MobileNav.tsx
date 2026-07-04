@@ -54,6 +54,7 @@ function MobileNavContent() {
             'Productos',
             'La Liga',
             'Grupos',
+            'Talents',
             'Liquidaciones',
             'Remarketing',
             'Caja',
