@@ -9,7 +9,7 @@ import { Wallet, Search, Loader2, Users, DollarSign, Lock, FileSpreadsheet, Libr
 import { useCash } from '@/context/CashContext'
 import Link from 'next/link'
 import { toast, Toaster } from 'sonner'
-import { pagarClaseProfeAction, guardarValorHoraRecepAction, pagarStaffAction } from '@/app/actions/liquidaciones'
+import { pagarClaseProfeAction, guardarValorHoraRecepAction, pagarStaffAction, guardarHorasRecepAction, eliminarHorasRecepAction } from '@/app/actions/liquidaciones'
 import { fetchGruposLiquidacionAction } from '@/app/actions/companias'
 
 import type {
@@ -257,7 +257,16 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
             horasPorRecepcionista[uid].cantidad_turnos += 1;
         })
     }
-    const reporteRecepcion = Object.values(horasPorRecepcionista).sort((a: any, b: any) => b.horas - a.horas);
+    // Ajustes manuales de horas (override del cálculo por turnos)
+    const { data: ajustesHoras } = await supabase.from('recep_horas_ajuste')
+        .select('recep_id, horas').eq('anio', yearNum).eq('mes', monthNum)
+    const ajusteMap: Record<string, number> = {}
+    ajustesHoras?.forEach((a: any) => { ajusteMap[a.recep_id] = Number(a.horas) })
+
+    const reporteRecepcion = Object.values(horasPorRecepcionista).map((r: any) => {
+        const ov = ajusteMap[r.id]
+        return { ...r, horasCalculadas: r.horas, horas: ov !== undefined ? ov : r.horas, ajustado: ov !== undefined }
+    }).sort((a: any, b: any) => b.horas - a.horas);
 
     const totalRetiros = retirosAdminData?.reduce((a: number, b: any) => a + Number(b.monto), 0) || 0
     const totalPagosAdmin = pagosProfeAdminData?.reduce((a: number, b: any) => a + Number(b.monto), 0) || 0
@@ -387,6 +396,20 @@ export default function AdminLiquidacionesPage() {
             toast.error(res.error || 'Error al guardar el valor de la hora.')
         }
         setGuardandoValor(false)
+    }
+
+    const handleGuardarHorasRecep = async (recepId: string, horas: number) => {
+        const [yyyy, mm] = selectedMonth.split('-')
+        const res = await guardarHorasRecepAction(Number(yyyy), Number(mm), recepId, horas)
+        if (res.success) { toast.success('Horas ajustadas'); mutate() }
+        else toast.error(res.error || 'Error al ajustar horas')
+    }
+
+    const handleRevertirHorasRecep = async (recepId: string) => {
+        const [yyyy, mm] = selectedMonth.split('-')
+        const res = await eliminarHorasRecepAction(Number(yyyy), Number(mm), recepId)
+        if (res.success) { toast.success('Volvió al cálculo automático'); mutate() }
+        else toast.error(res.error || 'Error')
     }
 
     const handleProcesarPagoStaff = async (metodo: 'efectivo' | 'transferencia') => {
@@ -727,6 +750,8 @@ export default function AdminLiquidacionesPage() {
                         handleGuardarValorHora={handleGuardarValorHora}
                         guardandoValor={guardandoValor}
                         setModalPagoStaff={setModalPagoStaff}
+                        onGuardarHoras={handleGuardarHorasRecep}
+                        onRevertirHoras={handleRevertirHorasRecep}
                     />
                 )}
                 {vistaActiva === 'grupos' && (

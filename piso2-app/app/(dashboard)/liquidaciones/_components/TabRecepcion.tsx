@@ -1,5 +1,6 @@
 'use client'
-import { Clock, Loader2, CheckCircle2, Save } from 'lucide-react'
+import { useState } from 'react'
+import { Clock, Loader2, CheckCircle2, Save, RotateCcw } from 'lucide-react'
 import type { ModalPagoStaffState } from './_types'
 
 type ReporteRecepcion = {
@@ -8,6 +9,8 @@ type ReporteRecepcion = {
     horas: number
     cantidad_turnos: number
     total_pagado: number
+    horasCalculadas?: number
+    ajustado?: boolean
 }
 
 type Props = {
@@ -17,9 +20,12 @@ type Props = {
     handleGuardarValorHora: () => void
     guardandoValor: boolean
     setModalPagoStaff: (v: ModalPagoStaffState) => void
+    onGuardarHoras: (recepId: string, horas: number) => void
+    onRevertirHoras: (recepId: string) => void
 }
 
-export default function TabRecepcion({ reporteRecepcion, valorHoraRecep, setValorHoraRecep, handleGuardarValorHora, guardandoValor, setModalPagoStaff }: Props) {
+export default function TabRecepcion({ reporteRecepcion, valorHoraRecep, setValorHoraRecep, handleGuardarValorHora, guardandoValor, setModalPagoStaff, onGuardarHoras, onRevertirHoras }: Props) {
+    const [horasEdit, setHorasEdit] = useState<Record<string, string>>({})
     return (
         <div className="animate-in fade-in space-y-6">
             <div className="bg-[#09090b] border border-white/10 p-6 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -61,8 +67,10 @@ export default function TabRecepcion({ reporteRecepcion, valorHoraRecep, setValo
                     </div>
                 ) : (
                     reporteRecepcion.map((recep) => {
-                        const aPagarTotal = recep.horas * valorHoraRecep
+                        const horasEfectivas = horasEdit[recep.id] !== undefined && horasEdit[recep.id] !== '' ? Number(horasEdit[recep.id]) : recep.horas
+                        const aPagarTotal = (isNaN(horasEfectivas) ? 0 : horasEfectivas) * valorHoraRecep
                         const saldoPendiente = Math.max(0, aPagarTotal - recep.total_pagado)
+                        const calc = recep.horasCalculadas ?? recep.horas
 
                         return (
                             <div key={recep.id} className="bg-[#111] border border-white/5 p-5 rounded-2xl hover:border-white/20 transition-all flex flex-col justify-between">
@@ -71,9 +79,25 @@ export default function TabRecepcion({ reporteRecepcion, valorHoraRecep, setValo
                                         <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20 text-blue-400 font-black shrink-0">
                                             {recep.nombre[0]}
                                         </div>
-                                        <div>
-                                            <h4 className="font-bold text-white text-sm truncate">{recep.nombre}</h4>
-                                            <p className="text-[10px] text-gray-500 uppercase font-bold">{recep.cantidad_turnos} turnos ({recep.horas.toFixed(2)} hs)</p>
+                                        <div className="min-w-0">
+                                            <h4 className="font-bold text-white text-sm truncate flex items-center gap-2">{recep.nombre} {recep.ajustado && <span className="text-[8px] bg-[#D4E655] text-black px-1.5 py-0.5 rounded font-black uppercase tracking-widest shrink-0">Ajustado</span>}</h4>
+                                            <p className="text-[10px] text-gray-500 uppercase font-bold">{recep.cantidad_turnos} turnos · {calc.toFixed(2)} hs (auto)</p>
+                                        </div>
+                                    </div>
+
+                                    {/* HORAS A PAGAR — editable, sin ir turno por turno */}
+                                    <div className="bg-black/30 border border-white/5 rounded-xl p-3 mb-4">
+                                        <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1.5">Horas a pagar</label>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="number"
+                                                step="0.25"
+                                                value={horasEdit[recep.id] !== undefined ? horasEdit[recep.id] : recep.horas.toFixed(2)}
+                                                onChange={e => setHorasEdit(prev => ({ ...prev, [recep.id]: e.target.value }))}
+                                                className="flex-1 bg-black border border-white/10 rounded-lg py-2 px-3 text-white text-sm font-black outline-none focus:border-[#D4E655]"
+                                            />
+                                            <button onClick={() => onGuardarHoras(recep.id, Number(horasEdit[recep.id] !== undefined ? horasEdit[recep.id] : recep.horas))} className="bg-[#D4E655] hover:bg-white text-black p-2 rounded-lg transition-colors" title="Guardar horas"><Save size={16} /></button>
+                                            {recep.ajustado && <button onClick={() => { setHorasEdit(prev => { const n = { ...prev }; delete n[recep.id]; return n }); onRevertirHoras(recep.id) }} className="bg-white/5 hover:bg-white/10 text-gray-400 p-2 rounded-lg transition-colors" title="Volver al cálculo automático de los turnos"><RotateCcw size={16} /></button>}
                                         </div>
                                     </div>
 

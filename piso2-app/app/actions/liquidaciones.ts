@@ -9,6 +9,38 @@ const getAdminClient = () => createAdminClient(
     { auth: { persistSession: false, autoRefreshToken: false } }
 )
 
+// Guarda un ajuste manual de horas de una recep para un mes (override del cálculo por turnos).
+export async function guardarHorasRecepAction(anio: number, mes: number, recepId: string, horas: number) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (perfil?.rol !== 'admin') return { success: false, error: 'Solo administradores pueden ajustar horas' }
+    if (isNaN(horas) || horas < 0) return { success: false, error: 'Horas inválidas' }
+
+    const admin = getAdminClient()
+    const { error } = await admin.from('recep_horas_ajuste').upsert(
+        { anio, mes, recep_id: recepId, horas, updated_at: new Date().toISOString() },
+        { onConflict: 'anio,mes,recep_id' }
+    )
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+// Quita el ajuste → vuelve a las horas calculadas por los turnos.
+export async function eliminarHorasRecepAction(anio: number, mes: number, recepId: string) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'No autorizado' }
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (perfil?.rol !== 'admin') return { success: false, error: 'Solo administradores' }
+
+    const admin = getAdminClient()
+    const { error } = await admin.from('recep_horas_ajuste').delete().eq('anio', anio).eq('mes', mes).eq('recep_id', recepId)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
 export async function pagarClaseProfeAction(
     claseId: string,
     monto: number,
