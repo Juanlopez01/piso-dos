@@ -46,7 +46,8 @@ export async function pagarClaseProfeAction(
     monto: number,
     metodoPago: string,
     nombreClase: string,
-    nombreProfe: string
+    nombreProfe: string,
+    fechaRef?: string  // ISO dentro del mes que se liquida (para atribuir el egreso al pozo correcto)
 ) {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()
@@ -90,7 +91,8 @@ export async function pagarClaseProfeAction(
                 concepto: `Liq Admin: ${nombreProfe} (${nombreClase})`,
                 monto,
                 metodo_pago: metodoPago,
-                origen_referencia: 'pago_profe_admin'
+                origen_referencia: 'pago_profe_admin',
+                ...(fechaRef ? { created_at: fechaRef } : {})
             })
         } else {
             return { success: false, error: 'No tenés permisos para realizar esta acción.' }

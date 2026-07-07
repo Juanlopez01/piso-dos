@@ -426,10 +426,20 @@ export default function AdminLiquidacionesPage() {
         setProcesandoPago(false)
     }
 
+    // Fecha para atribuir el egreso al mes que se está liquidando.
+    // Si es el mes actual → ahora (undefined). Si es un mes pasado → día 28 de ese mes.
+    const getFechaRefLiquidacion = (): string | undefined => {
+        const [y, m] = selectedMonth.split('-').map(Number)
+        const now = new Date()
+        const esMesActual = now.getFullYear() === y && (now.getMonth() + 1) === m
+        if (esMesActual) return undefined
+        return `${selectedMonth}-28T12:00:00`
+    }
+
     const handleProcesarPago = async (metodo: 'efectivo' | 'transferencia') => {
         if (!modalPago.clase) return
         setProcesandoPago(true)
-        const res = await pagarClaseProfeAction(modalPago.clase.id, modalPago.clase.pago_profe, metodo, modalPago.clase.nombre, modalPago.nombreProfe)
+        const res = await pagarClaseProfeAction(modalPago.clase.id, modalPago.clase.pago_profe, metodo, modalPago.clase.nombre, modalPago.nombreProfe, getFechaRefLiquidacion())
         if (res.success) {
             toast.success(`Pago de $${modalPago.clase.pago_profe} registrado correctamente.`)
             mutate()
@@ -444,8 +454,9 @@ export default function AdminLiquidacionesPage() {
         if (!modalPagoMasivo.clases.length) return
         setProcesandoPago(true)
         let successCount = 0
+        const fechaRef = getFechaRefLiquidacion()
         for (const clase of modalPagoMasivo.clases) {
-            const res = await pagarClaseProfeAction(clase.id, clase.pago_profe, metodo, clase.nombre, modalPagoMasivo.nombreProfe)
+            const res = await pagarClaseProfeAction(clase.id, clase.pago_profe, metodo, clase.nombre, modalPagoMasivo.nombreProfe, fechaRef)
             if (res.success) successCount++
         }
         if (successCount === modalPagoMasivo.clases.length) {
