@@ -1,15 +1,90 @@
 import { MercadoPagoConfig, Preference } from 'mercadopago'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server-helper'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 const client = new MercadoPagoConfig({
     accessToken: process.env.MP_ACCESS_TOKEN || ''
 })
 
+const getAdminClient = () => createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+)
+
 export async function POST(request: Request) {
     try {
         const body = await request.json()
-        const { userId, productoId, cuponId, tipo_pago, mes, anio, pase_referencia, precio } = body
+        const { productoId, cuponId, tipo_pago, mes, anio, pase_referencia, precio, link_id, cliente } = body
+        let { userId } = body
+
+        // ==========================================
+        // 0. LINK DE VENTA (lo genera un vendedor y lo paga un prospecto)
+        //    El cliente puede no tener cuenta: lo identificamos por mail acá.
+        // ==========================================
+        let linkRow: any = null
+
+        if (link_id) {
+            const admin = getAdminClient()
+
+            const { data: link } = await admin
+                .from('links_pago')
+                .select('id, producto_id, monto_final, estado, expira_at')
+                .eq('id', link_id)
+                .maybeSingle()
+
+            if (!link) return NextResponse.json({ error: "El link no existe" }, { status: 404 })
+            if (link.estado === 'pagado') return NextResponse.json({ error: "Este link ya fue pagado" }, { status: 400 })
+            if (link.estado === 'anulado') return NextResponse.json({ error: "Este link fue anulado" }, { status: 400 })
+            if (new Date(link.expira_at) < new Date()) {
+                return NextResponse.json({ error: "Este link venció" }, { status: 400 })
+            }
+
+            const emailLimpio = String(cliente?.email || '').trim().toLowerCase()
+            if (!emailLimpio || !emailLimpio.includes('@')) {
+                return NextResponse.json({ error: "Falta un email válido" }, { status: 400 })
+            }
+
+            // Mismo criterio que /api/admin/create-user: si ya existe, lo reusamos.
+            const { data: perfilExistente } = await admin
+                .from('profiles')
+                .select('id')
+                .eq('email', emailLimpio)
+                .maybeSingle()
+
+            if (perfilExistente) {
+                userId = perfilExistente.id
+            } else {
+                const dni = String(cliente?.dni || '').trim()
+                if (!dni) return NextResponse.json({ error: "Falta el DNI" }, { status: 400 })
+
+                const { data: authData, error: authError } = await admin.auth.admin.createUser({
+                    email: emailLimpio,
+                    password: dni, // Igual que en el alta manual: la clave inicial es el DNI
+                    email_confirm: true,
+                    user_metadata: {
+                        nombre: String(cliente?.nombre || '').trim(),
+                        apellido: String(cliente?.apellido || '').trim(),
+                        rol: 'alumno',
+                        telefono: String(cliente?.telefono || '').trim(),
+                        dni
+                    }
+                })
+                if (authError || !authData?.user) {
+                    console.error("❌ MP Preference: no se pudo crear el cliente:", authError?.message)
+                    return NextResponse.json({ error: "No se pudo crear tu usuario. Probá con otro mail." }, { status: 400 })
+                }
+                userId = authData.user.id
+            }
+
+            // Dejamos asentado a quién terminó quedando el link
+            await admin.from('links_pago')
+                .update({ user_id: userId, cliente_email: emailLimpio })
+                .eq('id', link_id)
+
+            linkRow = link
+        }
 
         if (!userId) {
             console.error("❌ MP Preference: Falta userId en el request")
@@ -28,7 +103,30 @@ export async function POST(request: Request) {
         // ==========================================
         // 1. ASIGNACIÓN DE PRECIOS Y METADATA
         // ==========================================
-        if (tipo_pago === 'cuota_liga') {
+        if (linkRow) {
+            // El monto ya viene calculado y congelado por el server al crear el
+            // link (precio de catálogo - descuento con tope). No se recalcula acá.
+            // Admin client: el cliente que paga es anónimo y no pasa el RLS.
+            const { data: pack } = await getAdminClient()
+                .from('productos')
+                .select('nombre, creditos, tipo_clase')
+                .eq('id', linkRow.producto_id)
+                .single()
+
+            if (!pack) return NextResponse.json({ error: "El producto del link ya no existe" }, { status: 400 })
+
+            tituloFinal = pack.nombre
+            precioFinal = Number(linkRow.monto_final)
+
+            // Metadata igual a la de una compra normal de pack: así el webhook
+            // le entrega los créditos al cliente sin ninguna rama nueva.
+            metadataCustom.tipo_pago = 'pack'
+            metadataCustom.producto_id = String(linkRow.producto_id)
+            metadataCustom.tipo_clase = String(pack.tipo_clase)
+            metadataCustom.creditos = String(pack.creditos)
+            metadataCustom.link_id = String(link_id)
+
+        } else if (tipo_pago === 'cuota_liga') {
             // --- LÓGICA LA LIGA ---
             const { data: perfil } = await supabase.from('profiles').select('nivel_liga, porcentaje_beca').eq('id', userId).single()
 
@@ -154,7 +252,10 @@ export async function POST(request: Request) {
 
         // 🚀 Definimos a dónde vuelve el usuario según lo que pagó
         let rutaDestino = "/perfil"
-        if (tipo_pago === 'cuota_liga') rutaDestino = "/la-liga"
+        // El cliente de un link recién se creó la cuenta y no está logueado:
+        // mandarlo a /perfil lo rebota al login. Lo mandamos derecho ahí.
+        if (linkRow) rutaDestino = "/login"
+        else if (tipo_pago === 'cuota_liga') rutaDestino = "/la-liga"
         else if (tipo_pago === 'cuota_compania') rutaDestino = "/companias"
 
         const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
@@ -163,7 +264,7 @@ export async function POST(request: Request) {
             body: {
                 items: [
                     {
-                        id: tipo_pago === 'cuota_liga' ? 'LIGA_CUOTA' : String(productoId),
+                        id: tipo_pago === 'cuota_liga' ? 'LIGA_CUOTA' : String(linkRow ? linkRow.producto_id : productoId),
                         title: tituloFinal,
                         quantity: 1,
                         unit_price: Number(precioFinal),

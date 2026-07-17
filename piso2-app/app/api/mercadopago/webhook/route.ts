@@ -128,6 +128,24 @@ export async function POST(request: Request) {
             }
 
             // =========================================================================
+            // 🔗 LINK DE VENTA: lo marcamos cobrado.
+            // Va después del candado, así un reintento de MP no lo pisa dos veces.
+            // No cortamos el flujo si falla: la entrega de los créditos (abajo)
+            // es más importante que la marca del link.
+            // =========================================================================
+            if (metadata.link_id) {
+                const { error: errLink } = await supabase.from('links_pago').update({
+                    estado: 'pagado',
+                    mp_payment_id: mpPaymentIdStr,
+                    pagado_at: new Date().toISOString(),
+                    user_id: userIdFinal
+                }).eq('id', metadata.link_id).eq('estado', 'pendiente');
+
+                if (errLink) console.error(`❌ [WEBHOOK] No se pudo marcar el link ${metadata.link_id}:`, errLink.message);
+                else console.log(`🔗 [WEBHOOK] Link ${metadata.link_id} marcado como pagado.`);
+            }
+
+            // =========================================================================
             // 🚀 OPERACIONES SEGÚN EL TIPO DE COMPRA
             // =========================================================================
 

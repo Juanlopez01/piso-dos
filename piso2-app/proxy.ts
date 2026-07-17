@@ -43,6 +43,7 @@ export async function proxy(request: NextRequest) {
             request.nextUrl.pathname.startsWith('/act-password') ||
             request.nextUrl.pathname.startsWith('/alquiler') ||
             request.nextUrl.pathname.startsWith('/pago-exito') ||
+            request.nextUrl.pathname.startsWith('/pagar') || // Link de venta: lo abre un cliente sin cuenta
             request.nextUrl.pathname.startsWith('/streaming') ||
             request.nextUrl.pathname.startsWith('/nueva-generacion') ||
             request.nextUrl.pathname.startsWith('/instalar') // 🚀 EL PASE VIP PARA MERCADO PAGO
