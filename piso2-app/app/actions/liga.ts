@@ -166,13 +166,25 @@ export async function eliminarAvisoAction(id: string) {
     }
 }
 
+// Quiénes pueden cargar notas. Debe coincidir con el `isStaff` que muestra el
+// botón de evaluar en la UI (la-liga/page.tsx), para que quien ve el botón
+// pueda guardar sin toparse con un error de permisos.
+const ROLES_EVALUAN = ['admin', 'recepcion', 'auxiliar', 'coordinador', 'profesor']
+
 export async function guardarEvaluacionAction(payload: any) {
     const supabase = await createClient()
     try {
         const { data: { session } } = await supabase.auth.getSession()
         if (!session?.user) throw new Error('No autorizado')
 
-        const { error } = await supabase.from('liga_evaluaciones').upsert(
+        const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+        if (!perfil || !ROLES_EVALUAN.includes(perfil.rol)) throw new Error('No tenés permisos para cargar notas')
+
+        // Admin client (bypass RLS): la tabla de evaluaciones no tiene policy de
+        // INSERT para profes/recep, así que el guardado fallaba silenciosamente.
+        // El permiso ya lo validamos arriba por rol.
+        const admin = getAdminClient()
+        const { error } = await admin.from('liga_evaluaciones').upsert(
             { ...payload, profesor_id: session.user.id },
             { onConflict: 'alumno_id,clase_id,cuatrimestre' }
         )
