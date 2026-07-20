@@ -15,7 +15,7 @@ export const menuItems = [
     // Profe 4
     { name: 'Notificaciones', href: '/notificaciones', icon: Bell, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'auxiliar', 'vendedor'] },
     // Vendedor 1: su única herramienta
-    { name: 'Links de Pago', href: '/vender', icon: Link2, roles: ['admin', 'vendedor'] },
+    { name: 'Ventas', href: '/vender', icon: Link2, roles: ['admin', 'vendedor'] },
 
     // --- RESTO DEL MENÚ (Para Admin, Recepción y vistas generales) ---
     { name: 'Inicio', href: '/', icon: Home, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'visitante', 'auxiliar', 'vendedor'] },

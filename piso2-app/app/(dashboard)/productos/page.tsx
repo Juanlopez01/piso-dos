@@ -4,7 +4,7 @@ import { createClient } from '@/utils/supabase/client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
-import { Plus, Tag, Edit2, Trash2, Power, Loader2, Layers, BookOpen, Star, Percent, Ticket, ShieldAlert } from 'lucide-react'
+import { Plus, Tag, Edit2, Trash2, Power, Loader2, Layers, BookOpen, Star, Percent, Ticket, ShieldAlert, Store, Briefcase } from 'lucide-react'
 import { eliminarProductoAction } from '@/app/actions/tienda' // Fijate que coincida con tu ruta
 import { Toaster, toast } from 'sonner'
 import { format } from 'date-fns'
@@ -25,7 +25,25 @@ type Producto = {
     activo: boolean
     tipo_clase: 'regular' | 'seminario' | 'especial' | 'exclusivo'
     pase_referencia?: string
+    // Config del módulo de Ventas Externas
+    categoria?: string
+    visible_tienda?: boolean
+    permite_editar_precio?: boolean
+    comision_pct?: number
+    entrega_tipo?: 'creditos' | 'cuota_liga' | 'cuota_compania' | 'ninguna'
 }
+
+// Categorías sugeridas para el módulo de ventas (spec punto 8)
+const CATEGORIAS_VENTA = [
+    'Clases Regulares', 'La Liga', 'Compañía', 'Workshops',
+    'Alquiler Sala Stream', 'Alquiler Sala Negra', 'Alquiler Sala Blanca',
+    'Producciones', 'Eventos', 'Otros'
+]
+const ENTREGAS = [
+    { v: 'creditos', label: 'Acredita créditos' },
+    { v: 'cuota_liga', label: 'Marca cuota La Liga' },
+    { v: 'ninguna', label: 'Sin entrega (solo registra)' },
+]
 
 type Cupon = {
     id: string
@@ -126,6 +144,12 @@ export default function TiendaConfigPage() {
     const [formCreditos, setFormCreditos] = useState('1')
     const [formTipo, setFormTipo] = useState<'regular' | 'especial' | 'exclusivo'>('regular')
     const [formPaseReferencia, setFormPaseReferencia] = useState('')
+    // Config Ventas Externas
+    const [formCategoria, setFormCategoria] = useState('Clases Regulares')
+    const [formVisibleTienda, setFormVisibleTienda] = useState(true)
+    const [formPermiteEditarPrecio, setFormPermiteEditarPrecio] = useState(false)
+    const [formComisionPct, setFormComisionPct] = useState('0')
+    const [formEntregaTipo, setFormEntregaTipo] = useState<'creditos' | 'cuota_liga' | 'cuota_compania' | 'ninguna'>('creditos')
 
     // Modal Cupon State
     const [isCuponModalOpen, setIsCuponModalOpen] = useState(false)
@@ -143,6 +167,11 @@ export default function TiendaConfigPage() {
             setFormCreditos(prod.creditos.toString())
             setFormTipo(prod.tipo_clase === 'seminario' ? 'especial' : prod.tipo_clase || 'regular')
             setFormPaseReferencia(prod.pase_referencia || '')
+            setFormCategoria(prod.categoria || 'Clases Regulares')
+            setFormVisibleTienda(prod.visible_tienda ?? true)
+            setFormPermiteEditarPrecio(prod.permite_editar_precio ?? false)
+            setFormComisionPct((prod.comision_pct ?? 0).toString())
+            setFormEntregaTipo(prod.entrega_tipo || 'creditos')
         } else {
             setEditingProdId(null)
             setFormNombre('')
@@ -150,6 +179,11 @@ export default function TiendaConfigPage() {
             setFormCreditos('1')
             setFormTipo('regular')
             setFormPaseReferencia('')
+            setFormCategoria('Clases Regulares')
+            setFormVisibleTienda(true)
+            setFormPermiteEditarPrecio(false)
+            setFormComisionPct('0')
+            setFormEntregaTipo('creditos')
         }
         setIsProductModalOpen(true)
     }
@@ -182,7 +216,13 @@ export default function TiendaConfigPage() {
             precio: Number(formPrecio),
             creditos: Number(formCreditos),
             tipo_clase: formTipo === 'especial' ? 'seminario' : formTipo,
-            pase_referencia: formTipo === 'exclusivo' ? formPaseReferencia : null
+            pase_referencia: formTipo === 'exclusivo' ? formPaseReferencia : null,
+            // Config Ventas Externas
+            categoria: formCategoria,
+            visible_tienda: formVisibleTienda,
+            permite_editar_precio: formPermiteEditarPrecio,
+            comision_pct: Math.max(0, Math.min(100, Number(formComisionPct) || 0)),
+            entrega_tipo: formEntregaTipo
         }
 
         const response = await guardarProductoAction(payload, editingProdId || undefined)
@@ -555,6 +595,45 @@ export default function TiendaConfigPage() {
                                         {formTipo === 'exclusivo' ? 'Cant. Pases' : 'Créditos'}
                                     </label>
                                     <input required type="number" placeholder="1" value={formCreditos} onChange={e => setFormCreditos(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors" />
+                                </div>
+                            </div>
+
+                            {/* ── CONFIG VENTAS EXTERNAS ─────────────────────── */}
+                            <div className="mt-2 p-4 bg-[#D4E655]/5 border border-[#D4E655]/20 rounded-2xl space-y-4">
+                                <p className="text-[10px] uppercase font-black text-[#D4E655] tracking-widest flex items-center gap-1.5">
+                                    <Briefcase size={12} /> Ventas Externas
+                                </p>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Categoría</label>
+                                        <select value={formCategoria} onChange={e => setFormCategoria(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655] transition-colors">
+                                            {CATEGORIAS_VENTA.map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Comisión %</label>
+                                        <input type="number" min="0" max="100" value={formComisionPct} onChange={e => setFormComisionPct(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655] transition-colors" />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Qué entrega al pagarse</label>
+                                    <select value={formEntregaTipo} onChange={e => setFormEntregaTipo(e.target.value as any)} className="w-full bg-black border border-white/10 rounded-2xl p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655] transition-colors">
+                                        {ENTREGAS.map(e => <option key={e.v} value={e.v}>{e.label}</option>)}
+                                    </select>
+                                    {formEntregaTipo === 'creditos' && <p className="text-[9px] text-gray-500 italic pl-1">Acredita {formCreditos} crédito(s) × cantidad vendida.</p>}
+                                </div>
+
+                                <div className="flex flex-col gap-2 pt-1">
+                                    <button type="button" onClick={() => setFormVisibleTienda(v => !v)} className="flex items-center justify-between bg-black border border-white/10 rounded-xl px-3 py-2.5 text-left hover:border-white/20 transition-colors">
+                                        <span className="text-[10px] uppercase font-bold text-gray-400 flex items-center gap-1.5"><Store size={12} /> Visible en la Tienda</span>
+                                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${formVisibleTienda ? 'bg-green-500/20 text-green-500' : 'bg-white/5 text-gray-500'}`}>{formVisibleTienda ? 'Sí' : 'No'}</span>
+                                    </button>
+                                    <button type="button" onClick={() => setFormPermiteEditarPrecio(v => !v)} className="flex items-center justify-between bg-black border border-white/10 rounded-xl px-3 py-2.5 text-left hover:border-white/20 transition-colors">
+                                        <span className="text-[10px] uppercase font-bold text-gray-400 flex items-center gap-1.5"><Percent size={12} /> El vendedor puede editar el precio</span>
+                                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${formPermiteEditarPrecio ? 'bg-green-500/20 text-green-500' : 'bg-white/5 text-gray-500'}`}>{formPermiteEditarPrecio ? 'Sí' : 'No'}</span>
+                                    </button>
                                 </div>
                             </div>
 

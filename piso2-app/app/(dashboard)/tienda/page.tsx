@@ -53,6 +53,7 @@ const fetcherTienda = async (): Promise<TiendaData> => {
         .from('productos')
         .select('*')
         .eq('activo', true)
+        .eq('visible_tienda', true) // Los productos de venta externa (Alquileres, Eventos) no van a la Tienda
         .order('precio', { ascending: true })
 
     return {

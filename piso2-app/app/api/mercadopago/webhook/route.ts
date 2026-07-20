@@ -99,6 +99,10 @@ export async function POST(request: Request) {
                 conceptoFinal = `Pago Cuota La Liga (Mes ${metadata.mes}/${metadata.anio})`;
             } else if (tipoPagoFinal === 'cuota_compania') {
                 conceptoFinal = `Pago Cuota Grupo Exclusivo (Mes ${metadata.mes}/${metadata.anio})`;
+            } else if (tipoPagoFinal === 'venta_externa') {
+                // Venta externa sin entrega automática (Alquiler, Evento, etc.):
+                // solo se registra el cobro, no se entrega nada.
+                conceptoFinal = `Venta externa: ${metadata.producto_nombre || 'Producto'}`;
             } else {
                 const nombrePack = String(metadata.tipo_clase) === 'exclusivo' ? 'Pase Exclusivo' : `Pack de Clases (${metadata.tipo_clase})`;
                 conceptoFinal = `Compra online: ${nombrePack} - ${metadata.creditos} créditos`;
@@ -128,21 +132,53 @@ export async function POST(request: Request) {
             }
 
             // =========================================================================
-            // 🔗 LINK DE VENTA: lo marcamos cobrado.
-            // Va después del candado, así un reintento de MP no lo pisa dos veces.
-            // No cortamos el flujo si falla: la entrega de los créditos (abajo)
-            // es más importante que la marca del link.
+            // 🔗 VENTA EXTERNA: la marcamos cobrada y avisamos a Piso2 (in-app).
+            // Va después del candado, así un reintento de MP no la pisa dos veces.
+            // No cortamos el flujo si falla: la entrega (abajo) es más importante.
             // =========================================================================
-            if (metadata.link_id) {
-                const { error: errLink } = await supabase.from('links_pago').update({
+            if (metadata.venta_id) {
+                const { data: ventaMarcada, error: errVenta } = await supabase.from('ventas_externas').update({
                     estado: 'pagado',
                     mp_payment_id: mpPaymentIdStr,
                     pagado_at: new Date().toISOString(),
                     user_id: userIdFinal
-                }).eq('id', metadata.link_id).eq('estado', 'pendiente');
+                }).eq('id', metadata.venta_id).eq('estado', 'pendiente')
+                    .select('cantidad, producto_nombre, monto_total, comprador_nombre, vendedor:profiles!ventas_externas_vendedor_id_fkey(nombre_completo)')
+                    .maybeSingle();
 
-                if (errLink) console.error(`❌ [WEBHOOK] No se pudo marcar el link ${metadata.link_id}:`, errLink.message);
-                else console.log(`🔗 [WEBHOOK] Link ${metadata.link_id} marcado como pagado.`);
+                if (errVenta) {
+                    console.error(`❌ [WEBHOOK] No se pudo marcar la venta ${metadata.venta_id}:`, errVenta.message);
+                } else if (ventaMarcada) {
+                    console.log(`🔗 [WEBHOOK] Venta ${metadata.venta_id} marcada como pagada.`);
+
+                    // --- Notificación in-app a todos los admins (spec punto 5) ---
+                    try {
+                        const vendedorNom = Array.isArray(ventaMarcada.vendedor)
+                            ? ventaMarcada.vendedor[0]?.nombre_completo
+                            : (ventaMarcada.vendedor as any)?.nombre_completo;
+                        const { data: admins } = await supabase.from('profiles').select('id').eq('rol', 'admin');
+                        if (admins?.length) {
+                            const ahora = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+                            const mensaje = `${vendedorNom || 'Un vendedor'} vendió ${ventaMarcada.cantidad}× ${ventaMarcada.producto_nombre} a ${ventaMarcada.comprador_nombre} por $${Number(ventaMarcada.monto_total).toLocaleString('es-AR')} · ${ahora}`;
+                            await supabase.from('notificaciones').insert(
+                                admins.map(a => ({
+                                    usuario_id: a.id,
+                                    titulo: '💸 Nueva venta cobrada',
+                                    mensaje,
+                                    link: '/vender',
+                                    categoria: 'venta'
+                                }))
+                            );
+                        }
+                    } catch (e: any) {
+                        console.error('❌ [WEBHOOK] No se pudo notificar la venta:', e?.message);
+                    }
+                }
+            }
+
+            // Venta externa sin entrega automática: cortamos acá, no hay nada que entregar.
+            if (tipoPagoFinal === 'venta_externa') {
+                return NextResponse.json({ success: true }, { status: 200 });
             }
 
             // =========================================================================

@@ -1,0 +1,245 @@
+'use server'
+
+import { createClient } from '@/utils/supabase/server-helper'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
+
+const getAdminClient = () => createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+)
+
+const limpiarTel = (v: string) => (v || '').replace(/\D/g, '')
+
+// ── Autorización ────────────────────────────────────────────────────────────
+async function getVendedor() {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { error: 'No autorizado' as const }
+
+    const { data: perfil } = await supabase
+        .from('profiles')
+        .select('rol, vendedor_activo')
+        .eq('id', session.user.id)
+        .single()
+
+    if (!perfil) return { error: 'No autorizado' as const }
+    const esAdmin = perfil.rol === 'admin'
+    const esVendedor = perfil.rol === 'vendedor'
+    if (!esAdmin && !esVendedor) return { error: 'No tenés permisos para vender' as const }
+    // Un vendedor desactivado no puede operar; el admin siempre puede.
+    if (esVendedor && perfil.vendedor_activo === false) {
+        return { error: 'Tu usuario de vendedor está desactivado' as const }
+    }
+    return { userId: session.user.id, esAdmin }
+}
+
+// ── Crear venta + link de pago ──────────────────────────────────────────────
+export async function crearVentaAction(input: {
+    productoId: string
+    cantidad: number
+    precioUnitario?: number
+    compradorNombre: string
+    compradorTelefono: string
+    compradorEmail?: string
+    observaciones?: string
+}) {
+    const auth = await getVendedor()
+    if ('error' in auth) return { success: false, error: auth.error }
+
+    if (!input.productoId) return { success: false, error: 'Elegí un producto' }
+    if (!input.compradorNombre?.trim()) return { success: false, error: 'Falta el nombre del comprador' }
+
+    const telefono = limpiarTel(input.compradorTelefono)
+    if (telefono.length < 8) return { success: false, error: 'El teléfono no parece válido' }
+
+    const cantidad = Math.max(1, Math.floor(Number(input.cantidad) || 1))
+
+    const admin = getAdminClient()
+    const { data: producto } = await admin
+        .from('productos')
+        .select('id, nombre, precio, categoria, comision_pct, permite_editar_precio, activo')
+        .eq('id', input.productoId)
+        .single()
+
+    if (!producto) return { success: false, error: 'El producto no existe' }
+    if (producto.activo === false) return { success: false, error: 'Ese producto está inactivo' }
+
+    // El precio sale del catálogo. Solo se puede pisar si el admin lo habilitó
+    // en ese producto (spec punto 2).
+    let precioUnitario = Number(producto.precio)
+    if (producto.permite_editar_precio && input.precioUnitario != null) {
+        const pe = Number(input.precioUnitario)
+        if (!pe || pe <= 0) return { success: false, error: 'Precio inválido' }
+        precioUnitario = Math.round(pe)
+    }
+    if (!precioUnitario || precioUnitario <= 0) {
+        return { success: false, error: 'El producto no tiene un precio válido' }
+    }
+
+    const montoTotal = Math.round(precioUnitario * cantidad)
+    const comisionPct = Number(producto.comision_pct) || 0
+    const comisionMonto = Math.round(montoTotal * comisionPct / 100)
+
+    const { data: venta, error } = await admin
+        .from('ventas_externas')
+        .insert({
+            vendedor_id: auth.userId,
+            producto_id: producto.id,
+            producto_nombre: producto.nombre,
+            categoria: producto.categoria || 'Otros',
+            cantidad,
+            precio_unitario: precioUnitario,
+            monto_total: montoTotal,
+            comision_pct: comisionPct,
+            comision_monto: comisionMonto,
+            comprador_nombre: input.compradorNombre.trim(),
+            comprador_telefono: telefono,
+            comprador_email: input.compradorEmail?.trim().toLowerCase() || null,
+            observaciones: input.observaciones?.trim() || null
+        })
+        .select('id')
+        .single()
+
+    if (error) return { success: false, error: error.message }
+    return { success: true, ventaId: venta.id as string }
+}
+
+// ── Cancelar una venta pendiente ────────────────────────────────────────────
+export async function cancelarVentaAction(ventaId: string) {
+    const auth = await getVendedor()
+    if ('error' in auth) return { success: false, error: auth.error }
+
+    const admin = getAdminClient()
+    const { data: venta } = await admin
+        .from('ventas_externas')
+        .select('vendedor_id, estado')
+        .eq('id', ventaId)
+        .single()
+
+    if (!venta) return { success: false, error: 'La venta no existe' }
+    if (!auth.esAdmin && venta.vendedor_id !== auth.userId) {
+        return { success: false, error: 'Esa venta no es tuya' }
+    }
+    if (venta.estado === 'pagado') return { success: false, error: 'Esa venta ya fue pagada' }
+
+    const { error } = await admin
+        .from('ventas_externas')
+        .update({ estado: 'cancelado' })
+        .eq('id', ventaId)
+
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+// ── Listado (vendedor: solo lo suyo; admin: todo, con filtros) ──────────────
+export async function listarVentasAction(filtros?: {
+    vendedorId?: string
+    estado?: string
+    categoria?: string
+    desde?: string
+    hasta?: string
+}) {
+    const auth = await getVendedor()
+    if ('error' in auth) return { success: false, error: auth.error, ventas: [], esAdmin: false }
+
+    const admin = getAdminClient()
+    // Barremos vencidas antes de mostrar.
+    await admin.rpc('marcar_ventas_vencidas')
+
+    let query = admin
+        .from('ventas_externas')
+        .select('*, vendedor:profiles!ventas_externas_vendedor_id_fkey(nombre_completo)')
+        .order('created_at', { ascending: false })
+        .limit(500)
+
+    if (!auth.esAdmin) {
+        // El vendedor solo ve lo suyo, pase lo que pase.
+        query = query.eq('vendedor_id', auth.userId)
+    } else if (filtros?.vendedorId) {
+        query = query.eq('vendedor_id', filtros.vendedorId)
+    }
+
+    if (filtros?.estado) query = query.eq('estado', filtros.estado)
+    if (filtros?.categoria) query = query.eq('categoria', filtros.categoria)
+    if (filtros?.desde) query = query.gte('created_at', filtros.desde)
+    if (filtros?.hasta) query = query.lte('created_at', filtros.hasta)
+
+    const { data, error } = await query
+    if (error) return { success: false, error: error.message, ventas: [], esAdmin: auth.esAdmin }
+
+    return { success: true, ventas: data || [], esAdmin: auth.esAdmin }
+}
+
+// ── Catálogo para el formulario ─────────────────────────────────────────────
+export async function catalogoVentasAction() {
+    const auth = await getVendedor()
+    if ('error' in auth) return { success: false, error: auth.error, productos: [], esAdmin: false, vendedores: [] }
+
+    const admin = getAdminClient()
+    const { data: productos } = await admin
+        .from('productos')
+        .select('id, nombre, precio, categoria, comision_pct, permite_editar_precio, entrega_tipo')
+        .eq('activo', true)
+        .order('categoria', { ascending: true })
+        .order('nombre', { ascending: true })
+
+    // Para el filtro por vendedor del panel admin.
+    let vendedores: any[] = []
+    if (auth.esAdmin) {
+        const { data } = await admin
+            .from('profiles')
+            .select('id, nombre_completo, vendedor_activo')
+            .eq('rol', 'vendedor')
+            .order('nombre_completo', { ascending: true })
+        vendedores = data || []
+    }
+
+    return { success: true, productos: productos || [], esAdmin: auth.esAdmin, vendedores }
+}
+
+// ── Activar/desactivar un vendedor (solo admin) ─────────────────────────────
+export async function toggleVendedorActivoAction(vendedorId: string, activar: boolean) {
+    const auth = await getVendedor()
+    if ('error' in auth) return { success: false, error: auth.error }
+    if (!auth.esAdmin) return { success: false, error: 'Solo administradores' }
+
+    const admin = getAdminClient()
+    const { error } = await admin
+        .from('profiles')
+        .update({ vendedor_activo: activar })
+        .eq('id', vendedorId)
+        .eq('rol', 'vendedor')
+
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+// ── Lectura PÚBLICA de la venta (la ve el cliente en /pagar/[id]) ───────────
+export async function getVentaPublicaAction(ventaId: string) {
+    const admin = getAdminClient()
+    const { data: v } = await admin
+        .from('ventas_externas')
+        .select('id, producto_nombre, cantidad, precio_unitario, monto_total, comprador_nombre, estado, expira_at')
+        .eq('id', ventaId)
+        .maybeSingle()
+
+    if (!v) return { ok: false as const, motivo: 'inexistente' as const }
+    if (v.estado === 'pagado') return { ok: false as const, motivo: 'pagado' as const }
+    if (v.estado === 'cancelado') return { ok: false as const, motivo: 'cancelado' as const }
+    if (v.estado === 'vencido' || new Date(v.expira_at) < new Date()) {
+        return { ok: false as const, motivo: 'vencido' as const }
+    }
+
+    return {
+        ok: true as const,
+        venta: {
+            id: v.id as string,
+            producto_nombre: v.producto_nombre as string,
+            cantidad: Number(v.cantidad),
+            precio_unitario: Number(v.precio_unitario),
+            monto_total: Number(v.monto_total),
+            comprador_nombre: v.comprador_nombre as string
+        }
+    }
+}

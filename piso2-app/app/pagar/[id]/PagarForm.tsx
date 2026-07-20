@@ -4,22 +4,20 @@ import { useState } from 'react'
 import { toast, Toaster } from 'sonner'
 import { Loader2, ShieldCheck } from 'lucide-react'
 
-type LinkPublico = {
+type VentaPublica = {
     id: string
-    monto_final: number
-    precio_base: number
-    descuento_pct: number
-    cliente_nombre: string
     producto_nombre: string
-    creditos: number | null
-    tipo_clase: string | null
+    cantidad: number
+    precio_unitario: number
+    monto_total: number
+    comprador_nombre: string
 }
 
 const inputCls = "w-full bg-[#111] border border-white/10 rounded-lg py-3 px-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors"
 
-export default function PagarForm({ link }: { link: LinkPublico }) {
+export default function PagarForm({ venta }: { venta: VentaPublica }) {
     // El vendedor ya cargó el nombre; lo dejamos editable por si escribió mal.
-    const [nombre, ...restoNombre] = link.cliente_nombre.split(' ')
+    const [nombre, ...restoNombre] = venta.comprador_nombre.split(' ')
     const [form, setForm] = useState({
         nombre: nombre || '',
         apellido: restoNombre.join(' '),
@@ -36,7 +34,7 @@ export default function PagarForm({ link }: { link: LinkPublico }) {
             const res = await fetch('/api/mercadopago/preference', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ link_id: link.id, cliente: form })
+                body: JSON.stringify({ venta_id: venta.id, cliente: form })
             })
             const data = await res.json()
             if (!res.ok || !data.url) throw new Error(data.error || 'No se pudo generar el pago')
@@ -62,30 +60,20 @@ export default function PagarForm({ link }: { link: LinkPublico }) {
                 <div className="bg-[#09090b] border border-white/10 rounded-2xl p-5 space-y-3">
                     <div>
                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Producto</p>
-                        <p className="text-white font-bold text-sm">{link.producto_nombre}</p>
-                        {link.creditos ? (
-                            <p className="text-[10px] text-gray-500 font-bold uppercase mt-0.5">{link.creditos} créditos</p>
-                        ) : null}
+                        <p className="text-white font-bold text-sm">{venta.producto_nombre}</p>
+                        {venta.cantidad > 1 && (
+                            <p className="text-[10px] text-gray-500 font-bold uppercase mt-0.5">
+                                {venta.cantidad} × ${venta.precio_unitario.toLocaleString()}
+                            </p>
+                        )}
                     </div>
 
                     <div className="border-t border-white/5 pt-3 flex items-baseline justify-between">
                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Total</p>
-                        <div className="flex items-baseline gap-2">
-                            {link.descuento_pct > 0 && (
-                                <span className="text-xs text-gray-600 line-through font-bold">
-                                    ${link.precio_base.toLocaleString()}
-                                </span>
-                            )}
-                            <span className="text-3xl font-black text-[#D4E655]">
-                                ${link.monto_final.toLocaleString()}
-                            </span>
-                        </div>
+                        <span className="text-3xl font-black text-[#D4E655]">
+                            ${venta.monto_total.toLocaleString()}
+                        </span>
                     </div>
-                    {link.descuento_pct > 0 && (
-                        <p className="text-[10px] font-black text-[#D4E655]/70 uppercase text-right -mt-2">
-                            Descuento del {link.descuento_pct}% aplicado
-                        </p>
-                    )}
                 </div>
 
                 {/* ── SUS DATOS ─────────────────────────────────────────── */}

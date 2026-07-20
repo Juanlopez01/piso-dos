@@ -1,16 +1,16 @@
-import { getLinkPublicoAction } from '@/app/actions/links-pago'
+import { getVentaPublicaAction } from '@/app/actions/ventas'
 import PagarForm from './PagarForm'
 
 const MENSAJES: Record<string, { titulo: string; detalle: string }> = {
     inexistente: { titulo: 'Link no encontrado', detalle: 'Revisá que hayas copiado el link completo.' },
-    pagado: { titulo: '¡Este link ya fue pagado!', detalle: 'Si ya pagaste, entrá con tu mail y tu DNI como contraseña.' },
-    anulado: { titulo: 'Link anulado', detalle: 'Pedile uno nuevo a la persona que te lo mandó.' },
-    expirado: { titulo: 'Link vencido', detalle: 'Pedile uno nuevo a la persona que te lo mandó.' },
+    pagado: { titulo: '¡Esta venta ya fue pagada!', detalle: 'Si ya pagaste, entrá con tu mail y tu DNI como contraseña.' },
+    cancelado: { titulo: 'Venta cancelada', detalle: 'Pedile un link nuevo a la persona que te lo mandó.' },
+    vencido: { titulo: 'Link vencido', detalle: 'Pedile un link nuevo a la persona que te lo mandó.' },
 }
 
 export default async function PagarPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params
-    const res = await getLinkPublicoAction(id)
+    const res = await getVentaPublicaAction(id)
 
     if (!res.ok) {
         const m = MENSAJES[res.motivo]
@@ -22,5 +22,5 @@ export default async function PagarPage({ params }: { params: Promise<{ id: stri
         )
     }
 
-    return <PagarForm link={res.link} />
+    return <PagarForm venta={res.venta} />
 }

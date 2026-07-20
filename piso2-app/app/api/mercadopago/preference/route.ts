@@ -16,30 +16,39 @@ const getAdminClient = () => createAdminClient(
 export async function POST(request: Request) {
     try {
         const body = await request.json()
-        const { productoId, cuponId, tipo_pago, mes, anio, pase_referencia, precio, link_id, cliente } = body
+        const { productoId, cuponId, tipo_pago, mes, anio, pase_referencia, precio, venta_id, cliente } = body
         let { userId } = body
 
         // ==========================================
-        // 0. LINK DE VENTA (lo genera un vendedor y lo paga un prospecto)
+        // 0. VENTA EXTERNA (la genera un vendedor y la paga un prospecto)
         //    El cliente puede no tener cuenta: lo identificamos por mail acá.
         // ==========================================
-        let linkRow: any = null
+        let ventaRow: any = null
+        let ventaProducto: any = null
 
-        if (link_id) {
+        if (venta_id) {
             const admin = getAdminClient()
 
-            const { data: link } = await admin
-                .from('links_pago')
-                .select('id, producto_id, monto_final, estado, expira_at')
-                .eq('id', link_id)
+            const { data: venta } = await admin
+                .from('ventas_externas')
+                .select('id, producto_id, cantidad, monto_total, estado, expira_at, producto_nombre')
+                .eq('id', venta_id)
                 .maybeSingle()
 
-            if (!link) return NextResponse.json({ error: "El link no existe" }, { status: 404 })
-            if (link.estado === 'pagado') return NextResponse.json({ error: "Este link ya fue pagado" }, { status: 400 })
-            if (link.estado === 'anulado') return NextResponse.json({ error: "Este link fue anulado" }, { status: 400 })
-            if (new Date(link.expira_at) < new Date()) {
-                return NextResponse.json({ error: "Este link venció" }, { status: 400 })
+            if (!venta) return NextResponse.json({ error: "La venta no existe" }, { status: 404 })
+            if (venta.estado === 'pagado') return NextResponse.json({ error: "Esta venta ya fue pagada" }, { status: 400 })
+            if (venta.estado === 'cancelado') return NextResponse.json({ error: "Esta venta fue cancelada" }, { status: 400 })
+            if (venta.estado === 'vencido' || new Date(venta.expira_at) < new Date()) {
+                return NextResponse.json({ error: "Esta venta venció" }, { status: 400 })
             }
+
+            // El producto define qué se entrega al aprobarse el pago.
+            const { data: prod } = await admin
+                .from('productos')
+                .select('nombre, creditos, tipo_clase, entrega_tipo')
+                .eq('id', venta.producto_id)
+                .single()
+            if (!prod) return NextResponse.json({ error: "El producto de la venta ya no existe" }, { status: 400 })
 
             const emailLimpio = String(cliente?.email || '').trim().toLowerCase()
             if (!emailLimpio || !emailLimpio.includes('@')) {
@@ -78,12 +87,13 @@ export async function POST(request: Request) {
                 userId = authData.user.id
             }
 
-            // Dejamos asentado a quién terminó quedando el link
-            await admin.from('links_pago')
-                .update({ user_id: userId, cliente_email: emailLimpio })
-                .eq('id', link_id)
+            // Dejamos asentado a quién terminó quedando la venta
+            await admin.from('ventas_externas')
+                .update({ user_id: userId, comprador_email: emailLimpio })
+                .eq('id', venta_id)
 
-            linkRow = link
+            ventaRow = venta
+            ventaProducto = prod
         }
 
         if (!userId) {
@@ -103,28 +113,37 @@ export async function POST(request: Request) {
         // ==========================================
         // 1. ASIGNACIÓN DE PRECIOS Y METADATA
         // ==========================================
-        if (linkRow) {
-            // El monto ya viene calculado y congelado por el server al crear el
-            // link (precio de catálogo - descuento con tope). No se recalcula acá.
-            // Admin client: el cliente que paga es anónimo y no pasa el RLS.
-            const { data: pack } = await getAdminClient()
-                .from('productos')
-                .select('nombre, creditos, tipo_clase')
-                .eq('id', linkRow.producto_id)
-                .single()
+        if (ventaRow) {
+            // El monto ya está congelado por el server al crear la venta
+            // (precio de catálogo × cantidad). No se recalcula acá.
+            tituloFinal = ventaRow.cantidad > 1
+                ? `${ventaProducto.nombre} (x${ventaRow.cantidad})`
+                : ventaProducto.nombre
+            precioFinal = Number(ventaRow.monto_total)
 
-            if (!pack) return NextResponse.json({ error: "El producto del link ya no existe" }, { status: 400 })
+            // La venta siempre viaja para que el webhook la marque pagada.
+            metadataCustom.venta_id = String(venta_id)
+            metadataCustom.producto_nombre = String(ventaProducto.nombre)
 
-            tituloFinal = pack.nombre
-            precioFinal = Number(linkRow.monto_final)
-
-            // Metadata igual a la de una compra normal de pack: así el webhook
-            // le entrega los créditos al cliente sin ninguna rama nueva.
-            metadataCustom.tipo_pago = 'pack'
-            metadataCustom.producto_id = String(linkRow.producto_id)
-            metadataCustom.tipo_clase = String(pack.tipo_clase)
-            metadataCustom.creditos = String(pack.creditos)
-            metadataCustom.link_id = String(link_id)
+            // El tipo de entrega del producto decide qué hace el webhook.
+            const entrega = ventaProducto.entrega_tipo || 'creditos'
+            if (entrega === 'creditos') {
+                // Igual que una compra de pack: el webhook acredita los créditos.
+                metadataCustom.tipo_pago = 'pack'
+                metadataCustom.producto_id = String(ventaRow.producto_id)
+                metadataCustom.tipo_clase = String(ventaProducto.tipo_clase)
+                // Créditos × cantidad vendida.
+                metadataCustom.creditos = String(Number(ventaProducto.creditos || 0) * Number(ventaRow.cantidad || 1))
+            } else if (entrega === 'cuota_liga') {
+                // Marca la cuota de La Liga del mes actual para ese alumno.
+                metadataCustom.tipo_pago = 'cuota_liga'
+                metadataCustom.mes = String(new Date().getMonth() + 1)
+                metadataCustom.anio = String(new Date().getFullYear())
+            } else {
+                // 'ninguna' (o entregas que aún no automatizamos): el webhook
+                // solo registra la venta como pagada, sin entregar nada.
+                metadataCustom.tipo_pago = 'venta_externa'
+            }
 
         } else if (tipo_pago === 'cuota_liga') {
             // --- LÓGICA LA LIGA ---
@@ -252,9 +271,9 @@ export async function POST(request: Request) {
 
         // 🚀 Definimos a dónde vuelve el usuario según lo que pagó
         let rutaDestino = "/perfil"
-        // El cliente de un link recién se creó la cuenta y no está logueado:
+        // El cliente de una venta recién se creó la cuenta y no está logueado:
         // mandarlo a /perfil lo rebota al login. Lo mandamos derecho ahí.
-        if (linkRow) rutaDestino = "/login"
+        if (ventaRow) rutaDestino = "/login"
         else if (tipo_pago === 'cuota_liga') rutaDestino = "/la-liga"
         else if (tipo_pago === 'cuota_compania') rutaDestino = "/companias"
 
@@ -264,7 +283,7 @@ export async function POST(request: Request) {
             body: {
                 items: [
                     {
-                        id: tipo_pago === 'cuota_liga' ? 'LIGA_CUOTA' : String(linkRow ? linkRow.producto_id : productoId),
+                        id: tipo_pago === 'cuota_liga' ? 'LIGA_CUOTA' : String(ventaRow ? ventaRow.producto_id : productoId),
                         title: tituloFinal,
                         quantity: 1,
                         unit_price: Number(precioFinal),
