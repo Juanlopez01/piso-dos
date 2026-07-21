@@ -264,7 +264,7 @@ export async function procesarInscripcionAction(payload: any) {
                 }
 
                 const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
-                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago')
+                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago, precio_total')
                     .eq('user_id', payload.p_user_id)
                     .eq('tipo_clase', 'exclusivo')
                     .gt('creditos_restantes', 0)
@@ -274,7 +274,10 @@ export async function procesarInscripcionAction(payload: any) {
 
                 if (packActivo && packActivo.cantidad_inicial > 0) {
                     packUsadoId = packActivo.id;
-                    valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
+                    // Valor FIJO por clase = precio total pactado ÷ créditos (no cambia
+                    // aunque el alumno pague en cuotas). Fallback a lo abonado para
+                    // packs viejos sin precio_total cargado.
+                    valorInscripcion = Math.round((packActivo.precio_total ?? packActivo.monto_abonado) / packActivo.cantidad_inicial);
                     metodoPagoFinal = packActivo.metodo_pago || 'efectivo';
 
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
@@ -293,7 +296,10 @@ export async function procesarInscripcionAction(payload: any) {
                 const { data: prod } = await supabaseAdmin.from('productos').select('creditos').eq('id', productoIdLimpio).single();
                 const creditosDelPack = prod ? prod.creditos : 0;
 
-                valorInscripcion = creditosDelPack > 0 ? Math.round(payload.p_monto_caja / creditosDelPack) : payload.p_monto_caja;
+                // Total pactado = lo que paga ahora + lo que queda a deber (seña).
+                // El valor por clase sale del total, así no cambia si paga en cuotas.
+                const totalPack = (payload.p_monto_caja || 0) + (saldoPendienteCalculado || 0);
+                valorInscripcion = creditosDelPack > 0 ? Math.round(totalPack / creditosDelPack) : totalPack;
 
                 if (payload.p_monto_caja > 0 && turnoId) {
                     await supabaseAdmin.from('caja_movimientos').insert({
@@ -314,6 +320,7 @@ export async function procesarInscripcionAction(payload: any) {
                     cantidad_inicial: creditosDelPack,
                     creditos_restantes: Math.max(0, creditosDelPack - 1),
                     monto_abonado: payload.p_monto_caja || 0,
+                    precio_total: totalPack,
                     metodo_pago: payload.p_metodo_pago,
                     fecha_compra: ahora.toISOString(),
                     fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
@@ -361,7 +368,7 @@ export async function procesarInscripcionAction(payload: any) {
                 if (!perfil || (perfil as any)[campoCredito] < 1) throw new Error(`Créditos insuficientes.`);
 
                 const { data: packActivo } = await supabaseAdmin.from('alumno_packs')
-                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago')
+                    .select('id, creditos_restantes, cantidad_inicial, monto_abonado, metodo_pago, precio_total')
                     .eq('user_id', payload.p_user_id)
                     .eq('tipo_clase', tipoPackBusqueda)
                     .gt('creditos_restantes', 0)
@@ -371,7 +378,10 @@ export async function procesarInscripcionAction(payload: any) {
 
                 if (packActivo && packActivo.cantidad_inicial > 0) {
                     packUsadoId = packActivo.id;
-                    valorInscripcion = Math.round(packActivo.monto_abonado / packActivo.cantidad_inicial);
+                    // Valor FIJO por clase = precio total pactado ÷ créditos (no cambia
+                    // aunque el alumno pague en cuotas). Fallback a lo abonado para
+                    // packs viejos sin precio_total cargado.
+                    valorInscripcion = Math.round((packActivo.precio_total ?? packActivo.monto_abonado) / packActivo.cantidad_inicial);
                     metodoPagoFinal = packActivo.metodo_pago || 'efectivo';
 
                     const nuevosRestantes = packActivo.creditos_restantes - 1;
@@ -391,7 +401,10 @@ export async function procesarInscripcionAction(payload: any) {
                 const creditosDelPack = prod ? prod.creditos : 0;
                 const tipoClaseProd = prod?.tipo_clase || tipoPackBusqueda;
 
-                valorInscripcion = creditosDelPack > 0 ? Math.round(payload.p_monto_caja / creditosDelPack) : payload.p_monto_caja;
+                // Total pactado = lo que paga ahora + lo que queda a deber (seña).
+                // El valor por clase sale del total, así no cambia si paga en cuotas.
+                const totalPack = (payload.p_monto_caja || 0) + (saldoPendienteCalculado || 0);
+                valorInscripcion = creditosDelPack > 0 ? Math.round(totalPack / creditosDelPack) : totalPack;
 
                 if (payload.p_monto_caja > 0 && turnoId) {
                     await supabaseAdmin.from('caja_movimientos').insert({
@@ -412,6 +425,7 @@ export async function procesarInscripcionAction(payload: any) {
                     cantidad_inicial: creditosDelPack,
                     creditos_restantes: Math.max(0, creditosDelPack - 1),
                     monto_abonado: payload.p_monto_caja || 0,
+                    precio_total: totalPack,
                     metodo_pago: payload.p_metodo_pago,
                     fecha_compra: ahora.toISOString(),
                     fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),

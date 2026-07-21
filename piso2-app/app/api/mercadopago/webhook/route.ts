@@ -233,6 +233,7 @@ export async function POST(request: Request) {
                     cantidad_inicial: Number(creditos),
                     creditos_restantes: Number(creditos), // Al comprar, le quedan todos
                     monto_abonado: montoAbonado,
+                    precio_total: montoAbonado, // Online se paga completo → total = abonado
                     estado: 'activo',
                     mp_payment_id: mpPaymentIdStr,
                     metodo_pago: 'mercadopago',
