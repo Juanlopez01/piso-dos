@@ -58,6 +58,7 @@ function MobileNavContent() {
             'Liquidaciones',
             'Remarketing',
             'Caja',
+            'Ventas',
             'Sedes',
             'Notificaciones',
             'Mi Perfil'

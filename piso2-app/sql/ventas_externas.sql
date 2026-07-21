@@ -12,6 +12,15 @@
 --    block", ejecutá solo esta línea primero y después el resto del archivo.
 alter type public.rol_usuario add value if not exists 'vendedor';
 
+-- La tabla profiles tiene un CHECK 'roles_permitidos' (aparte del enum) que
+-- limita los valores de rol. Lo recreamos para que acepte 'vendedor'.
+alter table public.profiles drop constraint if exists roles_permitidos;
+alter table public.profiles add constraint roles_permitidos
+    check (rol in (
+        'admin', 'recepcion', 'profesor', 'alumno',
+        'coordinador', 'auxiliar', 'visitante', 'vendedor'
+    ));
+
 -- Estado Activo/Inactivo del vendedor (spec punto 1)
 alter table public.profiles
     add column if not exists vendedor_activo boolean not null default true;
