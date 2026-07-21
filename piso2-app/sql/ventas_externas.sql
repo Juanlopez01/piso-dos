@@ -13,13 +13,9 @@
 alter type public.rol_usuario add value if not exists 'vendedor';
 
 -- La tabla profiles tiene un CHECK 'roles_permitidos' (aparte del enum) que
--- limita los valores de rol. Lo recreamos para que acepte 'vendedor'.
+-- limitaba los valores de rol y bloqueaba 'vendedor'. Como 'rol' ya es el enum
+-- rol_usuario (que restringe los valores), ese CHECK es redundante: lo borramos.
 alter table public.profiles drop constraint if exists roles_permitidos;
-alter table public.profiles add constraint roles_permitidos
-    check (rol in (
-        'admin', 'recepcion', 'profesor', 'alumno',
-        'coordinador', 'auxiliar', 'visitante', 'vendedor'
-    ));
 
 -- Estado Activo/Inactivo del vendedor (spec punto 1)
 alter table public.profiles
