@@ -872,6 +872,7 @@ function UsuariosContent() {
                                                     <option value="coordinador">Coordinador</option>
                                                     <option value="recepcion">Recep.</option>
                                                     <option value="auxiliar">Auxiliar</option>
+                                                    {isAdmin && <option value="vendedor">Vendedor</option>}
                                                     <option value="profesor">Profe</option>
                                                     <option value="alumno">Alumno</option>
                                                 </select>
@@ -1400,6 +1401,7 @@ function UsuariosContent() {
                                             <>
                                                 <option value="recepcion">Recepción</option>
                                                 <option value="auxiliar">Auxiliar</option>
+                                                <option value="vendedor">Vendedor</option>
                                             </>
                                         )}
                                     </select>
