@@ -220,7 +220,7 @@ export async function getVentaPublicaAction(ventaId: string) {
     const admin = getAdminClient()
     const { data: v } = await admin
         .from('ventas_externas')
-        .select('id, producto_nombre, cantidad, precio_unitario, monto_total, comprador_nombre, estado, expira_at')
+        .select('id, producto_nombre, cantidad, precio_unitario, monto_total, comprador_nombre, estado, expira_at, vendedor:profiles!ventas_externas_vendedor_id_fkey(nombre_completo)')
         .eq('id', ventaId)
         .maybeSingle()
 
@@ -231,6 +231,10 @@ export async function getVentaPublicaAction(ventaId: string) {
         return { ok: false as const, motivo: 'vencido' as const }
     }
 
+    const vendedorNom = Array.isArray(v.vendedor)
+        ? (v.vendedor[0] as any)?.nombre_completo
+        : (v.vendedor as any)?.nombre_completo
+
     return {
         ok: true as const,
         venta: {
@@ -239,7 +243,8 @@ export async function getVentaPublicaAction(ventaId: string) {
             cantidad: Number(v.cantidad),
             precio_unitario: Number(v.precio_unitario),
             monto_total: Number(v.monto_total),
-            comprador_nombre: v.comprador_nombre as string
+            comprador_nombre: v.comprador_nombre as string,
+            vendedor_nombre: (vendedorNom || null) as string | null
         }
     }
 }

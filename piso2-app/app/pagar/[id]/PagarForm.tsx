@@ -11,6 +11,7 @@ type VentaPublica = {
     precio_unitario: number
     monto_total: number
     comprador_nombre: string
+    vendedor_nombre: string | null
 }
 
 const inputCls = "w-full bg-[#111] border border-white/10 rounded-lg py-3 px-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors"
@@ -54,6 +55,9 @@ export default function PagarForm({ venta }: { venta: VentaPublica }) {
                 <div className="text-center">
                     <p className="text-[10px] font-black text-[#D4E655] uppercase tracking-[0.2em]">Piso 2</p>
                     <h1 className="text-xl font-black text-white uppercase mt-1">Confirmá tu compra</h1>
+                    {venta.vendedor_nombre && (
+                        <p className="text-[11px] text-gray-500 font-medium mt-1.5">Te atiende <span className="text-gray-300 font-bold">{venta.vendedor_nombre}</span></p>
+                    )}
                 </div>
 
                 {/* ── QUÉ ESTÁ COMPRANDO ────────────────────────────────── */}
