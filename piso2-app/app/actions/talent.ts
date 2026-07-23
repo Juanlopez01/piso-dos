@@ -95,6 +95,111 @@ export async function crearSolicitudTalentoAction(payload: {
 }
 
 // ============================================================================
+// POSTULACIONES — gente logueada que quiere SER talento
+// ============================================================================
+
+// Cualquier usuario logueado puede postularse.
+export async function crearPostulacionTalentoAction(payload: {
+    nombre: string
+    rubro?: string
+    descripcion?: string
+    edad?: number
+    altura?: number
+    sexo?: string          // 'mujeres' | 'varones'
+    foto_url?: string
+    video_url?: string
+}) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { success: false, error: 'Tenés que iniciar sesión para postularte.' }
+
+    if (!payload.nombre?.trim()) return { success: false, error: 'Falta tu nombre completo.' }
+    if (!['mujeres', 'varones'].includes(payload.sexo || '')) return { success: false, error: 'Seleccioná el sexo.' }
+
+    const admin = getAdminClient()
+    const { error } = await admin.from('talent_postulaciones').insert({
+        user_id: session.user.id,
+        nombre: payload.nombre.trim(),
+        rubro: payload.rubro?.trim() || null,
+        descripcion: payload.descripcion?.trim() || null,
+        edad: payload.edad ? Number(payload.edad) : null,
+        altura: payload.altura ? Number(payload.altura) : null,
+        sexo: payload.sexo,
+        foto_url: payload.foto_url || null,
+        video_url: payload.video_url?.trim() || null,
+        estado: 'pendiente'
+    })
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+export async function listPostulacionesAction() {
+    const perm = await requireAdmin()
+    if (!perm.ok) return []
+    const admin = getAdminClient()
+    const { data } = await admin
+        .from('talent_postulaciones')
+        .select('*')
+        .order('estado', { ascending: true })       // 'pendiente' antes que 'standby'
+        .order('created_at', { ascending: false })
+    return data || []
+}
+
+// Aceptar → crea el talento en la vitrina y borra la postulación (la foto queda,
+// la usa el talento). Eliminar → borra postulación + foto para no ocupar espacio.
+export async function aceptarPostulacionAction(id: string) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+
+    const { data: p } = await admin.from('talent_postulaciones').select('*').eq('id', id).single()
+    if (!p) return { success: false, error: 'La postulación no existe' }
+
+    const categoria = ['mujeres', 'varones', 'obras'].includes(p.sexo) ? p.sexo : 'mujeres'
+    const { error: e1 } = await admin.from('talentos').insert({
+        nombre: p.nombre,
+        categoria,
+        disciplina: p.rubro,
+        bio: p.descripcion,
+        fotos: p.foto_url ? [p.foto_url] : [],
+        video_url: p.video_url,
+        edad: p.edad,
+        altura: p.altura,
+        destacado: false,
+        activo: true,
+        orden: 0
+    })
+    if (e1) return { success: false, error: e1.message }
+
+    await admin.from('talent_postulaciones').delete().eq('id', id)
+    return { success: true }
+}
+
+export async function standbyPostulacionAction(id: string, standby: boolean) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('talent_postulaciones').update({ estado: standby ? 'standby' : 'pendiente' }).eq('id', id)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+export async function eliminarPostulacionAction(id: string) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+
+    const { data: p } = await admin.from('talent_postulaciones').select('foto_url').eq('id', id).single()
+    const { error } = await admin.from('talent_postulaciones').delete().eq('id', id)
+    if (error) return { success: false, error: error.message }
+
+    // Borramos la foto del storage para no consumir espacio.
+    const path = p?.foto_url?.split('/talent/')[1]
+    if (path) await admin.storage.from('talent').remove([decodeURIComponent(path)])
+    return { success: true }
+}
+
+// ============================================================================
 // ADMIN — ABM de talentos
 // ============================================================================
 export async function listTalentosAdminAction() {

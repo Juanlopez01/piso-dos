@@ -6,10 +6,11 @@ import { useCash } from '@/context/CashContext'
 import { optimizeImage } from '@/utils/optimizeImage'
 import {
     listTalentosAdminAction, upsertTalentoAction, eliminarTalentoAction, toggleTalentoActivoAction,
-    listMarcasAdminAction, upsertMarcaAction, toggleMarcaActivoAction, eliminarMarcaAction
+    listMarcasAdminAction, upsertMarcaAction, toggleMarcaActivoAction, eliminarMarcaAction,
+    listPostulacionesAction, aceptarPostulacionAction, standbyPostulacionAction, eliminarPostulacionAction
 } from '@/app/actions/talent'
 import { toast, Toaster } from 'sonner'
-import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock } from 'lucide-react'
+import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play } from 'lucide-react'
 import { Playfair_Display } from 'next/font/google'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['500', '600', '700'] })
@@ -48,7 +49,7 @@ export default function TalentsAdminPage() {
     const [supabase] = useState(() => createClient())
     const { userRole, isLoading: loadingCtx } = useCash()
 
-    const [vista, setVista] = useState<'talentos' | 'marcas'>('talentos')
+    const [vista, setVista] = useState<'talentos' | 'marcas' | 'solicitudes'>('talentos')
     const [talentos, setTalentos] = useState<Talento[]>([])
     const [loading, setLoading] = useState(true)
     const [modalOpen, setModalOpen] = useState(false)
@@ -71,6 +72,37 @@ export default function TalentsAdminPage() {
 
     const cargarMarcas = () => { listMarcasAdminAction().then(d => setMarcas(d)).catch(() => { }) }
     useEffect(() => { if (userRole === 'admin') cargarMarcas() }, [userRole])
+
+    // Postulaciones (gente que quiere ser talento)
+    const [postulaciones, setPostulaciones] = useState<any[]>([])
+    const [postSel, setPostSel] = useState<any | null>(null)
+    const [procesandoPost, setProcesandoPost] = useState(false)
+    const cargarPostulaciones = () => { listPostulacionesAction().then(d => setPostulaciones(d)).catch(() => { }) }
+    useEffect(() => { if (userRole === 'admin') cargarPostulaciones() }, [userRole])
+    const pendientesCount = postulaciones.filter(p => p.estado === 'pendiente').length
+
+    const handleAceptarPost = async (id: string) => {
+        setProcesandoPost(true)
+        const res = await aceptarPostulacionAction(id)
+        if (res.success) { toast.success('Aceptado. Pasó a la vitrina.'); setPostSel(null); cargarPostulaciones(); cargar() }
+        else toast.error(res.error || 'Error')
+        setProcesandoPost(false)
+    }
+    const handleStandbyPost = async (p: any) => {
+        setProcesandoPost(true)
+        const res = await standbyPostulacionAction(p.id, p.estado !== 'standby')
+        if (res.success) { toast.success(p.estado === 'standby' ? 'Vuelto a pendiente' : 'En stand by'); cargarPostulaciones(); setPostSel(null) }
+        else toast.error(res.error || 'Error')
+        setProcesandoPost(false)
+    }
+    const handleEliminarPost = async (id: string) => {
+        if (!confirm('¿Eliminar la postulación? Se borra también la foto y no se puede deshacer.')) return
+        setProcesandoPost(true)
+        const res = await eliminarPostulacionAction(id)
+        if (res.success) { toast.success('Postulación eliminada'); setPostSel(null); cargarPostulaciones() }
+        else toast.error(res.error || 'Error')
+        setProcesandoPost(false)
+    }
 
     const abrirNuevo = () => { setForm(formVacio()); setModalOpen(true) }
     const abrirEditar = (t: Talento) => {
@@ -194,10 +226,16 @@ export default function TalentsAdminPage() {
                         <div className="flex bg-neutral-100 p-1 rounded-lg">
                             <button onClick={() => setVista('talentos')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'talentos' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Talentos</button>
                             <button onClick={() => setVista('marcas')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'marcas' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Marcas</button>
+                            <button onClick={() => setVista('solicitudes')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${vista === 'solicitudes' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>
+                                Solicitudes
+                                {pendientesCount > 0 && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${vista === 'solicitudes' ? 'bg-white text-black' : 'bg-black text-white'}`}>{pendientesCount}</span>}
+                            </button>
                         </div>
-                        <button onClick={() => vista === 'talentos' ? abrirNuevo() : abrirNuevaMarca()} className="bg-black text-white font-bold uppercase px-5 py-3 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center gap-2">
-                            <Plus size={16} /> Nuevo
-                        </button>
+                        {vista !== 'solicitudes' && (
+                            <button onClick={() => vista === 'talentos' ? abrirNuevo() : abrirNuevaMarca()} className="bg-black text-white font-bold uppercase px-5 py-3 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center gap-2">
+                                <Plus size={16} /> Nuevo
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
@@ -275,8 +313,83 @@ export default function TalentsAdminPage() {
                         </div>
                     )
                 )}
+
+                {/* SOLICITUDES (postulaciones) */}
+                {vista === 'solicitudes' && (
+                    postulaciones.length === 0 ? (
+                        <div className="py-20 text-center border-2 border-dashed border-neutral-200 rounded-2xl">
+                            <Inbox className="mx-auto mb-3 text-neutral-300" size={32} />
+                            <p className="text-neutral-400 font-bold uppercase text-xs">No hay postulaciones por ahora.</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                            {postulaciones.map(p => (
+                                <button key={p.id} onClick={() => setPostSel(p)} className={`group text-left ${p.estado === 'standby' ? 'opacity-70' : ''}`}>
+                                    <div className="aspect-[3/4] bg-neutral-100 relative overflow-hidden">
+                                        {p.foto_url
+                                            ? <img src={p.foto_url} alt={p.nombre} className="w-full h-full object-cover grayscale group-hover:grayscale-0 group-hover:scale-105 transition-all duration-700" />
+                                            : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-[10px] uppercase tracking-widest">Sin foto</div>}
+                                        {p.estado === 'standby'
+                                            ? <span className="absolute top-2 right-2 bg-amber-500/90 text-white text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1">Stand by</span>
+                                            : <span className="absolute top-2 right-2 bg-black/80 text-white text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1">Nueva</span>}
+                                    </div>
+                                    <h3 className="mt-2.5 text-[11px] tracking-[0.15em] uppercase font-semibold truncate">{p.nombre}</h3>
+                                    {p.rubro && <p className="text-[9px] tracking-[0.2em] uppercase text-neutral-400 truncate">{p.rubro}</p>}
+                                </button>
+                            ))}
+                        </div>
+                    )
+                )}
             </div>
             </div>
+
+            {/* MODAL DETALLE POSTULACIÓN */}
+            {postSel && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => !procesandoPost && setPostSel(null)}>
+                    <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden relative max-h-[90vh] flex flex-col md:flex-row" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setPostSel(null)} className="absolute top-4 right-4 z-10 bg-white/80 rounded-full p-1 text-neutral-500 hover:text-black"><X size={20} /></button>
+
+                        <div className="md:w-2/5 bg-neutral-100 shrink-0">
+                            {postSel.foto_url
+                                ? <img src={postSel.foto_url} alt={postSel.nombre} className="w-full h-56 md:h-full object-cover" />
+                                : <div className="w-full h-56 md:h-full flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin foto</div>}
+                        </div>
+
+                        <div className="flex-1 p-6 md:p-8 overflow-y-auto">
+                            <p className="text-[9px] font-bold tracking-[0.3em] uppercase text-neutral-400 mb-1">{postSel.rubro || 'Sin rubro'}{postSel.estado === 'standby' ? ' · Stand by' : ''}</p>
+                            <h3 className={`${serif.className} text-2xl md:text-3xl tracking-wide mb-4`}>{postSel.nombre}</h3>
+
+                            <div className="flex flex-wrap gap-4 text-xs text-neutral-600 mb-4">
+                                <span><b className="text-neutral-900">{postSel.sexo === 'varones' ? 'Masculino' : 'Femenino'}</b></span>
+                                {postSel.edad && <span>Edad: <b className="text-neutral-900">{postSel.edad}</b></span>}
+                                {postSel.altura && <span>Altura: <b className="text-neutral-900">{postSel.altura} cm</b></span>}
+                            </div>
+
+                            {postSel.descripcion && <p className="text-sm text-neutral-600 leading-relaxed mb-4 whitespace-pre-line">{postSel.descripcion}</p>}
+
+                            {postSel.video_url && (
+                                <a href={postSel.video_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.15em] uppercase border border-neutral-300 px-4 py-2 hover:border-black transition-colors mb-6">
+                                    <Play size={13} /> Ver video
+                                </a>
+                            )}
+
+                            <div className="flex flex-col gap-2 border-t border-neutral-200 pt-5 mt-2">
+                                <button disabled={procesandoPost} onClick={() => handleAceptarPost(postSel.id)} className="w-full bg-neutral-900 text-white font-semibold uppercase tracking-[0.15em] text-xs py-3 hover:bg-black transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                                    {procesandoPost ? <Loader2 size={14} className="animate-spin" /> : <Check size={15} />} Aceptar y pasar a la vitrina
+                                </button>
+                                <div className="flex gap-2">
+                                    <button disabled={procesandoPost} onClick={() => handleStandbyPost(postSel)} className="flex-1 border border-neutral-300 hover:border-black py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                                        <PauseCircle size={14} /> {postSel.estado === 'standby' ? 'Quitar stand by' : 'Stand by'}
+                                    </button>
+                                    <button disabled={procesandoPost} onClick={() => handleEliminarPost(postSel.id)} className="flex-1 border border-neutral-300 hover:border-red-500 hover:text-red-500 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                                        <Trash2 size={14} /> Eliminar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL MARCA */}
             {modalMarca && (

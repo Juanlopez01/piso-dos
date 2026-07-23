@@ -46,7 +46,7 @@ function SidebarContent() {
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         if (userRole === 'profesor') {
-            return ['Inicio', 'Mis Clases', 'Mis Pagos', 'Grupos', 'La Liga', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+            return ['Inicio', 'Mis Clases', 'Mis Pagos', 'Grupos', 'La Liga', 'Notificaciones', 'Mi Perfil', 'Sumate a Talent'].includes(item.name)
         }
 
         if (userRole === 'recepcion') {
@@ -62,7 +62,7 @@ function SidebarContent() {
 
         // 🚀 ROL COORDINADOR: Ve La Liga y Grupos (sujetos a su llavero que ya validamos arriba en `hasLigaAccess/hasCompaniaAccess`), y su perfil. No ve caja ni agenda de recepcion.
         if (userRole === 'coordinador') {
-            return ['Inicio', 'Explorar', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
+            return ['Inicio', 'Explorar', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Sumate a Talent'].includes(item.name)
         }
 
         return item.roles.includes(userRole || 'visitante')

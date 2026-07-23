@@ -40,6 +40,7 @@ export const menuItems = [
     { name: 'Sedes', href: '/sedes', icon: MapPin, roles: ['admin'] },
     { name: 'Grupos', href: '/companias', icon: UsersRound, roles: ['admin', 'coordinador', 'profesor', 'alumno'] },
     { name: 'Talents', href: '/talents', icon: Sparkles, roles: ['admin'] },
+    { name: 'Sumate a Talent', href: '/talent/postular', icon: Sparkles, roles: ['alumno', 'profesor', 'coordinador'] },
     { name: 'La Liga', href: '/la-liga', icon: GraduationCap, roles: ['admin', 'profesor', 'coordinador', 'alumno', 'auxiliar'] },
     { name: 'Alquilar sala', href: '/alquilar-sala', icon: ShoppingBagIcon, roles: ['admin', 'profesor', 'coordinador', 'alumno'] },
 ]

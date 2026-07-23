@@ -62,6 +62,7 @@ export default function TalentHome() {
                     <a href="#nosotros" className="hover:text-black transition-colors">Nosotros</a>
                     <a href="#management" className="hover:text-black transition-colors">Management</a>
                     <a href="#marcas" className="hover:text-black transition-colors">Con quién trabajamos</a>
+                    <Link href="/talent/postular" className="border border-neutral-900 px-4 py-2 hover:bg-neutral-900 hover:text-white transition-colors">Sumate</Link>
                 </nav>
             </header>
 
