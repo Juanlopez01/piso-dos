@@ -30,7 +30,9 @@ type Producto = {
     visible_tienda?: boolean
     visible_vendedor?: boolean
     permite_editar_precio?: boolean
+    comision_tipo?: 'porcentaje' | 'monto_fijo'
     comision_pct?: number
+    comision_monto?: number
     entrega_tipo?: 'creditos' | 'cuota_liga' | 'cuota_compania' | 'ninguna'
 }
 
@@ -150,7 +152,9 @@ export default function TiendaConfigPage() {
     const [formVisibleTienda, setFormVisibleTienda] = useState(true)
     const [formVisibleVendedor, setFormVisibleVendedor] = useState(false)
     const [formPermiteEditarPrecio, setFormPermiteEditarPrecio] = useState(false)
+    const [formComisionTipo, setFormComisionTipo] = useState<'porcentaje' | 'monto_fijo'>('porcentaje')
     const [formComisionPct, setFormComisionPct] = useState('0')
+    const [formComisionMonto, setFormComisionMonto] = useState('0')
     const [formEntregaTipo, setFormEntregaTipo] = useState<'creditos' | 'cuota_liga' | 'cuota_compania' | 'ninguna'>('creditos')
 
     // Modal Cupon State
@@ -173,7 +177,9 @@ export default function TiendaConfigPage() {
             setFormVisibleTienda(prod.visible_tienda ?? true)
             setFormVisibleVendedor(prod.visible_vendedor ?? false)
             setFormPermiteEditarPrecio(prod.permite_editar_precio ?? false)
+            setFormComisionTipo(prod.comision_tipo === 'monto_fijo' ? 'monto_fijo' : 'porcentaje')
             setFormComisionPct((prod.comision_pct ?? 0).toString())
+            setFormComisionMonto((prod.comision_monto ?? 0).toString())
             setFormEntregaTipo(prod.entrega_tipo || 'creditos')
         } else {
             setEditingProdId(null)
@@ -186,7 +192,9 @@ export default function TiendaConfigPage() {
             setFormVisibleTienda(true)
             setFormVisibleVendedor(false)
             setFormPermiteEditarPrecio(false)
+            setFormComisionTipo('porcentaje')
             setFormComisionPct('0')
+            setFormComisionMonto('0')
             setFormEntregaTipo('creditos')
         }
         setIsProductModalOpen(true)
@@ -226,7 +234,9 @@ export default function TiendaConfigPage() {
             visible_tienda: formVisibleTienda,
             visible_vendedor: formVisibleVendedor,
             permite_editar_precio: formPermiteEditarPrecio,
-            comision_pct: Math.max(0, Math.min(100, Number(formComisionPct) || 0)),
+            comision_tipo: formComisionTipo,
+            comision_pct: formComisionTipo === 'porcentaje' ? Math.max(0, Math.min(100, Number(formComisionPct) || 0)) : 0,
+            comision_monto: formComisionTipo === 'monto_fijo' ? Math.max(0, Number(formComisionMonto) || 0) : 0,
             entrega_tipo: formEntregaTipo
         }
 
@@ -617,10 +627,25 @@ export default function TiendaConfigPage() {
                                         </select>
                                     </div>
                                     <div className="space-y-2">
-                                        <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Comisión %</label>
-                                        <input type="number" min="0" max="100" value={formComisionPct} onChange={e => setFormComisionPct(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655] transition-colors" />
+                                        <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Comisión</label>
+                                        <div className="grid grid-cols-2 gap-1 bg-black border border-white/10 rounded-xl p-1">
+                                            <button type="button" onClick={() => setFormComisionTipo('porcentaje')} className={`py-2 text-[10px] font-black uppercase rounded-lg transition-all ${formComisionTipo === 'porcentaje' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}>%</button>
+                                            <button type="button" onClick={() => setFormComisionTipo('monto_fijo')} className={`py-2 text-[10px] font-black uppercase rounded-lg transition-all ${formComisionTipo === 'monto_fijo' ? 'bg-[#D4E655] text-black' : 'text-gray-500 hover:text-white'}`}>$ Fijo</button>
+                                        </div>
                                     </div>
                                 </div>
+
+                                {formComisionTipo === 'porcentaje' ? (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Porcentaje (%)</label>
+                                        <input type="number" min="0" max="100" value={formComisionPct} onChange={e => setFormComisionPct(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655] transition-colors" placeholder="10" />
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Monto fijo por unidad ($)</label>
+                                        <input type="number" min="0" value={formComisionMonto} onChange={e => setFormComisionMonto(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655] transition-colors" placeholder="150000" />
+                                    </div>
+                                )}
 
                                 <div className="space-y-2">
                                     <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Qué entrega al pagarse</label>

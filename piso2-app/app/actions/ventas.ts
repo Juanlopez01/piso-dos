@@ -58,7 +58,7 @@ export async function crearVentaAction(input: {
     const admin = getAdminClient()
     const { data: producto } = await admin
         .from('productos')
-        .select('id, nombre, precio, categoria, comision_pct, permite_editar_precio, activo')
+        .select('id, nombre, precio, categoria, comision_pct, comision_tipo, comision_monto, permite_editar_precio, activo')
         .eq('id', input.productoId)
         .single()
 
@@ -78,8 +78,18 @@ export async function crearVentaAction(input: {
     }
 
     const montoTotal = Math.round(precioUnitario * cantidad)
-    const comisionPct = Number(producto.comision_pct) || 0
-    const comisionMonto = Math.round(montoTotal * comisionPct / 100)
+
+    // Comisión congelada al momento de la venta. Puede ser porcentaje sobre el
+    // total, o un monto fijo por unidad vendida (ej. $150.000 por inscripto).
+    const comisionTipo = producto.comision_tipo === 'monto_fijo' ? 'monto_fijo' : 'porcentaje'
+    let comisionPct = 0
+    let comisionMonto = 0
+    if (comisionTipo === 'monto_fijo') {
+        comisionMonto = Math.round((Number(producto.comision_monto) || 0) * cantidad)
+    } else {
+        comisionPct = Number(producto.comision_pct) || 0
+        comisionMonto = Math.round(montoTotal * comisionPct / 100)
+    }
 
     const { data: venta, error } = await admin
         .from('ventas_externas')
@@ -91,6 +101,7 @@ export async function crearVentaAction(input: {
             cantidad,
             precio_unitario: precioUnitario,
             monto_total: montoTotal,
+            comision_tipo: comisionTipo,
             comision_pct: comisionPct,
             comision_monto: comisionMonto,
             comprador_nombre: input.compradorNombre.trim(),
@@ -214,6 +225,88 @@ export async function toggleVendedorActivoAction(vendedorId: string, activar: bo
 
     if (error) return { success: false, error: error.message }
     return { success: true }
+}
+
+// ── Resumen de comisiones: pendientes por vendedor + historial de cierres ───
+// "Pendiente" = ventas pagadas todavía no liquidadas (el período corre de una
+// liquidación a la siguiente, no por mes calendario).
+export async function resumenComisionesAction() {
+    const auth = await getVendedor()
+    if ('error' in auth) return { success: false, error: auth.error, pendientes: [], historial: [], esAdmin: false }
+
+    const admin = getAdminClient()
+
+    let q = admin
+        .from('ventas_externas')
+        .select('vendedor_id, comision_monto, pagado_at, vendedor:profiles!ventas_externas_vendedor_id_fkey(nombre_completo)')
+        .eq('estado', 'pagado')
+        .is('liquidacion_id', null)
+    if (!auth.esAdmin) q = q.eq('vendedor_id', auth.userId)
+    const { data: pend } = await q
+
+    const map: Record<string, any> = {}
+    for (const v of (pend || []) as any[]) {
+        const nom = Array.isArray(v.vendedor) ? v.vendedor[0]?.nombre_completo : v.vendedor?.nombre_completo
+        if (!map[v.vendedor_id]) map[v.vendedor_id] = { vendedor_id: v.vendedor_id, nombre: nom || '—', total: 0, cantidad: 0, desde: v.pagado_at, hasta: v.pagado_at }
+        map[v.vendedor_id].total += Number(v.comision_monto) || 0
+        map[v.vendedor_id].cantidad += 1
+        if (v.pagado_at && v.pagado_at < map[v.vendedor_id].desde) map[v.vendedor_id].desde = v.pagado_at
+        if (v.pagado_at && v.pagado_at > map[v.vendedor_id].hasta) map[v.vendedor_id].hasta = v.pagado_at
+    }
+    const pendientes = Object.values(map).sort((a: any, b: any) => b.total - a.total)
+
+    let hq = admin
+        .from('vendedor_liquidaciones')
+        .select('*, vendedor:profiles!vendedor_liquidaciones_vendedor_id_fkey(nombre_completo)')
+        .order('created_at', { ascending: false })
+        .limit(100)
+    if (!auth.esAdmin) hq = hq.eq('vendedor_id', auth.userId)
+    const { data: historial } = await hq
+
+    return { success: true, esAdmin: auth.esAdmin, pendientes, historial: historial || [] }
+}
+
+// ── Liquidar (cerrar comisiones) de un vendedor — solo admin ────────────────
+export async function liquidarVendedorAction(vendedorId: string) {
+    const auth = await getVendedor()
+    if ('error' in auth) return { success: false, error: auth.error }
+    if (!auth.esAdmin) return { success: false, error: 'Solo administradores' }
+
+    const admin = getAdminClient()
+    const { data: ventas } = await admin
+        .from('ventas_externas')
+        .select('id, comision_monto, pagado_at')
+        .eq('vendedor_id', vendedorId)
+        .eq('estado', 'pagado')
+        .is('liquidacion_id', null)
+
+    if (!ventas || !ventas.length) return { success: false, error: 'No hay comisiones pendientes para liquidar' }
+
+    const total = ventas.reduce((a, v) => a + (Number(v.comision_monto) || 0), 0)
+    const fechas = ventas.map(v => v.pagado_at).filter(Boolean).sort() as string[]
+
+    const { data: liq, error } = await admin
+        .from('vendedor_liquidaciones')
+        .insert({
+            vendedor_id: vendedorId,
+            liquidado_por: auth.userId,
+            total_comision: total,
+            cantidad_ventas: ventas.length,
+            desde: fechas[0] || null,
+            hasta: fechas[fechas.length - 1] || null
+        })
+        .select('id')
+        .single()
+    if (error) return { success: false, error: error.message }
+
+    // Atamos esas ventas a la liquidación → arranca un período nuevo.
+    const { error: e2 } = await admin
+        .from('ventas_externas')
+        .update({ liquidacion_id: liq.id })
+        .in('id', ventas.map(v => v.id))
+    if (e2) return { success: false, error: e2.message }
+
+    return { success: true, total, cantidad: ventas.length }
 }
 
 // ── Lectura PÚBLICA de la venta (la ve el cliente en /pagar/[id]) ───────────

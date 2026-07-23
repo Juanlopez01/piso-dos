@@ -3,23 +3,31 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useCash } from '@/context/CashContext'
 import {
-    crearVentaAction, listarVentasAction, cancelarVentaAction, catalogoVentasAction, toggleVendedorActivoAction
+    crearVentaAction, listarVentasAction, cancelarVentaAction, catalogoVentasAction, toggleVendedorActivoAction,
+    resumenComisionesAction, liquidarVendedorAction
 } from '@/app/actions/ventas'
 import { toast, Toaster } from 'sonner'
-import { Loader2, Link2, Copy, Check, MessageCircle, Ban, Lock, Tag, Download, Filter, Power, Users } from 'lucide-react'
+import { Loader2, Link2, Copy, Check, MessageCircle, Ban, Lock, Tag, Download, Filter, Power, Users, Wallet, HandCoins } from 'lucide-react'
 
 type Producto = {
     id: string; nombre: string; precio: number; categoria: string
-    comision_pct: number; permite_editar_precio: boolean; entrega_tipo: string
+    comision_tipo: 'porcentaje' | 'monto_fijo'; comision_pct: number; comision_monto: number
+    permite_editar_precio: boolean; entrega_tipo: string
 }
 type Vendedor = { id: string; nombre_completo: string; vendedor_activo: boolean }
 type Venta = {
     id: string; created_at: string; producto_nombre: string; categoria: string
     cantidad: number; precio_unitario: number; monto_total: number
-    comision_pct: number; comision_monto: number
+    comision_tipo: 'porcentaje' | 'monto_fijo'; comision_pct: number; comision_monto: number
     comprador_nombre: string; comprador_telefono: string; comprador_email: string | null
     observaciones: string | null; estado: 'pendiente' | 'pagado' | 'cancelado' | 'vencido'
     pagado_at: string | null; expira_at: string
+    vendedor: { nombre_completo: string } | { nombre_completo: string }[] | null
+}
+type Pendiente = { vendedor_id: string; nombre: string; total: number; cantidad: number; desde: string | null; hasta: string | null }
+type Liquidacion = {
+    id: string; created_at: string; total_comision: number; cantidad_ventas: number
+    desde: string | null; hasta: string | null
     vendedor: { nombre_completo: string } | { nombre_completo: string }[] | null
 }
 
@@ -34,6 +42,10 @@ const waUrl = (tel: string, texto: string) => {
 }
 const vendedorNom = (v: Venta) =>
     (Array.isArray(v.vendedor) ? v.vendedor[0]?.nombre_completo : v.vendedor?.nombre_completo) || '—'
+const liqVendedorNom = (h: Liquidacion) =>
+    (Array.isArray(h.vendedor) ? h.vendedor[0]?.nombre_completo : h.vendedor?.nombre_completo) || '—'
+const rango = (d: string | null, h: string | null) =>
+    d ? `${new Date(d).toLocaleDateString('es-AR')} → ${h ? new Date(h).toLocaleDateString('es-AR') : 'hoy'}` : ''
 
 const BADGES: Record<string, string> = {
     pendiente: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
@@ -59,6 +71,9 @@ export default function VenderPage() {
         nombre: '', telefono: '', email: '', observaciones: ''
     })
     const [filtros, setFiltros] = useState({ vendedorId: '', estado: '', categoria: '', desde: '', hasta: '' })
+    const [pendientes, setPendientes] = useState<Pendiente[]>([])
+    const [historial, setHistorial] = useState<Liquidacion[]>([])
+    const [liquidando, setLiquidando] = useState<string | null>(null)
 
     const habilitado = !!userRole && ROLES_OK.includes(userRole)
 
@@ -74,9 +89,24 @@ export default function VenderPage() {
         setVentas(lst.ventas as unknown as Venta[])
         setLoading(false)
     }
+    const cargarComisiones = async () => {
+        const r = await resumenComisionesAction()
+        setPendientes(r.pendientes as Pendiente[])
+        setHistorial(r.historial as unknown as Liquidacion[])
+    }
 
     useEffect(() => { if (habilitado) cargarCatalogo() }, [habilitado])
     useEffect(() => { if (habilitado) cargarVentas() }, [habilitado, esAdmin, JSON.stringify(filtros)])
+    useEffect(() => { if (habilitado) cargarComisiones() }, [habilitado])
+
+    const handleLiquidar = async (p: Pendiente) => {
+        if (!confirm(`¿Liquidar $${p.total.toLocaleString()} de comisiones a ${p.nombre}? Se cierra el período y arranca uno nuevo.`)) return
+        setLiquidando(p.vendedor_id)
+        const res = await liquidarVendedorAction(p.vendedor_id)
+        if (res.success) { toast.success(`Liquidado: $${res.total?.toLocaleString()} (${res.cantidad} ventas)`); cargarComisiones(); cargarVentas() }
+        else toast.error(res.error || 'Error')
+        setLiquidando(null)
+    }
 
     const urlDe = (id: string) => `${typeof window !== 'undefined' ? window.location.origin : ''}/pagar/${id}`
     const mensajeDe = (v: Venta) =>
@@ -126,7 +156,13 @@ export default function VenderPage() {
     const precioEfectivo = productoSel
         ? (productoSel.permite_editar_precio && form.precioUnitario !== '' ? Number(form.precioUnitario) : productoSel.precio)
         : 0
-    const previewTotal = precioEfectivo * (Number(form.cantidad) || 1)
+    const previewCant = Number(form.cantidad) || 1
+    const previewTotal = precioEfectivo * previewCant
+    const previewComision = productoSel
+        ? (productoSel.comision_tipo === 'monto_fijo'
+            ? Math.round((Number(productoSel.comision_monto) || 0) * previewCant)
+            : Math.round(previewTotal * (Number(productoSel.comision_pct) || 0) / 100))
+        : 0
 
     // Totales del panel admin (solo cuentan lo efectivamente pagado)
     const totales = useMemo(() => {
@@ -139,11 +175,12 @@ export default function VenderPage() {
     }, [ventas])
 
     const exportarCSV = () => {
-        const head = ['Fecha', 'Vendedor', 'Cliente', 'Telefono', 'Email', 'Producto', 'Categoria', 'Cantidad', 'PrecioUnit', 'Total', 'ComisionPct', 'ComisionMonto', 'Estado', 'Observaciones']
+        const head = ['Fecha', 'Vendedor', 'Cliente', 'Telefono', 'Email', 'Producto', 'Categoria', 'Cantidad', 'PrecioUnit', 'Total', 'ComisionTipo', 'ComisionPct', 'ComisionMonto', 'Estado', 'Observaciones']
         const rows = ventas.map(v => [
             new Date(v.created_at).toLocaleString('es-AR'), vendedorNom(v), v.comprador_nombre,
             v.comprador_telefono, v.comprador_email || '', v.producto_nombre, v.categoria,
-            v.cantidad, v.precio_unitario, v.monto_total, v.comision_pct, v.comision_monto,
+            v.cantidad, v.precio_unitario, v.monto_total,
+            v.comision_tipo === 'monto_fijo' ? 'fijo' : '%', v.comision_pct, v.comision_monto,
             v.estado, (v.observaciones || '').replace(/[\n;]/g, ' ')
         ])
         const csv = [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n')
@@ -229,8 +266,8 @@ export default function VenderPage() {
                         <Tag size={16} className="text-gray-500" />
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">El cliente paga</span>
                         <span className="text-2xl font-black text-[#D4E655]">${previewTotal.toLocaleString()}</span>
-                        {productoSel && productoSel.comision_pct > 0 && (
-                            <span className="text-[10px] font-bold text-gray-500 uppercase">· comisión ${Math.round(previewTotal * productoSel.comision_pct / 100).toLocaleString()} ({productoSel.comision_pct}%)</span>
+                        {productoSel && previewComision > 0 && (
+                            <span className="text-[10px] font-bold text-gray-500 uppercase">· comisión ${previewComision.toLocaleString()} {productoSel.comision_tipo === 'porcentaje' ? `(${productoSel.comision_pct}%)` : '(fija)'}</span>
                         )}
                     </div>
                     <button type="submit" disabled={creando || !form.productoId}
@@ -239,6 +276,51 @@ export default function VenderPage() {
                     </button>
                 </div>
             </form>
+
+            {/* ── COMISIONES Y LIQUIDACIONES (período de liquidación a liquidación) ── */}
+            <div className="bg-[#09090b] border border-white/10 p-5 rounded-2xl space-y-4">
+                <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                    <Wallet size={14} /> {esAdmin ? 'Comisiones a liquidar' : 'Mis comisiones a cobrar'}
+                </h3>
+
+                {!pendientes.length ? (
+                    <p className="text-xs font-bold uppercase text-gray-500">No hay comisiones pendientes de liquidar.</p>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {pendientes.map(p => (
+                            <div key={p.vendedor_id} className="bg-[#111] border border-white/5 rounded-xl p-4">
+                                {esAdmin && <p className="text-sm font-bold text-white truncate mb-1">{p.nombre}</p>}
+                                <p className="text-2xl font-black text-[#D4E655] leading-none">${p.total.toLocaleString()}</p>
+                                <p className="text-[10px] text-gray-500 uppercase font-bold mt-1.5">{p.cantidad} venta{p.cantidad !== 1 ? 's' : ''} pagada{p.cantidad !== 1 ? 's' : ''} · sin liquidar</p>
+                                {p.desde && <p className="text-[9px] text-gray-600 font-bold mt-0.5">{rango(p.desde, p.hasta)}</p>}
+                                {esAdmin && (
+                                    <button onClick={() => handleLiquidar(p)} disabled={liquidando === p.vendedor_id}
+                                        className="mt-3 w-full bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black font-black uppercase py-2 rounded-lg transition-all text-[10px] tracking-widest border border-[#D4E655]/30 flex items-center justify-center gap-1.5 disabled:opacity-40">
+                                        {liquidando === p.vendedor_id ? <Loader2 size={13} className="animate-spin" /> : <HandCoins size={13} />} Liquidar
+                                    </button>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {historial.length > 0 && (
+                    <div className="border-t border-white/5 pt-3">
+                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Liquidaciones anteriores</p>
+                        <div className="space-y-1.5">
+                            {historial.map(h => (
+                                <div key={h.id} className="flex items-center justify-between gap-2 text-xs bg-[#111]/60 rounded-lg px-3 py-2">
+                                    <span className="text-gray-400 font-medium truncate">
+                                        {new Date(h.created_at).toLocaleDateString('es-AR')}{esAdmin && <span className="text-gray-500"> · {liqVendedorNom(h)}</span>}
+                                        {h.desde && <span className="text-gray-600 hidden sm:inline"> · {rango(h.desde, h.hasta)}</span>}
+                                    </span>
+                                    <span className="font-black text-white shrink-0">${Number(h.total_comision).toLocaleString()} <span className="text-gray-600 font-bold text-[10px]">({h.cantidad_ventas})</span></span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
 
             {/* ── PANEL ADMIN: filtros + totales + export ───────────────── */}
             {esAdmin && (
@@ -312,6 +394,12 @@ export default function VenderPage() {
                                 </div>
 
                                 <span className="text-2xl font-black text-[#D4E655]">${Number(v.monto_total).toLocaleString()}</span>
+                                {Number(v.comision_monto) > 0 && (
+                                    <p className="text-[10px] font-bold uppercase mt-0.5 text-gray-400">
+                                        Comisión: <span className="text-[#D4E655]">${Number(v.comision_monto).toLocaleString()}</span>
+                                        <span className="text-gray-600"> {v.comision_tipo === 'porcentaje' ? `(${v.comision_pct}%)` : '(fija)'}{v.estado !== 'pagado' ? ' · si se paga' : ''}</span>
+                                    </p>
+                                )}
                                 {v.observaciones && <p className="text-[10px] text-gray-500 font-medium mt-1 italic truncate">{v.observaciones}</p>}
                                 <p className="text-[10px] text-gray-600 font-bold mt-1">
                                     {v.estado === 'pagado' && v.pagado_at
