@@ -28,6 +28,7 @@ type Producto = {
     // Config del módulo de Ventas Externas
     categoria?: string
     visible_tienda?: boolean
+    visible_vendedor?: boolean
     permite_editar_precio?: boolean
     comision_pct?: number
     entrega_tipo?: 'creditos' | 'cuota_liga' | 'cuota_compania' | 'ninguna'
@@ -147,6 +148,7 @@ export default function TiendaConfigPage() {
     // Config Ventas Externas
     const [formCategoria, setFormCategoria] = useState('Clases Regulares')
     const [formVisibleTienda, setFormVisibleTienda] = useState(true)
+    const [formVisibleVendedor, setFormVisibleVendedor] = useState(false)
     const [formPermiteEditarPrecio, setFormPermiteEditarPrecio] = useState(false)
     const [formComisionPct, setFormComisionPct] = useState('0')
     const [formEntregaTipo, setFormEntregaTipo] = useState<'creditos' | 'cuota_liga' | 'cuota_compania' | 'ninguna'>('creditos')
@@ -169,6 +171,7 @@ export default function TiendaConfigPage() {
             setFormPaseReferencia(prod.pase_referencia || '')
             setFormCategoria(prod.categoria || 'Clases Regulares')
             setFormVisibleTienda(prod.visible_tienda ?? true)
+            setFormVisibleVendedor(prod.visible_vendedor ?? false)
             setFormPermiteEditarPrecio(prod.permite_editar_precio ?? false)
             setFormComisionPct((prod.comision_pct ?? 0).toString())
             setFormEntregaTipo(prod.entrega_tipo || 'creditos')
@@ -181,6 +184,7 @@ export default function TiendaConfigPage() {
             setFormPaseReferencia('')
             setFormCategoria('Clases Regulares')
             setFormVisibleTienda(true)
+            setFormVisibleVendedor(false)
             setFormPermiteEditarPrecio(false)
             setFormComisionPct('0')
             setFormEntregaTipo('creditos')
@@ -220,6 +224,7 @@ export default function TiendaConfigPage() {
             // Config Ventas Externas
             categoria: formCategoria,
             visible_tienda: formVisibleTienda,
+            visible_vendedor: formVisibleVendedor,
             permite_editar_precio: formPermiteEditarPrecio,
             comision_pct: Math.max(0, Math.min(100, Number(formComisionPct) || 0)),
             entrega_tipo: formEntregaTipo
@@ -627,8 +632,12 @@ export default function TiendaConfigPage() {
 
                                 <div className="flex flex-col gap-2 pt-1">
                                     <button type="button" onClick={() => setFormVisibleTienda(v => !v)} className="flex items-center justify-between bg-black border border-white/10 rounded-xl px-3 py-2.5 text-left hover:border-white/20 transition-colors">
-                                        <span className="text-[10px] uppercase font-bold text-gray-400 flex items-center gap-1.5"><Store size={12} /> Visible en la Tienda</span>
+                                        <span className="text-[10px] uppercase font-bold text-gray-400 flex items-center gap-1.5"><Store size={12} /> Visible en la Tienda (alumnos)</span>
                                         <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${formVisibleTienda ? 'bg-green-500/20 text-green-500' : 'bg-white/5 text-gray-500'}`}>{formVisibleTienda ? 'Sí' : 'No'}</span>
+                                    </button>
+                                    <button type="button" onClick={() => setFormVisibleVendedor(v => !v)} className="flex items-center justify-between bg-black border border-white/10 rounded-xl px-3 py-2.5 text-left hover:border-white/20 transition-colors">
+                                        <span className="text-[10px] uppercase font-bold text-gray-400 flex items-center gap-1.5"><Briefcase size={12} /> Lo puede vender el vendedor</span>
+                                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${formVisibleVendedor ? 'bg-[#D4E655]/20 text-[#D4E655]' : 'bg-white/5 text-gray-500'}`}>{formVisibleVendedor ? 'Sí' : 'No'}</span>
                                     </button>
                                     <button type="button" onClick={() => setFormPermiteEditarPrecio(v => !v)} className="flex items-center justify-between bg-black border border-white/10 rounded-xl px-3 py-2.5 text-left hover:border-white/20 transition-colors">
                                         <span className="text-[10px] uppercase font-bold text-gray-400 flex items-center gap-1.5"><Percent size={12} /> El vendedor puede editar el precio</span>

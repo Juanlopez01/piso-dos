@@ -181,6 +181,7 @@ export async function catalogoVentasAction() {
         .from('productos')
         .select('id, nombre, precio, categoria, comision_pct, permite_editar_precio, entrega_tipo')
         .eq('activo', true)
+        .eq('visible_vendedor', true) // Solo lo que el admin habilitó para vender
         .order('categoria', { ascending: true })
         .order('nombre', { ascending: true })
 
