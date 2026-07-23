@@ -173,10 +173,55 @@ export async function POST(request: Request) {
                     } catch (e: any) {
                         console.error('❌ [WEBHOOK] No se pudo notificar la venta:', e?.message);
                     }
+
+                    // --- Entrega de cada ítem del carrito según su entrega_tipo ---
+                    // (créditos → carga pack; cuota_liga → marca la cuota; ninguna → nada).
+                    // Corre una sola vez: el candado de pagos_online ya frenó los reintentos.
+                    try {
+                        const { data: items } = await supabase
+                            .from('ventas_items')
+                            .select('producto_id, cantidad, subtotal, producto:productos(entrega_tipo, creditos, tipo_clase)')
+                            .eq('venta_id', metadata.venta_id);
+
+                        const ahoraD = new Date();
+                        const vto = new Date(ahoraD.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+                        for (const it of (items || []) as any[]) {
+                            const prod = Array.isArray(it.producto) ? it.producto[0] : it.producto;
+                            const entrega = prod?.entrega_tipo || 'ninguna';
+
+                            if (entrega === 'creditos') {
+                                const creditos = Number(prod.creditos || 0) * Number(it.cantidad || 1);
+                                if (creditos <= 0) continue;
+                                const tipoClase = prod.tipo_clase || 'regular';
+                                await supabase.from('alumno_packs').insert({
+                                    user_id: userIdFinal, producto_id: it.producto_id, tipo_clase: tipoClase,
+                                    cantidad_inicial: creditos, creditos_restantes: creditos,
+                                    monto_abonado: it.subtotal, precio_total: it.subtotal,
+                                    estado: 'activo', metodo_pago: 'mercadopago',
+                                    fecha_compra: ahoraD.toISOString(), fecha_vencimiento: vto
+                                });
+                                if (tipoClase !== 'exclusivo') {
+                                    const field = tipoClase === 'regular' ? 'creditos_regulares' : 'creditos_especiales';
+                                    const { data: prof } = await supabase.from('profiles').select(field).eq('id', userIdFinal).single();
+                                    await supabase.from('profiles').update({ [field]: (((prof as any)?.[field]) || 0) + creditos }).eq('id', userIdFinal);
+                                }
+                            } else if (entrega === 'cuota_liga') {
+                                const now = new Date(); const mes = now.getMonth() + 1, anio = now.getFullYear();
+                                const { data: ex } = await supabase.from('liga_pagos').select('id, monto').eq('alumno_id', userIdFinal).eq('mes', mes).eq('anio', anio).maybeSingle();
+                                if (ex) await supabase.from('liga_pagos').update({ monto: Number(ex.monto) + Number(it.subtotal) }).eq('id', ex.id);
+                                else await supabase.from('liga_pagos').insert({ alumno_id: userIdFinal, mes, anio, monto: it.subtotal, metodo_pago: 'mercadopago' });
+                            }
+                            // 'ninguna' → no se entrega nada, solo queda registrada la venta.
+                        }
+                        console.log(`🔗 [WEBHOOK] Ítems de la venta ${metadata.venta_id} entregados.`);
+                    } catch (e: any) {
+                        console.error('❌ [WEBHOOK] Error entregando ítems de la venta:', e?.message);
+                    }
                 }
             }
 
-            // Venta externa sin entrega automática: cortamos acá, no hay nada que entregar.
+            // La venta ya quedó marcada, notificada y entregada por ítem. Cortamos.
             if (tipoPagoFinal === 'venta_externa') {
                 return NextResponse.json({ success: true }, { status: 200 });
             }

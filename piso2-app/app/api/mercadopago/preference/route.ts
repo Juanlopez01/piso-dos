@@ -24,7 +24,7 @@ export async function POST(request: Request) {
         //    El cliente puede no tener cuenta: lo identificamos por mail acá.
         // ==========================================
         let ventaRow: any = null
-        let ventaProducto: any = null
+        let ventaItems: any[] = []
 
         if (venta_id) {
             const admin = getAdminClient()
@@ -42,13 +42,13 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: "Esta venta venció" }, { status: 400 })
             }
 
-            // El producto define qué se entrega al aprobarse el pago.
-            const { data: prod } = await admin
-                .from('productos')
-                .select('nombre, creditos, tipo_clase, entrega_tipo')
-                .eq('id', venta.producto_id)
-                .single()
-            if (!prod) return NextResponse.json({ error: "El producto de la venta ya no existe" }, { status: 400 })
+            // Ítems del carrito → líneas de Mercado Pago. La entrega de cada uno
+            // la resuelve el webhook leyendo ventas_items.
+            const { data: items } = await admin
+                .from('ventas_items')
+                .select('producto_nombre, cantidad, precio_unitario, subtotal')
+                .eq('venta_id', venta_id)
+            if (!items || !items.length) return NextResponse.json({ error: "La venta no tiene productos" }, { status: 400 })
 
             const emailLimpio = String(cliente?.email || '').trim().toLowerCase()
             if (!emailLimpio || !emailLimpio.includes('@')) {
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
                 .eq('id', venta_id)
 
             ventaRow = venta
-            ventaProducto = prod
+            ventaItems = items
         }
 
         if (!userId) {
@@ -114,36 +114,15 @@ export async function POST(request: Request) {
         // 1. ASIGNACIÓN DE PRECIOS Y METADATA
         // ==========================================
         if (ventaRow) {
-            // El monto ya está congelado por el server al crear la venta
-            // (precio de catálogo × cantidad). No se recalcula acá.
-            tituloFinal = ventaRow.cantidad > 1
-                ? `${ventaProducto.nombre} (x${ventaRow.cantidad})`
-                : ventaProducto.nombre
+            // El monto ya está congelado por el server al crear la venta. El
+            // webhook marca la venta pagada y entrega cada ítem del carrito según
+            // el entrega_tipo de su producto (créditos / cuota liga / nada).
+            tituloFinal = String(ventaRow.producto_nombre)
             precioFinal = Number(ventaRow.monto_total)
 
-            // La venta siempre viaja para que el webhook la marque pagada.
             metadataCustom.venta_id = String(venta_id)
-            metadataCustom.producto_nombre = String(ventaProducto.nombre)
-
-            // El tipo de entrega del producto decide qué hace el webhook.
-            const entrega = ventaProducto.entrega_tipo || 'creditos'
-            if (entrega === 'creditos') {
-                // Igual que una compra de pack: el webhook acredita los créditos.
-                metadataCustom.tipo_pago = 'pack'
-                metadataCustom.producto_id = String(ventaRow.producto_id)
-                metadataCustom.tipo_clase = String(ventaProducto.tipo_clase)
-                // Créditos × cantidad vendida.
-                metadataCustom.creditos = String(Number(ventaProducto.creditos || 0) * Number(ventaRow.cantidad || 1))
-            } else if (entrega === 'cuota_liga') {
-                // Marca la cuota de La Liga del mes actual para ese alumno.
-                metadataCustom.tipo_pago = 'cuota_liga'
-                metadataCustom.mes = String(new Date().getMonth() + 1)
-                metadataCustom.anio = String(new Date().getFullYear())
-            } else {
-                // 'ninguna' (o entregas que aún no automatizamos): el webhook
-                // solo registra la venta como pagada, sin entregar nada.
-                metadataCustom.tipo_pago = 'venta_externa'
-            }
+            metadataCustom.producto_nombre = String(ventaRow.producto_nombre)
+            metadataCustom.tipo_pago = 'venta_externa'
 
         } else if (tipo_pago === 'cuota_liga') {
             // --- LÓGICA LA LIGA ---
@@ -279,17 +258,26 @@ export async function POST(request: Request) {
 
         const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
 
+        // Una venta con carrito manda una línea por producto; el resto, una sola.
+        const mpItems = (ventaRow && ventaItems.length)
+            ? ventaItems.map((it: any) => ({
+                id: String(venta_id),
+                title: String(it.producto_nombre),
+                quantity: Number(it.cantidad) || 1,
+                unit_price: Number(it.precio_unitario),
+                currency_id: 'ARS',
+            }))
+            : [{
+                id: tipo_pago === 'cuota_liga' ? 'LIGA_CUOTA' : String(productoId),
+                title: tituloFinal,
+                quantity: 1,
+                unit_price: Number(precioFinal),
+                currency_id: 'ARS',
+            }]
+
         const mpPayload: any = {
             body: {
-                items: [
-                    {
-                        id: tipo_pago === 'cuota_liga' ? 'LIGA_CUOTA' : String(ventaRow ? ventaRow.producto_id : productoId),
-                        title: tituloFinal,
-                        quantity: 1,
-                        unit_price: Number(precioFinal),
-                        currency_id: 'ARS',
-                    }
-                ],
+                items: mpItems,
                 metadata: metadataCustom,
                 back_urls: {
                     success: `${baseUrl}/pago-exito?destino=${rutaDestino}&pago=exito`,

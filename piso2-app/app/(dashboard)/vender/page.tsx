@@ -18,7 +18,7 @@ type Vendedor = { id: string; nombre_completo: string; vendedor_activo: boolean 
 type Venta = {
     id: string; created_at: string; producto_nombre: string; categoria: string
     cantidad: number; precio_unitario: number; monto_total: number
-    comision_tipo: 'porcentaje' | 'monto_fijo'; comision_pct: number; comision_monto: number
+    comision_tipo: 'porcentaje' | 'monto_fijo' | 'mixto'; comision_pct: number; comision_monto: number
     comprador_nombre: string; comprador_telefono: string; comprador_email: string | null
     observaciones: string | null; estado: 'pendiente' | 'pagado' | 'cancelado' | 'vencido'
     pagado_at: string | null; expira_at: string
@@ -66,10 +66,9 @@ export default function VenderPage() {
     const [creando, setCreando] = useState(false)
     const [copiado, setCopiado] = useState<string | null>(null)
 
-    const [form, setForm] = useState({
-        productoId: '', cantidad: 1, precioUnitario: '' as number | '',
-        nombre: '', telefono: '', email: '', observaciones: ''
-    })
+    const [cart, setCart] = useState<{ productoId: string; cantidad: number; precioUnitario: number | '' }[]>([])
+    const [addSel, setAddSel] = useState('')
+    const [buyer, setBuyer] = useState({ nombre: '', telefono: '', email: '', observaciones: '' })
     const [filtros, setFiltros] = useState({ vendedorId: '', estado: '', categoria: '', desde: '', hasta: '' })
     const [pendientes, setPendientes] = useState<Pendiente[]>([])
     const [historial, setHistorial] = useState<Liquidacion[]>([])
@@ -118,21 +117,52 @@ export default function VenderPage() {
         setTimeout(() => setCopiado(null), 2000)
     }
 
+    // ── Carrito ──────────────────────────────────────────────────
+    const agregarAlCarrito = (id: string) => {
+        if (!id || cart.some(c => c.productoId === id)) { setAddSel(''); return }
+        setCart([...cart, { productoId: id, cantidad: 1, precioUnitario: '' }])
+        setAddSel('')
+    }
+    const actualizarItem = (idx: number, patch: Partial<{ cantidad: number; precioUnitario: number | '' }>) =>
+        setCart(cart.map((c, i) => i === idx ? { ...c, ...patch } : c))
+    const quitarItem = (idx: number) => setCart(cart.filter((_, i) => i !== idx))
+
+    const prodDe = (id: string) => productos.find(p => p.id === id)
+    const precioItem = (c: { productoId: string; precioUnitario: number | '' }) => {
+        const p = prodDe(c.productoId)
+        if (!p) return 0
+        return (p.permite_editar_precio && c.precioUnitario !== '') ? Number(c.precioUnitario) : p.precio
+    }
+    const comisionItem = (c: { productoId: string; cantidad: number; precioUnitario: number | '' }) => {
+        const p = prodDe(c.productoId)
+        if (!p) return 0
+        const cant = Number(c.cantidad) || 1
+        return p.comision_tipo === 'monto_fijo'
+            ? Math.round((Number(p.comision_monto) || 0) * cant)
+            : Math.round(precioItem(c) * cant * (Number(p.comision_pct) || 0) / 100)
+    }
+    const cartTotal = cart.reduce((a, c) => a + precioItem(c) * (Number(c.cantidad) || 1), 0)
+    const cartComision = cart.reduce((a, c) => a + comisionItem(c), 0)
+
     const handleCrear = async (e: React.FormEvent) => {
         e.preventDefault()
+        if (!cart.length) { toast.error('Agregá al menos un producto'); return }
         setCreando(true)
         const res = await crearVentaAction({
-            productoId: form.productoId,
-            cantidad: Number(form.cantidad),
-            precioUnitario: form.precioUnitario === '' ? undefined : Number(form.precioUnitario),
-            compradorNombre: form.nombre,
-            compradorTelefono: form.telefono,
-            compradorEmail: form.email || undefined,
-            observaciones: form.observaciones || undefined
+            items: cart.map(c => ({
+                productoId: c.productoId,
+                cantidad: Number(c.cantidad) || 1,
+                precioUnitario: c.precioUnitario === '' ? undefined : Number(c.precioUnitario)
+            })),
+            compradorNombre: buyer.nombre,
+            compradorTelefono: buyer.telefono,
+            compradorEmail: buyer.email || undefined,
+            observaciones: buyer.observaciones || undefined
         })
         if (res.success) {
             toast.success('Venta cargada y link generado')
-            setForm({ productoId: '', cantidad: 1, precioUnitario: '', nombre: '', telefono: '', email: '', observaciones: '' })
+            setCart([]); setAddSel('')
+            setBuyer({ nombre: '', telefono: '', email: '', observaciones: '' })
             cargarVentas()
         } else {
             toast.error(res.error || 'Error al cargar la venta')
@@ -151,18 +181,6 @@ export default function VenderPage() {
         if (res.success) { toast.success(v.vendedor_activo ? 'Vendedor desactivado' : 'Vendedor activado'); cargarCatalogo() }
         else toast.error(res.error || 'Error')
     }
-
-    const productoSel = productos.find(p => p.id === form.productoId)
-    const precioEfectivo = productoSel
-        ? (productoSel.permite_editar_precio && form.precioUnitario !== '' ? Number(form.precioUnitario) : productoSel.precio)
-        : 0
-    const previewCant = Number(form.cantidad) || 1
-    const previewTotal = precioEfectivo * previewCant
-    const previewComision = productoSel
-        ? (productoSel.comision_tipo === 'monto_fijo'
-            ? Math.round((Number(productoSel.comision_monto) || 0) * previewCant)
-            : Math.round(previewTotal * (Number(productoSel.comision_pct) || 0) / 100))
-        : 0
 
     // Totales del panel admin (solo cuentan lo efectivamente pagado)
     const totales = useMemo(() => {
@@ -211,53 +229,74 @@ export default function VenderPage() {
                 </p>
             </div>
 
-            {/* ── NUEVA VENTA ───────────────────────────────────────────── */}
+            {/* ── NUEVA VENTA (carrito) ─────────────────────────────────── */}
             <form onSubmit={handleCrear} className="bg-[#09090b] border border-white/10 p-6 rounded-2xl space-y-4">
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">Nueva Venta</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="md:col-span-2">
-                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1.5">Producto</label>
-                        <select required value={form.productoId}
-                            onChange={e => setForm({ ...form, productoId: e.target.value, precioUnitario: '' })} className={inputCls}>
-                            <option value="">Elegí un producto…</option>
-                            {productos.map(p => (
-                                <option key={p.id} value={p.id}>{p.categoria} · {p.nombre} — ${p.precio.toLocaleString()}</option>
-                            ))}
-                        </select>
-                    </div>
 
-                    <div>
-                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1.5">Cantidad</label>
-                        <input type="number" min={1} step={1} required value={form.cantidad}
-                            onChange={e => setForm({ ...form, cantidad: Number(e.target.value) })} className={inputCls} />
-                    </div>
+                {/* Agregar producto al carrito */}
+                <div>
+                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1.5">Agregar producto</label>
+                    <select value={addSel} onChange={e => agregarAlCarrito(e.target.value)} className={inputCls}>
+                        <option value="">Elegí un producto…</option>
+                        {productos.filter(p => !cart.some(c => c.productoId === p.id)).map(p => (
+                            <option key={p.id} value={p.id}>{p.categoria} · {p.nombre} — ${p.precio.toLocaleString()}</option>
+                        ))}
+                    </select>
+                </div>
 
-                    <div>
-                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1.5">
-                            Precio unitario {productoSel && !productoSel.permite_editar_precio ? '(fijo)' : ''}
-                        </label>
-                        <input type="number" min={0}
-                            disabled={!productoSel?.permite_editar_precio}
-                            value={form.precioUnitario === '' ? (productoSel?.precio ?? '') : form.precioUnitario}
-                            onChange={e => setForm({ ...form, precioUnitario: e.target.value === '' ? '' : Number(e.target.value) })}
-                            className={`${inputCls} disabled:opacity-50`} />
+                {/* Ítems del carrito */}
+                {cart.length > 0 && (
+                    <div className="space-y-2">
+                        {cart.map((c, idx) => {
+                            const p = prodDe(c.productoId)
+                            if (!p) return null
+                            return (
+                                <div key={c.productoId} className="bg-[#111] border border-white/5 rounded-xl p-3 flex flex-wrap items-end gap-3">
+                                    <div className="flex-1 min-w-[140px]">
+                                        <p className="text-sm font-bold text-white truncate">{p.nombre}</p>
+                                        <p className="text-[9px] text-gray-500 uppercase font-bold">{p.categoria}</p>
+                                    </div>
+                                    <div className="w-16">
+                                        <label className="text-[9px] font-bold text-gray-500 uppercase block mb-1">Cant.</label>
+                                        <input type="number" min={1} step={1} value={c.cantidad}
+                                            onChange={e => actualizarItem(idx, { cantidad: Number(e.target.value) })}
+                                            className="w-full bg-black border border-white/10 rounded-lg py-1.5 px-2 text-white text-sm font-bold outline-none focus:border-[#D4E655]" />
+                                    </div>
+                                    <div className="w-28">
+                                        <label className="text-[9px] font-bold text-gray-500 uppercase block mb-1">Precio {p.permite_editar_precio ? '' : '(fijo)'}</label>
+                                        <input type="number" min={0} disabled={!p.permite_editar_precio}
+                                            value={c.precioUnitario === '' ? p.precio : c.precioUnitario}
+                                            onChange={e => actualizarItem(idx, { precioUnitario: e.target.value === '' ? '' : Number(e.target.value) })}
+                                            className="w-full bg-black border border-white/10 rounded-lg py-1.5 px-2 text-white text-sm font-bold outline-none focus:border-[#D4E655] disabled:opacity-50" />
+                                    </div>
+                                    <div className="text-right min-w-[70px]">
+                                        <label className="text-[9px] font-bold text-gray-500 uppercase block mb-1">Subtotal</label>
+                                        <p className="text-sm font-black text-[#D4E655]">${(precioItem(c) * (Number(c.cantidad) || 1)).toLocaleString()}</p>
+                                    </div>
+                                    <button type="button" onClick={() => quitarItem(idx)} className="bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-500 p-2 rounded-lg transition-colors" title="Quitar"><Ban size={15} /></button>
+                                </div>
+                            )
+                        })}
                     </div>
+                )}
 
+                {/* Datos del comprador */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-white/5 pt-4">
                     <div>
                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1.5">Nombre y apellido del comprador</label>
-                        <input required value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} className={inputCls} placeholder="Juana Pérez" />
+                        <input required value={buyer.nombre} onChange={e => setBuyer({ ...buyer, nombre: e.target.value })} className={inputCls} placeholder="Juana Pérez" />
                     </div>
                     <div>
                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1.5">Teléfono</label>
-                        <input required value={form.telefono} onChange={e => setForm({ ...form, telefono: e.target.value })} className={inputCls} placeholder="11 5555-4444" />
+                        <input required value={buyer.telefono} onChange={e => setBuyer({ ...buyer, telefono: e.target.value })} className={inputCls} placeholder="11 5555-4444" />
                     </div>
                     <div>
                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1.5">Mail (opcional)</label>
-                        <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className={inputCls} placeholder="juana@mail.com" />
+                        <input type="email" value={buyer.email} onChange={e => setBuyer({ ...buyer, email: e.target.value })} className={inputCls} placeholder="juana@mail.com" />
                     </div>
                     <div>
                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1.5">Observaciones (opcional)</label>
-                        <input value={form.observaciones} onChange={e => setForm({ ...form, observaciones: e.target.value })} className={inputCls} placeholder="Notas de la venta" />
+                        <input value={buyer.observaciones} onChange={e => setBuyer({ ...buyer, observaciones: e.target.value })} className={inputCls} placeholder="Notas de la venta" />
                     </div>
                 </div>
 
@@ -265,12 +304,12 @@ export default function VenderPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                         <Tag size={16} className="text-gray-500" />
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">El cliente paga</span>
-                        <span className="text-2xl font-black text-[#D4E655]">${previewTotal.toLocaleString()}</span>
-                        {productoSel && previewComision > 0 && (
-                            <span className="text-[10px] font-bold text-gray-500 uppercase">· comisión ${previewComision.toLocaleString()} {productoSel.comision_tipo === 'porcentaje' ? `(${productoSel.comision_pct}%)` : '(fija)'}</span>
+                        <span className="text-2xl font-black text-[#D4E655]">${cartTotal.toLocaleString()}</span>
+                        {cartComision > 0 && (
+                            <span className="text-[10px] font-bold text-gray-500 uppercase">· comisión ${cartComision.toLocaleString()}</span>
                         )}
                     </div>
-                    <button type="submit" disabled={creando || !form.productoId}
+                    <button type="submit" disabled={creando || !cart.length}
                         className="w-full sm:w-auto bg-[#D4E655] hover:bg-white disabled:opacity-40 text-black font-black uppercase py-3 px-6 rounded-xl transition-all text-[10px] tracking-widest flex items-center justify-center gap-2">
                         {creando ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />} Cargar venta y generar link
                     </button>
@@ -397,7 +436,7 @@ export default function VenderPage() {
                                 {Number(v.comision_monto) > 0 && (
                                     <p className="text-[10px] font-bold uppercase mt-0.5 text-gray-400">
                                         Comisión: <span className="text-[#D4E655]">${Number(v.comision_monto).toLocaleString()}</span>
-                                        <span className="text-gray-600"> {v.comision_tipo === 'porcentaje' ? `(${v.comision_pct}%)` : '(fija)'}{v.estado !== 'pagado' ? ' · si se paga' : ''}</span>
+                                        <span className="text-gray-600"> {v.comision_tipo === 'porcentaje' ? `(${v.comision_pct}%)` : v.comision_tipo === 'monto_fijo' ? '(fija)' : ''}{v.estado !== 'pagado' ? ' · si se paga' : ''}</span>
                                     </p>
                                 )}
                                 {v.observaciones && <p className="text-[10px] text-gray-500 font-medium mt-1 italic truncate">{v.observaciones}</p>}

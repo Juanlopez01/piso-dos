@@ -36,9 +36,7 @@ async function getVendedor() {
 
 // ── Crear venta + link de pago ──────────────────────────────────────────────
 export async function crearVentaAction(input: {
-    productoId: string
-    cantidad: number
-    precioUnitario?: number
+    items: { productoId: string; cantidad: number; precioUnitario?: number }[]
     compradorNombre: string
     compradorTelefono: string
     compradorEmail?: string
@@ -47,63 +45,71 @@ export async function crearVentaAction(input: {
     const auth = await getVendedor()
     if ('error' in auth) return { success: false, error: auth.error }
 
-    if (!input.productoId) return { success: false, error: 'Elegí un producto' }
+    const items = (input.items || []).filter(i => i?.productoId)
+    if (!items.length) return { success: false, error: 'Agregá al menos un producto' }
     if (!input.compradorNombre?.trim()) return { success: false, error: 'Falta el nombre del comprador' }
 
     const telefono = limpiarTel(input.compradorTelefono)
     if (telefono.length < 8) return { success: false, error: 'El teléfono no parece válido' }
 
-    const cantidad = Math.max(1, Math.floor(Number(input.cantidad) || 1))
-
     const admin = getAdminClient()
-    const { data: producto } = await admin
+    const ids = [...new Set(items.map(i => i.productoId))]
+    const { data: productos } = await admin
         .from('productos')
         .select('id, nombre, precio, categoria, comision_pct, comision_tipo, comision_monto, permite_editar_precio, activo')
-        .eq('id', input.productoId)
-        .single()
+        .in('id', ids)
+    const pmap: Record<string, any> = Object.fromEntries((productos || []).map((p: any) => [p.id, p]))
 
-    if (!producto) return { success: false, error: 'El producto no existe' }
-    if (producto.activo === false) return { success: false, error: 'Ese producto está inactivo' }
+    // Calculamos cada ítem (precio + comisión congelados).
+    const itemsCalc: any[] = []
+    let montoTotal = 0, comisionTotal = 0, cantidadTotal = 0
+    for (const it of items) {
+        const p = pmap[it.productoId]
+        if (!p) return { success: false, error: 'Un producto del carrito no existe' }
+        if (p.activo === false) return { success: false, error: `"${p.nombre}" está inactivo` }
 
-    // El precio sale del catálogo. Solo se puede pisar si el admin lo habilitó
-    // en ese producto (spec punto 2).
-    let precioUnitario = Number(producto.precio)
-    if (producto.permite_editar_precio && input.precioUnitario != null) {
-        const pe = Number(input.precioUnitario)
-        if (!pe || pe <= 0) return { success: false, error: 'Precio inválido' }
-        precioUnitario = Math.round(pe)
+        const cantidad = Math.max(1, Math.floor(Number(it.cantidad) || 1))
+        // El precio sale del catálogo; solo se puede pisar si el admin lo habilitó.
+        let precioUnitario = Number(p.precio)
+        if (p.permite_editar_precio && it.precioUnitario != null) {
+            const pe = Number(it.precioUnitario)
+            if (!pe || pe <= 0) return { success: false, error: `Precio inválido en "${p.nombre}"` }
+            precioUnitario = Math.round(pe)
+        }
+        if (!precioUnitario || precioUnitario <= 0) return { success: false, error: `"${p.nombre}" no tiene precio válido` }
+
+        const subtotal = Math.round(precioUnitario * cantidad)
+        const tipo = p.comision_tipo === 'monto_fijo' ? 'monto_fijo' : 'porcentaje'
+        let cPct = 0, cMonto = 0
+        if (tipo === 'monto_fijo') cMonto = Math.round((Number(p.comision_monto) || 0) * cantidad)
+        else { cPct = Number(p.comision_pct) || 0; cMonto = Math.round(subtotal * cPct / 100) }
+
+        itemsCalc.push({
+            producto_id: p.id, producto_nombre: p.nombre, categoria: p.categoria || 'Otros',
+            cantidad, precio_unitario: precioUnitario, subtotal,
+            comision_tipo: tipo, comision_pct: cPct, comision_monto: cMonto
+        })
+        montoTotal += subtotal; comisionTotal += cMonto; cantidadTotal += cantidad
     }
-    if (!precioUnitario || precioUnitario <= 0) {
-        return { success: false, error: 'El producto no tiene un precio válido' }
-    }
+    if (montoTotal <= 0) return { success: false, error: 'El monto final no puede ser $0' }
 
-    const montoTotal = Math.round(precioUnitario * cantidad)
+    const esMulti = itemsCalc.length > 1
+    const first = itemsCalc[0]
 
-    // Comisión congelada al momento de la venta. Puede ser porcentaje sobre el
-    // total, o un monto fijo por unidad vendida (ej. $150.000 por inscripto).
-    const comisionTipo = producto.comision_tipo === 'monto_fijo' ? 'monto_fijo' : 'porcentaje'
-    let comisionPct = 0
-    let comisionMonto = 0
-    if (comisionTipo === 'monto_fijo') {
-        comisionMonto = Math.round((Number(producto.comision_monto) || 0) * cantidad)
-    } else {
-        comisionPct = Number(producto.comision_pct) || 0
-        comisionMonto = Math.round(montoTotal * comisionPct / 100)
-    }
-
+    // La venta guarda el resumen; el detalle va en ventas_items.
     const { data: venta, error } = await admin
         .from('ventas_externas')
         .insert({
             vendedor_id: auth.userId,
-            producto_id: producto.id,
-            producto_nombre: producto.nombre,
-            categoria: producto.categoria || 'Otros',
-            cantidad,
-            precio_unitario: precioUnitario,
+            producto_id: first.producto_id,
+            producto_nombre: esMulti ? `${itemsCalc.length} productos` : first.producto_nombre,
+            categoria: esMulti ? 'Varios' : first.categoria,
+            cantidad: cantidadTotal,
+            precio_unitario: esMulti ? 0 : first.precio_unitario,
             monto_total: montoTotal,
-            comision_tipo: comisionTipo,
-            comision_pct: comisionPct,
-            comision_monto: comisionMonto,
+            comision_tipo: esMulti ? 'mixto' : first.comision_tipo,
+            comision_pct: esMulti ? 0 : first.comision_pct,
+            comision_monto: comisionTotal,
             comprador_nombre: input.compradorNombre.trim(),
             comprador_telefono: telefono,
             comprador_email: input.compradorEmail?.trim().toLowerCase() || null,
@@ -111,8 +117,16 @@ export async function crearVentaAction(input: {
         })
         .select('id')
         .single()
-
     if (error) return { success: false, error: error.message }
+
+    const { error: e2 } = await admin
+        .from('ventas_items')
+        .insert(itemsCalc.map(i => ({ ...i, venta_id: venta.id })))
+    if (e2) {
+        await admin.from('ventas_externas').delete().eq('id', venta.id)
+        return { success: false, error: e2.message }
+    }
+
     return { success: true, ventaId: venta.id as string }
 }
 
@@ -329,6 +343,11 @@ export async function getVentaPublicaAction(ventaId: string) {
         ? (v.vendedor[0] as any)?.nombre_completo
         : (v.vendedor as any)?.nombre_completo
 
+    const { data: items } = await admin
+        .from('ventas_items')
+        .select('producto_nombre, cantidad, precio_unitario, subtotal')
+        .eq('venta_id', ventaId)
+
     return {
         ok: true as const,
         venta: {
@@ -338,7 +357,13 @@ export async function getVentaPublicaAction(ventaId: string) {
             precio_unitario: Number(v.precio_unitario),
             monto_total: Number(v.monto_total),
             comprador_nombre: v.comprador_nombre as string,
-            vendedor_nombre: (vendedorNom || null) as string | null
+            vendedor_nombre: (vendedorNom || null) as string | null,
+            items: (items || []).map((i: any) => ({
+                producto_nombre: i.producto_nombre as string,
+                cantidad: Number(i.cantidad),
+                precio_unitario: Number(i.precio_unitario),
+                subtotal: Number(i.subtotal)
+            }))
         }
     }
 }

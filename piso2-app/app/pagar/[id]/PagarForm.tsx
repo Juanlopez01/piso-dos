@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { toast, Toaster } from 'sonner'
 import { Loader2, ShieldCheck } from 'lucide-react'
 
+type VentaItem = { producto_nombre: string; cantidad: number; precio_unitario: number; subtotal: number }
 type VentaPublica = {
     id: string
     producto_nombre: string
@@ -12,6 +13,7 @@ type VentaPublica = {
     monto_total: number
     comprador_nombre: string
     vendedor_nombre: string | null
+    items: VentaItem[]
 }
 
 const inputCls = "w-full bg-[#111] border border-white/10 rounded-lg py-3 px-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-colors"
@@ -62,14 +64,17 @@ export default function PagarForm({ venta }: { venta: VentaPublica }) {
 
                 {/* ── QUÉ ESTÁ COMPRANDO ────────────────────────────────── */}
                 <div className="bg-[#09090b] border border-white/10 rounded-2xl p-5 space-y-3">
-                    <div>
-                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Producto</p>
-                        <p className="text-white font-bold text-sm">{venta.producto_nombre}</p>
-                        {venta.cantidad > 1 && (
-                            <p className="text-[10px] text-gray-500 font-bold uppercase mt-0.5">
-                                {venta.cantidad} × ${venta.precio_unitario.toLocaleString()}
-                            </p>
-                        )}
+                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Tu compra</p>
+                    <div className="space-y-2.5">
+                        {(venta.items.length ? venta.items : [{ producto_nombre: venta.producto_nombre, cantidad: venta.cantidad, precio_unitario: venta.precio_unitario, subtotal: venta.monto_total }]).map((it, i) => (
+                            <div key={i} className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-white font-bold text-sm leading-tight">{it.producto_nombre}</p>
+                                    {it.cantidad > 1 && <p className="text-[10px] text-gray-500 font-bold uppercase mt-0.5">{it.cantidad} × ${it.precio_unitario.toLocaleString()}</p>}
+                                </div>
+                                <span className="text-sm font-black text-white shrink-0">${it.subtotal.toLocaleString()}</span>
+                            </div>
+                        ))}
                     </div>
 
                     <div className="border-t border-white/5 pt-3 flex items-baseline justify-between">
