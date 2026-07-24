@@ -12,6 +12,42 @@ const getAdminClient = () => {
     )
 }
 
+// Cartelera PÚBLICA (sin login): clases próximas agrupadas, sin datos privados.
+export type ClasePublicaInstancia = { id: string; inicio: string; sala: string; sede: string }
+export type ClasePublicaGrupo = {
+    key_grupo: string; nombre: string; tipo_clase: string; imagen_url: string | null
+    profesor: string; instancias: ClasePublicaInstancia[]
+}
+
+export async function getClasesPublicasAction(): Promise<ClasePublicaGrupo[]> {
+    const admin = getAdminClient()
+    const hoy = new Date().toISOString()
+    const { data } = await admin
+        .from('clases')
+        .select(`
+            id, nombre, inicio, tipo_clase, imagen_url,
+            profesor:profiles!clases_profesor_id_fkey(nombre_completo),
+            sala:salas(nombre, sede:sedes(nombre))
+        `)
+        .gte('inicio', hoy)
+        .neq('estado', 'cancelada')
+        .order('inicio', { ascending: true })
+
+    const agrup: Record<string, ClasePublicaGrupo> = {}
+    for (const c of (data || []) as any[]) {
+        const profe = (Array.isArray(c.profesor) ? c.profesor[0]?.nombre_completo : c.profesor?.nombre_completo) || 'Staff'
+        const sala = Array.isArray(c.sala) ? c.sala[0] : c.sala
+        const sede = (Array.isArray(sala?.sede) ? sala.sede[0]?.nombre : sala?.sede?.nombre) || ''
+        const key = `${c.nombre}-${profe}-${c.tipo_clase}`
+        if (!agrup[key]) {
+            agrup[key] = { key_grupo: key, nombre: c.nombre, tipo_clase: c.tipo_clase, imagen_url: c.imagen_url || null, profesor: profe, instancias: [] }
+        }
+        agrup[key].instancias.push({ id: c.id, inicio: c.inicio, sala: sala?.nombre || '', sede })
+    }
+    return Object.values(agrup).sort((a, b) =>
+        new Date(a.instancias[0].inicio).getTime() - new Date(b.instancias[0].inicio).getTime())
+}
+
 export async function inscribirAlumnoAction(claseId: string, tipoClase: string, paseReferencia: string) {
     const supabase = await createClient()
     const supabaseAdmin = getAdminClient()

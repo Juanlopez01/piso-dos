@@ -91,6 +91,7 @@ export default function LandingPage() {
           <div className="hidden md:flex items-center gap-8 text-[10px] font-bold tracking-[0.2em] text-gray-400 uppercase">
             <button onClick={() => window.scrollTo(0, 0)} className="hover:text-white transition-colors">INICIO</button>
             <button onClick={() => scrollTo('ecosistema')} className="hover:text-white transition-colors">ECOSISTEMA</button>
+            <Link href="/cartelera" className="hover:text-white transition-colors">Clases</Link>
             <Link href="/alquiler" className="hover:text-white transition-colors">Salas</Link>
             <Link href="/nueva-generacion" className="text-[#D4E655] hover:text-white transition-colors">NUEVA GEN</Link>
             <button onClick={() => scrollTo('contacto')} className="hover:text-white transition-colors">CONTACTO</button>
@@ -115,6 +116,7 @@ export default function LandingPage() {
       <div className={`fixed inset-0 bg-[#050505] z-40 flex flex-col justify-center items-center gap-8 transition-all duration-300 ${isMobileMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
         <button onClick={() => { window.scrollTo(0, 0); setIsMobileMenuOpen(false) }} className="text-2xl font-black text-white uppercase tracking-widest hover:text-[#D4E655]">INICIO</button>
         <button onClick={() => scrollTo('ecosistema')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">ECOSISTEMA</button>
+        <Link href="/cartelera" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Clases</Link>
         <Link href="/alquiler" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Salas</Link>
         <Link href="/nueva-generacion" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-[#D4E655] uppercase tracking-widest hover:text-white">Nueva Generación</Link>
         <button onClick={() => scrollTo('contacto')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">CONTACTO</button>
@@ -184,7 +186,7 @@ export default function LandingPage() {
             <div className="p-10 md:p-16 flex flex-col justify-center">
               <h2 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6 leading-[0.9]">Espacio de <br /><span className="text-[#D4E655]">Movimiento.</span></h2>
               <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed mb-8 font-medium">Formación profesional, clases regulares y entrenamiento para bailarines. Sé parte de nuestro ecosistema.</p>
-              <div><Link href="/login" className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 hover:bg-white transition-all text-xs tracking-[0.2em]">INGRESAR <ArrowRight size={16} /></Link></div>
+              <div><Link href="/cartelera" className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 hover:bg-white transition-all text-xs tracking-[0.2em]">VER CLASES <ArrowRight size={16} /></Link></div>
             </div>
           </div>
 
