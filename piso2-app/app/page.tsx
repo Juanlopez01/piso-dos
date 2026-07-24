@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { ArrowUpRight, Triangle, Play, ArrowRight, Menu, X, MapPin, Instagram, Mail, InstagramIcon, Loader2, User as UserIcon, MonitorSmartphone } from 'lucide-react'
+import { ArrowUpRight, Triangle, Play, ArrowRight, Menu, X, MapPin, Instagram, Mail, InstagramIcon, Loader2, User as UserIcon, MonitorSmartphone, Music } from 'lucide-react'
 import { Montserrat } from 'next/font/google'
 
 const montserrat = Montserrat({
@@ -91,7 +91,7 @@ export default function LandingPage() {
           <div className="hidden md:flex items-center gap-8 text-[10px] font-bold tracking-[0.2em] text-gray-400 uppercase">
             <button onClick={() => window.scrollTo(0, 0)} className="hover:text-white transition-colors">INICIO</button>
             <button onClick={() => scrollTo('ecosistema')} className="hover:text-white transition-colors">ECOSISTEMA</button>
-            <Link href="/cartelera" className="hover:text-white transition-colors">Clases</Link>
+            <Link href="/cartelera" className="text-[#D4E655] hover:text-white transition-colors">Clases</Link>
             <Link href="/alquiler" className="hover:text-white transition-colors">Salas</Link>
             <Link href="/nueva-generacion" className="text-[#D4E655] hover:text-white transition-colors">NUEVA GEN</Link>
             <button onClick={() => scrollTo('contacto')} className="hover:text-white transition-colors">CONTACTO</button>
@@ -299,6 +299,34 @@ export default function LandingPage() {
 
           </div>
 
+        </div>
+      </section>
+
+      {/* --- BANDA: CARTELERA / CLASES (ver la propuesta sin login) --- */}
+      <section className="py-20 px-6 border-t border-white/5 relative overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] bg-[#D4E655]/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="max-w-5xl mx-auto relative z-10">
+          <Link href="/cartelera" className="group block bg-[#09090b]/60 backdrop-blur-md border border-white/10 hover:border-[#D4E655]/40 rounded-3xl p-10 md:p-14 transition-all duration-300">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <Music className="text-[#D4E655]" size={14} />
+                  <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">Cartelera</span>
+                </div>
+                <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tighter leading-[0.95] mb-4">
+                  Mirá todas <br /><span className="text-[#D4E655]">nuestras clases</span>
+                </h2>
+                <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed font-medium">
+                  Explorá la propuesta completa: ritmos, profes, días y horarios. Sin registrarte.
+                </p>
+              </div>
+              <div className="shrink-0">
+                <span className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl group-hover:bg-white transition-colors">
+                  Ver cartelera <ArrowRight size={16} />
+                </span>
+              </div>
+            </div>
+          </Link>
         </div>
       </section>
 

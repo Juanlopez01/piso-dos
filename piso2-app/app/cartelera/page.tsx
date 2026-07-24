@@ -10,6 +10,13 @@ import { getClasesPublicasAction, type ClasePublicaGrupo } from '@/app/actions/c
 
 const norm = (s: string) => s ? s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim() : ''
 
+// Días de la semana en que se da la clase (a partir de las instancias)
+const DIAS_ABR = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+const diasDe = (instancias: { inicio: string }[]) => {
+    const dias = [...new Set(instancias.map(i => new Date(i.inicio).getDay()))]
+    return dias.sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(d => DIAS_ABR[d])
+}
+
 const estilo = (tipo: string) => {
     switch (norm(tipo)) {
         case 'regular': return { border: 'border-orange-500/40', chip: 'bg-orange-500 text-white', icon: 'text-orange-500' }
@@ -130,6 +137,12 @@ export default function CarteleraPublicaPage() {
                                                     <div>
                                                         <h3 className="text-xl font-black uppercase leading-tight mb-1 drop-shadow-md">{g.nombre}</h3>
                                                         <p className="flex items-center gap-1.5 text-sm font-bold text-gray-200"><User size={14} className={st.icon} /> {g.profesor}</p>
+                                                    </div>
+                                                    {/* DÍAS de la semana (info importante) */}
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {diasDe(g.instancias).map(d => (
+                                                            <span key={d} className={`text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-md ${st.chip}`}>{d}</span>
+                                                        ))}
                                                     </div>
                                                     <div className="flex items-center justify-between pt-3 border-t border-white/10 text-xs text-gray-300 font-medium">
                                                         <span className="flex items-center gap-1.5"><MapPin size={12} className="text-white/50" /> {prox.sala} <span className="text-[9px] uppercase opacity-50 border border-white/20 px-1 rounded ml-1">{prox.sede}</span></span>
