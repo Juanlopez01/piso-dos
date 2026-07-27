@@ -49,7 +49,12 @@ export default function TalentoDetallePage() {
             mensaje: form.mensaje
         })
         setEnviando(false)
-        if (res.success) setEnviado(true)
+        if (res.success) {
+            setEnviado(true)
+            // Además de quedar registrada, avisamos por WhatsApp a Piso 2.
+            const msg = `Hola! Consulta de contratación por *${t!.nombre}* (Piso2 Talent).\nNombre: ${form.nombre}\nContacto: ${form.contacto}${form.empresa ? `\nEmpresa: ${form.empresa}` : ''}${form.mensaje ? `\nMensaje: ${form.mensaje}` : ''}`
+            window.open(`https://wa.me/5491155163773?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer')
+        }
         else setError(res.error || 'No se pudo enviar. Intentá de nuevo.')
     }
 

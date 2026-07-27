@@ -7,8 +7,8 @@ import { Montserrat } from 'next/font/google'
 
 const montserrat = Montserrat({ subsets: ['latin'], weight: ['400', '700', '900'] })
 
-// WhatsApp del estudio
-const WHATSAPP_ESTUDIO = '5491171190301'
+// WhatsApp del estudio (recibe las solicitudes de Nueva Generación)
+const WHATSAPP_ESTUDIO = '5491155163773'
 
 export default function NuevaGeneracionPage() {
     const [form, setForm] = useState({
