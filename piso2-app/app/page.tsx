@@ -92,6 +92,7 @@ export default function LandingPage() {
             <button onClick={() => window.scrollTo(0, 0)} className="hover:text-white transition-colors">INICIO</button>
             <button onClick={() => scrollTo('ecosistema')} className="hover:text-white transition-colors">ECOSISTEMA</button>
             <Link href="/cartelera" className="text-[#D4E655] hover:text-white transition-colors">Clases</Link>
+            <Link href="/talent" className="hover:text-white transition-colors">Talents</Link>
             <Link href="/alquiler" className="hover:text-white transition-colors">Salas</Link>
             <Link href="/nueva-generacion" className="text-[#D4E655] hover:text-white transition-colors">NUEVA GEN</Link>
             <button onClick={() => scrollTo('contacto')} className="hover:text-white transition-colors">CONTACTO</button>
@@ -117,6 +118,7 @@ export default function LandingPage() {
         <button onClick={() => { window.scrollTo(0, 0); setIsMobileMenuOpen(false) }} className="text-2xl font-black text-white uppercase tracking-widest hover:text-[#D4E655]">INICIO</button>
         <button onClick={() => scrollTo('ecosistema')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">ECOSISTEMA</button>
         <Link href="/cartelera" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Clases</Link>
+        <Link href="/talent" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Talents</Link>
         <Link href="/alquiler" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Salas</Link>
         <Link href="/nueva-generacion" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-[#D4E655] uppercase tracking-widest hover:text-white">Nueva Generación</Link>
         <button onClick={() => scrollTo('contacto')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">CONTACTO</button>
