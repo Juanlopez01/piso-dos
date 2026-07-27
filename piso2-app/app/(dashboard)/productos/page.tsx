@@ -38,7 +38,7 @@ type Producto = {
 
 // Categorías sugeridas para el módulo de ventas (spec punto 8)
 const CATEGORIAS_VENTA = [
-    'Clases Regulares', 'La Liga', 'Compañía', 'Workshops',
+    'Clases Regulares', 'La Liga', 'Compañía', 'Proyecto Staff', 'Workshops',
     'Alquiler Sala Stream', 'Alquiler Sala Negra', 'Alquiler Sala Blanca',
     'Producciones', 'Eventos', 'Otros'
 ]
