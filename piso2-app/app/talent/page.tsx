@@ -10,7 +10,7 @@ const serif = Playfair_Display({ subsets: ['latin'], weight: ['400', '500', '600
 const sans = Montserrat({ subsets: ['latin'], weight: ['300', '400', '500', '600'] })
 
 const IG = 'https://www.instagram.com/piso2multiespacio/'
-const MAIL = 'mailto:info@piso2multiespacio.com'
+const MAIL = 'mailto:multiespaciopiso2@gmail.com'
 
 const CATS = [
     { key: 'mujeres', label: 'Mujeres' },

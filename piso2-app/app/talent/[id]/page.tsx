@@ -66,7 +66,8 @@ export default function TalentoDetallePage() {
         </div>
     )
 
-    const embed = toEmbed(t.video_url)
+    const listaVideos = (t.videos && t.videos.length ? t.videos : (t.video_url ? [t.video_url] : []))
+    const embeds = listaVideos.map(v => ({ raw: v, embed: toEmbed(v) })).filter(x => x.embed)
     const esObra = t.categoria === 'obras'
 
     return (
@@ -109,11 +110,15 @@ export default function TalentoDetallePage() {
 
                         {t.bio && <p className="mt-8 text-neutral-600 leading-relaxed font-light whitespace-pre-wrap">{t.bio}</p>}
 
-                        {embed && (
+                        {embeds.length > 0 && (
                             <div className="mt-8">
-                                <p className="text-[10px] font-bold tracking-[0.3em] uppercase text-neutral-400 mb-3">Reel</p>
-                                <div className="w-full bg-black" style={{ aspectRatio: '16 / 9' }}>
-                                    <iframe src={embed} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen title={`Reel ${t.nombre}`} />
+                                <p className="text-[10px] font-bold tracking-[0.3em] uppercase text-neutral-400 mb-3">{embeds.length > 1 ? 'Reels' : 'Reel'}</p>
+                                <div className="space-y-4">
+                                    {embeds.map((e, i) => (
+                                        <div key={i} className="w-full bg-black" style={{ aspectRatio: '16 / 9' }}>
+                                            <iframe src={e.embed!} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen title={`Reel ${i + 1} ${t.nombre}`} />
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         )}

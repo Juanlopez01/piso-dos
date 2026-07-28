@@ -27,6 +27,7 @@ export type TalentoPublico = {
     bio: string | null
     fotos: string[]
     video_url: string | null
+    videos: string[]
     destacado: boolean
 }
 
@@ -35,7 +36,7 @@ export async function getTalentosPublicosAction(): Promise<TalentoPublico[]> {
     const admin = getAdminClient()
     const { data } = await admin
         .from('talentos')
-        .select('id, nombre, categoria, disciplina, bio, fotos, video_url, destacado')
+        .select('id, nombre, categoria, disciplina, bio, fotos, video_url, videos, destacado')
         .eq('activo', true)
         .order('destacado', { ascending: false })
         .order('orden', { ascending: true })
@@ -47,7 +48,7 @@ export async function getTalentoAction(id: string): Promise<TalentoPublico | nul
     const admin = getAdminClient()
     const { data } = await admin
         .from('talentos')
-        .select('id, nombre, categoria, disciplina, bio, fotos, video_url, destacado')
+        .select('id, nombre, categoria, disciplina, bio, fotos, video_url, videos, destacado')
         .eq('id', id)
         .eq('activo', true)
         .maybeSingle()
@@ -235,6 +236,7 @@ export async function upsertTalentoAction(payload: {
     bio?: string
     fotos?: string[]
     video_url?: string
+    videos?: string[]
     destacado?: boolean
     activo?: boolean
     orden?: number
@@ -254,13 +256,16 @@ export async function upsertTalentoAction(payload: {
         if ((count || 0) >= 5) return { success: false, error: 'Ya hay 5 destacados (el máximo). Quitá uno antes de destacar otro.' }
     }
 
+    const videos = (payload.videos && payload.videos.length ? payload.videos : (payload.video_url ? [payload.video_url] : []))
+        .map(v => v?.trim()).filter(Boolean).slice(0, 3)
     const row = {
         nombre: payload.nombre.trim(),
         categoria: payload.categoria,
         disciplina: payload.disciplina?.trim() || null,
         bio: payload.bio?.trim() || null,
         fotos: payload.fotos || [],
-        video_url: payload.video_url?.trim() || null,
+        videos,
+        video_url: videos[0] || null,   // compat con el reproductor actual
         destacado: !!payload.destacado,
         activo: payload.activo !== false,
         orden: Number(payload.orden) || 0

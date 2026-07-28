@@ -23,6 +23,7 @@ type Talento = {
     bio: string | null
     fotos: string[]
     video_url: string | null
+    videos: string[] | null
     destacado: boolean
     activo: boolean
     orden: number
@@ -39,7 +40,7 @@ const DISCIPLINAS = ['Bailarín/a', 'Acróbata', 'Modelo', 'Cantante', 'Músico/
 const formVacio = () => ({
     id: undefined as string | undefined,
     nombre: '', categoria: 'mujeres' as 'mujeres' | 'varones' | 'obras',
-    disciplina: '', bio: '', fotos: [] as string[], video_url: '',
+    disciplina: '', bio: '', fotos: [] as string[], videos: ['', '', ''] as string[],
     destacado: false, activo: true, orden: 0
 })
 
@@ -108,7 +109,8 @@ export default function TalentsAdminPage() {
     const abrirEditar = (t: Talento) => {
         setForm({
             id: t.id, nombre: t.nombre, categoria: t.categoria, disciplina: t.disciplina || '',
-            bio: t.bio || '', fotos: t.fotos || [], video_url: t.video_url || '',
+            bio: t.bio || '', fotos: t.fotos || [],
+            videos: [...(t.videos && t.videos.length ? t.videos : (t.video_url ? [t.video_url] : [])), '', '', ''].slice(0, 3),
             destacado: t.destacado, activo: t.activo, orden: t.orden
         })
         setModalOpen(true)
@@ -491,8 +493,12 @@ export default function TalentsAdminPage() {
                                 <textarea value={form.bio} onChange={e => setForm({ ...form, bio: e.target.value })} className={`${inputCls} min-h-[90px] resize-none`} />
                             </div>
                             <div className="md:col-span-2">
-                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Reel (link de YouTube / Vimeo)</label>
-                                <input value={form.video_url} onChange={e => setForm({ ...form, video_url: e.target.value })} placeholder="https://vimeo.com/… o https://youtu.be/…" className={inputCls} />
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Videos / Reels (hasta 3 links)</label>
+                                <div className="space-y-2 mt-1">
+                                    {[0, 1, 2].map(i => (
+                                        <input key={i} value={form.videos[i] || ''} onChange={e => setForm(f => ({ ...f, videos: f.videos.map((v, idx) => idx === i ? e.target.value : v) }))} placeholder={i === 0 ? 'https://youtu.be/… o https://vimeo.com/…' : 'Otro link (opcional)'} className={inputCls} />
+                                    ))}
+                                </div>
                             </div>
 
                             {/* FOTOS */}
