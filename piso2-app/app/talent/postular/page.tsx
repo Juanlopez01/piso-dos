@@ -23,31 +23,40 @@ export default function PostularTalentoPage() {
     const router = useRouter()
 
     const [form, setForm] = useState({
-        nombre: '', sexo: '', rubro: '', edad: '', altura: '', descripcion: '', video_url: '', foto_url: ''
+        nombre: '', sexo: '', rubro: '', edad: '', altura: '', descripcion: ''
     })
+    const [fotos, setFotos] = useState<string[]>([])          // hasta 3
+    const [videos, setVideos] = useState<string[]>(['', '', ''])  // hasta 3 links
     const [subiendo, setSubiendo] = useState(false)
     const [enviando, setEnviando] = useState(false)
     const [listo, setListo] = useState(false)
 
-    const handleFoto = async (files: FileList | null) => {
+    const handleFotos = async (files: FileList | null) => {
         if (!files || !files.length) return
         setSubiendo(true)
-        try {
-            const opt = await optimizeImage(files[0], { maxDim: 1400 })
-            const ext = opt.name.split('.').pop()
-            const path = `postulaciones/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-            const { error } = await supabase.storage.from('talent').upload(path, opt)
-            if (error) throw error
-            setForm(f => ({ ...f, foto_url: supabase.storage.from('talent').getPublicUrl(path).data.publicUrl }))
-        } catch (e: any) {
-            toast.error('No se pudo subir la foto: ' + (e.message || ''))
+        const nuevas: string[] = []
+        for (const file of Array.from(files)) {
+            if (fotos.length + nuevas.length >= 3) break
+            try {
+                const opt = await optimizeImage(file, { maxDim: 1400 })
+                const ext = opt.name.split('.').pop()
+                const path = `postulaciones/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+                const { error } = await supabase.storage.from('talent').upload(path, opt)
+                if (error) throw error
+                nuevas.push(supabase.storage.from('talent').getPublicUrl(path).data.publicUrl)
+            } catch (e: any) {
+                toast.error('No se pudo subir una foto: ' + (e.message || ''))
+            }
         }
+        setFotos(f => [...f, ...nuevas].slice(0, 3))
         setSubiendo(false)
     }
+    const quitarFoto = (i: number) => setFotos(f => f.filter((_, idx) => idx !== i))
+    const setVideo = (i: number, v: string) => setVideos(vs => vs.map((x, idx) => idx === i ? v : x))
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!form.foto_url) return toast.error('Subí una foto.')
+        if (!fotos.length) return toast.error('Subí al menos una foto.')
         setEnviando(true)
         const res = await crearPostulacionTalentoAction({
             nombre: form.nombre,
@@ -56,8 +65,8 @@ export default function PostularTalentoPage() {
             descripcion: form.descripcion,
             edad: form.edad ? Number(form.edad) : undefined,
             altura: form.altura ? Number(form.altura) : undefined,
-            video_url: form.video_url,
-            foto_url: form.foto_url
+            fotos,
+            videos: videos.filter(v => v.trim())
         })
         if (res.success) setListo(true)
         else toast.error(res.error || 'Error al enviar la postulación')
@@ -92,21 +101,24 @@ export default function PostularTalentoPage() {
             </header>
 
             <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-6 pb-24 space-y-6">
-                {/* FOTO */}
+                {/* FOTOS (hasta 3) */}
                 <div>
-                    <span className={labelCls}>Foto</span>
-                    {form.foto_url ? (
-                        <div className="relative w-40 aspect-[3/4] overflow-hidden bg-neutral-100 border border-neutral-200">
-                            <img src={form.foto_url} alt="Tu foto" className="w-full h-full object-cover" />
-                            <button type="button" onClick={() => setForm(f => ({ ...f, foto_url: '' }))} className="absolute top-1.5 right-1.5 bg-black/70 text-white rounded-full p-1 hover:bg-black"><X size={13} /></button>
-                        </div>
-                    ) : (
-                        <label className="w-40 aspect-[3/4] border border-dashed border-neutral-300 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-neutral-900 transition-colors text-neutral-400">
-                            {subiendo ? <Loader2 className="animate-spin" size={22} /> : <Upload size={22} />}
-                            <span className="text-[10px] uppercase tracking-widest font-semibold">Subir foto</span>
-                            <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e => handleFoto(e.target.files)} />
-                        </label>
-                    )}
+                    <span className={labelCls}>Fotos <span className="text-neutral-400 normal-case tracking-normal">(hasta 3)</span></span>
+                    <div className="flex flex-wrap gap-3">
+                        {fotos.map((url, i) => (
+                            <div key={i} className="relative w-32 aspect-[3/4] overflow-hidden bg-neutral-100 border border-neutral-200">
+                                <img src={url} alt={`Foto ${i + 1}`} className="w-full h-full object-cover" />
+                                <button type="button" onClick={() => quitarFoto(i)} className="absolute top-1.5 right-1.5 bg-black/70 text-white rounded-full p-1 hover:bg-black"><X size={13} /></button>
+                            </div>
+                        ))}
+                        {fotos.length < 3 && (
+                            <label className="w-32 aspect-[3/4] border border-dashed border-neutral-300 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-neutral-900 transition-colors text-neutral-400">
+                                {subiendo ? <Loader2 className="animate-spin" size={22} /> : <Upload size={22} />}
+                                <span className="text-[10px] uppercase tracking-widest font-semibold">Subir</span>
+                                <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={e => handleFotos(e.target.files)} />
+                            </label>
+                        )}
+                    </div>
                 </div>
 
                 <div>
@@ -146,8 +158,12 @@ export default function PostularTalentoPage() {
                 </div>
 
                 <div>
-                    <label className={labelCls}>Link de video</label>
-                    <input type="url" value={form.video_url} onChange={e => setForm({ ...form, video_url: e.target.value })} className={inputCls} placeholder="YouTube, Instagram, Vimeo…" />
+                    <label className={labelCls}>Links de video <span className="text-neutral-400 normal-case tracking-normal">(hasta 3)</span></label>
+                    <div className="space-y-2.5">
+                        {videos.map((v, i) => (
+                            <input key={i} type="url" value={v} onChange={e => setVideo(i, e.target.value)} className={inputCls} placeholder={i === 0 ? 'YouTube, Instagram, Vimeo…' : 'Otro link (opcional)'} />
+                        ))}
+                    </div>
                 </div>
 
                 <button type="submit" disabled={enviando || subiendo}

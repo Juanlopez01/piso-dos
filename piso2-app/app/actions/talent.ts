@@ -106,8 +106,8 @@ export async function crearPostulacionTalentoAction(payload: {
     edad?: number
     altura?: number
     sexo?: string          // 'mujeres' | 'varones'
-    foto_url?: string
-    video_url?: string
+    fotos?: string[]       // hasta 3
+    videos?: string[]      // hasta 3
 }) {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()
@@ -115,6 +115,10 @@ export async function crearPostulacionTalentoAction(payload: {
 
     if (!payload.nombre?.trim()) return { success: false, error: 'Falta tu nombre completo.' }
     if (!['mujeres', 'varones'].includes(payload.sexo || '')) return { success: false, error: 'Seleccioná el sexo.' }
+
+    const fotos = (payload.fotos || []).filter(Boolean).slice(0, 3)
+    const videos = (payload.videos || []).map(v => v?.trim()).filter(Boolean).slice(0, 3)
+    if (!fotos.length) return { success: false, error: 'Subí al menos una foto.' }
 
     const admin = getAdminClient()
     const { error } = await admin.from('talent_postulaciones').insert({
@@ -125,8 +129,10 @@ export async function crearPostulacionTalentoAction(payload: {
         edad: payload.edad ? Number(payload.edad) : null,
         altura: payload.altura ? Number(payload.altura) : null,
         sexo: payload.sexo,
-        foto_url: payload.foto_url || null,
-        video_url: payload.video_url?.trim() || null,
+        fotos,
+        videos,
+        foto_url: fotos[0] || null,     // compat con la columna vieja
+        video_url: videos[0] || null,
         estado: 'pendiente'
     })
     if (error) return { success: false, error: error.message }
@@ -156,13 +162,16 @@ export async function aceptarPostulacionAction(id: string) {
     if (!p) return { success: false, error: 'La postulación no existe' }
 
     const categoria = ['mujeres', 'varones', 'obras'].includes(p.sexo) ? p.sexo : 'mujeres'
+    const fotos = (p.fotos && p.fotos.length) ? p.fotos : (p.foto_url ? [p.foto_url] : [])
+    const videos = (p.videos && p.videos.length) ? p.videos : (p.video_url ? [p.video_url] : [])
     const { error: e1 } = await admin.from('talentos').insert({
         nombre: p.nombre,
         categoria,
         disciplina: p.rubro,
         bio: p.descripcion,
-        fotos: p.foto_url ? [p.foto_url] : [],
-        video_url: p.video_url,
+        fotos,
+        videos,
+        video_url: videos[0] || null,   // compat con el reproductor actual de la ficha
         edad: p.edad,
         altura: p.altura,
         destacado: false,
@@ -189,13 +198,15 @@ export async function eliminarPostulacionAction(id: string) {
     if (!perm.ok) return { success: false, error: perm.error }
     const admin = getAdminClient()
 
-    const { data: p } = await admin.from('talent_postulaciones').select('foto_url').eq('id', id).single()
+    const { data: p } = await admin.from('talent_postulaciones').select('foto_url, fotos').eq('id', id).single()
     const { error } = await admin.from('talent_postulaciones').delete().eq('id', id)
     if (error) return { success: false, error: error.message }
 
-    // Borramos la foto del storage para no consumir espacio.
-    const path = p?.foto_url?.split('/talent/')[1]
-    if (path) await admin.storage.from('talent').remove([decodeURIComponent(path)])
+    // Borramos TODAS las fotos del storage para no consumir espacio.
+    const urls: string[] = [...(p?.fotos || [])]
+    if (p?.foto_url) urls.push(p.foto_url)
+    const paths = [...new Set(urls)].map(u => u?.split('/talent/')[1]).filter(Boolean).map((x: string) => decodeURIComponent(x))
+    if (paths.length) await admin.storage.from('talent').remove(paths)
     return { success: true }
 }
 

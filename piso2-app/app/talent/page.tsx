@@ -54,8 +54,8 @@ export default function TalentHome() {
             {/* LOGO + NAV */}
             <header id="inicio" className="pt-14 pb-8 text-center">
                 <div className={`${serif.className} leading-none`}>
-                    <p className="text-[11px] md:text-sm tracking-[0.55em] text-neutral-500 uppercase">Piso 2</p>
-                    <h1 className="text-5xl md:text-7xl tracking-[0.15em] font-medium mt-1">TALENT</h1>
+                    <p className="text-xs md:text-base tracking-[0.6em] text-neutral-500 uppercase mb-2">Piso 2</p>
+                    <h1 className="text-7xl md:text-9xl tracking-[0.12em] font-semibold">TALENT</h1>
                 </div>
                 <nav className="mt-8 flex flex-wrap items-center justify-center gap-6 md:gap-10 text-[10px] md:text-[11px] font-semibold tracking-[0.2em] uppercase text-neutral-600">
                     <a href="#inicio" className="hover:text-black transition-colors">Inicio</a>
@@ -79,9 +79,9 @@ export default function TalentHome() {
             ) : (
                 <>
                     {/* TAGLINE */}
-                    <section className="py-16 md:py-24 px-6 text-center">
-                        <p className={`${serif.className} text-2xl md:text-4xl lg:text-5xl tracking-wide leading-snug max-w-3xl mx-auto`}>
-                            Conectando <span className="font-semibold">TALENTOS</span> de primer nivel con el mundo
+                    <section className="pb-14 md:pb-20 px-6 text-center">
+                        <p className={`${serif.className} text-base md:text-xl tracking-wide leading-snug max-w-2xl mx-auto text-neutral-500`}>
+                            Conectando <span className="font-semibold text-neutral-800">talentos</span> de primer nivel con el mundo
                         </p>
                     </section>
 

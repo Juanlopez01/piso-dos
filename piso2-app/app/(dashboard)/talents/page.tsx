@@ -349,10 +349,19 @@ export default function TalentsAdminPage() {
                     <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden relative max-h-[90vh] flex flex-col md:flex-row" onClick={e => e.stopPropagation()}>
                         <button onClick={() => setPostSel(null)} className="absolute top-4 right-4 z-10 bg-white/80 rounded-full p-1 text-neutral-500 hover:text-black"><X size={20} /></button>
 
-                        <div className="md:w-2/5 bg-neutral-100 shrink-0">
-                            {postSel.foto_url
-                                ? <img src={postSel.foto_url} alt={postSel.nombre} className="w-full h-56 md:h-full object-cover" />
-                                : <div className="w-full h-56 md:h-full flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin foto</div>}
+                        <div className="md:w-2/5 bg-neutral-100 shrink-0 flex flex-col">
+                            {(() => {
+                                const fotos: string[] = (postSel.fotos && postSel.fotos.length) ? postSel.fotos : (postSel.foto_url ? [postSel.foto_url] : [])
+                                if (!fotos.length) return <div className="w-full h-56 md:h-full flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin foto</div>
+                                return (<>
+                                    <img src={fotos[0]} alt={postSel.nombre} className="w-full h-56 md:flex-1 object-cover" />
+                                    {fotos.length > 1 && (
+                                        <div className="flex gap-1 p-1 bg-neutral-200">
+                                            {fotos.slice(1).map((u, i) => <img key={i} src={u} alt="" className="flex-1 h-16 object-cover" />)}
+                                        </div>
+                                    )}
+                                </>)
+                            })()}
                         </div>
 
                         <div className="flex-1 p-6 md:p-8 overflow-y-auto">
@@ -367,11 +376,19 @@ export default function TalentsAdminPage() {
 
                             {postSel.descripcion && <p className="text-sm text-neutral-600 leading-relaxed mb-4 whitespace-pre-line">{postSel.descripcion}</p>}
 
-                            {postSel.video_url && (
-                                <a href={postSel.video_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.15em] uppercase border border-neutral-300 px-4 py-2 hover:border-black transition-colors mb-6">
-                                    <Play size={13} /> Ver video
-                                </a>
-                            )}
+                            {(() => {
+                                const videos: string[] = (postSel.videos && postSel.videos.length) ? postSel.videos : (postSel.video_url ? [postSel.video_url] : [])
+                                if (!videos.length) return null
+                                return (
+                                    <div className="flex flex-wrap gap-2 mb-6">
+                                        {videos.map((v, i) => (
+                                            <a key={i} href={v} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.15em] uppercase border border-neutral-300 px-4 py-2 hover:border-black transition-colors">
+                                                <Play size={13} /> Video {videos.length > 1 ? i + 1 : ''}
+                                            </a>
+                                        ))}
+                                    </div>
+                                )
+                            })()}
 
                             <div className="flex flex-col gap-2 border-t border-neutral-200 pt-5 mt-2">
                                 <button disabled={procesandoPost} onClick={() => handleAceptarPost(postSel.id)} className="w-full bg-neutral-900 text-white font-semibold uppercase tracking-[0.15em] text-xs py-3 hover:bg-black transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
