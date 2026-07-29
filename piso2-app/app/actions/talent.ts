@@ -55,13 +55,13 @@ export async function getTalentoAction(id: string): Promise<TalentoPublico | nul
     return (data as TalentoPublico) || null
 }
 
-export type MarcaPublica = { id: string; nombre: string; logo_url: string }
+export type MarcaPublica = { id: string; nombre: string; logo_url: string; link: string | null }
 
 export async function getMarcasPublicasAction(): Promise<MarcaPublica[]> {
     const admin = getAdminClient()
     const { data } = await admin
         .from('talent_marcas')
-        .select('id, nombre, logo_url')
+        .select('id, nombre, logo_url, link')
         .eq('activo', true)
         .order('orden', { ascending: true })
         .order('nombre', { ascending: true })
@@ -315,12 +315,12 @@ export async function listMarcasAdminAction() {
     return data || []
 }
 
-export async function upsertMarcaAction(payload: { id?: string; nombre: string; logo_url: string; orden?: number; activo?: boolean }) {
+export async function upsertMarcaAction(payload: { id?: string; nombre: string; logo_url: string; link?: string; orden?: number; activo?: boolean }) {
     const perm = await requireAdmin()
     if (!perm.ok) return { success: false, error: perm.error }
     if (!payload.nombre?.trim() || !payload.logo_url) return { success: false, error: 'Falta nombre o logo' }
     const admin = getAdminClient()
-    const row = { nombre: payload.nombre.trim(), logo_url: payload.logo_url, orden: Number(payload.orden) || 0, activo: payload.activo !== false }
+    const row = { nombre: payload.nombre.trim(), logo_url: payload.logo_url, link: payload.link?.trim() || null, orden: Number(payload.orden) || 0, activo: payload.activo !== false }
     const { error } = payload.id
         ? await admin.from('talent_marcas').update(row).eq('id', payload.id)
         : await admin.from('talent_marcas').insert(row)

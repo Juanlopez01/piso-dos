@@ -131,10 +131,13 @@ export default function TalentHome() {
                         </div>
                         <div className="max-w-5xl mx-auto px-6 md:px-10 py-16">
                             {marcas.length > 0 ? (
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-8 gap-y-12 items-center justify-items-center">
-                                    {marcas.map(m => (
-                                        <img key={m.id} src={m.logo_url} alt={m.nombre} className="max-h-14 md:max-h-16 w-auto object-contain opacity-80 hover:opacity-100 transition-opacity" />
-                                    ))}
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-10 gap-y-14 items-center justify-items-center">
+                                    {marcas.map(m => {
+                                        const logo = <img src={m.logo_url} alt={m.nombre} className="max-h-20 md:max-h-28 w-auto object-contain opacity-80 hover:opacity-100 transition-opacity" />
+                                        return m.link
+                                            ? <a key={m.id} href={m.link} target="_blank" rel="noreferrer" title={m.nombre} className="block hover:scale-105 transition-transform">{logo}</a>
+                                            : <div key={m.id}>{logo}</div>
+                                    })}
                                 </div>
                             ) : (
                                 <p className="text-center text-neutral-400 text-xs uppercase tracking-[0.3em]">Próximamente</p>

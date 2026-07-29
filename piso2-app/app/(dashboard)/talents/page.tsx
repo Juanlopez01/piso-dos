@@ -61,7 +61,7 @@ export default function TalentsAdminPage() {
     // Marcas
     const [marcas, setMarcas] = useState<any[]>([])
     const [modalMarca, setModalMarca] = useState(false)
-    const [marcaForm, setMarcaForm] = useState<{ id?: string; nombre: string; logo_url: string; orden: number; activo: boolean }>({ nombre: '', logo_url: '', orden: 0, activo: true })
+    const [marcaForm, setMarcaForm] = useState<{ id?: string; nombre: string; logo_url: string; link: string; orden: number; activo: boolean }>({ nombre: '', logo_url: '', link: '', orden: 0, activo: true })
     const [guardandoMarca, setGuardandoMarca] = useState(false)
     const [subiendoLogo, setSubiendoLogo] = useState(false)
 
@@ -161,8 +161,8 @@ export default function TalentsAdminPage() {
         if (res.success) { toast.success('Eliminado'); cargar() } else toast.error(res.error || 'Error')
     }
 
-    const abrirNuevaMarca = () => { setMarcaForm({ nombre: '', logo_url: '', orden: 0, activo: true }); setModalMarca(true) }
-    const abrirEditarMarca = (m: any) => { setMarcaForm({ id: m.id, nombre: m.nombre, logo_url: m.logo_url, orden: m.orden, activo: m.activo }); setModalMarca(true) }
+    const abrirNuevaMarca = () => { setMarcaForm({ nombre: '', logo_url: '', link: '', orden: 0, activo: true }); setModalMarca(true) }
+    const abrirEditarMarca = (m: any) => { setMarcaForm({ id: m.id, nombre: m.nombre, logo_url: m.logo_url, link: m.link || '', orden: m.orden, activo: m.activo }); setModalMarca(true) }
 
     const handleLogo = async (files: FileList | null) => {
         if (!files || !files[0]) return
@@ -433,6 +433,11 @@ export default function TalentsAdminPage() {
                                     </label>
                                 </div>
                                 <p className="text-[9px] text-neutral-400 mt-1">Ideal PNG con fondo transparente.</p>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Link (opcional)</label>
+                                <input type="url" value={marcaForm.link} onChange={e => setMarcaForm({ ...marcaForm, link: e.target.value })} placeholder="https://…" className={inputCls} />
+                                <p className="text-[9px] text-neutral-400 mt-1">Al tocar el logo en la vitrina, lleva acá.</p>
                             </div>
                             <div className="flex items-center gap-5">
                                 <label className="flex items-center gap-2 cursor-pointer">
