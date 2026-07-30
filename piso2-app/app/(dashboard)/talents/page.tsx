@@ -7,10 +7,12 @@ import { optimizeImage } from '@/utils/optimizeImage'
 import {
     listTalentosAdminAction, upsertTalentoAction, eliminarTalentoAction, toggleTalentoActivoAction,
     listMarcasAdminAction, upsertMarcaAction, toggleMarcaActivoAction, eliminarMarcaAction,
-    listPostulacionesAction, aceptarPostulacionAction, standbyPostulacionAction, eliminarPostulacionAction
+    listPostulacionesAction, aceptarPostulacionAction, standbyPostulacionAction, eliminarPostulacionAction,
+    listBusquedasAdminAction, upsertBusquedaAction, toggleBusquedaActivaAction, eliminarBusquedaAction,
+    listPostulacionesBusquedaAction, cambiarEstadoPostBusquedaAction, eliminarPostBusquedaAction, aceptarPostBusquedaAction
 } from '@/app/actions/talent'
 import { toast, Toaster } from 'sonner'
-import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play } from 'lucide-react'
+import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users } from 'lucide-react'
 import { Playfair_Display } from 'next/font/google'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['500', '600', '700'] })
@@ -50,7 +52,7 @@ export default function TalentsAdminPage() {
     const [supabase] = useState(() => createClient())
     const { userRole, isLoading: loadingCtx } = useCash()
 
-    const [vista, setVista] = useState<'talentos' | 'marcas' | 'solicitudes'>('talentos')
+    const [vista, setVista] = useState<'talentos' | 'marcas' | 'solicitudes' | 'busquedas'>('talentos')
     const [talentos, setTalentos] = useState<Talento[]>([])
     const [loading, setLoading] = useState(true)
     const [modalOpen, setModalOpen] = useState(false)
@@ -103,6 +105,75 @@ export default function TalentsAdminPage() {
         if (res.success) { toast.success('Postulación eliminada'); setPostSel(null); cargarPostulaciones() }
         else toast.error(res.error || 'Error')
         setProcesandoPost(false)
+    }
+
+    // Búsquedas personalizadas
+    const [busquedas, setBusquedas] = useState<any[]>([])
+    const [modalBusqueda, setModalBusqueda] = useState(false)
+    const [busquedaForm, setBusquedaForm] = useState<{ id?: string; titulo: string; descripcion: string; requisitos: string; ubicacion: string; categoria: string; fecha_limite: string; activa: boolean }>({ titulo: '', descripcion: '', requisitos: '', ubicacion: '', categoria: '', fecha_limite: '', activa: true })
+    const [guardandoBusqueda, setGuardandoBusqueda] = useState(false)
+    const [busquedaSel, setBusquedaSel] = useState<any | null>(null)
+    const [postsBusqueda, setPostsBusqueda] = useState<any[]>([])
+    const [loadingPostsBusq, setLoadingPostsBusq] = useState(false)
+    const [postBusqSel, setPostBusqSel] = useState<any | null>(null)
+    const [procesandoPostBusq, setProcesandoPostBusq] = useState(false)
+
+    const cargarBusquedas = () => { listBusquedasAdminAction().then(d => setBusquedas(d)).catch(() => {}) }
+    useEffect(() => { if (userRole === 'admin') cargarBusquedas() }, [userRole])
+
+    const abrirNuevaBusqueda = () => { setBusquedaForm({ titulo: '', descripcion: '', requisitos: '', ubicacion: '', categoria: '', fecha_limite: '', activa: true }); setModalBusqueda(true) }
+    const abrirEditarBusqueda = (b: any) => { setBusquedaForm({ id: b.id, titulo: b.titulo, descripcion: b.descripcion || '', requisitos: b.requisitos || '', ubicacion: b.ubicacion || '', categoria: b.categoria || '', fecha_limite: b.fecha_limite || '', activa: b.activa }); setModalBusqueda(true) }
+
+    const handleGuardarBusqueda = async () => {
+        if (!busquedaForm.titulo.trim()) return toast.error('Pone un titulo para la busqueda')
+        setGuardandoBusqueda(true)
+        const res = await upsertBusquedaAction({ ...busquedaForm, categoria: busquedaForm.categoria || null, fecha_limite: busquedaForm.fecha_limite || null })
+        setGuardandoBusqueda(false)
+        if (res.success) { toast.success('Busqueda guardada'); setModalBusqueda(false); cargarBusquedas() }
+        else toast.error(res.error || 'Error')
+    }
+
+    const handleToggleBusqueda = async (b: any) => { const r = await toggleBusquedaActivaAction(b.id, !b.activa); if (r.success) cargarBusquedas() }
+    const handleEliminarBusqueda = async (b: any) => {
+        if (!confirm(`¿Eliminar la busqueda "${b.titulo}"? Se eliminan tambien todas las postulaciones.`)) return
+        const r = await eliminarBusquedaAction(b.id)
+        if (r.success) { toast.success('Eliminada'); cargarBusquedas() } else toast.error(r.error || 'Error')
+    }
+
+    const abrirPostsBusqueda = (b: any) => {
+        setBusquedaSel(b)
+        setLoadingPostsBusq(true)
+        listPostulacionesBusquedaAction(b.id).then(d => { setPostsBusqueda(d); setLoadingPostsBusq(false) }).catch(() => setLoadingPostsBusq(false))
+    }
+
+    const handleEstadoPostBusq = async (id: string, estado: 'pendiente' | 'standby' | 'descartado') => {
+        setProcesandoPostBusq(true)
+        const res = await cambiarEstadoPostBusquedaAction(id, estado)
+        if (res.success) { toast.success('Estado actualizado'); if (busquedaSel) abrirPostsBusqueda(busquedaSel); setPostBusqSel(null) }
+        else toast.error(res.error || 'Error')
+        setProcesandoPostBusq(false)
+    }
+
+    const handleEliminarPostBusq = async (id: string) => {
+        if (!confirm('¿Eliminar esta postulacion?')) return
+        setProcesandoPostBusq(true)
+        const res = await eliminarPostBusquedaAction(id)
+        if (res.success) { toast.success('Eliminada'); if (busquedaSel) abrirPostsBusqueda(busquedaSel); setPostBusqSel(null) }
+        else toast.error(res.error || 'Error')
+        setProcesandoPostBusq(false)
+    }
+
+    const handleAceptarPostBusq = async (id: string) => {
+        setProcesandoPostBusq(true)
+        const res = await aceptarPostBusquedaAction(id)
+        if (res.success) { toast.success('Aceptado. Paso a la vitrina.'); if (busquedaSel) abrirPostsBusqueda(busquedaSel); setPostBusqSel(null); cargar() }
+        else toast.error(res.error || 'Error')
+        setProcesandoPostBusq(false)
+    }
+
+    const copiarLinkBusqueda = (slug: string) => {
+        const url = `${window.location.origin}/talent/busqueda/${slug}`
+        navigator.clipboard.writeText(url).then(() => toast.success('Link copiado al portapapeles')).catch(() => toast.error('No se pudo copiar'))
     }
 
     const abrirNuevo = () => { setForm(formVacio()); setModalOpen(true) }
@@ -232,10 +303,14 @@ export default function TalentsAdminPage() {
                                 Solicitudes
                                 {pendientesCount > 0 && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${vista === 'solicitudes' ? 'bg-white text-black' : 'bg-black text-white'}`}>{pendientesCount}</span>}
                             </button>
+                            <button onClick={() => setVista('busquedas')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${vista === 'busquedas' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>
+                                Busquedas
+                                {busquedas.filter(b => b.activa).length > 0 && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${vista === 'busquedas' ? 'bg-white text-black' : 'bg-black text-white'}`}>{busquedas.filter(b => b.activa).length}</span>}
+                            </button>
                         </div>
                         {vista !== 'solicitudes' && (
-                            <button onClick={() => vista === 'talentos' ? abrirNuevo() : abrirNuevaMarca()} className="bg-black text-white font-bold uppercase px-5 py-3 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center gap-2">
-                                <Plus size={16} /> Nuevo
+                            <button onClick={() => vista === 'talentos' ? abrirNuevo() : vista === 'marcas' ? abrirNuevaMarca() : abrirNuevaBusqueda()} className="bg-black text-white font-bold uppercase px-5 py-3 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center gap-2">
+                                <Plus size={16} /> {vista === 'busquedas' ? 'Nueva busqueda' : 'Nuevo'}
                             </button>
                         )}
                     </div>
@@ -342,8 +417,218 @@ export default function TalentsAdminPage() {
                         </div>
                     )
                 )}
+
+                {/* BÚSQUEDAS PERSONALIZADAS */}
+                {vista === 'busquedas' && (
+                    busquedaSel ? (
+                        <div>
+                            <button onClick={() => { setBusquedaSel(null); setPostsBusqueda([]) }} className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-500 hover:text-black mb-5">
+                                <ArrowLeftToLine size={13} /> Volver a busquedas
+                            </button>
+                            <div className="flex flex-wrap items-center gap-3 mb-4">
+                                <h2 className={`${serif.className} text-xl md:text-2xl tracking-wide`}>{busquedaSel.titulo}</h2>
+                                {busquedaSel.ubicacion && <span className="flex items-center gap-1 text-neutral-400 text-xs"><MapPin size={12} /> {busquedaSel.ubicacion}</span>}
+                                <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-widest ${busquedaSel.activa ? 'bg-green-100 text-green-700' : 'bg-neutral-100 text-neutral-500'}`}>{busquedaSel.activa ? 'Activa' : 'Cerrada'}</span>
+                            </div>
+                            <div className="flex items-center gap-2 mb-6">
+                                <button onClick={() => copiarLinkBusqueda(busquedaSel.slug)} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest border border-neutral-300 px-3 py-1.5 rounded hover:border-black transition-colors"><Copy size={12} /> Copiar link</button>
+                            </div>
+
+                            {loadingPostsBusq ? (
+                                <div className="flex justify-center py-16"><Loader2 className="animate-spin text-neutral-300" size={32} /></div>
+                            ) : postsBusqueda.length === 0 ? (
+                                <div className="py-16 text-center border-2 border-dashed border-neutral-200 rounded-2xl">
+                                    <Inbox className="mx-auto mb-3 text-neutral-300" size={32} />
+                                    <p className="text-neutral-400 font-bold uppercase text-xs">Todavia no hay postulaciones para esta busqueda.</p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                                    {postsBusqueda.map(p => (
+                                        <button key={p.id} onClick={() => setPostBusqSel(p)} className={`group text-left ${p.estado === 'descartado' ? 'opacity-40' : p.estado === 'standby' ? 'opacity-70' : ''}`}>
+                                            <div className="aspect-[3/4] bg-neutral-100 relative overflow-hidden">
+                                                {p.fotos?.[0]
+                                                    ? <img src={p.fotos[0]} alt={p.nombre} className="w-full h-full object-cover grayscale group-hover:grayscale-0 group-hover:scale-105 transition-all duration-700" />
+                                                    : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-[10px] uppercase tracking-widest">Sin foto</div>}
+                                                <span className={`absolute top-2 right-2 text-white text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1 ${p.estado === 'standby' ? 'bg-amber-500/90' : p.estado === 'descartado' ? 'bg-red-500/80' : 'bg-black/80'}`}>
+                                                    {p.estado === 'standby' ? 'Stand by' : p.estado === 'descartado' ? 'Descartado' : 'Nueva'}
+                                                </span>
+                                            </div>
+                                            <h3 className="mt-2.5 text-[11px] tracking-[0.15em] uppercase font-semibold truncate">{p.nombre}</h3>
+                                            {p.rubro && <p className="text-[9px] tracking-[0.2em] uppercase text-neutral-400 truncate">{p.rubro}</p>}
+                                            <p className="text-[9px] text-neutral-400 truncate">{p.email}</p>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ) : busquedas.length === 0 ? (
+                        <div className="py-20 text-center border-2 border-dashed border-neutral-200 rounded-2xl">
+                            <Search className="mx-auto mb-3 text-neutral-300" size={32} />
+                            <p className="text-neutral-400 font-bold uppercase text-xs">No creaste busquedas todavia.</p>
+                            <p className="text-neutral-400 text-xs mt-1">Crea una busqueda personalizada y comparte el link.</p>
+                            <button onClick={abrirNuevaBusqueda} className="mt-5 bg-black text-white px-5 py-2.5 rounded text-[10px] font-black uppercase tracking-widest hover:bg-neutral-800 transition-colors">+ Crear la primera</button>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {busquedas.map(b => (
+                                <div key={b.id} className={`border rounded-xl p-5 bg-white ${b.activa ? 'border-neutral-200' : 'border-orange-300 opacity-60'}`}>
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <h3 className="text-sm font-bold uppercase tracking-widest truncate">{b.titulo}</h3>
+                                                {b.activa
+                                                    ? <span className="text-[8px] px-2 py-0.5 rounded-full font-bold uppercase tracking-widest bg-green-100 text-green-700 shrink-0">Activa</span>
+                                                    : <span className="text-[8px] px-2 py-0.5 rounded-full font-bold uppercase tracking-widest bg-neutral-100 text-neutral-500 shrink-0">Cerrada</span>}
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-3 text-[10px] text-neutral-400">
+                                                {b.ubicacion && <span className="flex items-center gap-1"><MapPin size={10} /> {b.ubicacion}</span>}
+                                                {b.fecha_limite && <span className="flex items-center gap-1"><CalendarDays size={10} /> Hasta {new Date(b.fecha_limite + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}</span>}
+                                                {b.categoria && b.categoria !== 'todos' && <span className="capitalize">{b.categoria}</span>}
+                                            </div>
+                                            {b.descripcion && <p className="text-xs text-neutral-500 mt-2 line-clamp-2">{b.descripcion}</p>}
+                                        </div>
+                                        <div className="flex items-center gap-1.5 shrink-0">
+                                            <button onClick={() => abrirPostsBusqueda(b)} className="border border-neutral-300 hover:border-black py-1.5 px-3 text-[9px] font-semibold uppercase tracking-[0.15em] flex items-center gap-1 transition-colors rounded"><Users size={11} /> Ver postulaciones</button>
+                                            <button onClick={() => copiarLinkBusqueda(b.slug)} title="Copiar link" className="border border-neutral-300 hover:border-black p-1.5 rounded transition-colors"><Link2 size={13} /></button>
+                                            <button onClick={() => abrirEditarBusqueda(b)} title="Editar" className="border border-neutral-300 hover:border-black p-1.5 rounded transition-colors"><Pencil size={13} /></button>
+                                            <button onClick={() => handleToggleBusqueda(b)} title={b.activa ? 'Cerrar' : 'Reabrir'} className="border border-neutral-300 hover:border-black p-1.5 rounded transition-colors">{b.activa ? <Eye size={13} /> : <EyeOff size={13} />}</button>
+                                            <button onClick={() => handleEliminarBusqueda(b)} title="Eliminar" className="border border-neutral-300 hover:border-red-500 hover:text-red-500 p-1.5 rounded transition-colors"><Trash2 size={13} /></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )
+                )}
             </div>
             </div>
+
+            {/* MODAL DETALLE POSTULACIÓN BÚSQUEDA */}
+            {postBusqSel && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => !procesandoPostBusq && setPostBusqSel(null)}>
+                    <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden relative max-h-[90vh] flex flex-col md:flex-row" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setPostBusqSel(null)} className="absolute top-4 right-4 z-10 bg-white/80 rounded-full p-1 text-neutral-500 hover:text-black"><X size={20} /></button>
+
+                        <div className="md:w-2/5 bg-neutral-100 shrink-0 flex flex-col">
+                            {(() => {
+                                const fotos: string[] = postBusqSel.fotos || []
+                                if (!fotos.length) return <div className="w-full h-56 md:h-full flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin foto</div>
+                                return (<>
+                                    <img src={fotos[0]} alt={postBusqSel.nombre} className="w-full h-56 md:flex-1 object-cover" />
+                                    {fotos.length > 1 && (
+                                        <div className="flex gap-1 p-1 bg-neutral-200">
+                                            {fotos.slice(1).map((u: string, i: number) => <img key={i} src={u} alt="" className="flex-1 h-16 object-cover" />)}
+                                        </div>
+                                    )}
+                                </>)
+                            })()}
+                        </div>
+
+                        <div className="flex-1 p-6 md:p-8 overflow-y-auto">
+                            <p className="text-[9px] font-bold tracking-[0.3em] uppercase text-neutral-400 mb-1">
+                                {postBusqSel.rubro || 'Sin rubro'}
+                                {postBusqSel.estado === 'standby' ? ' · Stand by' : postBusqSel.estado === 'descartado' ? ' · Descartado' : ''}
+                            </p>
+                            <h3 className={`${serif.className} text-2xl md:text-3xl tracking-wide mb-4`}>{postBusqSel.nombre}</h3>
+
+                            <div className="flex flex-wrap gap-4 text-xs text-neutral-600 mb-2">
+                                {postBusqSel.sexo && <span><b className="text-neutral-900">{postBusqSel.sexo === 'varones' ? 'Masculino' : 'Femenino'}</b></span>}
+                                {postBusqSel.edad && <span>Edad: <b className="text-neutral-900">{postBusqSel.edad}</b></span>}
+                                {postBusqSel.altura && <span>Altura: <b className="text-neutral-900">{postBusqSel.altura} cm</b></span>}
+                            </div>
+                            <div className="flex flex-wrap gap-4 text-xs text-neutral-600 mb-4">
+                                <span>Email: <b className="text-neutral-900">{postBusqSel.email}</b></span>
+                                {postBusqSel.telefono && <span>Tel: <b className="text-neutral-900">{postBusqSel.telefono}</b></span>}
+                            </div>
+
+                            {postBusqSel.descripcion && <p className="text-sm text-neutral-600 leading-relaxed mb-4 whitespace-pre-line">{postBusqSel.descripcion}</p>}
+
+                            {postBusqSel.videos?.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mb-6">
+                                    {postBusqSel.videos.map((v: string, i: number) => (
+                                        <a key={i} href={v} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.15em] uppercase border border-neutral-300 px-4 py-2 hover:border-black transition-colors">
+                                            <Play size={13} /> Video {postBusqSel.videos.length > 1 ? i + 1 : ''}
+                                        </a>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="flex flex-col gap-2 border-t border-neutral-200 pt-5 mt-2">
+                                <button disabled={procesandoPostBusq} onClick={() => handleAceptarPostBusq(postBusqSel.id)} className="w-full bg-neutral-900 text-white font-semibold uppercase tracking-[0.15em] text-xs py-3 hover:bg-black transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                                    {procesandoPostBusq ? <Loader2 size={14} className="animate-spin" /> : <Check size={15} />} Aceptar y pasar a la vitrina
+                                </button>
+                                <div className="flex gap-2">
+                                    <button disabled={procesandoPostBusq} onClick={() => handleEstadoPostBusq(postBusqSel.id, postBusqSel.estado === 'standby' ? 'pendiente' : 'standby')} className="flex-1 border border-neutral-300 hover:border-black py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                                        <PauseCircle size={14} /> {postBusqSel.estado === 'standby' ? 'Quitar stand by' : 'Stand by'}
+                                    </button>
+                                    <button disabled={procesandoPostBusq} onClick={() => handleEstadoPostBusq(postBusqSel.id, 'descartado')} className="flex-1 border border-neutral-300 hover:border-orange-500 hover:text-orange-500 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                                        <EyeOff size={14} /> Descartar
+                                    </button>
+                                </div>
+                                <button disabled={procesandoPostBusq} onClick={() => handleEliminarPostBusq(postBusqSel.id)} className="border border-neutral-300 hover:border-red-500 hover:text-red-500 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                                    <Trash2 size={14} /> Eliminar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL CREAR/EDITAR BÚSQUEDA */}
+            {modalBusqueda && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => !guardandoBusqueda && setModalBusqueda(false)}>
+                    <div className="bg-white w-full max-w-lg rounded-2xl p-6 md:p-8 relative max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setModalBusqueda(false)} className="absolute top-5 right-5 text-neutral-400 hover:text-black"><X size={20} /></button>
+                        <h3 className={`${serif.className} text-2xl tracking-wide mb-6 flex items-center gap-2`}><Search size={18} /> {busquedaForm.id ? 'Editar busqueda' : 'Nueva busqueda'}</h3>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Titulo *</label>
+                                <input value={busquedaForm.titulo} onChange={e => setBusquedaForm({ ...busquedaForm, titulo: e.target.value })} placeholder="Ej: Bailarines para Dubai" className={inputCls} />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Descripcion</label>
+                                <textarea value={busquedaForm.descripcion} onChange={e => setBusquedaForm({ ...busquedaForm, descripcion: e.target.value })} className={`${inputCls} min-h-[80px] resize-none`} placeholder="Detalle de la busqueda, tipo de trabajo, etc." />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Requisitos</label>
+                                <textarea value={busquedaForm.requisitos} onChange={e => setBusquedaForm({ ...busquedaForm, requisitos: e.target.value })} className={`${inputCls} min-h-[80px] resize-none`} placeholder="Edad, altura, experiencia, idiomas, etc." />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Ubicacion</label>
+                                    <input value={busquedaForm.ubicacion} onChange={e => setBusquedaForm({ ...busquedaForm, ubicacion: e.target.value })} placeholder="Ej: Dubai, Crucero, Buenos Aires" className={inputCls} />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Categoria</label>
+                                    <select value={busquedaForm.categoria} onChange={e => setBusquedaForm({ ...busquedaForm, categoria: e.target.value })} className={inputCls}>
+                                        <option value="">Todos</option>
+                                        <option value="mujeres">Mujeres</option>
+                                        <option value="varones">Varones</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Fecha limite (opcional)</label>
+                                    <input type="date" value={busquedaForm.fecha_limite} onChange={e => setBusquedaForm({ ...busquedaForm, fecha_limite: e.target.value })} className={inputCls} />
+                                </div>
+                                <div className="flex items-end pb-1">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input type="checkbox" checked={busquedaForm.activa} onChange={e => setBusquedaForm({ ...busquedaForm, activa: e.target.checked })} className="accent-black w-4 h-4" />
+                                        <span className="text-[10px] font-black uppercase tracking-widest">Activa (recibe postulaciones)</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 mt-8">
+                            <button onClick={handleGuardarBusqueda} disabled={guardandoBusqueda} className="flex-1 bg-black text-white font-bold uppercase py-4 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">{guardandoBusqueda ? <Loader2 size={16} className="animate-spin" /> : 'Guardar'}</button>
+                            <button onClick={() => setModalBusqueda(false)} className="border border-neutral-300 px-6 font-bold uppercase text-xs tracking-widest hover:bg-neutral-100">Cancelar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL DETALLE POSTULACIÓN */}
             {postSel && (
