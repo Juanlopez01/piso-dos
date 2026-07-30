@@ -697,8 +697,8 @@ export default function TalentsAdminPage() {
 
             {/* MODAL MARCA */}
             {modalMarca && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => !guardandoMarca && setModalMarca(false)}>
-                    <div className="bg-white w-full max-w-md rounded-2xl p-6 md:p-8 relative" onClick={e => e.stopPropagation()}>
+                <div className="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto" onClick={() => !guardandoMarca && setModalMarca(false)}>
+                    <div className="bg-white w-full max-w-md my-8 rounded-2xl p-6 md:p-8 relative" onClick={e => e.stopPropagation()}>
                         <button onClick={() => setModalMarca(false)} className="absolute top-5 right-5 text-neutral-400 hover:text-black"><X size={20} /></button>
                         <h3 className={`${serif.className} text-2xl tracking-wide mb-6`}>{marcaForm.id ? 'Editar marca' : 'Nueva marca'}</h3>
                         <div className="space-y-4">

@@ -57,6 +57,7 @@ export async function eliminarInscripcionAction(inscripcionId: string) {
         .select(`
             user_id,
             modalidad,
+            pack_usado_id,
             clase:clases (
                 nombre,
                 tipo_clase,
@@ -88,7 +89,28 @@ export async function eliminarInscripcionAction(inscripcionId: string) {
             // =================================================================
             const profeObj: any = claseInfo.profesor;
             const nombreProfe = Array.isArray(profeObj) ? profeObj[0]?.nombre_completo : (profeObj?.nombre_completo || 'Staff');
-            const llavePase = `${claseInfo.nombre}-${nombreProfe}-${claseInfo.tipo_clase}`;
+            // La referencia REAL del pase sale del producto del pack usado. Reconstruirla
+            // desde el nombre de la clase falla si la clase se renombró después de la compra
+            // (ej: "Jazz Contempo" -> "Jazz Contemporáneo"), y el crédito no vuelve.
+            let llavePase = `${claseInfo.nombre}-${nombreProfe}-${claseInfo.tipo_clase}`; // fallback
+            let packRefilleado = false;
+
+            if (inscripcion.pack_usado_id) {
+                const { data: pk } = await supabaseAdmin.from('alumno_packs')
+                    .select('id, creditos_restantes, producto:productos(pase_referencia)')
+                    .eq('id', inscripcion.pack_usado_id)
+                    .maybeSingle();
+                if (pk) {
+                    const prod: any = Array.isArray(pk.producto) ? pk.producto[0] : pk.producto;
+                    if (prod?.pase_referencia) llavePase = prod.pase_referencia;
+                    // Reintegramos al pack exacto que se usó (confiable).
+                    await supabaseAdmin.from('alumno_packs').update({
+                        creditos_restantes: (pk.creditos_restantes || 0) + 1,
+                        estado: 'activo'
+                    }).eq('id', pk.id);
+                    packRefilleado = true;
+                }
+            }
 
             await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', {
                 p_usuario_id: inscripcion.user_id,
@@ -96,22 +118,22 @@ export async function eliminarInscripcionAction(inscripcionId: string) {
                 p_cantidad: 1
             })
 
-            // 🚀 LÓGICA DETECTIVE: Buscamos el pack que fue "tocado"
-            const { data: packsExAlumno } = await supabaseAdmin.from('alumno_packs')
-                .select('id, creditos_restantes, cantidad_inicial')
-                .eq('user_id', inscripcion.user_id)
-                .eq('tipo_clase', 'exclusivo')
-                .order('fecha_compra', { ascending: false });
+            // Si no había pack_usado_id, caemos al método viejo (detective).
+            if (!packRefilleado) {
+                const { data: packsExAlumno } = await supabaseAdmin.from('alumno_packs')
+                    .select('id, creditos_restantes, cantidad_inicial')
+                    .eq('user_id', inscripcion.user_id)
+                    .eq('tipo_clase', 'exclusivo')
+                    .order('fecha_compra', { ascending: false });
 
-            if (packsExAlumno && packsExAlumno.length > 0) {
-                // Buscamos el primero que no esté lleno (ahí fue a parar el consumo)
-                const packAfectado = packsExAlumno.find(p => p.creditos_restantes < p.cantidad_inicial);
-
-                if (packAfectado) {
-                    await supabaseAdmin.from('alumno_packs').update({
-                        creditos_restantes: packAfectado.creditos_restantes + 1,
-                        estado: 'activo'
-                    }).eq('id', packAfectado.id);
+                if (packsExAlumno && packsExAlumno.length > 0) {
+                    const packAfectado = packsExAlumno.find(p => p.creditos_restantes < p.cantidad_inicial);
+                    if (packAfectado) {
+                        await supabaseAdmin.from('alumno_packs').update({
+                            creditos_restantes: packAfectado.creditos_restantes + 1,
+                            estado: 'activo'
+                        }).eq('id', packAfectado.id);
+                    }
                 }
             }
 

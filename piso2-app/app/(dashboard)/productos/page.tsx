@@ -559,7 +559,7 @@ export default function TiendaConfigPage() {
             {/* MODAL PRODUCTO */}
             {isProductModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setIsProductModalOpen(false)}>
-                    <div className="bg-[#111] border border-white/10 w-full md:max-w-md md:rounded-3xl rounded-t-3xl p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
+                    <div className="bg-[#111] border border-white/10 w-full md:max-w-md md:rounded-3xl rounded-t-3xl p-8 shadow-2xl max-h-[90dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                         <h3 className="text-2xl font-black text-white uppercase mb-6 flex items-center gap-3">
                             {editingProdId ? <Edit2 className="text-[#D4E655]" size={24} /> : <Plus className="text-[#D4E655]" size={24} />}
                             {editingProdId ? 'Editar Pack' : 'Nuevo Pack'}
@@ -685,7 +685,7 @@ export default function TiendaConfigPage() {
             {/* MODAL CUPON */}
             {isCuponModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setIsCuponModalOpen(false)}>
-                    <div className="bg-[#111] border border-white/10 w-full md:max-w-md md:rounded-3xl rounded-t-3xl p-8 shadow-2xl" onClick={e => e.stopPropagation()}>
+                    <div className="bg-[#111] border border-white/10 w-full md:max-w-md md:rounded-3xl rounded-t-3xl p-8 shadow-2xl max-h-[90dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                         <h3 className="text-2xl font-black text-white uppercase mb-6 flex items-center gap-3">
                             <Tag className="text-[#D4E655]" size={24} /> Crear Cupón
                         </h3>
