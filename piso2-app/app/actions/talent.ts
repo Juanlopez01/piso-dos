@@ -560,3 +560,30 @@ export async function aceptarPostBusquedaAction(id: string) {
     await admin.from('talent_busqueda_postulaciones').update({ estado: 'standby' }).eq('id', id)
     return { success: true }
 }
+
+// ============================================================================
+// CARGA INICIAL DEL PANEL — una sola action, autentica 1 vez y trae todo en
+// paralelo (evita la cola de 4 server actions serializadas al montar).
+// ============================================================================
+export async function getTalentDashboardDataAction() {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { talentos: [], marcas: [], postulaciones: [], busquedas: [] }
+    const admin = getAdminClient()
+    const [talentos, marcas, postulaciones, busquedas] = await Promise.all([
+        admin.from('talentos').select('*')
+            .order('categoria', { ascending: true }).order('destacado', { ascending: false })
+            .order('orden', { ascending: true }).order('nombre', { ascending: true }),
+        admin.from('talent_marcas').select('*')
+            .order('orden', { ascending: true }).order('nombre', { ascending: true }),
+        admin.from('talent_postulaciones').select('*')
+            .order('estado', { ascending: true }).order('created_at', { ascending: false }),
+        admin.from('talent_busquedas').select('*')
+            .order('activa', { ascending: false }).order('created_at', { ascending: false }),
+    ])
+    return {
+        talentos: talentos.data || [],
+        marcas: marcas.data || [],
+        postulaciones: postulaciones.data || [],
+        busquedas: busquedas.data || [],
+    }
+}

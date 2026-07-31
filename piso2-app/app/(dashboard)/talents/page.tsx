@@ -9,7 +9,8 @@ import {
     listMarcasAdminAction, upsertMarcaAction, toggleMarcaActivoAction, eliminarMarcaAction,
     listPostulacionesAction, aceptarPostulacionAction, standbyPostulacionAction, eliminarPostulacionAction,
     listBusquedasAdminAction, upsertBusquedaAction, toggleBusquedaActivaAction, eliminarBusquedaAction,
-    listPostulacionesBusquedaAction, cambiarEstadoPostBusquedaAction, eliminarPostBusquedaAction, aceptarPostBusquedaAction
+    listPostulacionesBusquedaAction, cambiarEstadoPostBusquedaAction, eliminarPostBusquedaAction, aceptarPostBusquedaAction,
+    getTalentDashboardDataAction
 } from '@/app/actions/talent'
 import { toast, Toaster } from 'sonner'
 import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users } from 'lucide-react'
@@ -71,17 +72,13 @@ export default function TalentsAdminPage() {
         setLoading(true)
         listTalentosAdminAction().then(d => { setTalentos(d as Talento[]); setLoading(false) }).catch(() => setLoading(false))
     }
-    useEffect(() => { if (userRole === 'admin') cargar() }, [userRole])
-
     const cargarMarcas = () => { listMarcasAdminAction().then(d => setMarcas(d)).catch(() => { }) }
-    useEffect(() => { if (userRole === 'admin') cargarMarcas() }, [userRole])
 
     // Postulaciones (gente que quiere ser talento)
     const [postulaciones, setPostulaciones] = useState<any[]>([])
     const [postSel, setPostSel] = useState<any | null>(null)
     const [procesandoPost, setProcesandoPost] = useState(false)
     const cargarPostulaciones = () => { listPostulacionesAction().then(d => setPostulaciones(d)).catch(() => { }) }
-    useEffect(() => { if (userRole === 'admin') cargarPostulaciones() }, [userRole])
     const pendientesCount = postulaciones.filter(p => p.estado === 'pendiente').length
 
     const handleAceptarPost = async (id: string) => {
@@ -119,7 +116,23 @@ export default function TalentsAdminPage() {
     const [procesandoPostBusq, setProcesandoPostBusq] = useState(false)
 
     const cargarBusquedas = () => { listBusquedasAdminAction().then(d => setBusquedas(d)).catch(() => {}) }
-    useEffect(() => { if (userRole === 'admin') cargarBusquedas() }, [userRole])
+
+    // Carga inicial: UNA sola action (autentica 1 vez, queries en paralelo) en
+    // lugar de 4 server actions serializadas. Las cargas individuales de arriba
+    // se siguen usando para refrescar después de cada edición.
+    useEffect(() => {
+        if (userRole !== 'admin') return
+        setLoading(true)
+        getTalentDashboardDataAction()
+            .then(d => {
+                setTalentos(d.talentos as Talento[])
+                setMarcas(d.marcas)
+                setPostulaciones(d.postulaciones)
+                setBusquedas(d.busquedas)
+            })
+            .catch(() => {})
+            .finally(() => setLoading(false))
+    }, [userRole])
 
     const abrirNuevaBusqueda = () => { setBusquedaForm({ titulo: '', descripcion: '', requisitos: '', ubicacion: '', categoria: '', fecha_limite: '', activa: true }); setModalBusqueda(true) }
     const abrirEditarBusqueda = (b: any) => { setBusquedaForm({ id: b.id, titulo: b.titulo, descripcion: b.descripcion || '', requisitos: b.requisitos || '', ubicacion: b.ubicacion || '', categoria: b.categoria || '', fecha_limite: b.fecha_limite || '', activa: b.activa }); setModalBusqueda(true) }
