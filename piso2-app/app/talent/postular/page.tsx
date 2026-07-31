@@ -30,6 +30,7 @@ export default function PostularTalentoPage() {
     const [subiendo, setSubiendo] = useState(false)
     const [enviando, setEnviando] = useState(false)
     const [listo, setListo] = useState(false)
+    const [acepta, setAcepta] = useState(false)
 
     const handleFotos = async (files: FileList | null) => {
         if (!files || !files.length) return
@@ -57,6 +58,7 @@ export default function PostularTalentoPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!fotos.length) return toast.error('Subí al menos una foto.')
+        if (!acepta) return toast.error('Tenés que aceptar los Términos y Condiciones.')
         setEnviando(true)
         const res = await crearPostulacionTalentoAction({
             nombre: form.nombre,
@@ -166,7 +168,20 @@ export default function PostularTalentoPage() {
                     </div>
                 </div>
 
-                <button type="submit" disabled={enviando || subiendo}
+                {/* ACEPTACIÓN T&C */}
+                <label className="flex items-start gap-3 cursor-pointer select-none">
+                    <input type="checkbox" checked={acepta} onChange={e => setAcepta(e.target.checked)}
+                        className="mt-0.5 w-4 h-4 accent-neutral-900 shrink-0 cursor-pointer" />
+                    <span className="text-xs text-neutral-600 leading-relaxed">
+                        Leí y acepto los{' '}
+                        <Link href="/talent/terminos" target="_blank" className="text-neutral-900 font-semibold underline underline-offset-2 hover:text-black">
+                            Términos y Condiciones de Postulación
+                        </Link>
+                        {' '}de Piso 2.
+                    </span>
+                </label>
+
+                <button type="submit" disabled={enviando || subiendo || !acepta}
                     className="w-full bg-neutral-900 text-white font-semibold uppercase tracking-[0.2em] text-xs py-4 hover:bg-black transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
                     {enviando ? <Loader2 size={15} className="animate-spin" /> : null} Enviar postulación
                 </button>

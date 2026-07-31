@@ -157,6 +157,9 @@ export default function TalentHome() {
                             <a href={MAIL} className="hover:opacity-70"><Mail size={16} /></a>
                         </div>
                         <p className="text-[9px] tracking-[0.2em] uppercase text-white/40 mt-6">Contrataciones a través de Piso 2</p>
+                        <Link href="/talent/terminos" className="inline-block text-[9px] tracking-[0.2em] uppercase text-white/40 hover:text-white/80 transition-colors mt-3 underline underline-offset-4">
+                            Términos y Condiciones de Postulación
+                        </Link>
                     </footer>
                 </>
             )}
