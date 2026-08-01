@@ -372,6 +372,16 @@ function generarSlug(titulo: string): string {
         + '-' + Math.random().toString(36).slice(2, 6)
 }
 
+export async function getBusquedasActivasAction(): Promise<BusquedaPublica[]> {
+    const admin = getAdminClient()
+    const { data } = await admin
+        .from('talent_busquedas')
+        .select('id, titulo, descripcion, requisitos, ubicacion, categoria, fecha_limite, slug')
+        .eq('activa', true)
+        .order('created_at', { ascending: false })
+    return (data || []) as BusquedaPublica[]
+}
+
 export async function getBusquedaBySlugAction(slug: string): Promise<BusquedaPublica | null> {
     const admin = getAdminClient()
     const { data } = await admin
