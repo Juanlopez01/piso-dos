@@ -13,7 +13,7 @@ import {
     getTalentDashboardDataAction
 } from '@/app/actions/talent'
 import { toast, Toaster } from 'sonner'
-import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users, Share2 } from 'lucide-react'
+import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users, Share2, MessageCircle, Globe } from 'lucide-react'
 import { Playfair_Display } from 'next/font/google'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['500', '600', '700'] })
@@ -114,6 +114,7 @@ export default function TalentsAdminPage() {
     const [loadingPostsBusq, setLoadingPostsBusq] = useState(false)
     const [postBusqSel, setPostBusqSel] = useState<any | null>(null)
     const [procesandoPostBusq, setProcesandoPostBusq] = useState(false)
+    const [filtroPostBusq, setFiltroPostBusq] = useState<'todas' | 'pendiente' | 'standby' | 'descartado'>('todas')
 
     const cargarBusquedas = () => { listBusquedasAdminAction().then(d => setBusquedas(d)).catch(() => {}) }
 
@@ -462,9 +463,41 @@ export default function TalentsAdminPage() {
                                     <Inbox className="mx-auto mb-3 text-neutral-300" size={32} />
                                     <p className="text-neutral-400 font-bold uppercase text-xs">Todavia no hay postulaciones para esta busqueda.</p>
                                 </div>
-                            ) : (
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                                    {postsBusqueda.map(p => (
+                            ) : (() => {
+                                const conteo = {
+                                    todas: postsBusqueda.length,
+                                    pendiente: postsBusqueda.filter(p => !p.estado || p.estado === 'pendiente').length,
+                                    standby: postsBusqueda.filter(p => p.estado === 'standby').length,
+                                    descartado: postsBusqueda.filter(p => p.estado === 'descartado').length,
+                                }
+                                const filtrados = filtroPostBusq === 'todas'
+                                    ? postsBusqueda
+                                    : filtroPostBusq === 'pendiente'
+                                        ? postsBusqueda.filter(p => !p.estado || p.estado === 'pendiente')
+                                        : postsBusqueda.filter(p => p.estado === filtroPostBusq)
+                                const chips: { key: typeof filtroPostBusq; label: string }[] = [
+                                    { key: 'todas', label: 'Todas' },
+                                    { key: 'pendiente', label: 'Nuevas' },
+                                    { key: 'standby', label: 'Stand by' },
+                                    { key: 'descartado', label: 'Descartadas' },
+                                ]
+                                return (
+                                  <>
+                                    <div className="flex flex-wrap gap-2 mb-5">
+                                        {chips.map(c => (
+                                            <button key={c.key} onClick={() => setFiltroPostBusq(c.key)}
+                                                className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-full border transition-colors ${filtroPostBusq === c.key ? 'bg-black text-white border-black' : 'border-neutral-300 text-neutral-500 hover:border-black'}`}>
+                                                {c.label} <span className="opacity-60">({conteo[c.key]})</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {filtrados.length === 0 ? (
+                                        <div className="py-14 text-center border-2 border-dashed border-neutral-200 rounded-2xl">
+                                            <p className="text-neutral-400 font-bold uppercase text-xs">No hay postulaciones en este filtro.</p>
+                                        </div>
+                                    ) : (
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                                    {filtrados.map(p => (
                                         <button key={p.id} onClick={() => setPostBusqSel(p)} className={`group text-left ${p.estado === 'descartado' ? 'opacity-40' : p.estado === 'standby' ? 'opacity-70' : ''}`}>
                                             <div className="aspect-[3/4] bg-neutral-100 relative overflow-hidden">
                                                 {p.fotos?.[0]
@@ -481,7 +514,10 @@ export default function TalentsAdminPage() {
                                         </button>
                                     ))}
                                 </div>
-                            )}
+                                    )}
+                                  </>
+                                )
+                              })()}
                         </div>
                     ) : busquedas.length === 0 ? (
                         <div className="py-20 text-center border-2 border-dashed border-neutral-200 rounded-2xl">
@@ -558,11 +594,18 @@ export default function TalentsAdminPage() {
                                 {postBusqSel.sexo && <span><b className="text-neutral-900">{postBusqSel.sexo === 'varones' ? 'Masculino' : 'Femenino'}</b></span>}
                                 {postBusqSel.edad && <span>Edad: <b className="text-neutral-900">{postBusqSel.edad}</b></span>}
                                 {postBusqSel.altura && <span>Altura: <b className="text-neutral-900">{postBusqSel.altura} cm</b></span>}
+                                {postBusqSel.nacionalidad && <span>Nacionalidad: <b className="text-neutral-900">{postBusqSel.nacionalidad}</b></span>}
                             </div>
-                            <div className="flex flex-wrap gap-4 text-xs text-neutral-600 mb-4">
+                            <div className="flex flex-wrap gap-4 text-xs text-neutral-600 mb-3">
                                 <span>Email: <b className="text-neutral-900">{postBusqSel.email}</b></span>
                                 {postBusqSel.telefono && <span>Tel: <b className="text-neutral-900">{postBusqSel.telefono}</b></span>}
                             </div>
+                            {postBusqSel.telefono && (
+                                <a href={`https://wa.me/${String(postBusqSel.telefono).replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer"
+                                    className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition-colors mb-4">
+                                    <MessageCircle size={14} /> Contactar por WhatsApp
+                                </a>
+                            )}
 
                             {postBusqSel.descripcion && <p className="text-sm text-neutral-600 leading-relaxed mb-4 whitespace-pre-line">{postBusqSel.descripcion}</p>}
 
@@ -682,6 +725,7 @@ export default function TalentsAdminPage() {
                                 <span><b className="text-neutral-900">{postSel.sexo === 'varones' ? 'Masculino' : 'Femenino'}</b></span>
                                 {postSel.edad && <span>Edad: <b className="text-neutral-900">{postSel.edad}</b></span>}
                                 {postSel.altura && <span>Altura: <b className="text-neutral-900">{postSel.altura} cm</b></span>}
+                                {postSel.nacionalidad && <span>Nacionalidad: <b className="text-neutral-900">{postSel.nacionalidad}</b></span>}
                             </div>
 
                             {postSel.descripcion && <p className="text-sm text-neutral-600 leading-relaxed mb-4 whitespace-pre-line">{postSel.descripcion}</p>}

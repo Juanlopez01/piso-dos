@@ -23,7 +23,7 @@ export default function PostularTalentoPage() {
     const router = useRouter()
 
     const [form, setForm] = useState({
-        nombre: '', sexo: '', rubro: '', edad: '', altura: '', descripcion: ''
+        nombre: '', sexo: '', rubro: '', edad: '', altura: '', nacionalidad: '', descripcion: ''
     })
     const [fotos, setFotos] = useState<string[]>([])          // hasta 3
     const [videos, setVideos] = useState<string[]>(['', '', ''])  // hasta 3 links
@@ -67,6 +67,7 @@ export default function PostularTalentoPage() {
             descripcion: form.descripcion,
             edad: form.edad ? Number(form.edad) : undefined,
             altura: form.altura ? Number(form.altura) : undefined,
+            nacionalidad: form.nacionalidad,
             fotos,
             videos: videos.filter(v => v.trim())
         })
@@ -151,6 +152,10 @@ export default function PostularTalentoPage() {
                     <div>
                         <label className={labelCls}>Altura (cm)</label>
                         <input type="number" min={0} value={form.altura} onChange={e => setForm({ ...form, altura: e.target.value })} className={inputCls} placeholder="Ej: 170" />
+                    </div>
+                    <div>
+                        <label className={labelCls}>Nacionalidad</label>
+                        <input value={form.nacionalidad} onChange={e => setForm({ ...form, nacionalidad: e.target.value })} className={inputCls} placeholder="Ej: Argentina" />
                     </div>
                 </div>
 

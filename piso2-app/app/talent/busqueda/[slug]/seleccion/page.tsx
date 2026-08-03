@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { getBusquedaSeleccionAction, type BusquedaSeleccion } from '@/app/actions/talent'
-import { Loader2, ArrowLeft, MapPin, Play, Ruler, Cake } from 'lucide-react'
+import { Loader2, ArrowLeft, MapPin, Play, Ruler, Cake, Globe } from 'lucide-react'
 import { Playfair_Display, Montserrat } from 'next/font/google'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['400', '500', '600', '700'] })
@@ -49,6 +49,7 @@ function CandidatoCard({ p }: { p: Postulante }) {
                 <div className="flex flex-wrap gap-2 text-[11px] text-neutral-600">
                     {p.edad != null && <span className="flex items-center gap-1 bg-neutral-100 px-2.5 py-1 rounded-full"><Cake size={11} /> {p.edad} años</span>}
                     {p.altura != null && <span className="flex items-center gap-1 bg-neutral-100 px-2.5 py-1 rounded-full"><Ruler size={11} /> {p.altura} cm</span>}
+                    {p.nacionalidad && <span className="flex items-center gap-1 bg-neutral-100 px-2.5 py-1 rounded-full"><Globe size={11} /> {p.nacionalidad}</span>}
                     {sexoLabel && <span className="bg-neutral-100 px-2.5 py-1 rounded-full">{sexoLabel}</span>}
                 </div>
 

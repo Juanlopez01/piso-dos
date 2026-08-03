@@ -106,6 +106,7 @@ export async function crearPostulacionTalentoAction(payload: {
     descripcion?: string
     edad?: number
     altura?: number
+    nacionalidad?: string
     sexo?: string          // 'mujeres' | 'varones'
     fotos?: string[]       // hasta 3
     videos?: string[]      // hasta 3
@@ -129,6 +130,7 @@ export async function crearPostulacionTalentoAction(payload: {
         descripcion: payload.descripcion?.trim() || null,
         edad: payload.edad ? Number(payload.edad) : null,
         altura: payload.altura ? Number(payload.altura) : null,
+        nacionalidad: payload.nacionalidad?.trim() || null,
         sexo: payload.sexo,
         fotos,
         videos,
@@ -175,6 +177,7 @@ export async function aceptarPostulacionAction(id: string) {
         video_url: videos[0] || null,   // compat con el reproductor actual de la ficha
         edad: p.edad,
         altura: p.altura,
+        nacionalidad: p.nacionalidad,
         destacado: false,
         activo: true,
         orden: 0
@@ -410,6 +413,7 @@ export type BusquedaSeleccion = {
         rubro: string | null
         edad: number | null
         altura: number | null
+        nacionalidad: string | null
         sexo: string | null
         descripcion: string | null
         fotos: string[]
@@ -437,7 +441,7 @@ export async function getBusquedaSeleccionAction(slug: string): Promise<Busqueda
 
     const { data: posts } = await admin
         .from('talent_busqueda_postulaciones')
-        .select('id, nombre, rubro, edad, altura, sexo, descripcion, fotos, videos, estado, created_at')
+        .select('id, nombre, rubro, edad, altura, nacionalidad, sexo, descripcion, fotos, videos, estado, created_at')
         .eq('busqueda_id', b.id)
         .neq('estado', 'descartado')   // el seleccionador no ve los descartados
         .order('created_at', { ascending: true })
@@ -448,6 +452,7 @@ export async function getBusquedaSeleccionAction(slug: string): Promise<Busqueda
         rubro: p.rubro,
         edad: p.edad,
         altura: p.altura,
+        nacionalidad: p.nacionalidad,
         sexo: p.sexo,
         descripcion: p.descripcion,
         fotos: p.fotos || [],
@@ -473,6 +478,7 @@ export async function crearPostulacionBusquedaAction(payload: {
     descripcion?: string
     edad?: number
     altura?: number
+    nacionalidad?: string
     sexo?: string
     fotos?: string[]
     videos?: string[]
@@ -499,6 +505,7 @@ export async function crearPostulacionBusquedaAction(payload: {
         descripcion: payload.descripcion?.trim() || null,
         edad: payload.edad ? Number(payload.edad) : null,
         altura: payload.altura ? Number(payload.altura) : null,
+        nacionalidad: payload.nacionalidad?.trim() || null,
         sexo: payload.sexo || null,
         fotos,
         videos,
@@ -632,6 +639,7 @@ export async function aceptarPostBusquedaAction(id: string) {
         video_url: videos[0] || null,
         edad: p.edad,
         altura: p.altura,
+        nacionalidad: p.nacionalidad,
         destacado: false,
         activo: true,
         orden: 0

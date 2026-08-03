@@ -27,7 +27,7 @@ export default function BusquedaPublicaPage() {
     const [notFound, setNotFound] = useState(false)
 
     const [form, setForm] = useState({
-        nombre: '', email: '', telefono: '', sexo: '', rubro: '', edad: '', altura: '', descripcion: ''
+        nombre: '', email: '', telefono: '', sexo: '', rubro: '', edad: '', altura: '', nacionalidad: '', descripcion: ''
     })
     const [fotos, setFotos] = useState<string[]>([])
     const [videos, setVideos] = useState<string[]>(['', '', ''])
@@ -74,6 +74,7 @@ export default function BusquedaPublicaPage() {
         if (!fotos.length) return toast.error('Subi al menos una foto.')
         if (!form.nombre.trim()) return toast.error('Completa tu nombre.')
         if (!form.email.trim()) return toast.error('Completa tu email.')
+        if (!form.nacionalidad.trim()) return toast.error('Completa tu nacionalidad.')
 
         setEnviando(true)
         const res = await crearPostulacionBusquedaAction({
@@ -85,6 +86,7 @@ export default function BusquedaPublicaPage() {
             descripcion: form.descripcion,
             edad: form.edad ? Number(form.edad) : undefined,
             altura: form.altura ? Number(form.altura) : undefined,
+            nacionalidad: form.nacionalidad,
             sexo: form.sexo || undefined,
             fotos,
             videos: videos.filter(v => v.trim())
@@ -234,6 +236,10 @@ export default function BusquedaPublicaPage() {
                         <div>
                             <label className={labelCls}>Altura (cm)</label>
                             <input type="number" min={0} value={form.altura} onChange={e => setForm({ ...form, altura: e.target.value })} className={inputCls} placeholder="Ej: 170" />
+                        </div>
+                        <div>
+                            <label className={labelCls}>Nacionalidad *</label>
+                            <input required value={form.nacionalidad} onChange={e => setForm({ ...form, nacionalidad: e.target.value })} className={inputCls} placeholder="Ej: Argentina" />
                         </div>
                     </div>
 
