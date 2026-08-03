@@ -288,6 +288,9 @@ export async function duplicarMesAction(mesOrigen: string) {
                 ...datosClase,
                 inicio: nuevaFecha.toISOString(),
                 serie_id: nuevoSerieId,
+                // El mes nuevo arranca sin liquidar: nunca heredar el flag de pago
+                // del mes de origen (si no, las clases aparecen como "OK" ya pagadas).
+                pagado_profe: false,
                 fin: clase.fin ? addDays(new Date(clase.fin), 28).toISOString() : null
             }
         })
