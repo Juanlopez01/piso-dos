@@ -13,7 +13,7 @@ import {
     getTalentDashboardDataAction
 } from '@/app/actions/talent'
 import { toast, Toaster } from 'sonner'
-import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users } from 'lucide-react'
+import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users, Share2 } from 'lucide-react'
 import { Playfair_Display } from 'next/font/google'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['500', '600', '700'] })
@@ -186,7 +186,13 @@ export default function TalentsAdminPage() {
 
     const copiarLinkBusqueda = (slug: string) => {
         const url = `${window.location.origin}/talent/busqueda/${slug}`
-        navigator.clipboard.writeText(url).then(() => toast.success('Link copiado al portapapeles')).catch(() => toast.error('No se pudo copiar'))
+        navigator.clipboard.writeText(url).then(() => toast.success('Link de postulación copiado')).catch(() => toast.error('No se pudo copiar'))
+    }
+
+    // Link anonimizado para pasar a los seleccionadores / clientes (sin datos sensibles)
+    const copiarLinkSeleccion = (slug: string) => {
+        const url = `${window.location.origin}/talent/busqueda/${slug}/seleccion`
+        navigator.clipboard.writeText(url).then(() => toast.success('Link para seleccionadores copiado')).catch(() => toast.error('No se pudo copiar'))
     }
 
     const abrirNuevo = () => { setForm(formVacio()); setModalOpen(true) }
@@ -443,8 +449,10 @@ export default function TalentsAdminPage() {
                                 {busquedaSel.ubicacion && <span className="flex items-center gap-1 text-neutral-400 text-xs"><MapPin size={12} /> {busquedaSel.ubicacion}</span>}
                                 <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-widest ${busquedaSel.activa ? 'bg-green-100 text-green-700' : 'bg-neutral-100 text-neutral-500'}`}>{busquedaSel.activa ? 'Activa' : 'Cerrada'}</span>
                             </div>
-                            <div className="flex items-center gap-2 mb-6">
-                                <button onClick={() => copiarLinkBusqueda(busquedaSel.slug)} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest border border-neutral-300 px-3 py-1.5 rounded hover:border-black transition-colors"><Copy size={12} /> Copiar link</button>
+                            <div className="flex flex-wrap items-center gap-2 mb-6">
+                                <button onClick={() => copiarLinkBusqueda(busquedaSel.slug)} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest border border-neutral-300 px-3 py-1.5 rounded hover:border-black transition-colors"><Copy size={12} /> Link postulación</button>
+                                <button onClick={() => copiarLinkSeleccion(busquedaSel.slug)} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest bg-black text-white px-3 py-1.5 rounded hover:bg-neutral-800 transition-colors"><Share2 size={12} /> Link seleccionadores</button>
+                                <a href={`/talent/busqueda/${busquedaSel.slug}/seleccion`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest border border-neutral-300 px-3 py-1.5 rounded hover:border-black transition-colors"><ExternalLink size={12} /> Ver</a>
                             </div>
 
                             {loadingPostsBusq ? (
@@ -465,6 +473,7 @@ export default function TalentsAdminPage() {
                                                 <span className={`absolute top-2 right-2 text-white text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1 ${p.estado === 'standby' ? 'bg-amber-500/90' : p.estado === 'descartado' ? 'bg-red-500/80' : 'bg-black/80'}`}>
                                                     {p.estado === 'standby' ? 'Stand by' : p.estado === 'descartado' ? 'Descartado' : 'Nueva'}
                                                 </span>
+                                                <span className="absolute top-2 left-2 bg-white/90 text-black text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1 rounded-full">#{String(p.id).replace(/-/g, '').slice(0, 4).toUpperCase()}</span>
                                             </div>
                                             <h3 className="mt-2.5 text-[11px] tracking-[0.15em] uppercase font-semibold truncate">{p.nombre}</h3>
                                             {p.rubro && <p className="text-[9px] tracking-[0.2em] uppercase text-neutral-400 truncate">{p.rubro}</p>}
@@ -502,7 +511,8 @@ export default function TalentsAdminPage() {
                                         </div>
                                         <div className="flex items-center gap-1.5 shrink-0">
                                             <button onClick={() => abrirPostsBusqueda(b)} className="border border-neutral-300 hover:border-black py-1.5 px-3 text-[9px] font-semibold uppercase tracking-[0.15em] flex items-center gap-1 transition-colors rounded"><Users size={11} /> Ver postulaciones</button>
-                                            <button onClick={() => copiarLinkBusqueda(b.slug)} title="Copiar link" className="border border-neutral-300 hover:border-black p-1.5 rounded transition-colors"><Link2 size={13} /></button>
+                                            <button onClick={() => copiarLinkBusqueda(b.slug)} title="Copiar link de postulación" className="border border-neutral-300 hover:border-black p-1.5 rounded transition-colors"><Link2 size={13} /></button>
+                                            <button onClick={() => copiarLinkSeleccion(b.slug)} title="Copiar link para seleccionadores (anónimo)" className="border border-neutral-300 hover:border-black p-1.5 rounded transition-colors"><Share2 size={13} /></button>
                                             <button onClick={() => abrirEditarBusqueda(b)} title="Editar" className="border border-neutral-300 hover:border-black p-1.5 rounded transition-colors"><Pencil size={13} /></button>
                                             <button onClick={() => handleToggleBusqueda(b)} title={b.activa ? 'Cerrar' : 'Reabrir'} className="border border-neutral-300 hover:border-black p-1.5 rounded transition-colors">{b.activa ? <Eye size={13} /> : <EyeOff size={13} />}</button>
                                             <button onClick={() => handleEliminarBusqueda(b)} title="Eliminar" className="border border-neutral-300 hover:border-red-500 hover:text-red-500 p-1.5 rounded transition-colors"><Trash2 size={13} /></button>

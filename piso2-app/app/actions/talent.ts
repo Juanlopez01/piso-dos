@@ -393,6 +393,77 @@ export async function getBusquedaBySlugAction(slug: string): Promise<BusquedaPub
     return (data as BusquedaPublica) || null
 }
 
+// ============================================================================
+// VISTA SELECCIONADORES — link público anonimizado para pasar al cliente/casting.
+// Solo muestra material artístico. NUNCA sale del server el apellido completo,
+// el email ni el teléfono del postulante.
+// ============================================================================
+export type BusquedaSeleccion = {
+    titulo: string
+    ubicacion: string | null
+    categoria: string | null
+    descripcion: string | null
+    requisitos: string | null
+    postulantes: {
+        codigo: string           // referencia estable p/ que el cliente diga "me interesa el AB12"
+        nombre: string           // enmascarado: "Melina G."
+        rubro: string | null
+        edad: number | null
+        altura: number | null
+        sexo: string | null
+        descripcion: string | null
+        fotos: string[]
+        videos: string[]
+    }[]
+}
+
+// "Melina Gómez Pérez" -> "Melina P."  |  "Melina" -> "Melina"
+function enmascararNombre(full: string): string {
+    const parts = (full || '').trim().split(/\s+/).filter(Boolean)
+    if (parts.length === 0) return 'Anónimo'
+    if (parts.length === 1) return parts[0]
+    const inicial = parts[parts.length - 1][0]?.toUpperCase() || ''
+    return `${parts[0]} ${inicial}.`
+}
+
+export async function getBusquedaSeleccionAction(slug: string): Promise<BusquedaSeleccion | null> {
+    const admin = getAdminClient()
+    const { data: b } = await admin
+        .from('talent_busquedas')
+        .select('id, titulo, ubicacion, categoria, descripcion, requisitos')
+        .eq('slug', slug)
+        .maybeSingle()
+    if (!b) return null
+
+    const { data: posts } = await admin
+        .from('talent_busqueda_postulaciones')
+        .select('id, nombre, rubro, edad, altura, sexo, descripcion, fotos, videos, estado, created_at')
+        .eq('busqueda_id', b.id)
+        .neq('estado', 'descartado')   // el seleccionador no ve los descartados
+        .order('created_at', { ascending: true })
+
+    const postulantes = (posts || []).map((p: any) => ({
+        codigo: String(p.id).replace(/-/g, '').slice(0, 4).toUpperCase(),
+        nombre: enmascararNombre(p.nombre),
+        rubro: p.rubro,
+        edad: p.edad,
+        altura: p.altura,
+        sexo: p.sexo,
+        descripcion: p.descripcion,
+        fotos: p.fotos || [],
+        videos: p.videos || [],
+    }))
+
+    return {
+        titulo: b.titulo,
+        ubicacion: b.ubicacion,
+        categoria: b.categoria,
+        descripcion: b.descripcion,
+        requisitos: b.requisitos,
+        postulantes,
+    }
+}
+
 export async function crearPostulacionBusquedaAction(payload: {
     busquedaId: string
     nombre: string
