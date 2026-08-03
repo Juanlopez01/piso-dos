@@ -515,6 +515,126 @@ export async function crearPostulacionBusquedaAction(payload: {
     return { success: true }
 }
 
+// ============================================================================
+// Agregar a una búsqueda un talento YA existente (de la vitrina o de una
+// postulación general), para que el cliente lo vea sin que la persona se
+// tenga que postular de nuevo a esa búsqueda.
+// ============================================================================
+export type TalentoParaBusqueda = {
+    origen: 'vitrina' | 'postulacion'
+    refId: string
+    nombre: string
+    rubro: string | null
+    edad: number | null
+    altura: number | null
+    nacionalidad: string | null
+    sexo: string | null
+    descripcion: string | null
+    fotos: string[]
+    videos: string[]
+}
+
+export async function listTalentosParaBusquedaAction(): Promise<TalentoParaBusqueda[]> {
+    const perm = await requireAdmin()
+    if (!perm.ok) return []
+    const admin = getAdminClient()
+
+    const [tal, post] = await Promise.all([
+        admin.from('talentos')
+            .select('id, nombre, disciplina, edad, altura, nacionalidad, categoria, bio, fotos, videos')
+            .eq('activo', true)
+            .order('nombre', { ascending: true }),
+        admin.from('talent_postulaciones')
+            .select('id, nombre, rubro, edad, altura, nacionalidad, sexo, descripcion, fotos, videos, foto_url, video_url, estado')
+            .neq('estado', 'descartado')
+            .order('created_at', { ascending: false }),
+    ])
+
+    const deVitrina: TalentoParaBusqueda[] = (tal.data || []).map((t: any) => ({
+        origen: 'vitrina',
+        refId: t.id,
+        nombre: t.nombre,
+        rubro: t.disciplina,
+        edad: t.edad,
+        altura: t.altura,
+        nacionalidad: t.nacionalidad,
+        sexo: ['mujeres', 'varones'].includes(t.categoria) ? t.categoria : null,
+        descripcion: t.bio,
+        fotos: t.fotos || [],
+        videos: t.videos || [],
+    }))
+
+    const dePostulacion: TalentoParaBusqueda[] = (post.data || []).map((p: any) => ({
+        origen: 'postulacion',
+        refId: p.id,
+        nombre: p.nombre,
+        rubro: p.rubro,
+        edad: p.edad,
+        altura: p.altura,
+        nacionalidad: p.nacionalidad,
+        sexo: p.sexo,
+        descripcion: p.descripcion,
+        fotos: (p.fotos && p.fotos.length) ? p.fotos : (p.foto_url ? [p.foto_url] : []),
+        videos: (p.videos && p.videos.length) ? p.videos : (p.video_url ? [p.video_url] : []),
+    }))
+
+    return [...deVitrina, ...dePostulacion]
+}
+
+export async function agregarTalentoABusquedaAction(busquedaId: string, origen: 'vitrina' | 'postulacion', refId: string) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+
+    // Traemos el perfil origen
+    let row: any = null
+    if (origen === 'vitrina') {
+        const { data } = await admin.from('talentos')
+            .select('nombre, disciplina, edad, altura, nacionalidad, categoria, bio, fotos, videos')
+            .eq('id', refId).maybeSingle()
+        if (data) row = {
+            nombre: data.nombre, rubro: data.disciplina, edad: data.edad, altura: data.altura,
+            nacionalidad: data.nacionalidad, sexo: ['mujeres', 'varones'].includes(data.categoria) ? data.categoria : null,
+            descripcion: data.bio, fotos: data.fotos || [], videos: data.videos || [],
+        }
+    } else {
+        const { data } = await admin.from('talent_postulaciones')
+            .select('nombre, rubro, edad, altura, nacionalidad, sexo, descripcion, fotos, videos, foto_url, video_url')
+            .eq('id', refId).maybeSingle()
+        if (data) row = {
+            nombre: data.nombre, rubro: data.rubro, edad: data.edad, altura: data.altura,
+            nacionalidad: data.nacionalidad, sexo: data.sexo, descripcion: data.descripcion,
+            fotos: (data.fotos && data.fotos.length) ? data.fotos : (data.foto_url ? [data.foto_url] : []),
+            videos: (data.videos && data.videos.length) ? data.videos : (data.video_url ? [data.video_url] : []),
+        }
+    }
+    if (!row) return { success: false, error: 'No se encontró el perfil.' }
+
+    // Evitar duplicados dentro de la misma búsqueda (por nombre)
+    const { data: existentes } = await admin.from('talent_busqueda_postulaciones')
+        .select('nombre').eq('busqueda_id', busquedaId)
+    const yaEsta = (existentes || []).some((e: any) => (e.nombre || '').trim().toLowerCase() === (row.nombre || '').trim().toLowerCase())
+    if (yaEsta) return { success: false, error: `"${row.nombre}" ya está en esta búsqueda.` }
+
+    const { error } = await admin.from('talent_busqueda_postulaciones').insert({
+        busqueda_id: busquedaId,
+        nombre: row.nombre,
+        email: null,
+        telefono: null,
+        rubro: row.rubro || null,
+        descripcion: row.descripcion || null,
+        edad: row.edad,
+        altura: row.altura,
+        nacionalidad: row.nacionalidad || null,
+        sexo: row.sexo || null,
+        fotos: row.fotos,
+        videos: row.videos,
+        estado: 'pendiente',
+    })
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
 // --- Admin ---
 
 export async function listBusquedasAdminAction() {

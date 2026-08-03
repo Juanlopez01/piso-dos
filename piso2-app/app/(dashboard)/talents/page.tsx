@@ -10,7 +10,7 @@ import {
     listPostulacionesAction, aceptarPostulacionAction, standbyPostulacionAction, eliminarPostulacionAction,
     listBusquedasAdminAction, upsertBusquedaAction, toggleBusquedaActivaAction, eliminarBusquedaAction,
     listPostulacionesBusquedaAction, cambiarEstadoPostBusquedaAction, eliminarPostBusquedaAction, aceptarPostBusquedaAction,
-    getTalentDashboardDataAction
+    getTalentDashboardDataAction, listTalentosParaBusquedaAction, agregarTalentoABusquedaAction, type TalentoParaBusqueda
 } from '@/app/actions/talent'
 import { toast, Toaster } from 'sonner'
 import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users, Share2, MessageCircle, Globe } from 'lucide-react'
@@ -115,6 +115,26 @@ export default function TalentsAdminPage() {
     const [postBusqSel, setPostBusqSel] = useState<any | null>(null)
     const [procesandoPostBusq, setProcesandoPostBusq] = useState(false)
     const [filtroPostBusq, setFiltroPostBusq] = useState<'todas' | 'pendiente' | 'standby' | 'descartado'>('todas')
+
+    // Agregar un talento existente (vitrina / postulación) a la búsqueda
+    const [modalAgregar, setModalAgregar] = useState(false)
+    const [poolTalentos, setPoolTalentos] = useState<TalentoParaBusqueda[]>([])
+    const [loadingPool, setLoadingPool] = useState(false)
+    const [buscarPool, setBuscarPool] = useState('')
+    const [agregandoRef, setAgregandoRef] = useState<string | null>(null)
+
+    const abrirModalAgregar = () => {
+        setModalAgregar(true); setBuscarPool(''); setLoadingPool(true)
+        listTalentosParaBusquedaAction().then(d => setPoolTalentos(d)).catch(() => { }).finally(() => setLoadingPool(false))
+    }
+    const handleAgregarTalento = async (t: TalentoParaBusqueda) => {
+        if (!busquedaSel) return
+        setAgregandoRef(t.refId)
+        const res = await agregarTalentoABusquedaAction(busquedaSel.id, t.origen, t.refId)
+        setAgregandoRef(null)
+        if (res.success) { toast.success(`"${t.nombre}" agregado a la búsqueda`); abrirPostsBusqueda(busquedaSel) }
+        else toast.error(res.error || 'Error')
+    }
 
     const cargarBusquedas = () => { listBusquedasAdminAction().then(d => setBusquedas(d)).catch(() => {}) }
 
@@ -454,6 +474,7 @@ export default function TalentsAdminPage() {
                                 <button onClick={() => copiarLinkBusqueda(busquedaSel.slug)} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest border border-neutral-300 px-3 py-1.5 rounded hover:border-black transition-colors"><Copy size={12} /> Link postulación</button>
                                 <button onClick={() => copiarLinkSeleccion(busquedaSel.slug)} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest bg-black text-white px-3 py-1.5 rounded hover:bg-neutral-800 transition-colors"><Share2 size={12} /> Link seleccionadores</button>
                                 <a href={`/talent/busqueda/${busquedaSel.slug}/seleccion`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest border border-neutral-300 px-3 py-1.5 rounded hover:border-black transition-colors"><ExternalLink size={12} /> Ver</a>
+                                <button onClick={abrirModalAgregar} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest border border-neutral-900 px-3 py-1.5 rounded hover:bg-neutral-900 hover:text-white transition-colors"><Plus size={12} /> Agregar de Piso 2</button>
                             </div>
 
                             {loadingPostsBusq ? (
@@ -510,7 +531,7 @@ export default function TalentsAdminPage() {
                                             </div>
                                             <h3 className="mt-2.5 text-[11px] tracking-[0.15em] uppercase font-semibold truncate">{p.nombre}</h3>
                                             {p.rubro && <p className="text-[9px] tracking-[0.2em] uppercase text-neutral-400 truncate">{p.rubro}</p>}
-                                            <p className="text-[9px] text-neutral-400 truncate">{p.email}</p>
+                                            <p className="text-[9px] text-neutral-400 truncate">{p.email || 'Agregado desde Piso 2'}</p>
                                         </button>
                                     ))}
                                 </div>
@@ -597,7 +618,9 @@ export default function TalentsAdminPage() {
                                 {postBusqSel.nacionalidad && <span>Nacionalidad: <b className="text-neutral-900">{postBusqSel.nacionalidad}</b></span>}
                             </div>
                             <div className="flex flex-wrap gap-4 text-xs text-neutral-600 mb-3">
-                                <span>Email: <b className="text-neutral-900">{postBusqSel.email}</b></span>
+                                {postBusqSel.email
+                                    ? <span>Email: <b className="text-neutral-900">{postBusqSel.email}</b></span>
+                                    : <span className="text-neutral-400 italic">Agregado desde Piso 2 · sin datos de contacto</span>}
                                 {postBusqSel.telefono && <span>Tel: <b className="text-neutral-900">{postBusqSel.telefono}</b></span>}
                             </div>
                             {postBusqSel.telefono && (
@@ -636,6 +659,52 @@ export default function TalentsAdminPage() {
                                 </button>
                             </div>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL AGREGAR TALENTO EXISTENTE A LA BÚSQUEDA */}
+            {modalAgregar && busquedaSel && (
+                <div className="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto" onClick={() => setModalAgregar(false)}>
+                    <div className="bg-white w-full max-w-2xl rounded-2xl p-6 md:p-8 relative my-8 max-h-[90dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setModalAgregar(false)} className="absolute top-5 right-5 text-neutral-400 hover:text-black"><X size={20} /></button>
+                        <h3 className={`${serif.className} text-2xl tracking-wide mb-1 flex items-center gap-2`}><Plus size={18} /> Agregar a "{busquedaSel.titulo}"</h3>
+                        <p className="text-xs text-neutral-500 mb-5">Elegí un talento de la vitrina o de las postulaciones generales para sumarlo a esta búsqueda.</p>
+
+                        <input value={buscarPool} onChange={e => setBuscarPool(e.target.value)} placeholder="Buscar por nombre o rubro…" className={`${inputCls} mb-4`} />
+
+                        {loadingPool ? (
+                            <div className="flex justify-center py-16"><Loader2 className="animate-spin text-neutral-300" size={28} /></div>
+                        ) : (() => {
+                            const q = buscarPool.trim().toLowerCase()
+                            const lista = poolTalentos.filter(t => !q || (t.nombre || '').toLowerCase().includes(q) || (t.rubro || '').toLowerCase().includes(q))
+                            if (lista.length === 0) return <p className="text-center text-neutral-400 text-xs uppercase tracking-widest py-12">Sin resultados.</p>
+                            return (
+                                <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                                    {lista.map(t => (
+                                        <div key={`${t.origen}-${t.refId}`} className="flex items-center gap-3 border border-neutral-200 rounded-xl p-2.5">
+                                            <div className="w-12 h-14 rounded-lg overflow-hidden bg-neutral-100 shrink-0">
+                                                {t.fotos?.[0]
+                                                    ? <img src={t.fotos[0]} alt={t.nombre} className="w-full h-full object-cover" />
+                                                    : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-[8px] uppercase">Sin foto</div>}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-semibold truncate">{t.nombre}</p>
+                                                <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                                    {t.rubro && <span className="text-[9px] uppercase tracking-widest text-neutral-400 truncate">{t.rubro}</span>}
+                                                    <span className={`text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full ${t.origen === 'vitrina' ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-500'}`}>{t.origen === 'vitrina' ? 'Vitrina' : 'Postulación'}</span>
+                                                    {t.nacionalidad && <span className="text-[9px] text-neutral-400">{t.nacionalidad}</span>}
+                                                </div>
+                                            </div>
+                                            <button disabled={agregandoRef === t.refId} onClick={() => handleAgregarTalento(t)}
+                                                className="shrink-0 bg-neutral-900 text-white text-[10px] font-bold uppercase tracking-widest px-3 py-2 rounded hover:bg-black transition-colors disabled:opacity-40 flex items-center gap-1.5">
+                                                {agregandoRef === t.refId ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} Agregar
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )
+                        })()}
                     </div>
                 </div>
             )}
