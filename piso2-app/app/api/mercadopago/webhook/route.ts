@@ -180,7 +180,7 @@ export async function POST(request: Request) {
                     try {
                         const { data: items } = await supabase
                             .from('ventas_items')
-                            .select('producto_id, cantidad, subtotal, producto:productos(entrega_tipo, creditos, tipo_clase)')
+                            .select('producto_id, cantidad, subtotal, producto:productos(entrega_tipo, creditos, tipo_clase, compania_id)')
                             .eq('venta_id', metadata.venta_id);
 
                         const ahoraD = new Date();
@@ -211,6 +211,17 @@ export async function POST(request: Request) {
                                 const { data: ex } = await supabase.from('liga_pagos').select('id, monto').eq('alumno_id', userIdFinal).eq('mes', mes).eq('anio', anio).maybeSingle();
                                 if (ex) await supabase.from('liga_pagos').update({ monto: Number(ex.monto) + Number(it.subtotal) }).eq('id', ex.id);
                                 else await supabase.from('liga_pagos').insert({ alumno_id: userIdFinal, mes, anio, monto: it.subtotal, metodo_pago: 'mercadopago' });
+                            } else if (entrega === 'cuota_compania') {
+                                // Registra la cuota del alumno en la compañía vinculada al producto
+                                // (mes actual). Es lo que la liquidación de compañías lee para saber
+                                // quién abonó — sin esto la venta externa no impactaba en el grupo.
+                                const ciaId = prod?.compania_id || null;
+                                if (ciaId) {
+                                    const now = new Date(); const mes = now.getMonth() + 1, anio = now.getFullYear();
+                                    const { data: ex } = await supabase.from('companias_pagos').select('id, monto').eq('alumno_id', userIdFinal).eq('compania_id', ciaId).eq('mes', mes).eq('anio', anio).maybeSingle();
+                                    if (ex) await supabase.from('companias_pagos').update({ monto: Number(ex.monto) + Number(it.subtotal) }).eq('id', ex.id);
+                                    else await supabase.from('companias_pagos').insert({ alumno_id: userIdFinal, compania_id: ciaId, mes, anio, monto: it.subtotal, metodo_pago: 'mercadopago' });
+                                }
                             }
                             // 'ninguna' → no se entrega nada, solo queda registrada la venta.
                         }

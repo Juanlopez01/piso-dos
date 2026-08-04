@@ -34,6 +34,7 @@ type Producto = {
     comision_pct?: number
     comision_monto?: number
     entrega_tipo?: 'creditos' | 'cuota_liga' | 'cuota_compania' | 'ninguna'
+    compania_id?: string | null
 }
 
 // Categorías sugeridas para el módulo de ventas (spec punto 8)
@@ -45,6 +46,7 @@ const CATEGORIAS_VENTA = [
 const ENTREGAS = [
     { v: 'creditos', label: 'Acredita créditos' },
     { v: 'cuota_liga', label: 'Marca cuota La Liga' },
+    { v: 'cuota_compania', label: 'Marca cuota Compañía' },
     { v: 'ninguna', label: 'Sin entrega (solo registra)' },
 ]
 
@@ -62,10 +64,13 @@ type ClaseExclusiva = {
     key_grupo: string
 }
 
+type CompaniaOpt = { id: string; nombre: string }
+
 type TiendaConfigData = {
     productos: Producto[]
     cupones: Cupon[]
     clasesExclusivas: ClaseExclusiva[]
+    companias: CompaniaOpt[]
 }
 
 // 🚀 FETCHER UNIFICADO DE SWR
@@ -82,6 +87,11 @@ const fetcherTiendaConfig = async (): Promise<TiendaConfigData> => {
         .from('cupones')
         .select('*')
         .order('created_at', { ascending: false })
+
+    const { data: dataCompanias } = await supabase
+        .from('companias')
+        .select('id, nombre')
+        .order('nombre', { ascending: true })
 
     // 🚀 BUSCAMOS CLASES EXCLUSIVAS EN LA AGENDA
     const hoy = new Date().toISOString()
@@ -113,7 +123,8 @@ const fetcherTiendaConfig = async (): Promise<TiendaConfigData> => {
     return {
         productos: (dataProds as Producto[]) || [],
         cupones: (dataCupones as Cupon[]) || [],
-        clasesExclusivas: Array.from(mapExclusivas.values())
+        clasesExclusivas: Array.from(mapExclusivas.values()),
+        companias: (dataCompanias as CompaniaOpt[]) || []
     }
 }
 
@@ -129,6 +140,7 @@ export default function TiendaConfigPage() {
     const productos = data?.productos || []
     const cupones = data?.cupones || []
     const clasesExclusivas = data?.clasesExclusivas || []
+    const companias = data?.companias || []
 
     // Agrupamos los productos para mostrarlos ordenados
     const exclusivos = productos.filter(p => p.tipo_clase === 'exclusivo')
@@ -156,6 +168,7 @@ export default function TiendaConfigPage() {
     const [formComisionPct, setFormComisionPct] = useState('0')
     const [formComisionMonto, setFormComisionMonto] = useState('0')
     const [formEntregaTipo, setFormEntregaTipo] = useState<'creditos' | 'cuota_liga' | 'cuota_compania' | 'ninguna'>('creditos')
+    const [formCompaniaId, setFormCompaniaId] = useState('')
 
     // Modal Cupon State
     const [isCuponModalOpen, setIsCuponModalOpen] = useState(false)
@@ -181,6 +194,7 @@ export default function TiendaConfigPage() {
             setFormComisionPct((prod.comision_pct ?? 0).toString())
             setFormComisionMonto((prod.comision_monto ?? 0).toString())
             setFormEntregaTipo(prod.entrega_tipo || 'creditos')
+            setFormCompaniaId(prod.compania_id || '')
         } else {
             setEditingProdId(null)
             setFormNombre('')
@@ -196,6 +210,7 @@ export default function TiendaConfigPage() {
             setFormComisionPct('0')
             setFormComisionMonto('0')
             setFormEntregaTipo('creditos')
+            setFormCompaniaId('')
         }
         setIsProductModalOpen(true)
     }
@@ -221,6 +236,10 @@ export default function TiendaConfigPage() {
             return toast.error("Por favor, seleccioná una clase vinculada para este pase exclusivo.")
         }
 
+        if (formEntregaTipo === 'cuota_compania' && !formCompaniaId) {
+            return toast.error("Elegí a qué compañía pertenece esta cuota.")
+        }
+
         setSaving(true)
 
         const payload = {
@@ -237,7 +256,8 @@ export default function TiendaConfigPage() {
             comision_tipo: formComisionTipo,
             comision_pct: formComisionTipo === 'porcentaje' ? Math.max(0, Math.min(100, Number(formComisionPct) || 0)) : 0,
             comision_monto: formComisionTipo === 'monto_fijo' ? Math.max(0, Number(formComisionMonto) || 0) : 0,
-            entrega_tipo: formEntregaTipo
+            entrega_tipo: formEntregaTipo,
+            compania_id: formEntregaTipo === 'cuota_compania' ? (formCompaniaId || null) : null
         }
 
         const response = await guardarProductoAction(payload, editingProdId || undefined)
@@ -653,6 +673,15 @@ export default function TiendaConfigPage() {
                                         {ENTREGAS.map(e => <option key={e.v} value={e.v}>{e.label}</option>)}
                                     </select>
                                     {formEntregaTipo === 'creditos' && <p className="text-[9px] text-gray-500 italic pl-1">Acredita {formCreditos} crédito(s) × cantidad vendida.</p>}
+                                    {formEntregaTipo === 'cuota_compania' && (
+                                        <div className="pt-1">
+                                            <select value={formCompaniaId} onChange={e => setFormCompaniaId(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-3 text-white text-xs font-bold outline-none focus:border-[#D4E655] transition-colors">
+                                                <option value="">Elegí la compañía…</option>
+                                                {companias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                                            </select>
+                                            <p className="text-[9px] text-gray-500 italic mt-1 pl-1">Al pagarse, registra la cuota del alumno en esta compañía (mes actual).</p>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="flex flex-col gap-2 pt-1">
