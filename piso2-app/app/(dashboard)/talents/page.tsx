@@ -797,6 +797,13 @@ export default function TalentsAdminPage() {
                                 {postSel.nacionalidad && <span>Nacionalidad: <b className="text-neutral-900">{postSel.nacionalidad}</b></span>}
                             </div>
 
+                            {postSel.telefono && (
+                                <a href={`https://wa.me/${String(postSel.telefono).replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer"
+                                    className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition-colors mb-4">
+                                    <MessageCircle size={14} /> Contactar por WhatsApp
+                                </a>
+                            )}
+
                             {postSel.descripcion && <p className="text-sm text-neutral-600 leading-relaxed mb-4 whitespace-pre-line">{postSel.descripcion}</p>}
 
                             {(() => {

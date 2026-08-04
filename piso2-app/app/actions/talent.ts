@@ -142,6 +142,17 @@ export async function crearPostulacionTalentoAction(payload: {
     return { success: true }
 }
 
+// Adjunta el teléfono del perfil del usuario logueado (para contacto por WhatsApp
+// desde el admin). Las postulaciones generales no piden teléfono; lo tomamos del perfil.
+async function adjuntarTelefonoPerfil(admin: ReturnType<typeof getAdminClient>, posts: any[]): Promise<any[]> {
+    const ids = [...new Set(posts.map(p => p.user_id).filter(Boolean))]
+    if (!ids.length) return posts
+    const { data: perfiles } = await admin.from('profiles').select('id, telefono').in('id', ids)
+    const telPorId: Record<string, string | null> = {}
+    for (const pf of (perfiles || [])) telPorId[pf.id] = pf.telefono
+    return posts.map(p => ({ ...p, telefono: telPorId[p.user_id] || null }))
+}
+
 export async function listPostulacionesAction() {
     const perm = await requireAdmin()
     if (!perm.ok) return []
@@ -151,7 +162,7 @@ export async function listPostulacionesAction() {
         .select('*')
         .order('estado', { ascending: true })       // 'pendiente' antes que 'standby'
         .order('created_at', { ascending: false })
-    return data || []
+    return adjuntarTelefonoPerfil(admin, data || [])
 }
 
 // Aceptar → crea el talento en la vitrina y borra la postulación (la foto queda,
@@ -792,7 +803,7 @@ export async function getTalentDashboardDataAction() {
     return {
         talentos: talentos.data || [],
         marcas: marcas.data || [],
-        postulaciones: postulaciones.data || [],
+        postulaciones: await adjuntarTelefonoPerfil(admin, postulaciones.data || []),
         busquedas: busquedas.data || [],
     }
 }
