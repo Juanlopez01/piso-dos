@@ -1620,44 +1620,24 @@ function LaLigaContent() {
                 )}
 
                 {isStaff && adminTab === 'evaluaciones' && (
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
-                        <div className="lg:col-span-4 space-y-4">
-                            <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/10 pb-2">
-                                <BookOpen size={16} className="text-[#D4E655]" /> Clases Formación
-                            </h3>
+                    <div className="animate-in fade-in">
+                        <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/10 pb-2 mb-4">
+                            <BookOpen size={16} className="text-[#D4E655]" /> Clases Formación
+                        </h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                             {materias.map((mat: any) => (
-                                <div key={mat.id} className={`bg-[#111] border rounded-xl p-4 transition-all ${selectedMateria?.id === mat.id ? 'border-[#D4E655]' : 'border-white/5 hover:border-white/20'}`}>
+                                <div key={mat.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex flex-col">
                                     <div className="flex justify-between mb-1">
                                         <span className="text-[9px] font-bold text-gray-500 uppercase">Nivel {mat.liga_nivel}</span>
                                         {mat.proxima_clase && <span className="text-[9px] text-[#D4E655] font-bold uppercase">{format(parseSafeDate(mat.proxima_clase), "d MMM • HH:mm", { locale: es })}</span>}
                                     </div>
                                     <h4 className="font-black text-white uppercase text-sm truncate mb-3">{mat.nombre}</h4>
-
-                                    <div className="flex gap-2">
-                                        <button onClick={() => cargarAlumnos(mat)} className="flex-1 bg-white/5 hover:bg-white/10 text-white text-[10px] font-bold py-2 rounded-lg transition-all text-center">
-                                            Evaluar
-                                        </button>
-                                        <Link href={`/clase/${mat.id}`} className="flex-1 bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black text-[10px] font-bold py-2 rounded-lg transition-all flex items-center justify-center gap-1">
-                                            <Users size={12} /> Asistencia
-                                        </Link>
-                                    </div>
+                                    <Link href={`/clase/${mat.id}`} className="mt-auto w-full bg-[#D4E655]/10 hover:bg-[#D4E655] text-[#D4E655] hover:text-black text-[10px] font-bold py-2 rounded-lg transition-all flex items-center justify-center gap-1">
+                                        <Users size={12} /> Asistencia
+                                    </Link>
                                 </div>
                             ))}
-                        </div>
-                        <div className="lg:col-span-8 bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[400px]">
-                            {selectedMateria ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {alumnosList.map((alumno: any) => (
-                                        <div key={alumno.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex items-center justify-between">
-                                            <div>
-                                                <h4 className="font-bold text-white text-sm capitalize">{alumno.nombre_completo}</h4>
-                                                {alumno.evaluacion ? <span className="text-[10px] font-black uppercase text-green-500 tracking-widest">Nota: {alumno.evaluacion.nota_final}</span> : <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Pendiente</span>}
-                                            </div>
-                                            <button onClick={() => abrirModalEvaluacion(alumno)} className="bg-white/5 hover:bg-[#D4E655] text-white hover:text-black w-10 h-10 rounded-lg flex items-center justify-center transition-all shrink-0"><ClipboardEdit size={16} /></button>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : <div className="flex flex-col items-center justify-center h-full text-gray-600 uppercase font-black text-xs opacity-50"><ClipboardEdit size={48} className="mb-4" /> Seleccioná una materia para evaluar</div>}
+                            {materias.length === 0 && <p className="text-xs text-gray-500 uppercase font-bold col-span-full text-center py-8">Sin clases de formación este mes.</p>}
                         </div>
                     </div>
                 )}
