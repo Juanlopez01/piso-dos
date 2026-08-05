@@ -57,6 +57,11 @@ type Estadisticas = {
     desglose?: Record<string, any>
 }
 
+// Cuatrimestres: 1ero = hasta julio (meses 1-7), 2do = desde agosto (meses 8-12).
+function cuatriDe(mes: number, anio: number) { return `${anio}-${mes <= 7 ? '1' : '2'}` }
+function numCuatri(cuatriKey: string) { return (cuatriKey || '').split('-')[1] === '2' ? 2 : 1 }
+function labelCuatri(cuatriKey: string) { return numCuatri(cuatriKey) === 2 ? '2do Cuatrimestre' : '1er Cuatrimestre' }
+
 const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, supabase: any) => {
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', uid).single()
     if (!profile) throw new Error("No profile")
@@ -219,7 +224,8 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
 
         deudaCuota = miSaldoPendiente > 0 && miSaldoPendienteEfectivo > 0
 
-        const { data: evals } = await supabase.from('liga_evaluaciones').select('*').eq('alumno_id', uid).eq('cuatrimestre', cuatrimestreActual)
+        // Traemos TODAS (los dos cuatrimestres) para mostrarlas separadas.
+        const { data: evals } = await supabase.from('liga_evaluaciones').select('*').eq('alumno_id', uid)
         if (evals) misEvaluaciones = evals
     }
 
@@ -268,15 +274,18 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
             claseById[c.id] = c
         }
 
-        // Boletín directo: una fila por materia+nivel (la nota más reciente si hay varias).
+        // Boletín directo: una fila por materia+nivel POR cuatrimestre (la más reciente).
         // La nota va SOLO por nombre de materia (+ nivel), sin atarla a ninguna profe.
         const porMateria: Record<string, any> = {}
         for (const e of [...misEvaluaciones].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))) {
             const c = claseById[e.clase_id]
             if (!c) continue
-            porMateria[normKey(c.nombre, c.liga_nivel)] = {
+            const cuatri = e.cuatrimestre || cuatriDe(mesActual, anioActual)
+            porMateria[`${cuatri}|${normKey(c.nombre, c.liga_nivel)}`] = {
                 materia: (c.nombre || '').trim(),
                 nivel: c.liga_nivel,
+                cuatri,
+                cuatriNum: numCuatri(cuatri),
                 nota_final: e.nota_final,
                 aprobado: e.aprobado,
                 requiere_recuperatorio: e.requiere_recuperatorio,
@@ -284,7 +293,7 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
                 observaciones_docente: e.observaciones_docente,
             }
         }
-        misNotas = Object.values(porMateria).sort((a: any, b: any) => a.materia.localeCompare(b.materia))
+        misNotas = Object.values(porMateria).sort((a: any, b: any) => (b.cuatriNum - a.cuatriNum) || a.materia.localeCompare(b.materia))
     }
 
     const materias = Object.values(disciplinasMap).map((disciplina: any) => {
@@ -742,8 +751,8 @@ function LaLigaContent() {
         if (notasFaltantes) { toast.error('Completá todas las notas.'); setGuardandoEval(false); return }
         const notaFinal = parseFloat(calcularPromedio() as string)
         const aprobado = notaFinal >= 6
-        const cuatrimestreActual = '2026-1'
-        const payload = { alumno_id: selectedAlumno.id, clase_id: selectedMateria.id, cuatrimestre: cuatrimestreActual, anio: new Date().getFullYear(), criterios_notas: notas, observaciones_docente: observaciones, nota_final: notaFinal, aprobado: aprobado, requiere_recuperatorio: !aprobado }
+        const cuatrimestreActual = cuatriDe(mesDashboard, anioDashboard)
+        const payload = { alumno_id: selectedAlumno.id, clase_id: selectedMateria.id, cuatrimestre: cuatrimestreActual, anio: anioDashboard, criterios_notas: notas, observaciones_docente: observaciones, nota_final: notaFinal, aprobado: aprobado, requiere_recuperatorio: !aprobado }
         const response = await guardarEvaluacionAction(payload)
         if (response.success) {
             toast.success('Guardado'); setEvalModalOpen(false)
@@ -760,7 +769,7 @@ function LaLigaContent() {
         try {
             const { data: perfiles } = await supabase.from('profiles').select('id, nombre_completo, email, rol, nivel_liga').eq('rol', 'alumno').eq('nivel_liga', materia.liga_nivel)
             const alumnosReales = perfiles ? perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '') : []
-            const cuatrimestreActual = '2026-1'
+            const cuatrimestreActual = cuatriDe(mesDashboard, anioDashboard)
             // Notas de la materia juntando TODAS sus clases del cuatrimestre (no solo el mes actual).
             const evaluaciones = await getEvaluacionesDeMateriaAction(materia.id, cuatrimestreActual)
 
@@ -795,7 +804,7 @@ function LaLigaContent() {
         setNotasAlumnoSel(alumno)
         setLoadingNotasAlumno(true)
         try {
-            const res = await getNotasDeAlumnoAction(alumno.id, '2026-1')
+            const res = await getNotasDeAlumnoAction(alumno.id)
             setNotasDeAlumno((res as any[]) || [])
         } finally { setLoadingNotasAlumno(false) }
     }
@@ -1559,14 +1568,17 @@ function LaLigaContent() {
                                     <div className="flex items-center justify-between mb-5">
                                         <div>
                                             <h3 className="text-lg font-black uppercase tracking-tighter text-white capitalize">{notasAlumnoSel.nombre_completo}</h3>
-                                            <span className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest">Nivel {notasAlumnoSel.nivel_liga} · Cuatrimestre actual</span>
+                                            <span className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest">Nivel {notasAlumnoSel.nivel_liga}</span>
                                         </div>
                                     </div>
+
+                                    {/* Cuatrimestre que se ve/edita según el mes de arriba */}
+                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-[#D4E655] mb-3 border-b border-white/10 pb-2">{labelCuatri(cuatriDe(mesDashboard, anioDashboard))} <span className="text-gray-500 normal-case">· editable (mes {mesDashboard}/{anioDashboard})</span></h4>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         {materias.filter((m: any) => m.liga_nivel === notasAlumnoSel.nivel_liga).length === 0 ? (
                                             <p className="text-xs text-gray-500 uppercase font-bold py-8 col-span-2 text-center">No hay materias de este nivel cargadas este mes.</p>
                                         ) : materias.filter((m: any) => m.liga_nivel === notasAlumnoSel.nivel_liga).map((m: any) => {
-                                            const nota = notasDeAlumno.find((n: any) => n.key === m.key)
+                                            const nota = notasDeAlumno.find((n: any) => n.key === m.key && n.cuatri === cuatriDe(mesDashboard, anioDashboard))
                                             return (
                                                 <div key={m.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex items-center justify-between gap-3">
                                                     <div className="min-w-0">
@@ -1582,6 +1594,25 @@ function LaLigaContent() {
                                             )
                                         })}
                                     </div>
+
+                                    {/* Notas del OTRO cuatrimestre (solo lectura; para editarlas, cambiá el mes de arriba) */}
+                                    {(() => {
+                                        const otras = notasDeAlumno.filter((n: any) => n.cuatri !== cuatriDe(mesDashboard, anioDashboard))
+                                        if (!otras.length) return null
+                                        return (
+                                            <div className="mt-8">
+                                                <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-3 border-b border-white/10 pb-2">{labelCuatri(otras[0].cuatri)} <span className="text-gray-600 normal-case">· cambiá el mes de arriba para editar</span></h4>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                    {otras.map((n: any, i: number) => (
+                                                        <div key={i} className="bg-[#111] border border-white/5 rounded-xl p-4 opacity-80">
+                                                            <h4 className="font-bold text-white text-sm uppercase truncate">{n.materia}</h4>
+                                                            <span className={`text-[10px] font-black uppercase tracking-widest ${n.aprobado ? 'text-green-500' : 'text-red-500'}`}>Nota: {n.nota_final} · {n.aprobado ? 'Aprobado' : 'A recuperar'}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )
+                                    })()}
                                 </>
                             )}
                         </div>
@@ -1715,34 +1746,45 @@ function LaLigaContent() {
                                 <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6">
                                     <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6"><FileText size={20} className="text-[#D4E655]" /> Mis Notas</h3>
                                     {(!misNotas || misNotas.length === 0) ? (
-                                        <p className="text-xs text-gray-500 uppercase font-bold text-center py-8">Todavía no tenés notas cargadas este cuatrimestre.</p>
+                                        <p className="text-xs text-gray-500 uppercase font-bold text-center py-8">Todavía no tenés notas cargadas.</p>
                                     ) : (
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                            {misNotas.map((n: any, i: number) => (
-                                                <div key={i} className="bg-[#111] border border-white/5 rounded-2xl p-5 flex items-center justify-between gap-4">
-                                                    <div className="min-w-0">
-                                                        <h4 className="font-black text-lg uppercase tracking-tighter text-white truncate">{n.materia}</h4>
-                                                        {n.nivel && <span className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest">Nivel {n.nivel}</span>}
-                                                        <div className="mt-1">
-                                                            <span className={`text-[9px] font-black uppercase tracking-widest ${n.aprobado ? 'text-green-500' : 'text-red-500'}`}>{n.aprobado ? 'Aprobado' : 'A recuperar'}</span>
+                                        <div className="space-y-6">
+                                            {[2, 1].map((cn) => {
+                                                const grupo = misNotas.filter((n: any) => n.cuatriNum === cn)
+                                                if (!grupo.length) return null
+                                                return (
+                                                    <div key={cn}>
+                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-[#D4E655] mb-3 border-b border-white/10 pb-2">{cn === 2 ? '2do Cuatrimestre' : '1er Cuatrimestre'}</h4>
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                            {grupo.map((n: any, i: number) => (
+                                                                <div key={i} className="bg-[#111] border border-white/5 rounded-2xl p-5 flex items-center justify-between gap-4">
+                                                                    <div className="min-w-0">
+                                                                        <h4 className="font-black text-lg uppercase tracking-tighter text-white truncate">{n.materia}</h4>
+                                                                        {n.nivel && <span className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest">Nivel {n.nivel}</span>}
+                                                                        <div className="mt-1">
+                                                                            <span className={`text-[9px] font-black uppercase tracking-widest ${n.aprobado ? 'text-green-500' : 'text-red-500'}`}>{n.aprobado ? 'Aprobado' : 'A recuperar'}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-3 shrink-0">
+                                                                        <div className="text-right">
+                                                                            <span className="text-[9px] text-gray-500 font-bold uppercase block">Nota</span>
+                                                                            <span className={`text-3xl font-black leading-none ${n.aprobado ? 'text-green-500' : 'text-red-500'}`}>{n.nota_final}</span>
+                                                                        </div>
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                if (deudaCuota) return toast.error('Tenés que abonar tu saldo para ver tu boletín completo.')
+                                                                                setSelectedBoletin({ nombre: n.materia, profesor: null, evaluacion: n }); setBoletinModalOpen(true);
+                                                                            }}
+                                                                            className="bg-white/5 hover:bg-[#D4E655] text-white hover:text-black p-2.5 rounded-xl transition-all" title="Ver detalle">
+                                                                            <FileText size={16} />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
                                                         </div>
                                                     </div>
-                                                    <div className="flex items-center gap-3 shrink-0">
-                                                        <div className="text-right">
-                                                            <span className="text-[9px] text-gray-500 font-bold uppercase block">Nota</span>
-                                                            <span className={`text-3xl font-black leading-none ${n.aprobado ? 'text-green-500' : 'text-red-500'}`}>{n.nota_final}</span>
-                                                        </div>
-                                                        <button
-                                                            onClick={() => {
-                                                                if (deudaCuota) return toast.error('Tenés que abonar tu saldo para ver tu boletín completo.')
-                                                                setSelectedBoletin({ nombre: n.materia, profesor: null, evaluacion: n }); setBoletinModalOpen(true);
-                                                            }}
-                                                            className="bg-white/5 hover:bg-[#D4E655] text-white hover:text-black p-2.5 rounded-xl transition-all" title="Ver detalle">
-                                                            <FileText size={16} />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ))}
+                                                )
+                                            })}
                                         </div>
                                     )}
                                 </div>

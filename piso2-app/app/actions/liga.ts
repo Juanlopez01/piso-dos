@@ -270,7 +270,7 @@ export async function getEvaluacionesDeMateriaAction(claseId: string, cuatrimest
 // Todas las notas de UN alumno en el cuatrimestre, resueltas por materia+nivel
 // (una por materia). Para la pestaña "Notas" del staff (ver/editar por alumno).
 // Devuelve `key` normalizada para matchear con las materias en el front.
-export async function getNotasDeAlumnoAction(alumnoId: string, cuatrimestre: string) {
+export async function getNotasDeAlumnoAction(alumnoId: string) {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return []
@@ -278,10 +278,10 @@ export async function getNotasDeAlumnoAction(alumnoId: string, cuatrimestre: str
     if (!perfil || !ROLES_EVALUAN.includes(perfil.rol)) return []
 
     const admin = getAdminClient()
+    // Ambos cuatrimestres (el front los muestra separados).
     const { data: evals } = await admin.from('liga_evaluaciones')
-        .select('clase_id, nota_final, aprobado, requiere_recuperatorio, criterios_notas, observaciones_docente, created_at')
+        .select('clase_id, cuatrimestre, nota_final, aprobado, requiere_recuperatorio, criterios_notas, observaciones_docente, created_at')
         .eq('alumno_id', alumnoId)
-        .eq('cuatrimestre', cuatrimestre)
         .order('created_at', { ascending: true })
     if (!evals || !evals.length) return []
 
@@ -290,13 +290,16 @@ export async function getNotasDeAlumnoAction(alumnoId: string, cuatrimestre: str
     const clById: Record<string, any> = {}
     for (const c of (cls || [])) clById[c.id] = c
 
+    // Una nota por materia+nivel POR cuatrimestre (la más reciente).
     const porKey: Record<string, any> = {}
     for (const e of evals) {
         const c = clById[e.clase_id]
         if (!c) continue
+        const cuatri = e.cuatrimestre || ''
         const key = normNombre(c.nombre) + '_N' + (c.liga_nivel || 1)
-        porKey[key] = {
+        porKey[`${cuatri}|${key}`] = {
             key,
+            cuatri,
             materia: (c.nombre || '').trim(),
             nivel: c.liga_nivel,
             nota_final: e.nota_final,
