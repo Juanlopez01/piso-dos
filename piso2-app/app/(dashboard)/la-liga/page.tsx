@@ -253,10 +253,36 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
     // sin importar qué mes esté viendo el alumno, resolvemos cada nota a su
     // materia+nivel y matcheamos por esa clave normalizada.
     let evalKeyPorClaseId: Record<string, string> = {}
+    let misNotas: any[] = []
     if (!isStaff && misEvaluaciones.length) {
         const idsEval = [...new Set(misEvaluaciones.map(e => e.clase_id))]
-        const { data: clasesEval } = await supabase.from('clases').select('id, nombre, liga_nivel').in('id', idsEval)
-        for (const c of (clasesEval || [])) evalKeyPorClaseId[c.id] = normKey(c.nombre, c.liga_nivel)
+        const { data: clasesEval } = await supabase
+            .from('clases')
+            .select('id, nombre, liga_nivel')
+            .in('id', idsEval)
+        const claseById: Record<string, any> = {}
+        for (const c of (clasesEval || [])) {
+            evalKeyPorClaseId[c.id] = normKey(c.nombre, c.liga_nivel)
+            claseById[c.id] = c
+        }
+
+        // Boletín directo: una fila por materia+nivel (la nota más reciente si hay varias).
+        // La nota va SOLO por nombre de materia (+ nivel), sin atarla a ninguna profe.
+        const porMateria: Record<string, any> = {}
+        for (const e of [...misEvaluaciones].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))) {
+            const c = claseById[e.clase_id]
+            if (!c) continue
+            porMateria[normKey(c.nombre, c.liga_nivel)] = {
+                materia: (c.nombre || '').trim(),
+                nivel: c.liga_nivel,
+                nota_final: e.nota_final,
+                aprobado: e.aprobado,
+                requiere_recuperatorio: e.requiere_recuperatorio,
+                criterios_notas: e.criterios_notas,
+                observaciones_docente: e.observaciones_docente,
+            }
+        }
+        misNotas = Object.values(porMateria).sort((a: any, b: any) => a.materia.localeCompare(b.materia))
     }
 
     const materias = Object.values(disciplinasMap).map((disciplina: any) => {
@@ -306,7 +332,7 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
 
     return {
         profile, isStaff, canManage, legajoCompleto, avisos: avisos || [],
-        materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo,
+        materias, misNotas, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo,
         allStudents, preciosLiga, criterios: criteriosData || [],
         clasesDelMes, cuotaMesOverride,
         miAsistencia: statsAsistencia[uid] || { presentes: 0, ausentes: 0, justificadas: 0, saf: 0, medias_faltas: 0, total: 0, desglose: {} }
@@ -795,7 +821,7 @@ function LaLigaContent() {
         )
     }
 
-    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo, allStudents, criterios, clasesDelMes, miAsistencia } = data
+    const { profile, isStaff, canManage, legajoCompleto, avisos, materias, misNotas, deudaCuota, miSaldoPendiente, miSaldoPendienteEfectivo, allStudents, criterios, clasesDelMes, miAsistencia } = data
     const nivelActual = profile.nivel_liga || profile.nivel || 1
 
     // 🚀 Asistencia a mostrar: por mes (default) o por rango si está activo
@@ -1587,37 +1613,49 @@ function LaLigaContent() {
                                     )}
                                 </div>
 
+                                {/* MIS NOTAS DEL CUATRIMESTRE (por materia, sin atar a profe ni al mes) */}
+                                <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6">
+                                    <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6"><FileText size={20} className="text-[#D4E655]" /> Mis Notas</h3>
+                                    {(!misNotas || misNotas.length === 0) ? (
+                                        <p className="text-xs text-gray-500 uppercase font-bold text-center py-8">Todavía no tenés notas cargadas este cuatrimestre.</p>
+                                    ) : (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            {misNotas.map((n: any, i: number) => (
+                                                <div key={i} className="bg-[#111] border border-white/5 rounded-2xl p-5 flex items-center justify-between gap-4">
+                                                    <div className="min-w-0">
+                                                        <h4 className="font-black text-lg uppercase tracking-tighter text-white truncate">{n.materia}</h4>
+                                                        {n.nivel && <span className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest">Nivel {n.nivel}</span>}
+                                                        <div className="mt-1">
+                                                            <span className={`text-[9px] font-black uppercase tracking-widest ${n.aprobado ? 'text-green-500' : 'text-red-500'}`}>{n.aprobado ? 'Aprobado' : 'A recuperar'}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 shrink-0">
+                                                        <div className="text-right">
+                                                            <span className="text-[9px] text-gray-500 font-bold uppercase block">Nota</span>
+                                                            <span className={`text-3xl font-black leading-none ${n.aprobado ? 'text-green-500' : 'text-red-500'}`}>{n.nota_final}</span>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => {
+                                                                if (deudaCuota) return toast.error('Tenés que abonar tu saldo para ver tu boletín completo.')
+                                                                setSelectedBoletin({ nombre: n.materia, profesor: null, evaluacion: n }); setBoletinModalOpen(true);
+                                                            }}
+                                                            className="bg-white/5 hover:bg-[#D4E655] text-white hover:text-black p-2.5 rounded-xl transition-all" title="Ver detalle">
+                                                            <FileText size={16} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className="bg-[#09090b] border border-white/5 rounded-3xl p-6">
                                     <h3 className="text-lg font-black uppercase tracking-tighter text-white flex items-center gap-2 mb-6"><BookOpen size={20} className="text-[#D4E655]" /> Mis Disciplinas</h3>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         {materias.map((materia: any) => (
                                             <div key={materia.id} className="bg-[#111] border border-white/5 rounded-2xl p-5 flex flex-col relative overflow-hidden group hover:border-[#D4E655]/30 transition-all">
                                                 <h4 className="font-black text-xl uppercase tracking-tighter text-white mb-1 truncate">{materia.nombre}</h4>
-                                                <p className="text-[10px] text-gray-400 mb-5 uppercase font-bold tracking-widest">Prof: {materia.profesor}</p>
-
-                                                <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-between">
-                                                    {materia.evaluacion ? (
-                                                        <>
-                                                            <div className="flex flex-col">
-                                                                <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Nota Final</span>
-                                                                <span className={`text-3xl font-black leading-none ${materia.evaluacion.aprobado ? 'text-green-500' : 'text-red-500'}`}>{materia.evaluacion.nota_final}</span>
-                                                            </div>
-                                                            <button
-                                                                onClick={() => {
-                                                                    if (deudaCuota) return toast.error('Tenés que abonar tu saldo para ver tu boletín completo.')
-                                                                    setSelectedBoletin(materia); setBoletinModalOpen(true);
-                                                                }}
-                                                                className="bg-white/5 hover:bg-[#D4E655] text-white hover:text-black text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl flex items-center gap-2 transition-all"
-                                                            >
-                                                                <FileText size={14} /> Boletín
-                                                            </button>
-                                                        </>
-                                                    ) : (
-                                                        <div className="w-full text-center">
-                                                            <span className="text-[9px] text-gray-600 font-bold uppercase tracking-widest">Evaluación en proceso</span>
-                                                        </div>
-                                                    )}
-                                                </div>
+                                                <p className="text-[10px] text-gray-400 uppercase font-bold tracking-widest">Prof: {materia.profesor}</p>
                                             </div>
                                         ))}
                                     </div>
@@ -1880,7 +1918,7 @@ function LaLigaContent() {
                             <div>
                                 <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.2em] uppercase">Boletín Oficial</span>
                                 <h3 className="text-3xl font-black uppercase text-white tracking-tighter leading-none mb-1">{selectedBoletin.nombre}</h3>
-                                <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">Prof: {selectedBoletin.profesor}</p>
+                                {selectedBoletin.profesor && <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">Prof: {selectedBoletin.profesor}</p>}
                             </div>
                             <div className="bg-black/50 border border-white/10 rounded-2xl p-4 flex items-center gap-4">
                                 <div>

@@ -191,6 +191,21 @@ export async function guardarEvaluacionAction(payload: any) {
 
         if (error) throw new Error(error.message)
 
+        // Avisar al alumno que tiene una nota cargada (titulo/mensaje nunca null).
+        try {
+            const { data: cl } = await admin.from('clases').select('nombre').eq('id', payload.clase_id).maybeSingle()
+            const materia = (cl?.nombre || 'La Liga').trim()
+            if (payload.alumno_id) {
+                await admin.from('notificaciones').insert({
+                    usuario_id: payload.alumno_id,
+                    titulo: 'Nueva nota en La Liga',
+                    mensaje: `Ya tenés tu nota de ${materia} cargada. Entrá a La Liga para verla.`,
+                    link: '/la-liga',
+                    leido: false
+                })
+            }
+        } catch { /* la nota ya se guardó; la notificación es best-effort */ }
+
         revalidatePath('/la-liga')
         return { success: true }
     } catch (error: any) {
