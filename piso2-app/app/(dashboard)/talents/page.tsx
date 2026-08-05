@@ -650,9 +650,15 @@ export default function TalentsAdminPage() {
                                     <button disabled={procesandoPostBusq} onClick={() => handleEstadoPostBusq(postBusqSel.id, postBusqSel.estado === 'standby' ? 'pendiente' : 'standby')} className="flex-1 border border-neutral-300 hover:border-black py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
                                         <PauseCircle size={14} /> {postBusqSel.estado === 'standby' ? 'Quitar stand by' : 'Stand by'}
                                     </button>
-                                    <button disabled={procesandoPostBusq} onClick={() => handleEstadoPostBusq(postBusqSel.id, 'descartado')} className="flex-1 border border-neutral-300 hover:border-orange-500 hover:text-orange-500 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
-                                        <EyeOff size={14} /> Descartar
-                                    </button>
+                                    {postBusqSel.estado === 'descartado' ? (
+                                        <button disabled={procesandoPostBusq} onClick={() => handleEstadoPostBusq(postBusqSel.id, 'pendiente')} className="flex-1 border border-neutral-300 hover:border-green-600 hover:text-green-600 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                                            <Eye size={14} /> Recuperar
+                                        </button>
+                                    ) : (
+                                        <button disabled={procesandoPostBusq} onClick={() => handleEstadoPostBusq(postBusqSel.id, 'descartado')} className="flex-1 border border-neutral-300 hover:border-orange-500 hover:text-orange-500 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                                            <EyeOff size={14} /> Descartar
+                                        </button>
+                                    )}
                                 </div>
                                 <button disabled={procesandoPostBusq} onClick={() => handleEliminarPostBusq(postBusqSel.id)} className="border border-neutral-300 hover:border-red-500 hover:text-red-500 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
                                     <Trash2 size={14} /> Eliminar
