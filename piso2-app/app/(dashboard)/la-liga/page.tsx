@@ -29,7 +29,8 @@ import {
     getNombresPerfilesAction,
     guardarCuotaLigaMesAction,
     eliminarCuotaLigaMesAction,
-    getEvaluacionesDeMateriaAction
+    getEvaluacionesDeMateriaAction,
+    getNotasDeAlumnoAction
 } from '@/app/actions/liga'
 
 import {
@@ -448,7 +449,12 @@ function LaLigaContent() {
 
     const pagoNotificado = useRef(false)
     const [procesandoPago, setProcesandoPago] = useState(false)
-    const [adminTab, setAdminTab] = useState<'evaluaciones' | 'gestion' | 'comunicados' | 'precios' | 'clases' | 'estadisticas'>('evaluaciones')
+    const [adminTab, setAdminTab] = useState<'evaluaciones' | 'notas' | 'gestion' | 'comunicados' | 'precios' | 'clases' | 'estadisticas'>('evaluaciones')
+    // Pestaña "Notas" (staff): boletín por alumno
+    const [notasAlumnoSel, setNotasAlumnoSel] = useState<any>(null)
+    const [notasDeAlumno, setNotasDeAlumno] = useState<any[]>([])
+    const [loadingNotasAlumno, setLoadingNotasAlumno] = useState(false)
+    const [buscarAlumnoNotas, setBuscarAlumnoNotas] = useState('')
     const [selectedMateria, setSelectedMateria] = useState<any>(null)
     const [alumnosList, setAlumnosList] = useState<any[]>([])
     const [loadingAlumnos, setLoadingAlumnos] = useState(false)
@@ -739,7 +745,12 @@ function LaLigaContent() {
         const cuatrimestreActual = '2026-1'
         const payload = { alumno_id: selectedAlumno.id, clase_id: selectedMateria.id, cuatrimestre: cuatrimestreActual, anio: new Date().getFullYear(), criterios_notas: notas, observaciones_docente: observaciones, nota_final: notaFinal, aprobado: aprobado, requiere_recuperatorio: !aprobado }
         const response = await guardarEvaluacionAction(payload)
-        if (response.success) { toast.success('Guardado'); setEvalModalOpen(false); cargarAlumnos(selectedMateria); mutate() }
+        if (response.success) {
+            toast.success('Guardado'); setEvalModalOpen(false)
+            if (adminTab === 'notas' && notasAlumnoSel) cargarNotasAlumno(notasAlumnoSel)
+            else cargarAlumnos(selectedMateria)
+            mutate()
+        }
         setGuardandoEval(false)
     }
 
@@ -777,6 +788,30 @@ function LaLigaContent() {
 
         data?.criterios.forEach((c: any) => notasIniciales[c.nombre] = 0)
         setNotas(notasIniciales)
+        setEvalModalOpen(true)
+    }
+
+    const cargarNotasAlumno = async (alumno: any) => {
+        setNotasAlumnoSel(alumno)
+        setLoadingNotasAlumno(true)
+        try {
+            const res = await getNotasDeAlumnoAction(alumno.id, '2026-1')
+            setNotasDeAlumno((res as any[]) || [])
+        } finally { setLoadingNotasAlumno(false) }
+    }
+
+    const abrirEvalDesdeNotas = (materia: any, alumno: any, notaExistente: any) => {
+        setSelectedMateria(materia)
+        setSelectedAlumno(alumno)
+        if (notaExistente) {
+            setNotas(notaExistente.criterios_notas || {})
+            setObservaciones(notaExistente.observaciones_docente || '')
+        } else {
+            const ni: Record<string, number> = {}
+            data?.criterios.forEach((c: any) => ni[c.nombre] = 0)
+            setNotas(ni)
+            setObservaciones('')
+        }
         setEvalModalOpen(true)
     }
 
@@ -919,6 +954,9 @@ function LaLigaContent() {
                         <div className="flex gap-6 border-b border-white/10 relative z-10 mt-2 overflow-x-auto custom-scrollbar">
                             <button onClick={() => setAdminTab('evaluaciones')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'evaluaciones' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                 <ClipboardEdit size={14} /> Evaluaciones
+                            </button>
+                            <button onClick={() => setAdminTab('notas')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'notas' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                                <FileText size={14} /> Notas
                             </button>
                             <button onClick={() => setAdminTab('clases')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'clases' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                 <Calendar size={14} /> Clases del Mes
@@ -1490,6 +1528,66 @@ function LaLigaContent() {
                 )}
 
                 {/* --- VISTA EVALUACIONES --- */}
+                {isStaff && adminTab === 'notas' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
+                        {/* Alumnos */}
+                        <div className="lg:col-span-4 space-y-3">
+                            <h3 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2 border-b border-white/10 pb-2">
+                                <Users size={16} className="text-[#D4E655]" /> Alumnos
+                            </h3>
+                            <input value={buscarAlumnoNotas} onChange={e => setBuscarAlumnoNotas(e.target.value)} placeholder="Buscar alumno..." className="w-full bg-[#111] border border-white/10 rounded-xl px-4 py-2.5 text-white text-xs outline-none focus:border-[#D4E655] transition-colors" />
+                            <div className="space-y-2 max-h-[65vh] overflow-y-auto custom-scrollbar pr-1">
+                                {allStudents
+                                    .filter((a: any) => !buscarAlumnoNotas.trim() || (a.nombre_completo || '').toLowerCase().includes(buscarAlumnoNotas.trim().toLowerCase()))
+                                    .map((a: any) => (
+                                        <button key={a.id} onClick={() => cargarNotasAlumno(a)} className={`w-full text-left bg-[#111] border rounded-xl p-3 transition-all ${notasAlumnoSel?.id === a.id ? 'border-[#D4E655]' : 'border-white/5 hover:border-white/20'}`}>
+                                            <h4 className="font-bold text-white text-sm capitalize truncate">{a.nombre_completo}</h4>
+                                            <span className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest">Nivel {a.nivel_liga}</span>
+                                        </button>
+                                    ))}
+                            </div>
+                        </div>
+
+                        {/* Notas del alumno seleccionado */}
+                        <div className="lg:col-span-8 bg-[#09090b] border border-white/5 rounded-3xl p-6 min-h-[400px]">
+                            {!notasAlumnoSel ? (
+                                <div className="flex flex-col items-center justify-center h-full text-gray-600 uppercase font-black text-xs opacity-50"><FileText size={48} className="mb-4" /> Elegí un alumno para ver sus notas</div>
+                            ) : loadingNotasAlumno ? (
+                                <div className="flex justify-center py-16"><Loader2 className="animate-spin text-[#D4E655]" size={28} /></div>
+                            ) : (
+                                <>
+                                    <div className="flex items-center justify-between mb-5">
+                                        <div>
+                                            <h3 className="text-lg font-black uppercase tracking-tighter text-white capitalize">{notasAlumnoSel.nombre_completo}</h3>
+                                            <span className="text-[9px] text-[#D4E655] font-bold uppercase tracking-widest">Nivel {notasAlumnoSel.nivel_liga} · Cuatrimestre actual</span>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        {materias.filter((m: any) => m.liga_nivel === notasAlumnoSel.nivel_liga).length === 0 ? (
+                                            <p className="text-xs text-gray-500 uppercase font-bold py-8 col-span-2 text-center">No hay materias de este nivel cargadas este mes.</p>
+                                        ) : materias.filter((m: any) => m.liga_nivel === notasAlumnoSel.nivel_liga).map((m: any) => {
+                                            const nota = notasDeAlumno.find((n: any) => n.key === m.key)
+                                            return (
+                                                <div key={m.id} className="bg-[#111] border border-white/5 rounded-xl p-4 flex items-center justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <h4 className="font-bold text-white text-sm uppercase truncate">{m.nombre}</h4>
+                                                        {nota ? (
+                                                            <span className={`text-[10px] font-black uppercase tracking-widest ${nota.aprobado ? 'text-green-500' : 'text-red-500'}`}>Nota: {nota.nota_final} · {nota.aprobado ? 'Aprobado' : 'A recuperar'}</span>
+                                                        ) : (
+                                                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Sin nota</span>
+                                                        )}
+                                                    </div>
+                                                    <button onClick={() => abrirEvalDesdeNotas(m, notasAlumnoSel, nota)} className="bg-white/5 hover:bg-[#D4E655] text-white hover:text-black w-10 h-10 rounded-lg flex items-center justify-center transition-all shrink-0" title={nota ? 'Editar nota' : 'Cargar nota'}><ClipboardEdit size={16} /></button>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {isStaff && adminTab === 'evaluaciones' && (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in">
                         <div className="lg:col-span-4 space-y-4">

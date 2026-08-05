@@ -267,6 +267,48 @@ export async function getEvaluacionesDeMateriaAction(claseId: string, cuatrimest
     return Object.values(porAlumno)
 }
 
+// Todas las notas de UN alumno en el cuatrimestre, resueltas por materia+nivel
+// (una por materia). Para la pestaña "Notas" del staff (ver/editar por alumno).
+// Devuelve `key` normalizada para matchear con las materias en el front.
+export async function getNotasDeAlumnoAction(alumnoId: string, cuatrimestre: string) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return []
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (!perfil || !ROLES_EVALUAN.includes(perfil.rol)) return []
+
+    const admin = getAdminClient()
+    const { data: evals } = await admin.from('liga_evaluaciones')
+        .select('clase_id, nota_final, aprobado, requiere_recuperatorio, criterios_notas, observaciones_docente, created_at')
+        .eq('alumno_id', alumnoId)
+        .eq('cuatrimestre', cuatrimestre)
+        .order('created_at', { ascending: true })
+    if (!evals || !evals.length) return []
+
+    const ids = [...new Set(evals.map((e: any) => e.clase_id))]
+    const { data: cls } = await admin.from('clases').select('id, nombre, liga_nivel').in('id', ids)
+    const clById: Record<string, any> = {}
+    for (const c of (cls || [])) clById[c.id] = c
+
+    const porKey: Record<string, any> = {}
+    for (const e of evals) {
+        const c = clById[e.clase_id]
+        if (!c) continue
+        const key = normNombre(c.nombre) + '_N' + (c.liga_nivel || 1)
+        porKey[key] = {
+            key,
+            materia: (c.nombre || '').trim(),
+            nivel: c.liga_nivel,
+            nota_final: e.nota_final,
+            aprobado: e.aprobado,
+            requiere_recuperatorio: e.requiere_recuperatorio,
+            criterios_notas: e.criterios_notas,
+            observaciones_docente: e.observaciones_docente,
+        }
+    }
+    return Object.values(porKey)
+}
+
 export async function cambiarNivelLigaAction(alumnoId: string, nuevoNivel: number | null) {
     const supabase = await createClient()
     try {
