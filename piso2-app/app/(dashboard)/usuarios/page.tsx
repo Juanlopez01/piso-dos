@@ -863,16 +863,17 @@ function UsuariosContent() {
                                         {(isAdmin || (isRecep && u.rol !== 'admin')) && (
                                             <div className="relative flex-1">
                                                 <select
-                                                    disabled={cambiandoRolId === u.id}
+                                                    disabled={cambiandoRolId === u.id || (isRecep && ['admin', 'recepcion', 'auxiliar'].includes(u.rol))}
                                                     value={u.rol || ''}
                                                     onChange={(e) => cambiarRol(u.id, e.target.value)}
                                                     className={`w-full h-full py-2.5 px-1 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoRolId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : 'bg-[#111] text-gray-300 border-white/5 hover:border-white/20 hover:text-white'}`}
                                                 >
-                                                    {isAdmin && <option value="admin">Admin</option>}
+                                                    {/* Recep solo asigna: alumno, profe, coordinador, vendedor. El resto es admin-only. */}
+                                                    <option value="admin" disabled={!isAdmin}>Admin</option>
+                                                    <option value="recepcion" disabled={!isAdmin}>Recep.</option>
+                                                    <option value="auxiliar" disabled={!isAdmin}>Auxiliar</option>
                                                     <option value="coordinador">Coordinador</option>
-                                                    <option value="recepcion">Recep.</option>
-                                                    <option value="auxiliar">Auxiliar</option>
-                                                    {isAdmin && <option value="vendedor">Vendedor</option>}
+                                                    <option value="vendedor">Vendedor</option>
                                                     <option value="profesor">Profe</option>
                                                     <option value="alumno">Alumno</option>
                                                 </select>

@@ -36,11 +36,18 @@ export async function cambiarRolAction(usuarioId: string, nuevoRol: string) {
         const rolActor = actor?.rol
         if (!['admin', 'recepcion'].includes(rolActor || '')) throw new Error('No tenés permisos para cambiar roles')
 
-        // Recepción puede cambiar el rol de todos MENOS admin (ni tocar admins ni promover a admin)
+        // Recepción solo maneja roles operativos: puede asignar únicamente
+        // alumno / profesor / coordinador / vendedor, y no puede tocar a otro
+        // staff (admin, recepción, auxiliar).
         if (rolActor === 'recepcion') {
+            const ROLES_RECEP = ['alumno', 'profesor', 'coordinador', 'vendedor']
             const { data: objetivo } = await supabase.from('profiles').select('rol').eq('id', usuarioId).single()
-            if (objetivo?.rol === 'admin') throw new Error('No podés modificar el rol de un administrador')
-            if (nuevoRol === 'admin') throw new Error('No podés asignar el rol de administrador')
+            if (['admin', 'recepcion', 'auxiliar'].includes(objetivo?.rol || '')) {
+                throw new Error('No podés modificar el rol de este usuario')
+            }
+            if (!ROLES_RECEP.includes(nuevoRol)) {
+                throw new Error('Solo podés asignar: alumno, profesor, coordinador o vendedor')
+            }
         }
 
         // Permisos ya validados → update con admin client (evita bloqueos de RLS)
