@@ -221,14 +221,19 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
         if (evals) misEvaluaciones = evals
     }
 
+    // Clave normalizada (ignora espacios y mayúsculas del nombre) para que
+    // "FLEX Y FUERZA", "FLEX Y FUERZA " y "Flex y fuerza " sean la MISMA materia,
+    // y para matchear la nota por materia+nivel (no por el clase_id de un mes puntual).
+    const normKey = (nombre: string, nivel: any) => `${(nombre || '').trim().toUpperCase()}_N${nivel || 1}`
+
     const disciplinasMap: Record<string, any> = {}
     if (dataClases) {
         dataClases.forEach((clase: any) => {
-            const keyAgrupacion = `${clase.nombre}_Nivel_${clase.liga_nivel || 1}`;
+            const keyAgrupacion = normKey(clase.nombre, clase.liga_nivel);
 
             if (!disciplinasMap[keyAgrupacion]) {
                 const profNombre = Array.isArray(clase.profesor) ? clase.profesor[0]?.nombre_completo : clase.profesor?.nombre_completo;
-                disciplinasMap[keyAgrupacion] = { id: clase.id, nombre: clase.nombre, liga_nivel: clase.liga_nivel, profesor: profNombre || 'Staff', proxima_clase: null, clases_ids: [] }
+                disciplinasMap[keyAgrupacion] = { id: clase.id, key: keyAgrupacion, nombre: (clase.nombre || '').trim(), liga_nivel: clase.liga_nivel, profesor: profNombre || 'Staff', proxima_clase: null, clases_ids: [] }
             }
             disciplinasMap[keyAgrupacion].clases_ids.push(clase.id)
 
@@ -243,9 +248,19 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
         })
     }
 
+    // Las notas se guardan contra un clase_id puntual (de un mes). Para mostrarlas
+    // sin importar qué mes esté viendo el alumno, resolvemos cada nota a su
+    // materia+nivel y matcheamos por esa clave normalizada.
+    let evalKeyPorClaseId: Record<string, string> = {}
+    if (!isStaff && misEvaluaciones.length) {
+        const idsEval = [...new Set(misEvaluaciones.map(e => e.clase_id))]
+        const { data: clasesEval } = await supabase.from('clases').select('id, nombre, liga_nivel').in('id', idsEval)
+        for (const c of (clasesEval || [])) evalKeyPorClaseId[c.id] = normKey(c.nombre, c.liga_nivel)
+    }
+
     const materias = Object.values(disciplinasMap).map((disciplina: any) => {
         let evaluacion = null
-        if (!isStaff) evaluacion = misEvaluaciones.find(e => disciplina.clases_ids.includes(e.clase_id))
+        if (!isStaff) evaluacion = misEvaluaciones.find(e => evalKeyPorClaseId[e.clase_id] === disciplina.key)
         return { ...disciplina, evaluacion: evaluacion || null }
     }).sort((a: any, b: any) => a.nombre.localeCompare(b.nombre))
 
