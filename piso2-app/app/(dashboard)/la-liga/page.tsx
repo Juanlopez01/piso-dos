@@ -962,7 +962,7 @@ function LaLigaContent() {
                     {isStaff && (
                         <div className="flex gap-6 border-b border-white/10 relative z-10 mt-2 overflow-x-auto custom-scrollbar">
                             <button onClick={() => setAdminTab('evaluaciones')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'evaluaciones' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
-                                <ClipboardEdit size={14} /> Evaluaciones
+                                <Users size={14} /> Asistencia
                             </button>
                             <button onClick={() => setAdminTab('notas')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'notas' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
                                 <FileText size={14} /> Notas
