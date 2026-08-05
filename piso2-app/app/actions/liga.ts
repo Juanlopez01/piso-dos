@@ -171,6 +171,25 @@ export async function eliminarAvisoAction(id: string) {
 // pueda guardar sin toparse con un error de permisos.
 const ROLES_EVALUAN = ['admin', 'recepcion', 'auxiliar', 'coordinador', 'profesor']
 
+// Normaliza el nombre de materia (ignora espacios, mayúsculas y acentos), igual
+// que en la UI, para agrupar "TECNICA CLASICA" / "Técnica Clásica " como una sola.
+function normNombre(n: string) {
+    return (n || '').trim().normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
+}
+
+// Una "materia" de La Liga se da varias veces (una clase por semana/mes). La nota
+// es del cuatrimestre, no de una clase puntual. Este helper devuelve TODOS los
+// clase_id de la misma materia+nivel, para tratar la nota a nivel materia.
+async function clasesHermanasDeMateria(admin: any, claseId: string): Promise<string[]> {
+    const { data: base } = await admin.from('clases').select('nombre, liga_nivel').eq('id', claseId).maybeSingle()
+    if (!base) return [claseId]
+    const bn = normNombre(base.nombre)
+    const bnv = base.liga_nivel || 1
+    const { data: todas } = await admin.from('clases').select('id, nombre, liga_nivel').eq('es_la_liga', true)
+    const ids = (todas || []).filter((c: any) => normNombre(c.nombre) === bn && (c.liga_nivel || 1) === bnv).map((c: any) => c.id)
+    return ids.length ? ids : [claseId]
+}
+
 export async function guardarEvaluacionAction(payload: any) {
     const supabase = await createClient()
     try {
@@ -184,10 +203,22 @@ export async function guardarEvaluacionAction(payload: any) {
         // INSERT para profes/recep, así que el guardado fallaba silenciosamente.
         // El permiso ya lo validamos arriba por rol.
         const admin = getAdminClient()
-        const { error } = await admin.from('liga_evaluaciones').upsert(
-            { ...payload, profesor_id: session.user.id },
-            { onConflict: 'alumno_id,clase_id,cuatrimestre' }
-        )
+
+        // La nota es por MATERIA+cuatrimestre, no por la clase de un mes puntual.
+        // Si ya existe una nota del alumno en cualquier clase hermana de esa materia,
+        // la ACTUALIZAMOS (en vez de crear una nueva contra otro mes = duplicado).
+        const hermanas = await clasesHermanasDeMateria(admin, payload.clase_id)
+        const { data: existente } = await admin.from('liga_evaluaciones')
+            .select('id')
+            .eq('alumno_id', payload.alumno_id)
+            .eq('cuatrimestre', payload.cuatrimestre)
+            .in('clase_id', hermanas)
+            .limit(1)
+            .maybeSingle()
+
+        const { error } = existente
+            ? await admin.from('liga_evaluaciones').update({ ...payload, profesor_id: session.user.id }).eq('id', existente.id)
+            : await admin.from('liga_evaluaciones').insert({ ...payload, profesor_id: session.user.id })
 
         if (error) throw new Error(error.message)
 
@@ -211,6 +242,29 @@ export async function guardarEvaluacionAction(payload: any) {
     } catch (error: any) {
         return { success: false, error: error.message }
     }
+}
+
+// Devuelve las notas ya cargadas de una materia (juntando todas sus clases del
+// cuatrimestre), una por alumno (la más reciente). Para que el staff vea/edite
+// lo que ya está cargado sin importar el mes, y no duplique.
+export async function getEvaluacionesDeMateriaAction(claseId: string, cuatrimestre: string) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return []
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (!perfil || !ROLES_EVALUAN.includes(perfil.rol)) return []
+
+    const admin = getAdminClient()
+    const hermanas = await clasesHermanasDeMateria(admin, claseId)
+    const { data } = await admin.from('liga_evaluaciones')
+        .select('alumno_id, nota_final, aprobado, requiere_recuperatorio, criterios_notas, observaciones_docente, created_at')
+        .in('clase_id', hermanas)
+        .eq('cuatrimestre', cuatrimestre)
+        .order('created_at', { ascending: true })
+
+    const porAlumno: Record<string, any> = {}
+    for (const e of (data || [])) porAlumno[e.alumno_id] = e   // se queda la más reciente
+    return Object.values(porAlumno)
 }
 
 export async function cambiarNivelLigaAction(alumnoId: string, nuevoNivel: number | null) {

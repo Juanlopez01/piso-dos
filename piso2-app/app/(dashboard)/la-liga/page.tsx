@@ -28,7 +28,8 @@ import {
     inscribirPadronLigaAction,
     getNombresPerfilesAction,
     guardarCuotaLigaMesAction,
-    eliminarCuotaLigaMesAction
+    eliminarCuotaLigaMesAction,
+    getEvaluacionesDeMateriaAction
 } from '@/app/actions/liga'
 
 import {
@@ -749,11 +750,11 @@ function LaLigaContent() {
             const { data: perfiles } = await supabase.from('profiles').select('id, nombre_completo, email, rol, nivel_liga').eq('rol', 'alumno').eq('nivel_liga', materia.liga_nivel)
             const alumnosReales = perfiles ? perfiles.filter((p: any) => p.nombre_completo && p.nombre_completo.trim() !== '') : []
             const cuatrimestreActual = '2026-1'
-            const { data: evaluaciones } = await supabase.from('liga_evaluaciones').select('alumno_id, nota_final, aprobado').eq('clase_id', materia.id).eq('cuatrimestre', cuatrimestreActual)
+            // Notas de la materia juntando TODAS sus clases del cuatrimestre (no solo el mes actual).
+            const evaluaciones = await getEvaluacionesDeMateriaAction(materia.id, cuatrimestreActual)
 
-            // 🚀 FIX: EL NOMBRE DEL CAMPO ES evaluacion
             const alumnosMapeados = alumnosReales.map((perfil: any) => {
-                const evalExistente = evaluaciones?.find((e: any) => e.alumno_id === perfil.id)
+                const evalExistente = (evaluaciones as any[])?.find((e: any) => e.alumno_id === perfil.id)
                 return { ...perfil, evaluacion: evalExistente || null }
             })
             setAlumnosList(alumnosMapeados)
@@ -765,14 +766,13 @@ function LaLigaContent() {
         setObservaciones('')
         const notasIniciales: Record<string, number> = {}
 
+        // La nota ya viene completa desde cargarAlumnos (criterios + observaciones),
+        // resuelta a nivel materia del cuatrimestre. Prellenamos con eso.
         if (alumno.evaluacion) {
-            const { data: evalCompleta } = await supabase.from('liga_evaluaciones').select('criterios_notas, observaciones_docente').eq('alumno_id', alumno.id).eq('clase_id', selectedMateria.id).single()
-            if (evalCompleta) {
-                setNotas(evalCompleta.criterios_notas || {})
-                setObservaciones(evalCompleta.observaciones_docente || '')
-                setEvalModalOpen(true)
-                return
-            }
+            setNotas(alumno.evaluacion.criterios_notas || {})
+            setObservaciones(alumno.evaluacion.observaciones_docente || '')
+            setEvalModalOpen(true)
+            return
         }
 
         data?.criterios.forEach((c: any) => notasIniciales[c.nombre] = 0)
