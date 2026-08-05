@@ -221,10 +221,11 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
         if (evals) misEvaluaciones = evals
     }
 
-    // Clave normalizada (ignora espacios y mayúsculas del nombre) para que
-    // "FLEX Y FUERZA", "FLEX Y FUERZA " y "Flex y fuerza " sean la MISMA materia,
-    // y para matchear la nota por materia+nivel (no por el clase_id de un mes puntual).
-    const normKey = (nombre: string, nivel: any) => `${(nombre || '').trim().toUpperCase()}_N${nivel || 1}`
+    // Clave normalizada (ignora espacios, mayúsculas y ACENTOS del nombre) para que
+    // "TECNICA CLASICA", "TÉCNICA CLÁSICA" y "Técnica Clásica " sean la MISMA materia
+    // (idem "FLEX Y FUERZA"), y para matchear la nota por materia+nivel (no por el
+    // clase_id de un mes puntual).
+    const normKey = (nombre: string, nivel: any) => `${(nombre || '').trim().normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()}_N${nivel || 1}`
 
     const disciplinasMap: Record<string, any> = {}
     if (dataClases) {
