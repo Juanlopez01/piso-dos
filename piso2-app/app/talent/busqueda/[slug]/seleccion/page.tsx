@@ -83,11 +83,18 @@ function PrintCandidato({ p }: { p: Postulante }) {
     const sexoLabel = sexoLabelDe(p.sexo)
     const chips = [p.rubro, p.edad != null ? `${p.edad} años` : null, p.altura != null ? `${p.altura} cm` : null, p.nacionalidad, sexoLabel].filter(Boolean)
     return (
-        <div style={{ breakInside: 'avoid', display: 'flex', gap: '14px', border: '1px solid #e5e5e5', borderRadius: '10px', padding: '12px', marginBottom: '12px' }}>
-            <div style={{ width: '110px', height: '146px', flex: 'none', background: '#f5f5f5', borderRadius: '6px', overflow: 'hidden' }}>
-                {p.fotos[0] && <img src={p.fotos[0]} alt={p.nombre} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ breakInside: 'avoid', border: '1px solid #e5e5e5', borderRadius: '10px', padding: '12px', marginBottom: '12px' }}>
+            {/* Hasta 3 fotos, una al lado de la otra */}
+            {p.fotos.length > 0 && (
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                    {p.fotos.slice(0, 3).map((f, i) => (
+                        <div key={i} style={{ flex: 1, height: '150px', background: '#f5f5f5', borderRadius: '6px', overflow: 'hidden' }}>
+                            <img src={f} alt={`${p.nombre} ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        </div>
+                    ))}
+                </div>
+            )}
+            <div style={{ minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
                     <h3 style={{ fontFamily: serif.style.fontFamily, fontSize: '17px', margin: 0 }}>{p.nombre}</h3>
                     <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', color: '#111' }}>#{p.codigo}</span>
