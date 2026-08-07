@@ -364,6 +364,71 @@ export async function eliminarMarcaAction(id: string) {
 }
 
 // ============================================================================
+// SHOWS — obras/producciones con video resumen y descripción
+// ============================================================================
+export type ShowPublico = { id: string; titulo: string; descripcion: string | null; video_url: string | null; portada_url: string | null }
+
+export async function getShowsPublicosAction(): Promise<ShowPublico[]> {
+    const admin = getAdminClient()
+    const { data } = await admin
+        .from('talent_shows')
+        .select('id, titulo, descripcion, video_url, portada_url')
+        .eq('activo', true)
+        .order('orden', { ascending: true })
+        .order('created_at', { ascending: false })
+    return (data || []) as ShowPublico[]
+}
+
+export async function listShowsAdminAction() {
+    const perm = await requireAdmin()
+    if (!perm.ok) return []
+    const admin = getAdminClient()
+    const { data } = await admin.from('talent_shows').select('*').order('orden', { ascending: true }).order('created_at', { ascending: false })
+    return data || []
+}
+
+export async function upsertShowAction(payload: { id?: string; titulo: string; descripcion?: string; video_url?: string; portada_url?: string; orden?: number; activo?: boolean }) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    if (!payload.titulo?.trim()) return { success: false, error: 'Falta el título' }
+    const admin = getAdminClient()
+    const row = {
+        titulo: payload.titulo.trim(),
+        descripcion: payload.descripcion?.trim() || null,
+        video_url: payload.video_url?.trim() || null,
+        portada_url: payload.portada_url?.trim() || null,
+        orden: Number(payload.orden) || 0,
+        activo: payload.activo !== false,
+    }
+    const { error } = payload.id
+        ? await admin.from('talent_shows').update(row).eq('id', payload.id)
+        : await admin.from('talent_shows').insert(row)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+export async function toggleShowActivoAction(id: string, activo: boolean) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('talent_shows').update({ activo }).eq('id', id)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+export async function eliminarShowAction(id: string) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+    const { data: s } = await admin.from('talent_shows').select('portada_url').eq('id', id).single()
+    const { error } = await admin.from('talent_shows').delete().eq('id', id)
+    if (error) return { success: false, error: error.message }
+    const path = s?.portada_url?.split('/talent/')[1]
+    if (path) await admin.storage.from('talent').remove([decodeURIComponent(path)])
+    return { success: true }
+}
+
+// ============================================================================
 // BÚSQUEDAS PERSONALIZADAS (audiciones / castings)
 // ============================================================================
 
@@ -787,9 +852,9 @@ export async function aceptarPostBusquedaAction(id: string) {
 // ============================================================================
 export async function getTalentDashboardDataAction() {
     const perm = await requireAdmin()
-    if (!perm.ok) return { talentos: [], marcas: [], postulaciones: [], busquedas: [] }
+    if (!perm.ok) return { talentos: [], marcas: [], postulaciones: [], busquedas: [], shows: [] }
     const admin = getAdminClient()
-    const [talentos, marcas, postulaciones, busquedas] = await Promise.all([
+    const [talentos, marcas, postulaciones, busquedas, shows] = await Promise.all([
         admin.from('talentos').select('*')
             .order('categoria', { ascending: true }).order('destacado', { ascending: false })
             .order('orden', { ascending: true }).order('nombre', { ascending: true }),
@@ -799,11 +864,14 @@ export async function getTalentDashboardDataAction() {
             .order('estado', { ascending: true }).order('created_at', { ascending: false }),
         admin.from('talent_busquedas').select('*')
             .order('activa', { ascending: false }).order('created_at', { ascending: false }),
+        admin.from('talent_shows').select('*')
+            .order('orden', { ascending: true }).order('created_at', { ascending: false }),
     ])
     return {
         talentos: talentos.data || [],
         marcas: marcas.data || [],
         postulaciones: await adjuntarTelefonoPerfil(admin, postulaciones.data || []),
         busquedas: busquedas.data || [],
+        shows: shows.data || [],
     }
 }

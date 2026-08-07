@@ -2,9 +2,9 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { Instagram, Mail, Loader2, ArrowLeft, MapPin, CalendarDays, ArrowRight } from 'lucide-react'
+import { Instagram, Mail, Loader2, ArrowLeft, MapPin, CalendarDays, ArrowRight, Play } from 'lucide-react'
 import { Playfair_Display, Montserrat } from 'next/font/google'
-import { getTalentosPublicosAction, getMarcasPublicasAction, getBusquedasActivasAction, type TalentoPublico, type MarcaPublica, type BusquedaPublica } from '@/app/actions/talent'
+import { getTalentosPublicosAction, getMarcasPublicasAction, getBusquedasActivasAction, getShowsPublicosAction, type TalentoPublico, type MarcaPublica, type BusquedaPublica, type ShowPublico } from '@/app/actions/talent'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['400', '500', '600', '700'] })
 const sans = Montserrat({ subsets: ['latin'], weight: ['300', '400', '500', '600'] })
@@ -18,15 +18,26 @@ const CATS = [
     { key: 'obras', label: 'Obras / Compañías' },
 ] as const
 
+// Convierte un link de YouTube/Vimeo en su URL embebible. Si no lo reconoce, null.
+function toEmbed(url: string | null): string | null {
+    if (!url) return null
+    const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([\w-]{11})/)
+    if (yt) return `https://www.youtube.com/embed/${yt[1]}`
+    const vim = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)
+    if (vim) return `https://player.vimeo.com/video/${vim[1]}`
+    return null
+}
+
 export default function TalentHome() {
     const [talentos, setTalentos] = useState<TalentoPublico[]>([])
     const [marcas, setMarcas] = useState<MarcaPublica[]>([])
     const [busquedas, setBusquedas] = useState<BusquedaPublica[]>([])
+    const [shows, setShows] = useState<ShowPublico[]>([])
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
-        Promise.all([getTalentosPublicosAction(), getMarcasPublicasAction(), getBusquedasActivasAction()])
-            .then(([t, m, b]) => { setTalentos(t); setMarcas(m); setBusquedas(b); setLoading(false) })
+        Promise.all([getTalentosPublicosAction(), getMarcasPublicasAction(), getBusquedasActivasAction(), getShowsPublicosAction()])
+            .then(([t, m, b, s]) => { setTalentos(t); setMarcas(m); setBusquedas(b); setShows(s); setLoading(false) })
             .catch(() => setLoading(false))
     }, [])
 
@@ -61,6 +72,7 @@ export default function TalentHome() {
                 <nav className="mt-8 flex flex-wrap items-center justify-center gap-6 md:gap-10 text-[10px] md:text-[11px] font-semibold tracking-[0.2em] uppercase text-neutral-600">
                     <a href="#inicio" className="hover:text-black transition-colors">Inicio</a>
                     <a href="#nosotros" className="hover:text-black transition-colors">Nosotros</a>
+                    <a href="#shows" className="hover:text-black transition-colors">Shows</a>
                     <a href="#busquedas" className="hover:text-black transition-colors">Búsquedas</a>
                     <a href="#marcas" className="hover:text-black transition-colors">Con quién trabajamos</a>
                     <Link href="/talent/postular" className="border border-neutral-900 px-4 py-2 hover:bg-neutral-900 hover:text-white transition-colors">Sumate</Link>
@@ -110,6 +122,45 @@ export default function TalentHome() {
                                         {t.fotos?.[0] && <img src={t.fotos[0]} alt={t.nombre} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />}
                                     </Link>
                                 ))}
+                            </div>
+                        </section>
+                    )}
+
+                    {/* SHOWS */}
+                    {shows.length > 0 && (
+                        <section id="shows" className="max-w-6xl mx-auto px-6 md:px-10 py-16 md:py-24">
+                            <div className="text-center mb-10">
+                                <h2 className={`${serif.className} text-3xl md:text-5xl tracking-[0.2em] uppercase`}>Shows</h2>
+                                <p className="text-neutral-500 text-sm mt-3 max-w-xl mx-auto">Nuestras obras y producciones.</p>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10">
+                                {shows.map(s => {
+                                    const embed = toEmbed(s.video_url)
+                                    return (
+                                        <div key={s.id} className="flex flex-col">
+                                            <div className="aspect-video bg-neutral-900 rounded-2xl overflow-hidden relative">
+                                                {embed ? (
+                                                    <iframe src={embed} title={s.titulo} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+                                                ) : s.video_url ? (
+                                                    <a href={s.video_url} target="_blank" rel="noreferrer" className="w-full h-full flex items-center justify-center group">
+                                                        {s.portada_url
+                                                            ? <img src={s.portada_url} alt={s.titulo} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+                                                            : null}
+                                                        <span className="absolute inset-0 flex items-center justify-center">
+                                                            <span className="w-16 h-16 rounded-full bg-white/90 text-neutral-900 flex items-center justify-center group-hover:scale-110 transition-transform"><Play size={26} className="ml-1" /></span>
+                                                        </span>
+                                                    </a>
+                                                ) : s.portada_url ? (
+                                                    <img src={s.portada_url} alt={s.titulo} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center text-neutral-500 text-xs uppercase tracking-widest">Sin video</div>
+                                                )}
+                                            </div>
+                                            <h3 className={`${serif.className} text-xl md:text-2xl tracking-wide mt-5`}>{s.titulo}</h3>
+                                            {s.descripcion && <p className="text-neutral-500 text-sm leading-relaxed mt-2 whitespace-pre-line">{s.descripcion}</p>}
+                                        </div>
+                                    )
+                                })}
                             </div>
                         </section>
                     )}

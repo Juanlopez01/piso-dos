@@ -7,6 +7,7 @@ import { optimizeImage } from '@/utils/optimizeImage'
 import {
     listTalentosAdminAction, upsertTalentoAction, eliminarTalentoAction, toggleTalentoActivoAction,
     listMarcasAdminAction, upsertMarcaAction, toggleMarcaActivoAction, eliminarMarcaAction,
+    listShowsAdminAction, upsertShowAction, toggleShowActivoAction, eliminarShowAction,
     listPostulacionesAction, aceptarPostulacionAction, standbyPostulacionAction, eliminarPostulacionAction,
     listBusquedasAdminAction, upsertBusquedaAction, toggleBusquedaActivaAction, eliminarBusquedaAction,
     listPostulacionesBusquedaAction, cambiarEstadoPostBusquedaAction, eliminarPostBusquedaAction, aceptarPostBusquedaAction,
@@ -53,7 +54,7 @@ export default function TalentsAdminPage() {
     const [supabase] = useState(() => createClient())
     const { userRole, isLoading: loadingCtx } = useCash()
 
-    const [vista, setVista] = useState<'talentos' | 'marcas' | 'solicitudes' | 'busquedas'>('talentos')
+    const [vista, setVista] = useState<'talentos' | 'marcas' | 'shows' | 'solicitudes' | 'busquedas'>('talentos')
     const [talentos, setTalentos] = useState<Talento[]>([])
     const [loading, setLoading] = useState(true)
     const [modalOpen, setModalOpen] = useState(false)
@@ -66,6 +67,14 @@ export default function TalentsAdminPage() {
     const [modalMarca, setModalMarca] = useState(false)
     const [marcaForm, setMarcaForm] = useState<{ id?: string; nombre: string; logo_url: string; link: string; orden: number; activo: boolean }>({ nombre: '', logo_url: '', link: '', orden: 0, activo: true })
     const [guardandoMarca, setGuardandoMarca] = useState(false)
+
+    // Shows
+    const [shows, setShows] = useState<any[]>([])
+    const [modalShow, setModalShow] = useState(false)
+    const [showForm, setShowForm] = useState<{ id?: string; titulo: string; descripcion: string; video_url: string; portada_url: string; orden: number; activo: boolean }>({ titulo: '', descripcion: '', video_url: '', portada_url: '', orden: 0, activo: true })
+    const [guardandoShow, setGuardandoShow] = useState(false)
+    const [subiendoPortada, setSubiendoPortada] = useState(false)
+    const cargarShows = () => { listShowsAdminAction().then(d => setShows(d)).catch(() => { }) }
     const [subiendoLogo, setSubiendoLogo] = useState(false)
 
     const cargar = () => {
@@ -148,6 +157,7 @@ export default function TalentsAdminPage() {
             .then(d => {
                 setTalentos(d.talentos as Talento[])
                 setMarcas(d.marcas)
+                setShows((d as any).shows || [])
                 setPostulaciones(d.postulaciones)
                 setBusquedas(d.busquedas)
             })
@@ -306,6 +316,37 @@ export default function TalentsAdminPage() {
         if (r.success) { toast.success('Eliminada'); cargarMarcas() } else toast.error(r.error || 'Error')
     }
 
+    // Shows
+    const abrirNuevoShow = () => { setShowForm({ titulo: '', descripcion: '', video_url: '', portada_url: '', orden: 0, activo: true }); setModalShow(true) }
+    const abrirEditarShow = (s: any) => { setShowForm({ id: s.id, titulo: s.titulo, descripcion: s.descripcion || '', video_url: s.video_url || '', portada_url: s.portada_url || '', orden: s.orden, activo: s.activo }); setModalShow(true) }
+    const handlePortada = async (files: FileList | null) => {
+        if (!files || !files[0]) return
+        setSubiendoPortada(true)
+        try {
+            const opt = await optimizeImage(files[0], { maxDim: 1400 })
+            const ext = opt.name.split('.').pop()
+            const path = `shows/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+            const { error } = await supabase.storage.from('talent').upload(path, opt)
+            if (error) throw error
+            setShowForm(f => ({ ...f, portada_url: supabase.storage.from('talent').getPublicUrl(path).data.publicUrl }))
+        } catch (e: any) { toast.error('Error subiendo la portada') }
+        setSubiendoPortada(false)
+    }
+    const handleGuardarShow = async () => {
+        if (!showForm.titulo.trim()) return toast.error('Poné el título del show')
+        setGuardandoShow(true)
+        const res = await upsertShowAction(showForm)
+        setGuardandoShow(false)
+        if (res.success) { toast.success('Show guardado'); setModalShow(false); cargarShows() }
+        else toast.error(res.error || 'Error')
+    }
+    const handleToggleShow = async (s: any) => { const r = await toggleShowActivoAction(s.id, !s.activo); if (r.success) cargarShows() }
+    const handleEliminarShow = async (s: any) => {
+        if (!confirm(`¿Eliminar el show "${s.titulo}"?`)) return
+        const r = await eliminarShowAction(s.id)
+        if (r.success) { toast.success('Eliminado'); cargarShows() } else toast.error(r.error || 'Error')
+    }
+
     // Disciplinas multi
     const discSeleccionadas = form.disciplina ? form.disciplina.split(',').map(s => s.trim()).filter(Boolean) : []
     const toggleDisciplina = (d: string) => {
@@ -339,6 +380,7 @@ export default function TalentsAdminPage() {
                         <div className="flex bg-neutral-100 p-1 rounded-lg">
                             <button onClick={() => setVista('talentos')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'talentos' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Talentos</button>
                             <button onClick={() => setVista('marcas')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'marcas' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Marcas</button>
+                            <button onClick={() => setVista('shows')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'shows' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Shows</button>
                             <button onClick={() => setVista('solicitudes')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${vista === 'solicitudes' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>
                                 Solicitudes
                                 {pendientesCount > 0 && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${vista === 'solicitudes' ? 'bg-white text-black' : 'bg-black text-white'}`}>{pendientesCount}</span>}
@@ -349,8 +391,8 @@ export default function TalentsAdminPage() {
                             </button>
                         </div>
                         {vista !== 'solicitudes' && (
-                            <button onClick={() => vista === 'talentos' ? abrirNuevo() : vista === 'marcas' ? abrirNuevaMarca() : abrirNuevaBusqueda()} className="bg-black text-white font-bold uppercase px-5 py-3 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center gap-2">
-                                <Plus size={16} /> {vista === 'busquedas' ? 'Nueva busqueda' : 'Nuevo'}
+                            <button onClick={() => vista === 'talentos' ? abrirNuevo() : vista === 'marcas' ? abrirNuevaMarca() : vista === 'shows' ? abrirNuevoShow() : abrirNuevaBusqueda()} className="bg-black text-white font-bold uppercase px-5 py-3 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center gap-2">
+                                <Plus size={16} /> {vista === 'busquedas' ? 'Nueva busqueda' : vista === 'shows' ? 'Nuevo show' : 'Nuevo'}
                             </button>
                         )}
                     </div>
@@ -424,6 +466,37 @@ export default function TalentsAdminPage() {
                                         <button onClick={() => abrirEditarMarca(m)} className="flex-1 bg-neutral-100 hover:bg-neutral-200 py-1.5 text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-1 rounded"><Pencil size={11} /> Editar</button>
                                         <button onClick={() => handleToggleMarca(m)} className="bg-neutral-100 hover:bg-neutral-200 p-1.5 rounded">{m.activo ? <Eye size={13} /> : <EyeOff size={13} />}</button>
                                         <button onClick={() => handleEliminarMarca(m)} className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded"><Trash2 size={13} /></button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )
+                )}
+
+                {/* SHOWS */}
+                {vista === 'shows' && (
+                    shows.length === 0 ? (
+                        <div className="py-20 text-center border-2 border-dashed border-neutral-200 rounded-2xl">
+                            <p className="text-neutral-400 font-bold uppercase text-xs">No cargaste shows todavía.</p>
+                            <button onClick={abrirNuevoShow} className="mt-5 bg-black text-white px-5 py-2.5 rounded text-[10px] font-black uppercase tracking-widest hover:bg-neutral-800 transition-colors">+ Cargar el primero</button>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {shows.map(s => (
+                                <div key={s.id} className={`border rounded-xl overflow-hidden bg-white ${s.activo ? 'border-neutral-200' : 'border-orange-300 opacity-60'}`}>
+                                    <div className="aspect-video bg-neutral-100 relative">
+                                        {s.portada_url
+                                            ? <img src={s.portada_url} alt={s.titulo} className="w-full h-full object-cover" />
+                                            : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-[10px] uppercase tracking-widest">{s.video_url ? 'Con video' : 'Sin portada'}</div>}
+                                    </div>
+                                    <div className="p-4">
+                                        <p className="text-sm font-bold uppercase truncate">{s.titulo}</p>
+                                        {s.descripcion && <p className="text-[11px] text-neutral-500 line-clamp-2 mt-1">{s.descripcion}</p>}
+                                        <div className="flex items-center gap-1 mt-3">
+                                            <button onClick={() => abrirEditarShow(s)} className="flex-1 bg-neutral-100 hover:bg-neutral-200 py-1.5 text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-1 rounded"><Pencil size={11} /> Editar</button>
+                                            <button onClick={() => handleToggleShow(s)} className="bg-neutral-100 hover:bg-neutral-200 p-1.5 rounded">{s.activo ? <Eye size={13} /> : <EyeOff size={13} />}</button>
+                                            <button onClick={() => handleEliminarShow(s)} className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded"><Trash2 size={13} /></button>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
@@ -887,6 +960,57 @@ export default function TalentsAdminPage() {
                         <div className="flex gap-3 mt-8">
                             <button onClick={handleGuardarMarca} disabled={guardandoMarca || subiendoLogo} className="flex-1 bg-black text-white font-bold uppercase py-4 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">{guardandoMarca ? <Loader2 size={16} className="animate-spin" /> : 'Guardar'}</button>
                             <button onClick={() => setModalMarca(false)} className="border border-neutral-300 px-6 font-bold uppercase text-xs tracking-widest hover:bg-neutral-100">Cancelar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL SHOW */}
+            {modalShow && (
+                <div className="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto" onClick={() => !guardandoShow && setModalShow(false)}>
+                    <div className="bg-white w-full max-w-lg my-8 rounded-2xl p-6 md:p-8 relative max-h-[90dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setModalShow(false)} className="absolute top-5 right-5 text-neutral-400 hover:text-black"><X size={20} /></button>
+                        <h3 className={`${serif.className} text-2xl tracking-wide mb-6`}>{showForm.id ? 'Editar show' : 'Nuevo show'}</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Título *</label>
+                                <input value={showForm.titulo} onChange={e => setShowForm({ ...showForm, titulo: e.target.value })} placeholder="Ej: Cascanueces 2026" className={inputCls} />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Descripción</label>
+                                <textarea value={showForm.descripcion} onChange={e => setShowForm({ ...showForm, descripcion: e.target.value })} className={`${inputCls} min-h-[80px] resize-none`} placeholder="Breve descripción del show" />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Link del video resumen</label>
+                                <input type="url" value={showForm.video_url} onChange={e => setShowForm({ ...showForm, video_url: e.target.value })} placeholder="YouTube o Vimeo (se muestra embebido)" className={inputCls} />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 flex items-center justify-between"><span>Portada (opcional)</span>{subiendoPortada && <span className="text-neutral-400 normal-case flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> subiendo…</span>}</label>
+                                <div className="mt-2 flex items-center gap-3">
+                                    <div className="w-28 aspect-video rounded-lg overflow-hidden bg-neutral-100 border border-neutral-200 flex items-center justify-center shrink-0">
+                                        {showForm.portada_url ? <img src={showForm.portada_url} alt="" className="w-full h-full object-cover" /> : <span className="text-neutral-300 text-[9px] uppercase">sin portada</span>}
+                                    </div>
+                                    <label className="flex-1 border border-dashed border-neutral-300 rounded-lg py-3 text-center text-[10px] uppercase tracking-widest font-semibold text-neutral-500 cursor-pointer hover:border-neutral-900 transition-colors">
+                                        Subir imagen
+                                        <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e => handlePortada(e.target.files)} />
+                                    </label>
+                                </div>
+                                <p className="text-[9px] text-neutral-400 mt-1">Si el video es de YouTube/Vimeo, la portada es opcional (se muestra el reproductor).</p>
+                            </div>
+                            <div className="flex items-center justify-between pt-1">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" checked={showForm.activo} onChange={e => setShowForm({ ...showForm, activo: e.target.checked })} className="accent-black w-4 h-4" />
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Visible en la web</span>
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Orden</span>
+                                    <input type="number" value={showForm.orden} onChange={e => setShowForm({ ...showForm, orden: Number(e.target.value) })} className="w-16 bg-white border border-neutral-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-black" />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex gap-3 mt-8">
+                            <button onClick={handleGuardarShow} disabled={guardandoShow || subiendoPortada} className="flex-1 bg-black text-white font-bold uppercase py-4 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">{guardandoShow ? <Loader2 size={16} className="animate-spin" /> : 'Guardar'}</button>
+                            <button onClick={() => setModalShow(false)} className="border border-neutral-300 px-6 font-bold uppercase text-xs tracking-widest hover:bg-neutral-100">Cancelar</button>
                         </div>
                     </div>
                 </div>
