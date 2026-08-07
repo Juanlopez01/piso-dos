@@ -127,8 +127,8 @@ export default function ExplorarClasesPage() {
     const { userId, isLoading: contextLoading, userRole } = useCash()
 
     const safeRole = String(userRole || '').toLowerCase().trim();
-    // 'vendedor' entra como solo-vista (ve la cartelera, no inscribe ni se inscribe).
-    const esStaff = ['admin', 'recepcion', 'profesor', 'vendedor'].includes(safeRole);
+    // 'vendedor' y 'auxiliar' entran como staff de solo-vista (ven la cartelera general, no se inscriben ellos).
+    const esStaff = ['admin', 'recepcion', 'profesor', 'vendedor', 'auxiliar'].includes(safeRole);
 
     const { data, isLoading, mutate: mutateCartelera } = useSWR<CarteleraData>(
         !contextLoading ? ['cartelera', userId] : null,

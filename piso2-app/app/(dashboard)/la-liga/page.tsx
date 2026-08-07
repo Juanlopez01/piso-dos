@@ -840,8 +840,8 @@ function LaLigaContent() {
         )
     }
 
-    // 🚀 ESCUDO MÁGICO: ESCURRIMOS AL COORDINADOR SI NO TIENE LA LLAVE 'liga'
-    if (userRole === 'coordinador' && !hasLigaAccess) {
+    // 🚀 ESCUDO: coordinador sin la llave 'liga' → afuera. El auxiliar NO maneja La Liga.
+    if ((userRole === 'coordinador' || userRole === 'auxiliar') && !hasLigaAccess) {
         return (
             <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8 flex flex-col items-center justify-center relative overflow-hidden">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pink-500/5 rounded-full blur-[100px] pointer-events-none" />

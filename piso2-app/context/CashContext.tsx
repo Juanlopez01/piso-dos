@@ -66,9 +66,12 @@ export function CashProvider({ children }: { children: ReactNode }) {
                 let compAccess = false
                 const misPermisos: string[] = (profile?.permisos_grupos as string[]) ?? []
 
-                if (rolReal === 'admin' || rolReal === 'recepcion' || rolReal === 'auxiliar') {
+                if (rolReal === 'admin' || rolReal === 'recepcion') {
                     ligaAccess = true
                     compAccess = true
+                } else if (rolReal === 'auxiliar') {
+                    ligaAccess = false   // el auxiliar NO maneja La Liga
+                    compAccess = true    // pero sí Grupos / Compañías
                 } else if (rolReal === 'coordinador') {
                     ligaAccess = misPermisos.includes('liga')
                     compAccess = misPermisos.some(p => p !== 'liga')

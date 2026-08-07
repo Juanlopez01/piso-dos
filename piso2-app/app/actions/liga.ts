@@ -169,7 +169,7 @@ export async function eliminarAvisoAction(id: string) {
 // Quiénes pueden cargar notas. Debe coincidir con el `isStaff` que muestra el
 // botón de evaluar en la UI (la-liga/page.tsx), para que quien ve el botón
 // pueda guardar sin toparse con un error de permisos.
-const ROLES_EVALUAN = ['admin', 'recepcion', 'auxiliar', 'coordinador', 'profesor']
+const ROLES_EVALUAN = ['admin', 'recepcion', 'coordinador', 'profesor']
 
 // Normaliza el nombre de materia (ignora espacios, mayúsculas y acentos), igual
 // que en la UI, para agrupar "TECNICA CLASICA" / "Técnica Clásica " como una sola.
