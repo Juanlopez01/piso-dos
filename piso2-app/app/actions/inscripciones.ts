@@ -593,32 +593,34 @@ export async function agregarPagoInscripcionAction(inscripcionId: string, monto:
         })
         if (errCaja) throw new Error('Error al registrar en caja')
 
-        // 2. LÓGICA INFALIBLE USANDO LA COLUMNA OFICIAL
-        let valorAAgregarAClaseActual = Number(monto); // Por defecto va entero si es clase suelta
+        // 2. CALCULAMOS EL NUEVO VALOR POR CLASE
+        // valor_credito = lo realmente cobrado por clase. Para un pack es
+        // monto_abonado / cantidad (NO se le suma la fracción sobre el nominal,
+        // que era el bug: 12.500 + 6.250 = 18.750 en vez de 45.000/4 = 11.250).
+        let nuevoValorCredito = Number(insc.valor_credito) + Number(monto); // default: clase suelta acumula
 
         if (insc.pack_usado_id) {
-            // Vamos a buscar el pack usando el ID directo
             const { data: packAfectado } = await supabaseAdmin
                 .from('alumno_packs')
                 .select('*')
                 .eq('id', insc.pack_usado_id)
                 .single();
 
-            if (packAfectado && packAfectado.cantidad_inicial > 1) {
-                // Dividimos la plata
+            if (packAfectado && Number(packAfectado.cantidad_inicial) > 1) {
                 const divisor = Number(packAfectado.cantidad_inicial);
-                valorAAgregarAClaseActual = Number(monto) / divisor;
+                const nuevoMonto = Number(packAfectado.monto_abonado) + Number(monto);
 
                 // Le sumamos la plata ingresada al pack maestro
-                await supabaseAdmin.from('alumno_packs').update({
-                    monto_abonado: Number(packAfectado.monto_abonado) + Number(monto)
-                }).eq('id', packAfectado.id);
+                await supabaseAdmin.from('alumno_packs').update({ monto_abonado: nuevoMonto }).eq('id', packAfectado.id);
+
+                // El valor por clase queda en línea con lo cobrado del pack
+                nuevoValorCredito = nuevoMonto / divisor;
             }
         }
 
-        // 3. ACTUALIZAMOS LA INSCRIPCIÓN ACTUAL (Con su fracción correspondiente o el monto total si era suelta)
+        // 3. ACTUALIZAMOS LA INSCRIPCIÓN
         const { error: errUpd } = await supabaseAdmin.from('inscripciones').update({
-            valor_credito: Number(insc.valor_credito) + valorAAgregarAClaseActual,
+            valor_credito: nuevoValorCredito,
             saldo_pendiente: liquidarDeuda ? 0 : 1
         }).eq('id', inscripcionId)
 
