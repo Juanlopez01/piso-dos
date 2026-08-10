@@ -84,10 +84,10 @@ function MobileNavContent() {
             return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
         }
 
-        // 🚀 ROL AUXILIAR: Mismo menú cerrado que recepción, ve Grupos pero NUNCA La Liga.
+        // 🚀 ROL AUXILIAR: Mismo menú cerrado que recepción, ve Grupos y Alquileres pero NUNCA La Liga.
         if (userRole === 'auxiliar') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'Grupos'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil', 'Grupos'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'Grupos', 'Alquileres'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil', 'Grupos', 'Alquileres'].includes(item.name)
         }
 
         // 🚀 ROL COORDINADOR: Ve La Liga y Grupos (sujetos a su llavero que ya validamos arriba), y su perfil.
