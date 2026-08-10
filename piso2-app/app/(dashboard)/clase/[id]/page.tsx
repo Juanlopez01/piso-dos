@@ -14,7 +14,8 @@ import {
     Eye,
     Receipt,
     ChevronRight,
-    Pencil
+    Pencil,
+    Repeat
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -29,7 +30,9 @@ import {
     enviarNotificacionClaseAction,
     setEstadoAsistenciaAction,
     agregarPagoInscripcionAction,
-    editarValorInscripcionAction
+    editarValorInscripcionAction,
+    getPacksConvertiblesAction,
+    convertirAsistenteAPackAction
 } from '@/app/actions/inscripciones'
 
 import { toggleMiembroCompaniaAction, getPlanesCompaniaAction, asignarPlanMiembroAction } from '@/app/actions/companias'
@@ -182,6 +185,49 @@ export default function ClaseDetallePage() {
     const [notifMessage, setNotifMessage] = useState('')
     const [sendingNotif, setSendingNotif] = useState(false)
     const [crearCuenta, setCrearCuenta] = useState(false)
+
+    // Pasar una clase suelta a pack (desde el panel de la clase)
+    const [convInsc, setConvInsc] = useState<any | null>(null)
+    const [convPacks, setConvPacks] = useState<any[]>([])
+    const [convForm, setConvForm] = useState({ productoId: '', yaPago: '', diferencia: '', metodo: 'efectivo', nombre: '', apellido: '', email: '', dni: '', telefono: '' })
+    const [convirtiendo, setConvirtiendo] = useState(false)
+
+    const abrirConvertir = async (insc: any) => {
+        const nomInv = insc.user ? '' : (insc.nombre_invitado || '')
+        const partes = nomInv.trim().split(/\s+/).filter(Boolean)
+        setConvForm({
+            productoId: '', yaPago: String(insc.valor_credito || ''), diferencia: '', metodo: 'efectivo',
+            nombre: insc.user ? '' : (partes[0] || ''), apellido: insc.user ? '' : partes.slice(1).join(' '),
+            email: '', dni: '', telefono: ''
+        })
+        setConvInsc(insc)
+        if (convPacks.length === 0) { const p = await getPacksConvertiblesAction(); setConvPacks((p as any[]) || []) }
+    }
+
+    const onConvertPackSelect = (productoId: string) => {
+        const prod = convPacks.find(p => p.id === productoId)
+        const dif = prod ? Math.max(0, Number(prod.precio) - (Number(convForm.yaPago) || 0)) : 0
+        setConvForm(f => ({ ...f, productoId, diferencia: String(dif) }))
+    }
+
+    const handleConvertir = async () => {
+        if (!convInsc) return
+        if (!convForm.productoId) return toast.error('Elegí el pack destino')
+        const esInvitado = !convInsc.user
+        if (esInvitado && !convForm.email.trim()) return toast.error('Completá el email para crear la cuenta del alumno')
+        setConvirtiendo(true)
+        const res = await convertirAsistenteAPackAction({
+            inscripcionId: convInsc.id,
+            productoId: convForm.productoId,
+            yaPago: Number(convForm.yaPago) || 0,
+            diferencia: Number(convForm.diferencia) || 0,
+            metodoPago: convForm.metodo,
+            nuevoUsuario: esInvitado ? { nombre: convForm.nombre, apellido: convForm.apellido, email: convForm.email, dni: convForm.dni, telefono: convForm.telefono } : undefined
+        })
+        setConvirtiendo(false)
+        if (res.success) { toast.success('Clase suelta convertida a pack'); setConvInsc(null); mutate() }
+        else toast.error(res.error || 'Error al convertir')
+    }
 
     const [guestForm, setGuestForm] = useState({
         nombre: '', apellido: '', email: '', telefono: '', dni: '',
@@ -626,6 +672,15 @@ export default function ClaseDetallePage() {
                                                     <AlertTriangle size={12} /> Adeuda
                                                 </button>
                                             )}
+                                            {!esGrupoOFormacion && (!(insc as any).pack || Number((insc as any).pack?.cantidad_inicial) === 1) && (
+                                                <button
+                                                    onClick={() => abrirConvertir(insc)}
+                                                    className="bg-purple-500/80 text-white text-[9px] md:text-[10px] font-black uppercase px-2 py-1 rounded flex items-center gap-1 hover:bg-purple-500 transition-colors"
+                                                    title="Pasar esta clase suelta a un pack (cobra la diferencia)"
+                                                >
+                                                    <Repeat size={12} /> A Pack
+                                                </button>
+                                            )}
                                         </div>
                                         <div className="flex items-center gap-2 mt-1">
                                             {!esGrupoOFormacion &&
@@ -923,6 +978,68 @@ export default function ClaseDetallePage() {
                     </div>
                 </div>
             )}
+
+            {/* MODAL SUELTA → PACK */}
+            {convInsc && (() => {
+                const esInvitado = !convInsc.user
+                const prodSel = convPacks.find(p => p.id === convForm.productoId)
+                const nombreAtt = convInsc.user ? (convInsc.user.nombre_completo || [convInsc.user.nombre, convInsc.user.apellido].filter(Boolean).join(' ')) : (convInsc.nombre_invitado || 'Invitado')
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-md p-4" onClick={() => setConvInsc(null)}>
+                        <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-3xl p-6 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                            <div className="flex justify-between mb-4">
+                                <h3 className="text-xl font-black uppercase text-white flex items-center gap-2"><Repeat size={20} className="text-purple-400" /> Suelta → Pack</h3>
+                                <button onClick={() => setConvInsc(null)}><X size={24} /></button>
+                            </div>
+                            <p className="text-[10px] font-bold uppercase text-gray-500 mb-4">Alumno: <span className="text-white">{nombreAtt}</span></p>
+
+                            {esInvitado && (
+                                <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-3 mb-4 space-y-3">
+                                    <p className="text-[10px] text-yellow-200/80 font-bold uppercase">Sin cuenta — creá el usuario para pasarlo a pack</p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <input placeholder="Nombre" value={convForm.nombre} onChange={e => setConvForm({ ...convForm, nombre: e.target.value })} className="bg-[#111] border border-white/10 rounded-lg p-2.5 text-white text-xs outline-none focus:border-purple-400" />
+                                        <input placeholder="Apellido" value={convForm.apellido} onChange={e => setConvForm({ ...convForm, apellido: e.target.value })} className="bg-[#111] border border-white/10 rounded-lg p-2.5 text-white text-xs outline-none focus:border-purple-400" />
+                                    </div>
+                                    <input placeholder="Email *" value={convForm.email} onChange={e => setConvForm({ ...convForm, email: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-lg p-2.5 text-white text-xs outline-none focus:border-purple-400" />
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <input placeholder="DNI (será la contraseña)" value={convForm.dni} onChange={e => setConvForm({ ...convForm, dni: e.target.value })} className="bg-[#111] border border-white/10 rounded-lg p-2.5 text-white text-xs outline-none focus:border-purple-400" />
+                                        <input placeholder="Teléfono" value={convForm.telefono} onChange={e => setConvForm({ ...convForm, telefono: e.target.value })} className="bg-[#111] border border-white/10 rounded-lg p-2.5 text-white text-xs outline-none focus:border-purple-400" />
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Pasar al pack</label>
+                                    <select value={convForm.productoId} onChange={e => onConvertPackSelect(e.target.value)} className="w-full mt-1 bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-purple-400">
+                                        <option value="">Elegí el pack destino...</option>
+                                        {convPacks.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.creditos} clases) - ${Number(p.precio).toLocaleString()}</option>)}
+                                    </select>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Ya pagó ($)</label>
+                                        <input type="number" value={convForm.yaPago} onChange={e => { const y = e.target.value; setConvForm(f => { const prod = convPacks.find(p => p.id === f.productoId); const dif = prod ? Math.max(0, Number(prod.precio) - (Number(y) || 0)) : 0; return { ...f, yaPago: y, diferencia: String(dif) } }) }} className="w-full mt-1 bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-black outline-none focus:border-purple-400" />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Diferencia ($)</label>
+                                        <input type="number" value={convForm.diferencia} onChange={e => setConvForm({ ...convForm, diferencia: e.target.value })} className="w-full mt-1 bg-[#111] border border-white/10 rounded-xl p-3 text-purple-300 text-sm font-black outline-none focus:border-purple-400" />
+                                    </div>
+                                </div>
+                                {prodSel && <p className="text-[11px] text-gray-400">Le quedarán <b className="text-white">{Number(prodSel.creditos) - 1}</b> créditos (descontando la clase de hoy).</p>}
+                                <div className="grid grid-cols-3 gap-2">
+                                    {['efectivo', 'transferencia', 'mercadopago'].map(m => (
+                                        <button key={m} type="button" onClick={() => setConvForm({ ...convForm, metodo: m })} className={`p-3 rounded-xl border text-[10px] font-black uppercase transition-all ${convForm.metodo === m ? 'bg-purple-500 border-purple-500 text-white' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}>{m === 'mercadopago' ? 'Tarjeta/MP' : m}</button>
+                                    ))}
+                                </div>
+                                <button disabled={convirtiendo || !convForm.productoId} onClick={handleConvertir} className="w-full bg-purple-500 text-white font-black uppercase py-4 rounded-xl hover:bg-purple-600 transition-all text-xs tracking-widest flex items-center justify-center gap-2 disabled:opacity-50">
+                                    {convirtiendo ? <Loader2 className="animate-spin" size={16} /> : <Repeat size={16} />} Convertir y cobrar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            })()}
 
             {/* MODAL NOTIFICACIÓN */}
             {isNotifModalOpen && (

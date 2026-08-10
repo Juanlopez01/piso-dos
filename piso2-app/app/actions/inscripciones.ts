@@ -3,6 +3,7 @@
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
+import { crearAlumnoDesdeRecepcionAction } from './usuarios'
 
 // 🚀 CLIENTE DIOS: Bypassea los escudos de seguridad (RLS)
 const getAdminClient = () => {
@@ -647,6 +648,120 @@ export async function editarValorInscripcionAction(inscripcionId: string, nuevoV
 
         if (error) throw new Error(error.message)
 
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
+// Packs (más de 1 clase) que se pueden elegir como destino de una conversión.
+export async function getPacksConvertiblesAction() {
+    const admin = getAdminClient()
+    const { data } = await admin.from('productos')
+        .select('id, nombre, tipo_clase, creditos, precio, pase_referencia')
+        .gt('creditos', 1)
+        .eq('activo', true)
+        .order('tipo_clase', { ascending: true })
+        .order('creditos', { ascending: true })
+    return data || []
+}
+
+// Desde el panel de la clase: pasa a un asistente de "clase suelta" a un PACK.
+// Si el asistente es invitado (sin cuenta), primero le crea el usuario.
+// Cobra la diferencia y le deja los créditos del pack menos la clase ya usada.
+export async function convertirAsistenteAPackAction(payload: {
+    inscripcionId: string
+    productoId: string
+    yaPago: number
+    diferencia: number
+    metodoPago: string
+    nuevoUsuario?: { nombre: string; apellido: string; email: string; dni: string; telefono: string }
+}) {
+    const supabase = await createClient()
+    const admin = getAdminClient()
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+        const operadoraId = session.user.id
+
+        const { data: insc } = await admin.from('inscripciones')
+            .select('id, user_id, pack_usado_id, nombre_invitado, clase_id')
+            .eq('id', payload.inscripcionId).single()
+        if (!insc) throw new Error('No se encontró la inscripción')
+
+        const { data: prod } = await admin.from('productos')
+            .select('id, nombre, tipo_clase, creditos, precio, pase_referencia')
+            .eq('id', payload.productoId).single()
+        if (!prod) throw new Error('No se encontró el pack destino')
+        if (Number(prod.creditos) <= 1) throw new Error('El destino tiene que ser un pack (más de 1 clase)')
+
+        const delta = Number(prod.creditos) - 1 // 1 clase ya usada (ésta)
+
+        // 1. Usuario: si es invitado, lo creamos y linkeamos la inscripción
+        let userId: string | null = insc.user_id
+        if (!userId) {
+            if (!payload.nuevoUsuario?.email?.trim()) throw new Error('Para pasar a pack hay que crear la cuenta (falta el email)')
+            const r = await crearAlumnoDesdeRecepcionAction(payload.nuevoUsuario)
+            if (!r.success || !r.user_id) throw new Error(r.error || 'No se pudo crear el usuario')
+            userId = r.user_id
+            await admin.from('inscripciones').update({ user_id: userId, es_invitado: false, nombre_invitado: null }).eq('id', insc.id)
+        }
+
+        const { data: perfil } = await admin.from('profiles')
+            .select('nombre, apellido, nombre_completo, creditos_regulares, creditos_especiales').eq('id', userId).single()
+        const nombreAlumno = perfil?.nombre_completo || [perfil?.nombre, perfil?.apellido].filter(Boolean).join(' ') || 'Alumno'
+
+        // 2. Cobro de la diferencia en la caja del turno abierto
+        if (Number(payload.diferencia) > 0) {
+            const { data: turno } = await admin.from('caja_turnos').select('id')
+                .eq('usuario_id', operadoraId).eq('estado', 'abierta')
+                .order('fecha_apertura', { ascending: false }).limit(1).maybeSingle()
+            if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja para cobrar la diferencia.')
+            const { error: errCaja } = await admin.from('caja_movimientos').insert({
+                turno_id: turno.id, tipo: 'ingreso',
+                concepto: `Diferencia Suelta→Pack (${prod.nombre}) | Alumno: ${nombreAlumno}`,
+                monto: Number(payload.diferencia), metodo_pago: payload.metodoPago, origen_referencia: 'manual'
+            })
+            if (errCaja) throw new Error('Error al registrar la diferencia en la caja')
+        }
+
+        const montoTotal = Number(payload.yaPago) + Number(payload.diferencia)
+        const ahora = new Date()
+
+        // 3. Pack: si ya tenía un pack de 1 clase lo convertimos; si no, creamos uno nuevo
+        if (insc.pack_usado_id) {
+            const { data: packActual } = await admin.from('alumno_packs').select('*').eq('id', insc.pack_usado_id).single()
+            if (packActual && Number(packActual.cantidad_inicial) === 1) {
+                await admin.from('alumno_packs').update({
+                    producto_id: prod.id, tipo_clase: prod.tipo_clase,
+                    cantidad_inicial: Number(prod.creditos),
+                    creditos_restantes: Number(packActual.creditos_restantes) + delta,
+                    monto_abonado: Number(packActual.monto_abonado) + Number(payload.diferencia),
+                    precio_total: Number(prod.precio),
+                }).eq('id', packActual.id)
+            }
+        } else {
+            const { data: nuevoPack } = await admin.from('alumno_packs').insert({
+                user_id: userId, producto_id: prod.id, tipo_clase: prod.tipo_clase,
+                cantidad_inicial: Number(prod.creditos), creditos_restantes: delta,
+                monto_abonado: montoTotal, precio_total: Number(prod.precio),
+                metodo_pago: payload.metodoPago, fecha_compra: ahora.toISOString(),
+                fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                estado: 'activo'
+            }).select('id').single()
+            if (nuevoPack?.id) await admin.from('inscripciones').update({ pack_usado_id: nuevoPack.id }).eq('id', insc.id)
+        }
+
+        // 4. Sumamos los créditos extra por el canal correcto
+        if (prod.tipo_clase === 'exclusivo') {
+            await admin.rpc('cargar_pase_exclusivo_manual', { p_usuario_id: userId, p_referencia: prod.pase_referencia, p_cantidad: delta })
+        } else {
+            const campo = prod.tipo_clase === 'seminario' ? 'creditos_especiales' : 'creditos_regulares'
+            await admin.from('profiles').update({ [campo]: (Number((perfil as any)?.[campo]) || 0) + delta }).eq('id', userId)
+        }
+
+        revalidatePath(`/clase/${insc.clase_id}`)
+        revalidatePath('/usuarios')
         return { success: true }
     } catch (error: any) {
         return { success: false, error: error.message }
