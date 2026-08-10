@@ -9,7 +9,7 @@ import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
     Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
-    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2, Library
+    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2, Library, Repeat
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { format } from 'date-fns'
@@ -23,7 +23,9 @@ import {
     asignarPackAction,
     cobrarLigaAction,
     cobrarCompaniaAction,
-    ajustarCreditosAction
+    ajustarCreditosAction,
+    getSueltasAlumnoAction,
+    convertirSueltaAPackAction
 } from '@/app/actions/usuarios'
 
 type Ritmo = { id: string; nombre: string }
@@ -195,6 +197,13 @@ function UsuariosContent() {
 
     const [createForm, setCreateForm] = useState({ nombre: '', email: '', dni: '', telefono: '', rol: 'alumno' })
     const [packForm, setPackForm] = useState({ packId: '', monto: '', metodo: 'efectivo' })
+
+    // Convertir clase suelta -> pack
+    const [convertOpen, setConvertOpen] = useState(false)
+    const [sueltas, setSueltas] = useState<any[]>([])
+    const [loadingSueltas, setLoadingSueltas] = useState(false)
+    const [convertForm, setConvertForm] = useState<{ packId: string; productoId: string; monto: string; metodo: string }>({ packId: '', productoId: '', monto: '', metodo: 'efectivo' })
+    const [convirtiendo, setConvirtiendo] = useState(false)
 
     const { data, error, isLoading, mutate } = useSWR('usuarios_completo', fetcher, { revalidateOnFocus: false })
 
@@ -576,6 +585,36 @@ function UsuariosContent() {
         setIsPackModalOpen(true)
     }
 
+    const openConvertModal = async (user: UsuarioDirectorio) => {
+        setSelectedUser(user)
+        setConvertForm({ packId: '', productoId: '', monto: '', metodo: 'efectivo' })
+        setSueltas([])
+        setConvertOpen(true)
+        setLoadingSueltas(true)
+        const res = await getSueltasAlumnoAction(user.id)
+        setSueltas((res as any[]) || [])
+        setLoadingSueltas(false)
+    }
+
+    // Al elegir suelta + pack, sugerimos la diferencia (precio pack − lo ya abonado)
+    const setConvertPack = (productoId: string) => {
+        const suelta = sueltas.find(s => s.id === convertForm.packId)
+        const prod = productos.find(p => p.id === productoId)
+        const dif = (prod && suelta) ? Math.max(0, Number(prod.precio) - Number(suelta.monto_abonado || 0)) : 0
+        setConvertForm(f => ({ ...f, productoId, monto: String(dif) }))
+    }
+
+    const handleConvertir = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!convertForm.packId) return toast.error('Elegí la clase suelta a convertir')
+        if (!convertForm.productoId) return toast.error('Elegí el pack destino')
+        setConvirtiendo(true)
+        const res = await convertirSueltaAPackAction(convertForm.packId, convertForm.productoId, Number(convertForm.monto) || 0, convertForm.metodo)
+        setConvirtiendo(false)
+        if (res.success) { toast.success('Clase suelta convertida a pack'); setConvertOpen(false); mutate() }
+        else toast.error(res.error || 'Error al convertir')
+    }
+
     const handlePackSelectionChange = (packId: string) => {
         const prod = productos.find(p => p.id === packId)
         let suggestedMonto = prod ? prod.precio.toString() : '';
@@ -838,6 +877,10 @@ function UsuariosContent() {
                                         <div className="flex flex-wrap gap-2 w-full mb-2">
                                             <button onClick={() => openPackModal(u)} className="flex-1 py-2 rounded-xl border bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500 hover:text-black text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1.5">
                                                 <Package size={12} /> Pack
+                                            </button>
+
+                                            <button onClick={() => openConvertModal(u)} className="flex-1 py-2 rounded-xl border bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500 hover:text-white text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-1.5">
+                                                <Repeat size={12} /> Suelta→Pack
                                             </button>
 
                                             {(u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') && (
@@ -1435,6 +1478,81 @@ function UsuariosContent() {
                     </div>
                 </div>
             )}
+
+            {/* MODAL: CONVERTIR CLASE SUELTA A PACK */}
+            {convertOpen && selectedUser && (() => {
+                const sueltaSel = sueltas.find(s => s.id === convertForm.packId)
+                const prodSel = productos.find(p => p.id === convertForm.productoId)
+                const packsCompatibles = sueltaSel ? productos.filter(p => p.tipo_clase === sueltaSel.tipo_clase && Number(p.creditos) > 1) : []
+                const nombreProd = (x: any) => (Array.isArray(x?.producto) ? x.producto[0]?.nombre : x?.producto?.nombre) || 'Clase suelta'
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
+                        <div className="bg-[#09090b] border border-white/10 w-full max-w-md rounded-2xl p-8 shadow-2xl relative max-h-[92vh] overflow-y-auto">
+                            <div className="flex justify-between items-start mb-6 pb-4 border-b border-white/10">
+                                <div>
+                                    <h3 className="text-xl font-black text-white uppercase flex items-center gap-2"><Repeat className="text-purple-400" size={20} /> Suelta → Pack</h3>
+                                    <p className="text-[10px] font-bold text-gray-500 uppercase mt-1">Para: <span className="text-white">{selectedUser.nombre_completo}</span></p>
+                                </div>
+                                <button onClick={() => setConvertOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
+                            </div>
+
+                            {loadingSueltas ? (
+                                <div className="flex justify-center py-10"><Loader2 className="animate-spin text-purple-400" /></div>
+                            ) : sueltas.length === 0 ? (
+                                <p className="text-center text-xs text-gray-500 uppercase font-bold py-10">Este alumno no tiene clases sueltas activas para convertir.</p>
+                            ) : (
+                                <form onSubmit={handleConvertir} className="space-y-5">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Clase suelta a convertir</label>
+                                        <select required value={convertForm.packId} onChange={e => setConvertForm({ ...convertForm, packId: e.target.value, productoId: '', monto: '' })} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-400">
+                                            <option value="" disabled>Elegí la clase suelta...</option>
+                                            {sueltas.map(s => (
+                                                <option key={s.id} value={s.id}>{nombreProd(s)} — pagó ${Number(s.monto_abonado || 0).toLocaleString()} {Number(s.creditos_restantes) === 0 ? '(ya usada)' : '(sin usar)'}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    {sueltaSel && (
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Pasar al pack</label>
+                                            <select required value={convertForm.productoId} onChange={e => setConvertPack(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-purple-400">
+                                                <option value="" disabled>Elegí el pack destino...</option>
+                                                {packsCompatibles.map(p => (
+                                                    <option key={p.id} value={p.id}>{p.nombre} ({p.creditos} clases) - ${p.precio.toLocaleString()}</option>
+                                                ))}
+                                            </select>
+                                            {packsCompatibles.length === 0 && <p className="text-[10px] text-yellow-500/80">No hay packs del mismo tipo ({sueltaSel.tipo_clase}) cargados.</p>}
+                                        </div>
+                                    )}
+
+                                    {prodSel && sueltaSel && (
+                                        <>
+                                            <div className="bg-purple-500/5 border border-purple-500/20 rounded-xl p-3 text-[11px] text-gray-300 leading-relaxed">
+                                                Pack: <b className="text-white">${Number(prodSel.precio).toLocaleString()}</b> − ya pagó <b className="text-white">${Number(sueltaSel.monto_abonado || 0).toLocaleString()}</b> = <b className="text-purple-300">${Math.max(0, Number(prodSel.precio) - Number(sueltaSel.monto_abonado || 0)).toLocaleString()}</b> a cobrar. Le quedarán <b className="text-white">{Number(prodSel.creditos) - (1 - Number(sueltaSel.creditos_restantes))}</b> créditos.
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Diferencia a cobrar ($)</label>
+                                                <div className="relative">
+                                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                                                    <input type="number" value={convertForm.monto} onChange={e => setConvertForm({ ...convertForm, monto: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-8 pr-4 text-white text-sm font-black outline-none focus:border-purple-400" />
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {['efectivo', 'transferencia', 'mercadopago'].map(m => (
+                                                    <button type="button" key={m} onClick={() => setConvertForm({ ...convertForm, metodo: m })} className={`p-3 rounded-xl border text-[10px] font-black uppercase transition-all ${convertForm.metodo === m ? 'bg-purple-500 border-purple-500 text-white' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}>{m === 'mercadopago' ? 'Tarjeta/MP' : m}</button>
+                                                ))}
+                                            </div>
+                                            <button disabled={convirtiendo} type="submit" className="w-full bg-purple-500 text-white font-black uppercase py-4 rounded-xl hover:bg-purple-600 transition-all text-xs tracking-widest flex items-center justify-center gap-2">
+                                                {convirtiendo ? <Loader2 className="animate-spin" size={16} /> : <Repeat size={16} />} Convertir y cobrar
+                                            </button>
+                                        </>
+                                    )}
+                                </form>
+                            )}
+                        </div>
+                    </div>
+                )
+            })()}
 
             {isPackModalOpen && selectedUser && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">

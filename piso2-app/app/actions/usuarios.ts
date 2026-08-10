@@ -283,6 +283,92 @@ export async function asignarPackAction(
     }
 }
 
+// Clases sueltas del alumno (packs de 1 clase, activos) que se pueden pasar a pack.
+export async function getSueltasAlumnoAction(userId: string) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return []
+    const admin = getAdminClient()
+    const { data } = await admin.from('alumno_packs')
+        .select('id, cantidad_inicial, creditos_restantes, monto_abonado, tipo_clase, estado, fecha_compra, producto:productos(nombre, tipo_clase, pase_referencia)')
+        .eq('user_id', userId)
+        .eq('cantidad_inicial', 1)
+        .eq('estado', 'activo')
+        .order('fecha_compra', { ascending: false })
+    return data || []
+}
+
+// Convierte una clase suelta en un pack del mismo tipo cobrando solo la diferencia.
+// Mantiene los créditos ya usados: deja (créditos del pack − 1) de más.
+export async function convertirSueltaAPackAction(packId: string, nuevoProductoId: string, montoDiferencia: number, metodoPago: string) {
+    const supabase = await createClient()
+    const supabaseAdmin = getAdminClient()
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+        const operadoraId = session.user.id
+
+        const { data: packActual } = await supabaseAdmin.from('alumno_packs').select('*').eq('id', packId).single()
+        if (!packActual) throw new Error('No se encontró la clase suelta')
+        if (Number(packActual.cantidad_inicial) !== 1) throw new Error('Solo se puede convertir una clase suelta (1 clase)')
+
+        const { data: nuevoProd } = await supabaseAdmin.from('productos').select('id, nombre, tipo_clase, creditos, precio, pase_referencia').eq('id', nuevoProductoId).single()
+        if (!nuevoProd) throw new Error('No se encontró el pack destino')
+        if (Number(nuevoProd.creditos) <= 1) throw new Error('El destino tiene que ser un pack (más de 1 clase)')
+        if (nuevoProd.tipo_clase !== packActual.tipo_clase) throw new Error('El pack tiene que ser del mismo tipo que la clase suelta')
+
+        const delta = Number(nuevoProd.creditos) - 1
+        const usuarioId = packActual.user_id
+
+        const { data: perfil } = await supabaseAdmin.from('profiles').select('nombre, apellido, nombre_completo, creditos_regulares, creditos_especiales').eq('id', usuarioId).single()
+        const nombreAlumno = getNombreSeguro(perfil)
+
+        // Cobro de la diferencia en la caja del turno abierto
+        if (Number(montoDiferencia) > 0) {
+            const { data: turno } = await supabaseAdmin.from('caja_turnos').select('id')
+                .eq('usuario_id', operadoraId).eq('estado', 'abierta')
+                .order('fecha_apertura', { ascending: false }).limit(1).maybeSingle()
+            if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja para cobrar la diferencia.')
+            const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
+                turno_id: turno.id, tipo: 'ingreso',
+                concepto: `Diferencia Suelta→Pack (${nuevoProd.nombre}) | Alumno: ${nombreAlumno}`,
+                monto: Number(montoDiferencia), metodo_pago: metodoPago, origen_referencia: 'manual'
+            })
+            if (errCaja) throw new Error('Error al registrar la diferencia en la caja')
+        }
+
+        // Convertimos el pack: mismos créditos disponibles + los que agrega el pack
+        const { error: errPack } = await supabaseAdmin.from('alumno_packs').update({
+            producto_id: nuevoProd.id,
+            tipo_clase: nuevoProd.tipo_clase,
+            cantidad_inicial: Number(nuevoProd.creditos),
+            creditos_restantes: Number(packActual.creditos_restantes) + delta,
+            monto_abonado: Number(packActual.monto_abonado) + Number(montoDiferencia),
+            precio_total: Number(nuevoProd.precio),
+        }).eq('id', packId)
+        if (errPack) throw new Error('Error al actualizar el pack')
+
+        // Sumamos los créditos extra al alumno (mismo canal que una compra normal)
+        if (nuevoProd.tipo_clase === 'exclusivo') {
+            const { error } = await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', {
+                p_usuario_id: usuarioId, p_referencia: nuevoProd.pase_referencia, p_cantidad: delta
+            })
+            if (error) throw new Error('Error al sumar el pase exclusivo')
+        } else {
+            const campo = nuevoProd.tipo_clase === 'seminario' ? 'creditos_especiales' : 'creditos_regulares'
+            const { error } = await supabaseAdmin.from('profiles').update({
+                [campo]: (Number((perfil as any)?.[campo]) || 0) + delta
+            }).eq('id', usuarioId)
+            if (error) throw new Error('Error al sumar los créditos al perfil')
+        }
+
+        revalidatePath('/usuarios')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
 export async function cobrarLigaAction(usuarioId: string, monto: number, metodoPago: string, mes?: number, anio?: number) {
     const supabase = await createClient()
     try {
