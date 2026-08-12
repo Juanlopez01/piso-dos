@@ -12,7 +12,7 @@ import {
     CheckCircle2, AlertCircle, Users, ClipboardEdit, Save, FileText,
     Search, UserCog, UserMinus, Star, Send, Trash2, Clock, Settings2, Percent,
     X, Coins, CalendarDays, Activity, XCircle, Eye, Calendar, MapPin, User,
-    Image as ImageIcon, CheckSquare, ChevronDown, ChevronUp
+    Image as ImageIcon, CheckSquare, ChevronDown, ChevronUp, Phone, FileCheck
 } from 'lucide-react'
 import { format, isToday } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -252,7 +252,7 @@ const fetcherLiga = async (uid: string, paramMes: number, paramAnio: number, sup
     let allStudents: any[] = []
     if (isStaff) {
         const { data: perfiles } = await supabase
-            .from('profiles').select('id, nombre_completo, email, nivel_liga, porcentaje_beca_liga')
+            .from('profiles').select('id, nombre_completo, email, telefono, nivel_liga, porcentaje_beca_liga, apto_fisico_url')
             .eq('rol', 'alumno').not('nivel_liga', 'is', null).order('nombre_completo', { ascending: true })
 
         if (perfiles) {
@@ -1356,7 +1356,32 @@ function LaLigaContent() {
                                             </button>
                                         </div>
 
-                                        <div className="flex flex-wrap gap-2 pt-2 mt-2">
+                                        {(alumno.telefono || alumno.email) && (
+                                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 mt-1 text-[10px] text-gray-400">
+                                                {alumno.telefono && (
+                                                    <a href={`https://wa.me/${alumno.telefono.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-[#D4E655] transition-colors">
+                                                        <Phone size={10} /> {alumno.telefono}
+                                                    </a>
+                                                )}
+                                                {alumno.email && (
+                                                    <span className="inline-flex items-center gap-1 truncate max-w-[180px]" title={alumno.email}>
+                                                        {alumno.email}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        <div className="flex flex-wrap gap-2 pt-2 mt-1">
+                                            {alumno.apto_fisico_url ? (
+                                                <a href={alumno.apto_fisico_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest hover:bg-emerald-500/20 transition-colors">
+                                                    <FileCheck size={10} /> Apto ✓
+                                                </a>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
+                                                    <AlertCircle size={10} /> Sin Apto
+                                                </span>
+                                            )}
+
                                             {alumno.becaVisual > 0 && (
                                                 <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest">
                                                     <Percent size={10} /> Beca {alumno.becaVisual}%

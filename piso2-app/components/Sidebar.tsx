@@ -54,10 +54,9 @@ function SidebarContent() {
             return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos'].includes(item.name)
         }
 
-        // 🚀 ROL AUXILIAR: Ve Grupos, pero NUNCA La Liga.
         if (userRole === 'auxiliar') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'Grupos'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil', 'Grupos'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Grupos', 'Alquileres'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Explorar', 'Caja', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Alquileres'].includes(item.name)
         }
 
         // 🚀 ROL COORDINADOR: Ve La Liga y Grupos (sujetos a su llavero que ya validamos arriba en `hasLigaAccess/hasCompaniaAccess`), y su perfil. No ve caja ni agenda de recepcion.

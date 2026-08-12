@@ -22,7 +22,7 @@ export const menuItems = [
     { name: 'Agenda', href: '/calendario', icon: CalendarIcon, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'visitante', 'auxiliar'] },
     { name: 'Alumnos / Profes', href: '/usuarios', icon: Users, roles: ['admin', 'recepcion'] },
     { name: 'Staff / Equipo', href: '/usuarios?ver=staff', icon: Settings, roles: ['admin'] },
-    { name: 'Alquileres', href: '/alquileres', icon: ShoppingBag, roles: ['admin', 'recepcion'] },
+    { name: 'Alquileres', href: '/alquileres', icon: ShoppingBag, roles: ['admin', 'recepcion', 'auxiliar'] },
     { name: 'Productos', href: '/productos', icon: Package, roles: ['admin', 'recepcion'] },
     { name: 'Caja', href: '/caja', icon: ShoppingBag, roles: ['admin', 'recepcion', 'auxiliar'] },
     {
@@ -38,7 +38,7 @@ export const menuItems = [
         roles: ['admin', 'recepcion']
     },
     { name: 'Sedes', href: '/sedes', icon: MapPin, roles: ['admin'] },
-    { name: 'Grupos', href: '/companias', icon: UsersRound, roles: ['admin', 'coordinador', 'profesor', 'alumno'] },
+    { name: 'Grupos', href: '/companias', icon: UsersRound, roles: ['admin', 'coordinador', 'profesor', 'alumno', 'auxiliar'] },
     { name: 'Talents', href: '/talents', icon: Sparkles, roles: ['admin'] },
     { name: 'Sumate a Talent', href: '/talent/postular', icon: Sparkles, roles: ['alumno', 'profesor', 'coordinador'] },
     { name: 'La Liga', href: '/la-liga', icon: GraduationCap, roles: ['admin', 'profesor', 'coordinador', 'alumno', 'auxiliar'] },
