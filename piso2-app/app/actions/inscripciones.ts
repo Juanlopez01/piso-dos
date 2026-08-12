@@ -624,6 +624,13 @@ export async function agregarPagoInscripcionAction(inscripcionId: string, monto:
 
         if (errUpd) throw new Error('Error al actualizar la inscripción')
 
+        // 4. Si se liquidó la deuda y es un pack, limpiar TODAS las inscripciones hermanas del mismo pack
+        if (liquidarDeuda && insc.pack_usado_id) {
+            await supabaseAdmin.from('inscripciones').update({
+                saldo_pendiente: 0
+            }).eq('pack_usado_id', insc.pack_usado_id).gt('saldo_pendiente', 0)
+        }
+
         revalidatePath(`/clase/${insc.clase_id}`)
         return { success: true }
     } catch (error: any) {
