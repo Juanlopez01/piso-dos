@@ -654,6 +654,25 @@ export async function editarValorInscripcionAction(inscripcionId: string, nuevoV
     }
 }
 
+// Marca la deuda de una inscripción como saldada (saldo 0) SIN registrar un
+// cobro nuevo. Para cuando el alumno ya pagó todo (por fuera o antes) y el
+// cartel de "Adeuda" quedó pegado.
+export async function saldarDeudaInscripcionAction(inscripcionId: string) {
+    const supabase = await createClient()
+    const admin = getAdminClient()
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+        const { data: insc } = await admin.from('inscripciones').select('clase_id').eq('id', inscripcionId).single()
+        const { error } = await admin.from('inscripciones').update({ saldo_pendiente: 0 }).eq('id', inscripcionId)
+        if (error) throw new Error(error.message)
+        if (insc?.clase_id) revalidatePath(`/clase/${insc.clase_id}`)
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
 // Packs (más de 1 clase) que se pueden elegir como destino de una conversión.
 export async function getPacksConvertiblesAction() {
     const admin = getAdminClient()

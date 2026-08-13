@@ -32,7 +32,8 @@ import {
     agregarPagoInscripcionAction,
     editarValorInscripcionAction,
     getPacksConvertiblesAction,
-    convertirAsistenteAPackAction
+    convertirAsistenteAPackAction,
+    saldarDeudaInscripcionAction
 } from '@/app/actions/inscripciones'
 
 import { toggleMiembroCompaniaAction, getPlanesCompaniaAction, asignarPlanMiembroAction } from '@/app/actions/companias'
@@ -653,6 +654,15 @@ export default function ClaseDetallePage() {
                                             {(Number(insc.saldo_pendiente) > 0) && (
                                                 <button
                                                     onClick={async () => {
+                                                        const yaPago = confirm(`¿${nombreMostrar} YA pagó todo el saldo?\n\nACEPTAR: Sí, marcar como saldado (NO cobra de nuevo).\nCANCELAR: No, voy a registrar un pago ahora.`);
+                                                        if (yaPago) {
+                                                            toast.promise(saldarDeudaInscripcionAction(insc.id), {
+                                                                loading: 'Saldando deuda...',
+                                                                success: () => { mutate(); return 'Deuda saldada. Ya no adeuda.'; },
+                                                                error: (err) => `Error: ${err}`
+                                                            });
+                                                            return;
+                                                        }
                                                         const montoStr = prompt(`¿Cuánta plata está entregando ahora el alumno?`);
                                                         if (!montoStr) return;
                                                         const monto = Number(montoStr);
