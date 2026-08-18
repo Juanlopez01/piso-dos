@@ -11,7 +11,9 @@ import {
     listPostulacionesAction, aceptarPostulacionAction, standbyPostulacionAction, eliminarPostulacionAction,
     listBusquedasAdminAction, upsertBusquedaAction, toggleBusquedaActivaAction, eliminarBusquedaAction,
     listPostulacionesBusquedaAction, cambiarEstadoPostBusquedaAction, eliminarPostBusquedaAction, aceptarPostBusquedaAction,
-    getTalentDashboardDataAction, listTalentosParaBusquedaAction, agregarTalentoABusquedaAction, type TalentoParaBusqueda
+    getTalentDashboardDataAction, listTalentosParaBusquedaAction, agregarTalentoABusquedaAction, type TalentoParaBusqueda,
+    listObrasAdminAction, upsertObraAction, toggleObraActivaAction, eliminarObraAction,
+    listPostulacionesObraAction, cambiarEstadoPostObraAction, eliminarPostObraAction
 } from '@/app/actions/talent'
 import { toast, Toaster } from 'sonner'
 import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users, Share2, MessageCircle, Globe } from 'lucide-react'
@@ -54,7 +56,7 @@ export default function TalentsAdminPage() {
     const [supabase] = useState(() => createClient())
     const { userRole, isLoading: loadingCtx } = useCash()
 
-    const [vista, setVista] = useState<'talentos' | 'marcas' | 'shows' | 'solicitudes' | 'busquedas'>('talentos')
+    const [vista, setVista] = useState<'talentos' | 'marcas' | 'shows' | 'obras' | 'solicitudes' | 'busquedas'>('talentos')
     const [talentos, setTalentos] = useState<Talento[]>([])
     const [loading, setLoading] = useState(true)
     const [modalOpen, setModalOpen] = useState(false)
@@ -75,6 +77,17 @@ export default function TalentsAdminPage() {
     const [guardandoShow, setGuardandoShow] = useState(false)
     const [subiendoPortada, setSubiendoPortada] = useState(false)
     const cargarShows = () => { listShowsAdminAction().then(d => setShows(d)).catch(() => { }) }
+
+    // Obras
+    const [obras, setObras] = useState<any[]>([])
+    const [modalObra, setModalObra] = useState(false)
+    const [obraForm, setObraForm] = useState<{ id?: string; titulo: string; descripcion: string; requisitos: string; ubicacion: string; flyer_url: string; video_url: string; fecha_limite: string; activa: boolean }>({ titulo: '', descripcion: '', requisitos: '', ubicacion: '', flyer_url: '', video_url: '', fecha_limite: '', activa: true })
+    const [guardandoObra, setGuardandoObra] = useState(false)
+    const [subiendoFlyer, setSubiendoFlyer] = useState(false)
+    const [obraSel, setObraSel] = useState<any | null>(null)
+    const [postsObra, setPostsObra] = useState<any[]>([])
+    const [loadingPostsObra, setLoadingPostsObra] = useState(false)
+    const cargarObras = () => { listObrasAdminAction().then(d => setObras(d)).catch(() => { }) }
     const [subiendoLogo, setSubiendoLogo] = useState(false)
 
     const cargar = () => {
@@ -158,6 +171,7 @@ export default function TalentsAdminPage() {
                 setTalentos(d.talentos as Talento[])
                 setMarcas(d.marcas)
                 setShows((d as any).shows || [])
+                setObras((d as any).obras || [])
                 setPostulaciones(d.postulaciones)
                 setBusquedas(d.busquedas)
             })
@@ -347,6 +361,54 @@ export default function TalentsAdminPage() {
         if (r.success) { toast.success('Eliminado'); cargarShows() } else toast.error(r.error || 'Error')
     }
 
+    // Obras
+    const abrirNuevaObra = () => { setObraForm({ titulo: '', descripcion: '', requisitos: '', ubicacion: '', flyer_url: '', video_url: '', fecha_limite: '', activa: true }); setModalObra(true) }
+    const abrirEditarObra = (o: any) => { setObraForm({ id: o.id, titulo: o.titulo, descripcion: o.descripcion || '', requisitos: o.requisitos || '', ubicacion: o.ubicacion || '', flyer_url: o.flyer_url || '', video_url: o.video_url || '', fecha_limite: o.fecha_limite || '', activa: o.activa }); setModalObra(true) }
+    const handleFlyer = async (files: FileList | null) => {
+        if (!files || !files[0]) return
+        setSubiendoFlyer(true)
+        try {
+            const opt = await optimizeImage(files[0], { maxDim: 1600 })
+            const ext = opt.name.split('.').pop()
+            const path = `obras/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+            const { error } = await supabase.storage.from('talent').upload(path, opt)
+            if (error) throw error
+            setObraForm(f => ({ ...f, flyer_url: supabase.storage.from('talent').getPublicUrl(path).data.publicUrl }))
+        } catch (e: any) { toast.error('Error subiendo el flyer') }
+        setSubiendoFlyer(false)
+    }
+    const handleGuardarObra = async () => {
+        if (!obraForm.titulo.trim()) return toast.error('Poné un título para la obra')
+        setGuardandoObra(true)
+        const res = await upsertObraAction({ ...obraForm, fecha_limite: obraForm.fecha_limite || null })
+        setGuardandoObra(false)
+        if (res.success) { toast.success('Obra guardada'); setModalObra(false); cargarObras() }
+        else toast.error(res.error || 'Error')
+    }
+    const handleToggleObra = async (o: any) => { const r = await toggleObraActivaAction(o.id, !o.activa); if (r.success) cargarObras() }
+    const handleEliminarObra = async (o: any) => {
+        if (!confirm(`¿Eliminar la obra "${o.titulo}"? Se eliminan también sus postulaciones.`)) return
+        const r = await eliminarObraAction(o.id)
+        if (r.success) { toast.success('Eliminada'); cargarObras() } else toast.error(r.error || 'Error')
+    }
+    const copiarLinkObra = (slug: string) => {
+        const url = `${window.location.origin}/talent/obra/${slug}`
+        navigator.clipboard.writeText(url).then(() => toast.success('Link de la obra copiado')).catch(() => toast.error('No se pudo copiar'))
+    }
+    const abrirPostsObra = (o: any) => {
+        setObraSel(o); setLoadingPostsObra(true)
+        listPostulacionesObraAction(o.id).then(d => { setPostsObra(d); setLoadingPostsObra(false) }).catch(() => setLoadingPostsObra(false))
+    }
+    const handleEstadoPostObra = async (id: string, estado: 'pendiente' | 'standby' | 'descartado') => {
+        const r = await cambiarEstadoPostObraAction(id, estado)
+        if (r.success) { toast.success('Estado actualizado'); if (obraSel) abrirPostsObra(obraSel) }
+    }
+    const handleEliminarPostObra = async (id: string) => {
+        if (!confirm('¿Eliminar esta postulación?')) return
+        const r = await eliminarPostObraAction(id)
+        if (r.success) { toast.success('Eliminada'); if (obraSel) abrirPostsObra(obraSel) }
+    }
+
     // Disciplinas multi
     const discSeleccionadas = form.disciplina ? form.disciplina.split(',').map(s => s.trim()).filter(Boolean) : []
     const toggleDisciplina = (d: string) => {
@@ -381,6 +443,7 @@ export default function TalentsAdminPage() {
                             <button onClick={() => setVista('talentos')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'talentos' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Talentos</button>
                             <button onClick={() => setVista('marcas')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'marcas' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Marcas</button>
                             <button onClick={() => setVista('shows')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'shows' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Shows</button>
+                            <button onClick={() => setVista('obras')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'obras' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Obras</button>
                             <button onClick={() => setVista('solicitudes')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${vista === 'solicitudes' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>
                                 Solicitudes
                                 {pendientesCount > 0 && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${vista === 'solicitudes' ? 'bg-white text-black' : 'bg-black text-white'}`}>{pendientesCount}</span>}
@@ -391,8 +454,8 @@ export default function TalentsAdminPage() {
                             </button>
                         </div>
                         {vista !== 'solicitudes' && (
-                            <button onClick={() => vista === 'talentos' ? abrirNuevo() : vista === 'marcas' ? abrirNuevaMarca() : vista === 'shows' ? abrirNuevoShow() : abrirNuevaBusqueda()} className="bg-black text-white font-bold uppercase px-5 py-3 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center gap-2">
-                                <Plus size={16} /> {vista === 'busquedas' ? 'Nueva busqueda' : vista === 'shows' ? 'Nuevo show' : 'Nuevo'}
+                            <button onClick={() => vista === 'talentos' ? abrirNuevo() : vista === 'marcas' ? abrirNuevaMarca() : vista === 'shows' ? abrirNuevoShow() : vista === 'obras' ? abrirNuevaObra() : abrirNuevaBusqueda()} className="bg-black text-white font-bold uppercase px-5 py-3 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center gap-2">
+                                <Plus size={16} /> {vista === 'busquedas' ? 'Nueva busqueda' : vista === 'shows' ? 'Nuevo show' : vista === 'obras' ? 'Nueva obra' : 'Nuevo'}
                             </button>
                         )}
                     </div>
@@ -496,6 +559,74 @@ export default function TalentsAdminPage() {
                                             <button onClick={() => abrirEditarShow(s)} className="flex-1 bg-neutral-100 hover:bg-neutral-200 py-1.5 text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-1 rounded"><Pencil size={11} /> Editar</button>
                                             <button onClick={() => handleToggleShow(s)} className="bg-neutral-100 hover:bg-neutral-200 p-1.5 rounded">{s.activo ? <Eye size={13} /> : <EyeOff size={13} />}</button>
                                             <button onClick={() => handleEliminarShow(s)} className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded"><Trash2 size={13} /></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )
+                )}
+
+                {/* OBRAS */}
+                {vista === 'obras' && (
+                    obraSel ? (
+                        <div>
+                            <button onClick={() => { setObraSel(null); setPostsObra([]) }} className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-neutral-500 hover:text-black mb-5"><ArrowLeftToLine size={13} /> Volver a obras</button>
+                            <div className="flex flex-wrap items-center gap-3 mb-4">
+                                <h2 className={`${serif.className} text-xl md:text-2xl tracking-wide`}>{obraSel.titulo}</h2>
+                                <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-widest ${obraSel.activa ? 'bg-green-100 text-green-700' : 'bg-neutral-100 text-neutral-500'}`}>{obraSel.activa ? 'Activa' : 'Cerrada'}</span>
+                                <button onClick={() => copiarLinkObra(obraSel.slug)} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest border border-neutral-300 px-3 py-1.5 rounded hover:border-black transition-colors"><Copy size={12} /> Copiar link</button>
+                                <a href={`/talent/obra/${obraSel.slug}`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest border border-neutral-300 px-3 py-1.5 rounded hover:border-black transition-colors"><ExternalLink size={12} /> Ver</a>
+                            </div>
+                            {loadingPostsObra ? (
+                                <div className="flex justify-center py-16"><Loader2 className="animate-spin text-neutral-300" size={32} /></div>
+                            ) : postsObra.length === 0 ? (
+                                <div className="py-16 text-center border-2 border-dashed border-neutral-200 rounded-2xl"><Inbox className="mx-auto mb-3 text-neutral-300" size={32} /><p className="text-neutral-400 font-bold uppercase text-xs">Todavía no hay postulaciones para esta obra.</p></div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {postsObra.map(p => (
+                                        <div key={p.id} className={`border rounded-xl p-3 bg-white flex items-center gap-3 ${p.estado === 'descartado' ? 'opacity-50' : p.estado === 'standby' ? 'opacity-75' : 'border-neutral-200'}`}>
+                                            <div className="w-12 h-14 rounded-lg overflow-hidden bg-neutral-100 shrink-0">
+                                                {p.fotos?.[0] ? <img src={p.fotos[0]} alt={p.nombre} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-[8px] uppercase">Sin foto</div>}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-bold truncate">{p.nombre} {p.estado === 'standby' && <span className="text-[9px] text-amber-600 font-black uppercase">· Stand by</span>}{p.estado === 'descartado' && <span className="text-[9px] text-red-600 font-black uppercase">· Descartado</span>}</p>
+                                                <p className="text-[10px] text-neutral-400 truncate">{[p.rubro, p.edad ? p.edad + ' años' : null, p.nacionalidad].filter(Boolean).join(' · ')}</p>
+                                                <p className="text-[10px] text-neutral-400 truncate">{p.email}{p.telefono ? ' · ' + p.telefono : ''}</p>
+                                            </div>
+                                            <div className="flex items-center gap-1 shrink-0">
+                                                {p.telefono && <a href={`https://wa.me/${String(p.telefono).replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer" title="WhatsApp" className="bg-green-50 hover:bg-green-100 text-green-600 p-1.5 rounded"><MessageCircle size={13} /></a>}
+                                                {p.estado === 'descartado'
+                                                    ? <button onClick={() => handleEstadoPostObra(p.id, 'pendiente')} title="Recuperar" className="bg-neutral-100 hover:bg-neutral-200 p-1.5 rounded"><Eye size={13} /></button>
+                                                    : <button onClick={() => handleEstadoPostObra(p.id, 'descartado')} title="Descartar" className="bg-neutral-100 hover:bg-neutral-200 p-1.5 rounded"><EyeOff size={13} /></button>}
+                                                <button onClick={() => handleEliminarPostObra(p.id)} title="Eliminar" className="bg-red-50 hover:bg-red-100 text-red-600 p-1.5 rounded"><Trash2 size={13} /></button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ) : obras.length === 0 ? (
+                        <div className="py-20 text-center border-2 border-dashed border-neutral-200 rounded-2xl">
+                            <p className="text-neutral-400 font-bold uppercase text-xs">No creaste obras todavía.</p>
+                            <button onClick={abrirNuevaObra} className="mt-5 bg-black text-white px-5 py-2.5 rounded text-[10px] font-black uppercase tracking-widest hover:bg-neutral-800 transition-colors">+ Crear la primera</button>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {obras.map(o => (
+                                <div key={o.id} className={`border rounded-xl overflow-hidden bg-white ${o.activa ? 'border-neutral-200' : 'border-orange-300 opacity-60'}`}>
+                                    <div className="aspect-video bg-neutral-100">
+                                        {o.flyer_url ? <img src={o.flyer_url} alt={o.titulo} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-[10px] uppercase tracking-widest">{o.video_url ? 'Con video' : 'Sin flyer'}</div>}
+                                    </div>
+                                    <div className="p-4">
+                                        <p className="text-sm font-bold uppercase truncate">{o.titulo}</p>
+                                        {o.ubicacion && <p className="text-[10px] text-neutral-400 flex items-center gap-1 mt-0.5"><MapPin size={10} /> {o.ubicacion}</p>}
+                                        <div className="flex items-center gap-1 mt-3">
+                                            <button onClick={() => abrirPostsObra(o)} className="flex-1 border border-neutral-300 hover:border-black py-1.5 px-2 text-[9px] font-semibold uppercase tracking-widest flex items-center justify-center gap-1 rounded"><Users size={11} /> Postulaciones</button>
+                                            <button onClick={() => copiarLinkObra(o.slug)} title="Copiar link" className="border border-neutral-300 hover:border-black p-1.5 rounded"><Link2 size={13} /></button>
+                                            <button onClick={() => abrirEditarObra(o)} title="Editar" className="border border-neutral-300 hover:border-black p-1.5 rounded"><Pencil size={13} /></button>
+                                            <button onClick={() => handleToggleObra(o)} title={o.activa ? 'Cerrar' : 'Reabrir'} className="border border-neutral-300 hover:border-black p-1.5 rounded">{o.activa ? <Eye size={13} /> : <EyeOff size={13} />}</button>
+                                            <button onClick={() => handleEliminarObra(o)} title="Eliminar" className="border border-neutral-300 hover:border-red-500 hover:text-red-500 p-1.5 rounded"><Trash2 size={13} /></button>
                                         </div>
                                     </div>
                                 </div>
@@ -1011,6 +1142,64 @@ export default function TalentsAdminPage() {
                         <div className="flex gap-3 mt-8">
                             <button onClick={handleGuardarShow} disabled={guardandoShow || subiendoPortada} className="flex-1 bg-black text-white font-bold uppercase py-4 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">{guardandoShow ? <Loader2 size={16} className="animate-spin" /> : 'Guardar'}</button>
                             <button onClick={() => setModalShow(false)} className="border border-neutral-300 px-6 font-bold uppercase text-xs tracking-widest hover:bg-neutral-100">Cancelar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* MODAL OBRA */}
+            {modalObra && (
+                <div className="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto" onClick={() => !guardandoObra && setModalObra(false)}>
+                    <div className="bg-white w-full max-w-lg my-8 rounded-2xl p-6 md:p-8 relative max-h-[90dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setModalObra(false)} className="absolute top-5 right-5 text-neutral-400 hover:text-black"><X size={20} /></button>
+                        <h3 className={`${serif.className} text-2xl tracking-wide mb-6`}>{obraForm.id ? 'Editar obra' : 'Nueva obra'}</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Título *</label>
+                                <input value={obraForm.titulo} onChange={e => setObraForm({ ...obraForm, titulo: e.target.value })} placeholder="Ej: Casting obra 'Raíces'" className={inputCls} />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Descripción</label>
+                                <textarea value={obraForm.descripcion} onChange={e => setObraForm({ ...obraForm, descripcion: e.target.value })} className={`${inputCls} min-h-[70px] resize-none`} placeholder="De qué se trata la obra / convocatoria" />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Requisitos</label>
+                                <textarea value={obraForm.requisitos} onChange={e => setObraForm({ ...obraForm, requisitos: e.target.value })} className={`${inputCls} min-h-[70px] resize-none`} placeholder="Edad, disciplina, experiencia, disponibilidad..." />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 flex items-center justify-between"><span>Flyer (imagen)</span>{subiendoFlyer && <span className="text-neutral-400 normal-case flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> subiendo…</span>}</label>
+                                <div className="mt-2 flex items-center gap-3">
+                                    <div className="w-28 aspect-video rounded-lg overflow-hidden bg-neutral-100 border border-neutral-200 flex items-center justify-center shrink-0">
+                                        {obraForm.flyer_url ? <img src={obraForm.flyer_url} alt="" className="w-full h-full object-cover" /> : <span className="text-neutral-300 text-[9px] uppercase">sin flyer</span>}
+                                    </div>
+                                    <label className="flex-1 border border-dashed border-neutral-300 rounded-lg py-3 text-center text-[10px] uppercase tracking-widest font-semibold text-neutral-500 cursor-pointer hover:border-neutral-900 transition-colors">
+                                        Subir flyer
+                                        <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e => handleFlyer(e.target.files)} />
+                                    </label>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Video (opcional)</label>
+                                <input type="url" value={obraForm.video_url} onChange={e => setObraForm({ ...obraForm, video_url: e.target.value })} placeholder="YouTube o Vimeo (se muestra embebido)" className={inputCls} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Ubicación</label>
+                                    <input value={obraForm.ubicacion} onChange={e => setObraForm({ ...obraForm, ubicacion: e.target.value })} placeholder="Ej: Buenos Aires" className={inputCls} />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Fecha límite</label>
+                                    <input type="date" value={obraForm.fecha_limite} onChange={e => setObraForm({ ...obraForm, fecha_limite: e.target.value })} className={inputCls} />
+                                </div>
+                            </div>
+                            <label className="flex items-center gap-2 cursor-pointer pt-1">
+                                <input type="checkbox" checked={obraForm.activa} onChange={e => setObraForm({ ...obraForm, activa: e.target.checked })} className="accent-black w-4 h-4" />
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Activa (visible y recibe postulaciones)</span>
+                            </label>
+                        </div>
+                        <div className="flex gap-3 mt-8">
+                            <button onClick={handleGuardarObra} disabled={guardandoObra || subiendoFlyer} className="flex-1 bg-black text-white font-bold uppercase py-4 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">{guardandoObra ? <Loader2 size={16} className="animate-spin" /> : 'Guardar'}</button>
+                            <button onClick={() => setModalObra(false)} className="border border-neutral-300 px-6 font-bold uppercase text-xs tracking-widest hover:bg-neutral-100">Cancelar</button>
                         </div>
                     </div>
                 </div>

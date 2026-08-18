@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Instagram, Mail, Loader2, ArrowLeft, MapPin, CalendarDays, ArrowRight, Play } from 'lucide-react'
 import { Playfair_Display, Montserrat } from 'next/font/google'
-import { getTalentosPublicosAction, getMarcasPublicasAction, getBusquedasActivasAction, getShowsPublicosAction, type TalentoPublico, type MarcaPublica, type BusquedaPublica, type ShowPublico } from '@/app/actions/talent'
+import { getTalentosPublicosAction, getMarcasPublicasAction, getBusquedasActivasAction, getShowsPublicosAction, getObrasActivasAction, type TalentoPublico, type MarcaPublica, type BusquedaPublica, type ShowPublico, type ObraPublica } from '@/app/actions/talent'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['400', '500', '600', '700'] })
 const sans = Montserrat({ subsets: ['latin'], weight: ['300', '400', '500', '600'] })
@@ -33,11 +33,12 @@ export default function TalentHome() {
     const [marcas, setMarcas] = useState<MarcaPublica[]>([])
     const [busquedas, setBusquedas] = useState<BusquedaPublica[]>([])
     const [shows, setShows] = useState<ShowPublico[]>([])
+    const [obras, setObras] = useState<ObraPublica[]>([])
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
-        Promise.all([getTalentosPublicosAction(), getMarcasPublicasAction(), getBusquedasActivasAction(), getShowsPublicosAction()])
-            .then(([t, m, b, s]) => { setTalentos(t); setMarcas(m); setBusquedas(b); setShows(s); setLoading(false) })
+        Promise.all([getTalentosPublicosAction(), getMarcasPublicasAction(), getBusquedasActivasAction(), getShowsPublicosAction(), getObrasActivasAction()])
+            .then(([t, m, b, s, o]) => { setTalentos(t); setMarcas(m); setBusquedas(b); setShows(s); setObras(o); setLoading(false) })
             .catch(() => setLoading(false))
     }, [])
 
@@ -73,6 +74,7 @@ export default function TalentHome() {
                     <a href="#inicio" className="hover:text-black transition-colors">Inicio</a>
                     <a href="#nosotros" className="hover:text-black transition-colors">Nosotros</a>
                     <a href="#shows" className="hover:text-black transition-colors">Shows</a>
+                    <a href="#obras" className="hover:text-black transition-colors">Obras</a>
                     <a href="#busquedas" className="hover:text-black transition-colors">Búsquedas</a>
                     <a href="#marcas" className="hover:text-black transition-colors">Con quién trabajamos</a>
                     <Link href="/talent/postular" className="border border-neutral-900 px-4 py-2 hover:bg-neutral-900 hover:text-white transition-colors">Sumate</Link>
@@ -158,6 +160,43 @@ export default function TalentHome() {
                                             </div>
                                             <h3 className={`${serif.className} text-xl md:text-2xl tracking-wide mt-5`}>{s.titulo}</h3>
                                             {s.descripcion && <p className="text-neutral-500 text-sm leading-relaxed mt-2 whitespace-pre-line">{s.descripcion}</p>}
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </section>
+                    )}
+
+                    {/* OBRAS — convocatorias con flyer/video */}
+                    {obras.length > 0 && (
+                        <section id="obras" className="max-w-6xl mx-auto px-6 md:px-10 py-16 md:py-24">
+                            <div className="text-center mb-10">
+                                <h2 className={`${serif.className} text-3xl md:text-5xl tracking-[0.2em] uppercase`}>Obras</h2>
+                                <p className="text-neutral-500 text-sm mt-3 max-w-xl mx-auto">Convocatorias abiertas para obras y producciones. Mirá el detalle y postulate.</p>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10">
+                                {obras.map(o => {
+                                    const embed = toEmbed(o.video_url)
+                                    return (
+                                        <div key={o.id} className="border border-neutral-200 rounded-2xl overflow-hidden flex flex-col">
+                                            <div className="aspect-video bg-neutral-100 relative">
+                                                {embed
+                                                    ? <iframe src={embed} title={o.titulo} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+                                                    : o.flyer_url
+                                                        ? <img src={o.flyer_url} alt={o.titulo} className="w-full h-full object-cover" />
+                                                        : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin flyer</div>}
+                                            </div>
+                                            <div className="p-5 flex flex-col flex-1">
+                                                <h3 className={`${serif.className} text-xl md:text-2xl tracking-wide`}>{o.titulo}</h3>
+                                                <div className="flex flex-wrap items-center gap-3 mt-1.5 text-[11px] text-neutral-500">
+                                                    {o.ubicacion && <span className="flex items-center gap-1"><MapPin size={11} /> {o.ubicacion}</span>}
+                                                    {o.fecha_limite && <span className="flex items-center gap-1"><CalendarDays size={11} /> Hasta {new Date(o.fecha_limite + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}</span>}
+                                                </div>
+                                                {o.descripcion && <p className="text-neutral-500 text-sm leading-relaxed mt-3 line-clamp-3">{o.descripcion}</p>}
+                                                <Link href={`/talent/obra/${o.slug}`} className="mt-auto pt-5 inline-flex items-center justify-center gap-2 bg-neutral-900 text-white text-[11px] font-semibold tracking-[0.2em] uppercase px-5 py-3 hover:bg-black transition-colors">
+                                                    Ver y postularme <ArrowRight size={14} />
+                                                </Link>
+                                            </div>
                                         </div>
                                     )
                                 })}
