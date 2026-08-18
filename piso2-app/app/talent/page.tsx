@@ -175,34 +175,26 @@ export default function TalentHome() {
                                 <h2 className={`${serif.className} text-3xl md:text-5xl tracking-[0.2em] uppercase`}>Obras</h2>
                                 <p className="text-neutral-500 text-sm mt-3 max-w-xl mx-auto">Convocatorias abiertas para obras y producciones. Mirá el detalle y postulate.</p>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10">
-                                {obras.map(o => {
-                                    const embed = toEmbed(o.video_url)
-                                    return (
-                                        <div key={o.id} className="border border-neutral-200 rounded-2xl overflow-hidden flex flex-col">
-                                            <div className="aspect-video bg-neutral-100 relative">
-                                                {embed
-                                                    ? <iframe src={embed} title={o.titulo} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
-                                                    : esVideoFile(o.video_url)
-                                                        ? <video src={o.video_url!} controls playsInline className="w-full h-full object-cover bg-black" />
-                                                        : o.flyer_url
-                                                            ? <img src={o.flyer_url} alt={o.titulo} className="w-full h-full object-cover" />
-                                                            : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin flyer</div>}
-                                            </div>
-                                            <div className="p-5 flex flex-col flex-1">
-                                                <h3 className={`${serif.className} text-xl md:text-2xl tracking-wide`}>{o.titulo}</h3>
-                                                <div className="flex flex-wrap items-center gap-3 mt-1.5 text-[11px] text-neutral-500">
-                                                    {o.ubicacion && <span className="flex items-center gap-1"><MapPin size={11} /> {o.ubicacion}</span>}
-                                                    {o.fecha_limite && <span className="flex items-center gap-1"><CalendarDays size={11} /> Hasta {new Date(o.fecha_limite + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}</span>}
-                                                </div>
-                                                {o.descripcion && <p className="text-neutral-500 text-sm leading-relaxed mt-3 line-clamp-3">{o.descripcion}</p>}
-                                                <Link href={`/talent/obra/${o.slug}`} className="mt-auto pt-5 inline-flex items-center justify-center gap-2 bg-neutral-900 text-white text-[11px] font-semibold tracking-[0.2em] uppercase px-5 py-3 hover:bg-black transition-colors">
-                                                    Ver y postularme <ArrowRight size={14} />
-                                                </Link>
-                                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
+                                {obras.map(o => (
+                                    <Link key={o.id} href={`/talent/obra/${o.slug}`} className="group border border-neutral-200 rounded-2xl overflow-hidden flex flex-col hover:border-neutral-900 transition-colors">
+                                        <div className="bg-neutral-100">
+                                            {o.flyer_url
+                                                ? <img src={o.flyer_url} alt={o.titulo} className="w-full h-auto object-contain group-hover:opacity-95 transition-opacity" />
+                                                : <div className="aspect-[3/4] flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin flyer</div>}
                                         </div>
-                                    )
-                                })}
+                                        <div className="p-5 flex flex-col flex-1">
+                                            <h3 className={`${serif.className} text-xl md:text-2xl tracking-wide`}>{o.titulo}</h3>
+                                            <div className="flex flex-wrap items-center gap-3 mt-1.5 text-[11px] text-neutral-500">
+                                                {o.ubicacion && <span className="flex items-center gap-1"><MapPin size={11} /> {o.ubicacion}</span>}
+                                                {o.fecha_limite && <span className="flex items-center gap-1"><CalendarDays size={11} /> Hasta {new Date(o.fecha_limite + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}</span>}
+                                            </div>
+                                            <span className="mt-auto pt-4 inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.2em] uppercase text-neutral-900 group-hover:gap-2.5 transition-all">
+                                                Ver obra <ArrowRight size={13} />
+                                            </span>
+                                        </div>
+                                    </Link>
+                                ))}
                             </div>
                         </section>
                     )}
