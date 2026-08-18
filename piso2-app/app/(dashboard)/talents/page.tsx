@@ -442,7 +442,6 @@ export default function TalentsAdminPage() {
                         <div className="flex bg-neutral-100 p-1 rounded-lg">
                             <button onClick={() => setVista('talentos')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'talentos' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Talentos</button>
                             <button onClick={() => setVista('marcas')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'marcas' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Marcas</button>
-                            <button onClick={() => setVista('shows')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'shows' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Shows</button>
                             <button onClick={() => setVista('obras')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all ${vista === 'obras' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>Obras</button>
                             <button onClick={() => setVista('solicitudes')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${vista === 'solicitudes' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>
                                 Solicitudes

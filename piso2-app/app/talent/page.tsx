@@ -73,7 +73,6 @@ export default function TalentHome() {
                 <nav className="mt-8 flex flex-wrap items-center justify-center gap-6 md:gap-10 text-[10px] md:text-[11px] font-semibold tracking-[0.2em] uppercase text-neutral-600">
                     <a href="#inicio" className="hover:text-black transition-colors">Inicio</a>
                     <a href="#nosotros" className="hover:text-black transition-colors">Nosotros</a>
-                    <a href="#shows" className="hover:text-black transition-colors">Shows</a>
                     <a href="#obras" className="hover:text-black transition-colors">Obras</a>
                     <a href="#busquedas" className="hover:text-black transition-colors">Búsquedas</a>
                     <a href="#marcas" className="hover:text-black transition-colors">Con quién trabajamos</a>
@@ -128,8 +127,8 @@ export default function TalentHome() {
                         </section>
                     )}
 
-                    {/* SHOWS */}
-                    {shows.length > 0 && (
+                    {/* SHOWS (oculto por ahora) */}
+                    {false && shows.length > 0 && (
                         <section id="shows" className="max-w-6xl mx-auto px-6 md:px-10 py-16 md:py-24">
                             <div className="text-center mb-10">
                                 <h2 className={`${serif.className} text-3xl md:text-5xl tracking-[0.2em] uppercase`}>Shows</h2>
