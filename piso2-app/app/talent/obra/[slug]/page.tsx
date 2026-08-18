@@ -27,6 +27,8 @@ function toEmbed(url: string | null): string | null {
     if (vim) return `https://player.vimeo.com/video/${vim[1]}`
     return null
 }
+// Archivo de video subido (se reproduce con <video>)
+const esVideoFile = (url: string | null) => !!url && /\.(mp4|webm|mov|m4v|ogg)(\?|$)/i.test(url)
 
 export default function ObraPublicaPage() {
     const params = useParams()
@@ -134,12 +136,14 @@ export default function ObraPublicaPage() {
                         <div className="aspect-video bg-neutral-900 rounded-2xl overflow-hidden">
                             <iframe src={embed} title={obra.titulo} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
                         </div>
+                    ) : esVideoFile(obra.video_url) ? (
+                        <video src={obra.video_url!} controls playsInline className="w-full rounded-2xl border border-neutral-200 bg-black max-h-[70vh]" />
                     ) : obra.flyer_url ? (
                         <img src={obra.flyer_url} alt={obra.titulo} className="w-full rounded-2xl border border-neutral-200" />
                     ) : obra.video_url ? (
                         <a href={obra.video_url} target="_blank" rel="noreferrer" className="block text-center text-sm font-semibold tracking-wide underline">Ver video de la obra</a>
                     ) : null}
-                    {embed && obra.flyer_url && <img src={obra.flyer_url} alt={obra.titulo} className="w-full rounded-2xl border border-neutral-200 mt-4" />}
+                    {(embed || esVideoFile(obra.video_url)) && obra.flyer_url && <img src={obra.flyer_url} alt={obra.titulo} className="w-full rounded-2xl border border-neutral-200 mt-4" />}
                 </div>
             )}
 

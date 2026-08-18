@@ -27,6 +27,8 @@ function toEmbed(url: string | null): string | null {
     if (vim) return `https://player.vimeo.com/video/${vim[1]}`
     return null
 }
+// Archivo de video subido (se reproduce con <video>)
+const esVideoFile = (url: string | null) => !!url && /\.(mp4|webm|mov|m4v|ogg)(\?|$)/i.test(url)
 
 export default function TalentHome() {
     const [talentos, setTalentos] = useState<TalentoPublico[]>([])
@@ -181,9 +183,11 @@ export default function TalentHome() {
                                             <div className="aspect-video bg-neutral-100 relative">
                                                 {embed
                                                     ? <iframe src={embed} title={o.titulo} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
-                                                    : o.flyer_url
-                                                        ? <img src={o.flyer_url} alt={o.titulo} className="w-full h-full object-cover" />
-                                                        : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin flyer</div>}
+                                                    : esVideoFile(o.video_url)
+                                                        ? <video src={o.video_url!} controls playsInline className="w-full h-full object-cover bg-black" />
+                                                        : o.flyer_url
+                                                            ? <img src={o.flyer_url} alt={o.titulo} className="w-full h-full object-cover" />
+                                                            : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin flyer</div>}
                                             </div>
                                             <div className="p-5 flex flex-col flex-1">
                                                 <h3 className={`${serif.className} text-xl md:text-2xl tracking-wide`}>{o.titulo}</h3>

@@ -84,6 +84,7 @@ export default function TalentsAdminPage() {
     const [obraForm, setObraForm] = useState<{ id?: string; titulo: string; descripcion: string; requisitos: string; ubicacion: string; flyer_url: string; video_url: string; fecha_limite: string; activa: boolean }>({ titulo: '', descripcion: '', requisitos: '', ubicacion: '', flyer_url: '', video_url: '', fecha_limite: '', activa: true })
     const [guardandoObra, setGuardandoObra] = useState(false)
     const [subiendoFlyer, setSubiendoFlyer] = useState(false)
+    const [subiendoVideo, setSubiendoVideo] = useState(false)
     const [obraSel, setObraSel] = useState<any | null>(null)
     const [postsObra, setPostsObra] = useState<any[]>([])
     const [loadingPostsObra, setLoadingPostsObra] = useState(false)
@@ -376,6 +377,21 @@ export default function TalentsAdminPage() {
             setObraForm(f => ({ ...f, flyer_url: supabase.storage.from('talent').getPublicUrl(path).data.publicUrl }))
         } catch (e: any) { toast.error('Error subiendo el flyer') }
         setSubiendoFlyer(false)
+    }
+    const handleVideoObra = async (files: FileList | null) => {
+        if (!files || !files[0]) return
+        const file = files[0]
+        if (file.size > 50 * 1024 * 1024) return toast.error('El video es muy pesado (máx. 50 MB). Subí uno más corto o comprimido.')
+        setSubiendoVideo(true)
+        try {
+            const ext = (file.name.split('.').pop() || 'mp4').toLowerCase()
+            const path = `obras/video-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+            const { error } = await supabase.storage.from('talent').upload(path, file, { contentType: file.type || 'video/mp4' })
+            if (error) throw error
+            setObraForm(f => ({ ...f, video_url: supabase.storage.from('talent').getPublicUrl(path).data.publicUrl }))
+            toast.success('Video subido')
+        } catch (e: any) { toast.error('Error subiendo el video: ' + (e.message || '')) }
+        setSubiendoVideo(false)
     }
     const handleGuardarObra = async () => {
         if (!obraForm.titulo.trim()) return toast.error('Poné un título para la obra')
@@ -1178,8 +1194,19 @@ export default function TalentsAdminPage() {
                                 </div>
                             </div>
                             <div>
-                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">Video (opcional)</label>
-                                <input type="url" value={obraForm.video_url} onChange={e => setObraForm({ ...obraForm, video_url: e.target.value })} placeholder="YouTube o Vimeo (se muestra embebido)" className={inputCls} />
+                                <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 flex items-center justify-between"><span>Video (opcional)</span>{subiendoVideo && <span className="text-neutral-400 normal-case flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> subiendo…</span>}</label>
+                                <input type="url" value={obraForm.video_url} onChange={e => setObraForm({ ...obraForm, video_url: e.target.value })} placeholder="Pegá un link de YouTube/Vimeo…" className={inputCls} />
+                                <div className="flex items-center gap-2 mt-2">
+                                    <span className="text-[9px] text-neutral-400 uppercase tracking-widest">o</span>
+                                    <label className="flex-1 border border-dashed border-neutral-300 rounded-lg py-2.5 text-center text-[10px] uppercase tracking-widest font-semibold text-neutral-500 cursor-pointer hover:border-neutral-900 transition-colors">
+                                        Subir video corto (máx. 50 MB)
+                                        <input type="file" accept="video/*" className="hidden" onChange={e => handleVideoObra(e.target.files)} />
+                                    </label>
+                                    {obraForm.video_url && <button type="button" onClick={() => setObraForm({ ...obraForm, video_url: '' })} className="text-neutral-400 hover:text-black" title="Quitar video"><X size={16} /></button>}
+                                </div>
+                                {obraForm.video_url && /\.(mp4|webm|mov|m4v|ogg)(\?|$)/i.test(obraForm.video_url) && (
+                                    <video src={obraForm.video_url} controls className="w-full mt-2 rounded-lg border border-neutral-200 max-h-40 bg-black" />
+                                )}
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
