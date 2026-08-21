@@ -51,8 +51,24 @@ export async function proxy(request: NextRequest) {
             request.nextUrl.pathname.startsWith('/nueva-generacion') ||
             request.nextUrl.pathname.startsWith('/instalar') // 🚀 EL PASE VIP PARA MERCADO PAGO
 
-        // 3. Si hay un error de token o no hay usuario, y quiere entrar a zona privada -> Al login
-        if ((error || !user) && !isPublicRoute) {
+        // 3. ¿El error es un PARPADEO de Supabase (red / servidor caído) o un
+        //    "no estás logueado" de verdad? Un error transitorio NO debe
+        //    desloguear a nadie: tratarlo como logout es lo que hacía que un
+        //    segundo de intermitencia pateara al usuario al login y le borrara
+        //    la sesión ("se cierra la cuenta y se vuelve a abrir sola").
+        //    - Sesión ausente/inválida => status 400/401/403 (logout real).
+        //    - Red / Supabase caído   => AuthRetryableFetchError, status 0 o 5xx.
+        const status = (error as any)?.status
+        const errorTransitorio = !!error && (
+            (error as any)?.name === 'AuthRetryableFetchError' ||
+            status === 0 ||
+            (typeof status === 'number' && status >= 500)
+        )
+
+        // 4. Solo mandamos al login si REALMENTE no hay sesión. Ante un parpadeo
+        //    dejamos pasar: la sesión sigue en las cookies y se revalida sola en
+        //    el próximo request (y el guardado a nivel de página sigue firme).
+        if (!user && !errorTransitorio && !isPublicRoute) {
             const url = request.nextUrl.clone()
             url.pathname = '/login'
             const redirectResponse = NextResponse.redirect(url)
@@ -65,10 +81,10 @@ export async function proxy(request: NextRequest) {
             return redirectResponse
         }
     } catch (e) {
-        console.error('Proxy Auth Error:', e)
-        const url = request.nextUrl.clone()
-        url.pathname = '/login'
-        return NextResponse.redirect(url)
+        // Excepción inesperada (casi siempre red / Supabase caído): NO
+        // deslogueamos por un parpadeo. Dejamos pasar; la sesión sigue en las
+        // cookies y el guardado a nivel de página sigue protegiendo las rutas.
+        console.error('Proxy Auth Error (transitorio, no desloguea):', e)
     }
 
     return supabaseResponse
