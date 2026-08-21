@@ -16,6 +16,7 @@ import {
     addDays,
 } from 'date-fns'
 import { revalidatePath } from 'next/cache'
+import { devolverCreditoDeInscripcion, MODALIDADES_CON_CREDITO } from './_refund-credito'
 
 const getAdminClient = () => createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -51,8 +52,51 @@ export async function cancelarClaseAction({ claseId, serieId }: { claseId?: stri
     const { error: errCancel } = await admin.from('clases').update({ estado: 'cancelada' }).in('id', claseIds)
     if (errCancel) return { success: false, error: errCancel.message }
 
-    // 2) Limpiar la asistencia de esas clases (sin falta ni presente)
-    await admin.from('inscripciones').update({ estado_asistencia: null, presente: false }).in('clase_id', claseIds)
+    // 2) A los inscriptos que NO asistieron, les devolvemos el crédito y les
+    //    sacamos la inscripción (así no quedan "pagando" una clase que no va).
+    //    A los que SÍ asistieron no se les toca nada (la clase les cuenta).
+    //    A los que no pagaron con crédito (invitado/suelta), solo se les limpia
+    //    la falta para que la cancelación no les deje una ausencia.
+    const { data: inscripciones } = await admin
+        .from('inscripciones')
+        .select(`
+            id, user_id, modalidad, pack_usado_id, presente, estado_asistencia,
+            clase:clases (
+                nombre, tipo_clase, es_combinable,
+                profesor:profiles!clases_profesor_id_fkey(nombre_completo)
+            )
+        `)
+        .in('clase_id', claseIds)
+
+    const idsSoloLimpiarFalta: string[] = []
+    for (const insc of (inscripciones || []) as any[]) {
+        const asistio = insc.presente === true ||
+            ['presente', 'media_falta', 'saf'].includes(insc.estado_asistencia)
+        if (asistio) continue // asistió: la clase le cuenta, no se toca
+
+        const claseInfo = Array.isArray(insc.clase) ? insc.clase[0] : insc.clase
+        const esCredito = insc.user_id && MODALIDADES_CON_CREDITO.includes(insc.modalidad)
+
+        if (esCredito) {
+            // Devolvemos el crédito y borramos la inscripción fantasma.
+            await devolverCreditoDeInscripcion(admin, {
+                user_id: insc.user_id,
+                modalidad: insc.modalidad,
+                pack_usado_id: insc.pack_usado_id,
+                claseInfo,
+            })
+            await admin.from('inscripciones').delete().eq('id', insc.id)
+        } else {
+            // Invitado / suelta / efectivo: no hay crédito que devolver.
+            idsSoloLimpiarFalta.push(insc.id)
+        }
+    }
+
+    if (idsSoloLimpiarFalta.length > 0) {
+        await admin.from('inscripciones')
+            .update({ estado_asistencia: null, presente: false })
+            .in('id', idsSoloLimpiarFalta)
+    }
 
     revalidatePath('/calendario')
     revalidatePath('/la-liga')
