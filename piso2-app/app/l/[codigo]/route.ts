@@ -24,8 +24,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         return NextResponse.redirect(new URL('/talent', request.url))
     }
 
-    // Contamos el click (best-effort, sin frenar la redirección).
-    void admin.from('short_links').update({ clicks: (data.clicks || 0) + 1 }).eq('codigo', codigo)
+    // Contamos el click. Lo await-eamos: en serverless (Vercel) el trabajo
+    // "fire-and-forget" se descarta al congelarse la función tras responder.
+    await admin.from('short_links').update({ clicks: (data.clicks || 0) + 1 }).eq('codigo', codigo)
 
     // destino es una ruta relativa → se resuelve contra el dominio actual.
     return NextResponse.redirect(new URL(data.destino, request.url))
