@@ -25,7 +25,7 @@ function PublicAlquilerContent() {
     const [horaInicio, setHoraInicio] = useState('10:00')
     const [horaFin, setHoraFin] = useState('12:00')
 
-    const numeroWhatsApp = '5491100000000' // <--- CAMBIÁ ESTO POR EL NÚMERO DEL ESTUDIO
+    const numeroWhatsApp = '5491171190301' // Línea de alquileres de Piso 2
 
     useEffect(() => {
         fetchSalas()

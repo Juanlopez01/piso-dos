@@ -126,7 +126,7 @@ export default function AlquileresPage() {
                                 <li className="flex items-center gap-3"><div className="w-1.5 h-1.5 bg-[#D4E655] rounded-full"></div> Sistema de sonido Bluetooth profesional</li>
                                 <li className="flex items-center gap-3"><div className="w-1.5 h-1.5 bg-[#D4E655] rounded-full"></div> Climatización frío/calor</li>
                             </ul>
-                            <a href="https://wa.me/549171190301?text=Hola! Me interesa alquilar en Sede Obelisco" target="_blank" rel="noreferrer" className="inline-flex w-full items-center justify-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-5 hover:bg-white transition-all text-xs tracking-[0.2em] rounded-2xl shadow-[0_0_20px_rgba(212,230,85,0.2)]">
+                            <a href="https://wa.me/5491171190301?text=Hola! Me interesa alquilar en Sede Obelisco" target="_blank" rel="noreferrer" className="inline-flex w-full items-center justify-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-5 hover:bg-white transition-all text-xs tracking-[0.2em] rounded-2xl shadow-[0_0_20px_rgba(212,230,85,0.2)]">
                                 CONSULTAR DISPONIBILIDAD <ArrowRight size={16} />
                             </a>
                         </div>
@@ -146,7 +146,7 @@ export default function AlquileresPage() {
                                 <li className="flex items-center gap-3"><div className="w-1.5 h-1.5 bg-[#D4E655] rounded-full"></div> Iluminación regulable (Cálida/Fría)</li>
                                 <li className="flex items-center gap-3"><div className="w-1.5 h-1.5 bg-[#D4E655] rounded-full"></div> Ideal para grupos reducidos o ensayos íntimos</li>
                             </ul>
-                            <a href="https://wa.me/549171190301?text=Hola! Me interesa alquilar en Sede Congreso" target="_blank" rel="noreferrer" className="inline-flex w-full items-center justify-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-5 hover:bg-white transition-all text-xs tracking-[0.2em] rounded-2xl shadow-[0_0_20px_rgba(212,230,85,0.2)]">
+                            <a href="https://wa.me/5491171190301?text=Hola! Me interesa alquilar en Sede Congreso" target="_blank" rel="noreferrer" className="inline-flex w-full items-center justify-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-5 hover:bg-white transition-all text-xs tracking-[0.2em] rounded-2xl shadow-[0_0_20px_rgba(212,230,85,0.2)]">
                                 CONSULTAR DISPONIBILIDAD <ArrowRight size={16} />
                             </a>
                         </div>

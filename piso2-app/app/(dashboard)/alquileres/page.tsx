@@ -48,14 +48,21 @@ const fetcher = async (): Promise<AlquileresData> => {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) throw new Error("No autorizado")
 
-    const { data: s } = await supabase.from('salas').select('*').order('nombre')
+    const { data: s } = await supabase.from('salas').select('*, sede:sedes(nombre)').order('nombre')
     const salas = s || []
+
+    // Traemos historial reciente (últimos 90 días) + TODO lo futuro, así no se
+    // pierden reservas próximas por el límite (antes traía solo las 100 más nuevas).
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 90)
+    const cutoffStr = cutoff.toISOString().slice(0, 10)
 
     const { data: rawData } = await supabase
         .from('alquileres')
         .select(`*, sala:salas(nombre)`)
-        .order('fecha', { ascending: false })
-        .limit(100)
+        .gte('fecha', cutoffStr)
+        .order('fecha', { ascending: true })
+        .limit(500)
 
     let grupos: ReservaGroup[] = []
 
@@ -125,6 +132,11 @@ export default function AlquileresPage() {
     const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
     const [expandedSala, setExpandedSala] = useState<string | null>(null)
     const [creating, setCreating] = useState(false)
+
+    // Filtros del listado
+    const [busqueda, setBusqueda] = useState('')
+    const [filtroSede, setFiltroSede] = useState('')
+    const [verPasados, setVerPasados] = useState(false)
 
     // Modal Cobro
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
@@ -265,6 +277,7 @@ export default function AlquileresPage() {
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault()
         if (form.fechas.length === 0) return toast.error('Seleccioná fechas')
+        if (priceBreakdown.total <= 0) return toast.error('Esta sala no tiene tarifa cargada para ese tipo de uso. Cargala en Tarifas o cambiá el tipo.')
         setCreating(true)
 
         const newGroupId = uuidv4()
@@ -534,6 +547,26 @@ export default function AlquileresPage() {
     const VISIBLE_TAGS = 12
     const recargoFactor = paymentMethod === 'transferencia' ? 1.10 : 1;
 
+    // Sedes disponibles (para el filtro) a partir de las salas.
+    const sedeDeSala = (s: any): string => (Array.isArray(s?.sede) ? s.sede[0]?.nombre : s?.sede?.nombre) || ''
+    const sedesDisponibles = Array.from(new Set(salas.map(sedeDeSala).filter(Boolean)))
+    const hoyStr = format(new Date(), 'yyyy-MM-dd')
+
+    // Aplicamos filtros: búsqueda por cliente, sede, y próximos/pasados.
+    const gruposFiltrados = grupos.filter(g => {
+        if (busqueda && !g.cliente_nombre.toLowerCase().includes(busqueda.trim().toLowerCase())) return false
+        if (filtroSede) {
+            const sala = salas.find((s: any) => s.id === g.sala_id)
+            if (sedeDeSala(sala) !== filtroSede) return false
+        }
+        if (!verPasados) {
+            // Un grupo es "próximo" si tiene alguna fecha de hoy en adelante.
+            const tieneFutura = g.items.some((it: any) => it.fecha >= hoyStr)
+            if (!tieneFutura) return false
+        }
+        return true
+    })
+
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32">
             <Toaster position="top-center" richColors theme="dark" />
@@ -557,12 +590,45 @@ export default function AlquileresPage() {
                 </div>
             </div>
 
+            {/* BARRA DE FILTROS */}
+            <div className="flex flex-col md:flex-row gap-2 mb-5">
+                <input
+                    value={busqueda}
+                    onChange={e => setBusqueda(e.target.value)}
+                    placeholder="Buscar por cliente…"
+                    className="flex-1 bg-[#111] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#D4E655] transition-colors"
+                />
+                {sedesDisponibles.length > 1 && (
+                    <select
+                        value={filtroSede}
+                        onChange={e => setFiltroSede(e.target.value)}
+                        className="bg-[#111] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#D4E655] transition-colors"
+                    >
+                        <option value="">Todas las sedes</option>
+                        {sedesDisponibles.map(sede => <option key={sede} value={sede}>{sede}</option>)}
+                    </select>
+                )}
+                <button
+                    onClick={() => setVerPasados(v => !v)}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide border transition-colors ${verPasados ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-300 border-white/10 hover:border-white/30'}`}
+                >
+                    {verPasados ? 'Viendo todos' : 'Solo próximos'}
+                </button>
+            </div>
+
             {/* GRILLA GRUPOS */}
             {isLoading && grupos.length === 0 ? (
                 <div className="min-h-[50vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
+            ) : gruposFiltrados.length === 0 ? (
+                <div className="min-h-[40vh] flex flex-col items-center justify-center text-center text-gray-500 gap-2">
+                    <Calendar size={32} className="opacity-40" />
+                    <p className="text-sm font-medium">
+                        {grupos.length === 0 ? 'Todavía no hay reservas cargadas.' : 'No hay reservas que coincidan con el filtro.'}
+                    </p>
+                </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {grupos.map((group) => {
+                    {gruposFiltrados.map((group) => {
                         const isFullyPaid = group.estado_pago === 'pagado'
                         const isSena = group.estado_pago === 'seña_pagada'
                         const isOpen = expandedGroup === group.group_id

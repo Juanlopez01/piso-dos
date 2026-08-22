@@ -6,10 +6,24 @@ import { revalidatePath } from 'next/cache'
 // Importamos format y en-US para que la fecha quede en el formato gringo que pide la BDD (YYYY-MM-DD)
 import { format } from 'date-fns'
 
-export async function crearAlquileresAction(inserts: any[]) {
+// Solo staff puede gestionar alquileres (crear/cobrar/editar/borrar/tarifas).
+// Sin esto, cualquier usuario logueado podría invocar estas actions y tocar
+// reservas, tarifas o la caja.
+const ROLES_ALQUILERES = ['admin', 'recepcion', 'auxiliar']
+async function requireStaffAlquileres(): Promise<{ ok: boolean; error?: string }> {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) return { success: false, error: 'No autorizado' }
+    if (!session?.user) return { ok: false, error: 'No autorizado' }
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (!perfil || !ROLES_ALQUILERES.includes(perfil.rol)) return { ok: false, error: 'Sin permisos' }
+    return { ok: true }
+}
+
+export async function crearAlquileresAction(inserts: any[]) {
+    const perm = await requireStaffAlquileres()
+    if (!perm.ok) return { success: false, error: perm.error }
+
+    const supabase = await createClient()
 
     try {
         // 🚀 MAGIA ANTI-ZONAS HORARIAS
@@ -43,9 +57,10 @@ export async function crearAlquileresAction(inserts: any[]) {
 }
 
 export async function cobrarAlquilerAction(updates: any[], movimientoCaja: any) {
+    const perm = await requireStaffAlquileres()
+    if (!perm.ok) return { success: false, error: perm.error }
+
     const supabase = await createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) return { success: false, error: 'No autorizado' }
 
     try {
         const promesas = updates.map(u => supabase.from('alquileres').update({
@@ -69,9 +84,10 @@ export async function cobrarAlquilerAction(updates: any[], movimientoCaja: any) 
 }
 
 export async function eliminarReservaAction(ids: string[]) {
+    const perm = await requireStaffAlquileres()
+    if (!perm.ok) return { success: false, error: perm.error }
+
     const supabase = await createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) return { success: false, error: 'No autorizado' }
 
     try {
         const { error } = await supabase.from('alquileres').delete().in('id', ids)
@@ -90,15 +106,16 @@ export async function editarAlquilerFechaHoraAction(
     horaInicio: string,
     horaFin: string
 ) {
+    const perm = await requireStaffAlquileres()
+    if (!perm.ok) return { success: false, error: perm.error }
+
     const supabase = await createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) return { success: false, error: 'No autorizado' }
 
     try {
         // Validar que el alquiler original sea a más de 24h
         const { data: alquiler } = await supabase
             .from('alquileres')
-            .select('fecha, hora_inicio')
+            .select('fecha, hora_inicio, sala_id')
             .eq('id', id)
             .single()
 
@@ -109,6 +126,30 @@ export async function editarAlquilerFechaHoraAction(
         if (diff < 24 * 60 * 60 * 1000) {
             return { success: false, error: 'Solo se puede editar con más de 24 horas de anticipación.' }
         }
+
+        // Chequear que el nuevo horario no pise una clase u otro alquiler en esa sala.
+        const reqStart = `${nuevaFecha}T${horaInicio}:00-03:00`
+        const reqEnd = `${nuevaFecha}T${horaFin}:00-03:00`
+
+        const { data: claseChoque } = await supabase.from('clases')
+            .select('nombre')
+            .eq('sala_id', alquiler.sala_id)
+            .neq('estado', 'cancelada')
+            .lt('inicio', reqEnd)
+            .gt('fin', reqStart)
+            .maybeSingle()
+        if (claseChoque) return { success: false, error: `Se pisa con una clase: ${claseChoque.nombre}` }
+
+        const { data: alqChoque } = await supabase.from('alquileres')
+            .select('cliente_nombre')
+            .eq('sala_id', alquiler.sala_id)
+            .eq('fecha', nuevaFecha)
+            .in('estado', ['confirmado', 'pagado', 'pendiente'])
+            .lt('hora_inicio', horaFin)
+            .gt('hora_fin', horaInicio)
+            .neq('id', id) // excluimos la propia reserva que estamos moviendo
+            .maybeSingle()
+        if (alqChoque) return { success: false, error: `Se pisa con otro alquiler: ${alqChoque.cliente_nombre}` }
 
         const { error } = await supabase
             .from('alquileres')
@@ -125,9 +166,10 @@ export async function editarAlquilerFechaHoraAction(
 }
 
 export async function actualizarTarifaAction(salaId: string, field: string, value: number) {
+    const perm = await requireStaffAlquileres()
+    if (!perm.ok) return { success: false, error: perm.error }
+
     const supabase = await createClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) return { success: false, error: 'No autorizado' }
 
     try {
         const { error } = await supabase.from('salas').update({ [field]: value }).eq('id', salaId)
