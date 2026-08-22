@@ -19,6 +19,48 @@ async function requireAdmin(): Promise<{ ok: boolean; error?: string }> {
     return { ok: true }
 }
 
+// ── Acortador de links ───────────────────────────────────────────────────────
+// Alfabeto sin caracteres confusos (0/o, 1/l/i) para que el link corto sea fácil
+// de leer y dictar.
+const SHORT_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789'
+function generarCodigoCorto(len: number): string {
+    let s = ''
+    for (let i = 0; i < len; i++) s += SHORT_ALPHABET[Math.floor(Math.random() * SHORT_ALPHABET.length)]
+    return s
+}
+
+// Devuelve (creando si hace falta) un código corto para una ruta. Reusa el mismo
+// código si ese destino ya fue acortado, así el link es estable.
+export async function acortarLinkAction(destino: string): Promise<{ ok: boolean; codigo?: string; error?: string }> {
+    // Se llama desde el panel: pedimos sesión (cualquier staff logueado).
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { ok: false, error: 'No autorizado' }
+
+    // Guardamos solo la ruta relativa (sin dominio), para que funcione en cualquier entorno.
+    let path = (destino || '').trim()
+    if (/^https?:\/\//i.test(path)) {
+        try { const u = new URL(path); path = u.pathname + u.search } catch { /* se usa tal cual */ }
+    }
+    if (!path.startsWith('/')) path = '/' + path
+    if (path.length < 2) return { ok: false, error: 'Destino inválido' }
+
+    const admin = getAdminClient()
+
+    // ¿Ya existe un código para este destino? Lo reusamos.
+    const { data: existente } = await admin.from('short_links').select('codigo').eq('destino', path).limit(1).maybeSingle()
+    if (existente?.codigo) return { ok: true, codigo: existente.codigo }
+
+    // Generamos uno único (reintenta si choca contra el PK).
+    for (let intento = 0; intento < 8; intento++) {
+        const codigo = generarCodigoCorto(intento < 5 ? 5 : 6)
+        const { error } = await admin.from('short_links').insert({ codigo, destino: path })
+        if (!error) return { ok: true, codigo }
+        if (error.code !== '23505') return { ok: false, error: error.message } // no era colisión
+    }
+    return { ok: false, error: 'No se pudo generar el código' }
+}
+
 export type TalentoPublico = {
     id: string
     nombre: string

@@ -13,7 +13,8 @@ import {
     listPostulacionesBusquedaAction, cambiarEstadoPostBusquedaAction, eliminarPostBusquedaAction, aceptarPostBusquedaAction,
     getTalentDashboardDataAction, listTalentosParaBusquedaAction, agregarTalentoABusquedaAction, type TalentoParaBusqueda,
     listObrasAdminAction, upsertObraAction, toggleObraActivaAction, eliminarObraAction,
-    listPostulacionesObraAction, cambiarEstadoPostObraAction, eliminarPostObraAction
+    listPostulacionesObraAction, cambiarEstadoPostObraAction, eliminarPostObraAction,
+    acortarLinkAction
 } from '@/app/actions/talent'
 import { toast, Toaster } from 'sonner'
 import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users, Share2, MessageCircle, Globe } from 'lucide-react'
@@ -230,16 +231,29 @@ export default function TalentsAdminPage() {
         setProcesandoPostBusq(false)
     }
 
-    const copiarLinkBusqueda = (slug: string) => {
-        const url = `${window.location.origin}/talent/busqueda/${slug}`
-        navigator.clipboard.writeText(url).then(() => toast.success('Link de postulación copiado')).catch(() => toast.error('No se pudo copiar'))
+    // Acorta el destino y copia el link corto (para compartir en RRSS sin URLs largas).
+    // Si el acortador falla, cae al link largo así el botón nunca queda roto.
+    const copiarLinkCorto = async (destino: string, okMsg: string) => {
+        const largo = `${window.location.origin}${destino}`
+        let url = largo
+        try {
+            const r = await acortarLinkAction(destino)
+            if (r.ok && r.codigo) url = `${window.location.origin}/l/${r.codigo}`
+        } catch { /* usamos el link largo */ }
+        try {
+            await navigator.clipboard.writeText(url)
+            toast.success(okMsg)
+        } catch {
+            toast.error('No se pudo copiar')
+        }
     }
 
+    const copiarLinkBusqueda = (slug: string) =>
+        copiarLinkCorto(`/talent/busqueda/${slug}`, 'Link de postulación copiado')
+
     // Link anonimizado para pasar a los seleccionadores / clientes (sin datos sensibles)
-    const copiarLinkSeleccion = (slug: string) => {
-        const url = `${window.location.origin}/talent/busqueda/${slug}/seleccion`
-        navigator.clipboard.writeText(url).then(() => toast.success('Link para seleccionadores copiado')).catch(() => toast.error('No se pudo copiar'))
-    }
+    const copiarLinkSeleccion = (slug: string) =>
+        copiarLinkCorto(`/talent/busqueda/${slug}/seleccion`, 'Link para seleccionadores copiado')
 
     const abrirNuevo = () => { setForm(formVacio()); setModalOpen(true) }
     const abrirEditar = (t: Talento) => {
@@ -407,10 +421,8 @@ export default function TalentsAdminPage() {
         const r = await eliminarObraAction(o.id)
         if (r.success) { toast.success('Eliminada'); cargarObras() } else toast.error(r.error || 'Error')
     }
-    const copiarLinkObra = (slug: string) => {
-        const url = `${window.location.origin}/talent/obra/${slug}`
-        navigator.clipboard.writeText(url).then(() => toast.success('Link de la obra copiado')).catch(() => toast.error('No se pudo copiar'))
-    }
+    const copiarLinkObra = (slug: string) =>
+        copiarLinkCorto(`/talent/obra/${slug}`, 'Link de la obra copiado')
     const abrirPostsObra = (o: any) => {
         setObraSel(o); setLoadingPostsObra(true)
         listPostulacionesObraAction(o.id).then(d => { setPostsObra(d); setLoadingPostsObra(false) }).catch(() => setLoadingPostsObra(false))

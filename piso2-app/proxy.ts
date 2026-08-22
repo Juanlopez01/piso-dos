@@ -44,6 +44,7 @@ export async function proxy(request: NextRequest) {
             request.nextUrl.pathname.startsWith('/alquiler') ||
             request.nextUrl.pathname.startsWith('/pago-exito') ||
             request.nextUrl.pathname.startsWith('/pagar') || // Link de venta: lo abre un cliente sin cuenta
+            request.nextUrl.pathname.startsWith('/l/') || // Links cortos: los abre gente desde RRSS sin cuenta
             // Vitrina de Talent pública (marcas sin cuenta), EXCEPTO /talent/postular que pide login
             (request.nextUrl.pathname.startsWith('/talent') && !request.nextUrl.pathname.startsWith('/talent/postular')) ||
             request.nextUrl.pathname.startsWith('/cartelera') || // Cartelera pública de clases: se ve sin login; reservar pide login
