@@ -55,6 +55,7 @@ function MobileNavContent() {
             'La Liga',
             'Grupos',
             'Talents',
+            'Asistente',
             'Liquidaciones',
             'Remarketing',
             'Caja',
