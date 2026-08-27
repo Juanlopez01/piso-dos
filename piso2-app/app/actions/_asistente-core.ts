@@ -36,6 +36,45 @@ function fmtHora(iso: string) {
 const nombreDe = (rel: any) => Array.isArray(rel) ? rel[0]?.nombre : rel?.nombre
 const nombreCompletoDe = (rel: any) => Array.isArray(rel) ? rel[0]?.nombre_completo : rel?.nombre_completo
 
+// ---- Horas y días (para disponibilidad de alquiler) ----
+const hhmmToMin = (s: string) => { const [h, m] = (s || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0) }
+const fmtMin = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+const minDeISO = (iso: string) => hhmmToMin(fmtHora(iso)) // minuto del día en horario Argentina
+
+const DIAS_SEMANA: Record<string, number> = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, jueves: 4, viernes: 5, sabado: 6 }
+const MESES: Record<string, number> = { enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6, julio: 7, agosto: 8, septiembre: 9, setiembre: 9, octubre: 10, noviembre: 11, diciembre: 12 }
+
+const dowDeFecha = (fecha: string) => new Date(fecha + 'T12:00:00Z').getUTCDay()
+function offsetDeFecha(y: number, m: number, d: number): number {
+    const [hy, hm, hd] = fechaART(0).split('-').map(Number)
+    return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(hy, hm - 1, hd)) / 86400000)
+}
+
+// Devuelve el offset de días (0..~120) para el día mencionado en el texto, o null.
+function parsearDiaOffset(q: string): number | null {
+    if (/pasado\s*manana/.test(q)) return 2
+    if (/\bmanana\b/.test(q)) return 1
+    if (/\bhoy\b/.test(q)) return 0
+    for (const [nombre, dow] of Object.entries(DIAS_SEMANA)) {
+        if (q.includes(nombre)) { const hoy = dowDeFecha(fechaART(0)); return (dow - hoy + 7) % 7 }
+    }
+    let m = q.match(/(\d{1,2})\s*de\s*([a-z]+)/)
+    if (m && MESES[m[2]]) { const [hy] = fechaART(0).split('-').map(Number); const off = offsetDeFecha(hy, MESES[m[2]], +m[1]); if (off >= 0 && off <= 120) return off }
+    m = q.match(/\b(\d{1,2})[\/\-](\d{1,2})\b/)
+    if (m) { const [hy] = fechaART(0).split('-').map(Number); const off = offsetDeFecha(hy, +m[2], +m[1]); if (off >= 0 && off <= 120) return off }
+    m = q.match(/\bel\s*(\d{1,2})\b/)
+    if (m) { const [hy, hm, hd] = fechaART(0).split('-').map(Number); const d = +m[1]; let mes = d < hd ? hm + 1 : hm; let y = hy; if (mes > 12) { mes = 1; y++ }; const off = offsetDeFecha(y, mes, d); if (off >= 0 && off <= 120) return off }
+    return null
+}
+
+function etiquetaDia(add: number): string {
+    if (add === 0) return 'hoy'; if (add === 1) return 'mañana'; if (add === 2) return 'pasado mañana'
+    const f = fechaART(add); const dt = new Date(f + 'T12:00:00Z')
+    const dia = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][dt.getUTCDay()]
+    const [, m, d] = f.split('-')
+    return `${dia} ${d}/${m}`
+}
+
 // ---------------------------------------------------------------------------
 // HERRAMIENTAS (reutilizables por la IA en Fase 2)
 // ---------------------------------------------------------------------------
@@ -120,30 +159,50 @@ export async function disponibilidadAlquiler(opts: { salaTexto: string; addDays?
     const fecha = fechaART(add)
     const { desde, hasta } = rangoDia(add)
 
-    const { data: salas } = await admin.from('salas').select('id, nombre, sede:sedes(nombre)')
+    const { data: salas } = await admin.from('salas')
+        .select('id, nombre, sede:sedes(nombre), p_ensayo_manana, p_ensayo_noche, p_ensayo_finde')
     const q = norm(opts.salaTexto)
-    const sala = (salas || []).find((s: any) => norm(s.nombre).includes(q))
-    if (!sala) return `No encontré una sala que coincida con "${opts.salaTexto}". Las salas son: ${(salas || []).map((s: any) => s.nombre).join(', ')}.`
+    const sala: any = (salas || []).find((s: any) => norm(s.nombre).includes(q))
+    if (!sala) return `No encontré esa sala. Las salas son: ${(salas || []).map((s: any) => s.nombre).join(', ')}. ¿Cuál te interesa?`
 
     const { data: clases } = await admin.from('clases')
-        .select('nombre, inicio, fin').eq('sala_id', sala.id).neq('estado', 'cancelada')
-        .gte('inicio', desde).lt('inicio', hasta).order('inicio')
+        .select('inicio, fin').eq('sala_id', sala.id).neq('estado', 'cancelada')
+        .gte('inicio', desde).lt('inicio', hasta)
     const { data: alqs } = await admin.from('alquileres')
         .select('hora_inicio, hora_fin').eq('sala_id', sala.id).eq('fecha', fecha)
         .in('estado', ['confirmado', 'pagado', 'pendiente'])
 
-    const ocup: { ini: string; fin: string }[] = []
-    ;(clases || []).forEach((c: any) => ocup.push({ ini: fmtHora(c.inicio), fin: fmtHora(c.fin) }))
-    ;(alqs || []).forEach((a: any) => ocup.push({ ini: (a.hora_inicio || '').slice(0, 5), fin: (a.hora_fin || '').slice(0, 5) }))
-    ocup.sort((a, b) => a.ini.localeCompare(b.ini))
+    // Ocupaciones en minutos del día (ART)
+    const ocup: { ini: number; fin: number }[] = []
+    ;(clases || []).forEach((c: any) => ocup.push({ ini: minDeISO(c.inicio), fin: minDeISO(c.fin) }))
+    ;(alqs || []).forEach((a: any) => ocup.push({ ini: hhmmToMin(a.hora_inicio), fin: hhmmToMin(a.hora_fin) }))
+    ocup.sort((a, b) => a.ini - b.ini)
 
-    const cuandoTxt = add === 0 ? 'hoy' : add === 1 ? 'mañana' : fecha
-    const sede = nombreDe(sala.sede)
-    if (ocup.length === 0) {
-        return `✅ *${sala.nombre}*${sede ? ` (${sede})` : ''} está *libre todo el día* ${cuandoTxt}. Para reservar, decime el horario y te paso el presupuesto.`
+    // Ventana de atención y cálculo de huecos libres
+    const APERTURA = 8 * 60, CIERRE = 23 * 60
+    const libres: { ini: number; fin: number }[] = []
+    let cursor = APERTURA
+    for (const o of ocup) {
+        const ini = Math.max(o.ini, APERTURA), fin = Math.min(o.fin, CIERRE)
+        if (fin <= APERTURA || ini >= CIERRE) continue
+        if (ini > cursor) libres.push({ ini: cursor, fin: ini })
+        cursor = Math.max(cursor, fin)
     }
-    const lineas = ocup.map(o => `• ${o.ini} a ${o.fin}hs`)
-    return `🏢 *${sala.nombre}*${sede ? ` (${sede})` : ''} — ${cuandoTxt}\nHorarios *ocupados*:\n${lineas.join('\n')}\n\n_El resto del día está libre. Decime qué horario querés y te paso el presupuesto._`
+    if (cursor < CIERRE) libres.push({ ini: cursor, fin: CIERRE })
+    const libresF = libres.filter(l => l.fin - l.ini >= 30)
+
+    const sede = nombreDe(sala.sede)
+    const esDomingo = dowDeFecha(fecha) === 0
+    const tarifa = esDomingo
+        ? `💲 Tarifa (domingo): ${pesos(sala.p_ensayo_finde)} por hora`
+        : `💲 Tarifas: mañana ${pesos(sala.p_ensayo_manana)}/h · noche —desde 18hs— ${pesos(sala.p_ensayo_noche)}/h`
+
+    const cab = `🏢 *${sala.nombre}*${sede ? ` (${sede})` : ''} — ${etiquetaDia(add)}`
+    if (libresF.length === 0) {
+        return `${cab}\nEse día está *completo*, no quedan horarios libres.\n\n${tarifa}`
+    }
+    const lineas = libresF.map(l => `• ${fmtMin(l.ini)} a ${fmtMin(l.fin)}hs`)
+    return `${cab}\n*Horarios libres:*\n${lineas.join('\n')}\n\n${tarifa}\n\n_Decime qué horario querés y te paso el presupuesto._`
 }
 
 // ---------------------------------------------------------------------------
@@ -177,13 +236,21 @@ async function textoRuteado(pregunta: string): Promise<string> {
     const esMenu = /(hola|buenas|menu|ayuda|opciones|que podes|que podés)/.test(q)
 
     if (esAlquiler) {
-        const m = q.match(/sala\s*([a-z0-9]+)/)
-        const salaTexto = m ? `sala ${m[1]}` : (/(pasillo|blanca|negra|completa)/.exec(q)?.[0] || '')
-        if (salaTexto && esDisponibilidad) {
-            const add = /\bmanana\b/.test(q) ? 1 : 0
-            return disponibilidadAlquiler({ salaTexto, addDays: add })
+        // Sala nombrada explícitamente (Sala 1/2, blanca, negra, completa, pasillo rojo)
+        const mSala = q.match(/sala\s*(\d+|blanca|negra|completa)/)
+        const salaTexto = mSala ? mSala[0] : (/pasillo/.test(q) ? 'pasillo' : '')
+        const off = parsearDiaOffset(q) // día pedido, o null
+
+        // Con sala + día (o pedido de disponibilidad) → horarios libres + tarifa de ese día
+        if (salaTexto && (off !== null || esDisponibilidad)) {
+            return disponibilidadAlquiler({ salaTexto, addDays: off ?? 0 })
         }
-        return tarifasAlquiler({ salaTexto: salaTexto || undefined })
+        const base = await tarifasAlquiler({ salaTexto: salaTexto || undefined })
+        // Pidió un día pero no dijo qué sala → tarifas + invitación a elegir sala
+        if (off !== null && !salaTexto) {
+            return base + '\n\n¿De qué sala? Decime la sala (ej: "Sala 1") y te paso los horarios libres de ese día.'
+        }
+        return base
     }
 
     // Un pedido de precio gana sobre "clase" (ej: "cuánto sale una clase" → precios).
