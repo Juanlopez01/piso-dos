@@ -21,20 +21,20 @@ async function requireStaff() {
 
 // Envía un mensaje al contacto vía la API de ManyChat (llega a su DM de IG/WhatsApp).
 // Requiere env MANYCHAT_API_KEY. Devuelve { ok, error }.
-async function enviarPorManyChat(subscriberId: string, texto: string): Promise<{ ok: boolean; error?: string }> {
+async function enviarPorManyChat(subscriberId: string, texto: string, canal = 'instagram'): Promise<{ ok: boolean; error?: string }> {
     const key = process.env.MANYCHAT_API_KEY
     if (!key) return { ok: false, error: 'Falta configurar MANYCHAT_API_KEY.' }
     if (!subscriberId) return { ok: false, error: 'La consulta no tiene ID de contacto (respondé desde ManyChat).' }
     try {
+        const tipo = canal === 'whatsapp' ? 'whatsapp' : 'instagram'
         const resp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
             method: 'POST',
             headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                // HUMAN_AGENT: permite que una persona (recep) responda hasta 7 días
-                // después del último mensaje del contacto (Instagram/WhatsApp).
+                // Sin message_tag (HUMAN_AGENT no está soportado): envío estándar,
+                // válido dentro de las 24hs del último mensaje de la persona.
                 subscriber_id: /^\d+$/.test(subscriberId) ? Number(subscriberId) : subscriberId,
-                data: { version: 'v2', content: { messages: [{ type: 'text', text: texto }] } },
-                message_tag: 'HUMAN_AGENT',
+                data: { version: 'v2', content: { type: tipo, messages: [{ type: 'text', text: texto }] } },
             }),
         })
         const json: any = await resp.json().catch(() => ({}))
@@ -82,7 +82,7 @@ export async function responderConsultaAction(consultaId: string, texto: string)
     if (!consulta) return { ok: false, error: 'Consulta no encontrada.' }
 
     // 1. Enviar al DM del contacto vía ManyChat
-    const envio = await enviarPorManyChat(consulta.subscriber_id, texto.trim())
+    const envio = await enviarPorManyChat(consulta.subscriber_id, texto.trim(), consulta.canal)
     if (!envio.ok) return { ok: false, error: envio.error }
 
     // 2. Guardar en el hilo + tocar la consulta
