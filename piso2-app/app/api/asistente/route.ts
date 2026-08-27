@@ -39,8 +39,8 @@ async function manejar(req: NextRequest, body: any) {
     }
     const pregunta = extraerPregunta(body, req)
     try {
-        const respuesta = await responderAsistente(pregunta)
-        return NextResponse.json({ ok: true, respuesta })
+        const { respuesta, derivar } = await responderAsistente(pregunta)
+        return NextResponse.json({ ok: true, respuesta, derivar })
     } catch (e: any) {
         return NextResponse.json({ ok: false, error: e?.message || 'Error del asistente' }, { status: 500 })
     }

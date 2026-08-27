@@ -166,7 +166,7 @@ function detectarDia(q: string): 'hoy' | 'manana' | 'semana' {
 }
 
 // Router interno: dada una pregunta en texto, arma la respuesta (con formato *negrita*).
-async function routearAsistente(pregunta: string): Promise<string> {
+async function textoRuteado(pregunta: string): Promise<string> {
     const q = norm(pregunta || '')
     if (!q.trim()) return MENU
 
@@ -199,9 +199,21 @@ async function routearAsistente(pregunta: string): Promise<string> {
     return `No estoy seguro de haber entendido 🤔\n\n${MENU}`
 }
 
-// Núcleo público: rutea y limpia el formato de negrita (*asteriscos*), que en
-// Instagram se ve literal. Queda texto plano, prolijo en todos los canales.
-export async function responderAsistente(pregunta: string): Promise<string> {
-    const r = await routearAsistente(pregunta)
-    return r.replace(/\*/g, '')
+const DERIVAR_MSG = `🙋 Te derivo con una persona del equipo de Piso 2.
+Contanos tu consulta y dejanos un teléfono o mail, y te respondemos apenas podamos. ¡Gracias!`
+
+// ¿La persona pide hablar con alguien del equipo (asistencia personalizada)?
+function esPedidoHumano(q: string): boolean {
+    if (q.trim() === '4') return true
+    return /(asesor|una persona|con alguien|humano|recepci|reclamo|queja|asistencia personalizada|hablar con|atencion personal|opcion 4)/.test(q)
+}
+
+// Núcleo público: rutea, detecta derivación a una persona, y limpia el formato
+// de negrita (*asteriscos*), que en Instagram se ve literal. Devuelve también
+// `derivar` para que ManyChat avise a recepción cuando se pide una persona.
+export async function responderAsistente(pregunta: string): Promise<{ respuesta: string; derivar: boolean }> {
+    const q = norm(pregunta || '')
+    const derivar = esPedidoHumano(q)
+    const texto = derivar ? DERIVAR_MSG : await textoRuteado(pregunta)
+    return { respuesta: texto.replace(/\*/g, ''), derivar }
 }

@@ -13,7 +13,8 @@ export async function preguntarAsistenteAction(pregunta: string): Promise<{ ok: 
     if (!session?.user) return { ok: false, error: 'No autorizado' }
 
     try {
-        return { ok: true, respuesta: await responderAsistente(pregunta) }
+        const r = await responderAsistente(pregunta)
+        return { ok: true, respuesta: r.respuesta }
     } catch (e: any) {
         return { ok: false, error: e?.message || 'Error del asistente' }
     }
