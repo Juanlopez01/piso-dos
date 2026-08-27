@@ -30,9 +30,10 @@ async function enviarPorManyChat(subscriberId: string, texto: string): Promise<{
             method: 'POST',
             headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                // Sin message_tag: envío estándar (válido dentro de las 24hs del último
+                // mensaje de la persona, que es el caso normal de una respuesta).
                 subscriber_id: /^\d+$/.test(subscriberId) ? Number(subscriberId) : subscriberId,
                 data: { version: 'v2', content: { messages: [{ type: 'text', text: texto }] } },
-                message_tag: 'ACCOUNT_UPDATE',
             }),
         })
         const json: any = await resp.json().catch(() => ({}))
