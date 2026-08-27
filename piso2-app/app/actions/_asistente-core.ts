@@ -186,14 +186,14 @@ async function textoRuteado(pregunta: string): Promise<string> {
         return tarifasAlquiler({ salaTexto: salaTexto || undefined })
     }
 
-    if (esPrecio && !esClase) return preciosPacks()
+    // Un pedido de precio gana sobre "clase" (ej: "cuánto sale una clase" → precios).
+    if (esPrecio) return preciosPacks()
 
     if (esClase) {
         const ritmo = /(jazz contempo|contempo|jazz|ballet|tecnic\w*|heels|reggaeton|urban|salsa)/.exec(q)?.[0]
         return clasesAgenda({ cuando: detectarDia(q), texto: ritmo })
     }
 
-    if (esPrecio) return preciosPacks()
     if (esMenu) return MENU
 
     return `No estoy seguro de haber entendido 🤔\n\n${MENU}`
