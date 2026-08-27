@@ -776,7 +776,7 @@ export async function crearPostulacionBusquedaAction(payload: {
     if (!payload.nombre?.trim()) return { success: false, error: 'Falta tu nombre completo.' }
     if (!payload.email?.trim()) return { success: false, error: 'Falta tu email.' }
 
-    const fotos = (payload.fotos || []).filter(Boolean).slice(0, 3)
+    const fotos = (payload.fotos || []).filter(Boolean).slice(0, 6)
     const videos = (payload.videos || []).map(v => v?.trim()).filter(Boolean).slice(0, 3)
     if (!fotos.length) return { success: false, error: 'Subi al menos una foto.' }
 

@@ -14,6 +14,7 @@ const serif = Playfair_Display({ subsets: ['latin'], weight: ['400', '500', '600
 const sans = Montserrat({ subsets: ['latin'], weight: ['300', '400', '500', '600'] })
 
 const RUBROS = ['Bailarin/a', 'Acrobata', 'Modelo', 'Cantante', 'Musico/a', 'Influencer', 'Actor/Actriz']
+const MAX_FOTOS = 6
 
 const inputCls = "w-full bg-white border border-neutral-300 rounded-lg px-4 py-3 text-sm text-neutral-900 outline-none focus:border-black transition-colors"
 const labelCls = "text-[10px] font-semibold tracking-[0.15em] uppercase text-neutral-500 block mb-1.5"
@@ -50,7 +51,7 @@ export default function BusquedaPublicaPage() {
         setSubiendo(true)
         const nuevas: string[] = []
         for (const file of Array.from(files)) {
-            if (fotos.length + nuevas.length >= 3) break
+            if (fotos.length + nuevas.length >= MAX_FOTOS) break
             try {
                 const opt = await optimizeImage(file, { maxDim: 1400 })
                 const ext = opt.name.split('.').pop()
@@ -62,7 +63,7 @@ export default function BusquedaPublicaPage() {
                 toast.error('No se pudo subir una foto: ' + (e.message || ''))
             }
         }
-        setFotos(f => [...f, ...nuevas].slice(0, 3))
+        setFotos(f => [...f, ...nuevas].slice(0, MAX_FOTOS))
         setSubiendo(false)
     }
 
@@ -183,7 +184,7 @@ export default function BusquedaPublicaPage() {
                     </div>
 
                     <div>
-                        <span className={labelCls}>Fotos <span className="text-neutral-400 normal-case tracking-normal">(hasta 3)</span></span>
+                        <span className={labelCls}>Fotos <span className="text-neutral-400 normal-case tracking-normal">(hasta {MAX_FOTOS})</span></span>
                         <div className="flex flex-wrap gap-3">
                             {fotos.map((url, i) => (
                                 <div key={i} className="relative w-32 aspect-[3/4] overflow-hidden bg-neutral-100 border border-neutral-200">
@@ -191,7 +192,7 @@ export default function BusquedaPublicaPage() {
                                     <button type="button" onClick={() => quitarFoto(i)} className="absolute top-1.5 right-1.5 bg-black/70 text-white rounded-full p-1 hover:bg-black"><X size={13} /></button>
                                 </div>
                             ))}
-                            {fotos.length < 3 && (
+                            {fotos.length < MAX_FOTOS && (
                                 <label className="w-32 aspect-[3/4] border border-dashed border-neutral-300 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-neutral-900 transition-colors text-neutral-400">
                                     {subiendo ? <Loader2 className="animate-spin" size={22} /> : <Upload size={22} />}
                                     <span className="text-[10px] uppercase tracking-widest font-semibold">Subir</span>

@@ -84,11 +84,11 @@ function PrintCandidato({ p }: { p: Postulante }) {
     const chips = [p.rubro, p.edad != null ? `${p.edad} años` : null, p.altura != null ? `${p.altura} cm` : null, p.nacionalidad, sexoLabel].filter(Boolean)
     return (
         <div style={{ breakInside: 'avoid', border: '1px solid #e5e5e5', borderRadius: '10px', padding: '12px', marginBottom: '12px' }}>
-            {/* Hasta 3 fotos, una al lado de la otra, en marco 4:5 vertical parejo (llenan el marco) */}
+            {/* TODAS las fotos cargadas, en grilla de 3 por fila, marco 4:5 vertical parejo. */}
             {p.fotos.length > 0 && (
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '10px' }}>
-                    {p.fotos.slice(0, 3).map((f, i) => (
-                        <div key={i} style={{ flex: 1, minWidth: 0, aspectRatio: '4 / 5', background: '#f5f5f5', borderRadius: '6px', overflow: 'hidden' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '10px' }}>
+                    {p.fotos.map((f, i) => (
+                        <div key={i} style={{ minWidth: 0, aspectRatio: '4 / 5', background: '#f5f5f5', borderRadius: '6px', overflow: 'hidden' }}>
                             <img src={f} alt={`${p.nombre} ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', display: 'block' }} />
                         </div>
                     ))}
