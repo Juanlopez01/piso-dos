@@ -165,8 +165,8 @@ function detectarDia(q: string): 'hoy' | 'manana' | 'semana' {
     return 'hoy'
 }
 
-// Núcleo: dada una pregunta en texto, devuelve la respuesta (sin auth).
-export async function responderAsistente(pregunta: string): Promise<string> {
+// Router interno: dada una pregunta en texto, arma la respuesta (con formato *negrita*).
+async function routearAsistente(pregunta: string): Promise<string> {
     const q = norm(pregunta || '')
     if (!q.trim()) return MENU
 
@@ -197,4 +197,11 @@ export async function responderAsistente(pregunta: string): Promise<string> {
     if (esMenu) return MENU
 
     return `No estoy seguro de haber entendido 🤔\n\n${MENU}`
+}
+
+// Núcleo público: rutea y limpia el formato de negrita (*asteriscos*), que en
+// Instagram se ve literal. Queda texto plano, prolijo en todos los canales.
+export async function responderAsistente(pregunta: string): Promise<string> {
+    const r = await routearAsistente(pregunta)
+    return r.replace(/\*/g, '')
 }
