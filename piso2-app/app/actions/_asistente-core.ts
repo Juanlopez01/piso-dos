@@ -252,12 +252,15 @@ const MENU = `¡Hola! 👋 Soy el asistente de *Piso 2*. Puedo ayudarte con:
 const DERIVAR_MSG = `🙋 Te derivo con una persona del equipo de Piso 2.
 Contanos tu consulta y dejanos un teléfono o mail, y te respondemos apenas podamos. ¡Gracias!`
 
+const NO_ENTIENDO_MSG = `Uf, esa consulta no la entendí bien 🤔 Te derivo con una persona del equipo de Piso 2 para que te ayude.
+Contanos un poco más y dejanos un teléfono o mail, y te respondemos apenas podamos. ¡Gracias!`
+
 function esPedidoHumano(q: string): boolean {
     if (q.trim() === '4' || q.trim() === '6') return true
     return /(asesor|un[ao] persona|con alguien|con una persona|humano|recepci|reclamo|queja|asistencia personalizada|hablar con|atencion personal|me (pueden |podrian )?(llama|contact)|contact(en|arme|enme|ar con)|derivar|representante|encargad|quiero que me (atiendan|llamen|contacten))/.test(q)
 }
 
-async function textoRuteado(pregunta: string): Promise<string> {
+async function textoRuteado(pregunta: string): Promise<string | null> {
     const q = norm(pregunta || '')
     if (!q.trim()) return MENU
 
@@ -320,7 +323,8 @@ async function textoRuteado(pregunta: string): Promise<string> {
         return '¡De nada! 😊 Cualquier cosa, escribime. Y si querés hablar con una persona del equipo, decime "quiero hablar con alguien".'
     }
 
-    return `No estoy seguro de haber entendido 🤔 Te dejo el menú:\n\n${MENU}`
+    // No se entendió la consulta → señal para derivar a recepción.
+    return null
 }
 
 // Núcleo público: rutea, detecta derivación, y limpia el formato *negrita*
@@ -328,7 +332,10 @@ async function textoRuteado(pregunta: string): Promise<string> {
 // ManyChat/nuestra API avisen a recepción.
 export async function responderAsistente(pregunta: string): Promise<{ respuesta: string; derivar: boolean }> {
     const q = norm(pregunta || '')
-    const derivar = esPedidoHumano(q)
-    const texto = derivar ? DERIVAR_MSG : await textoRuteado(pregunta)
-    return { respuesta: texto.replace(/\*/g, ''), derivar }
+    // 1. Pedido explícito de humano → derivar.
+    if (esPedidoHumano(q)) return { respuesta: DERIVAR_MSG.replace(/\*/g, ''), derivar: true }
+    // 2. Se entendió → responder. No se entendió (null) → derivar a recepción.
+    const texto = await textoRuteado(pregunta)
+    if (texto === null) return { respuesta: NO_ENTIENDO_MSG.replace(/\*/g, ''), derivar: true }
+    return { respuesta: texto.replace(/\*/g, ''), derivar: false }
 }
