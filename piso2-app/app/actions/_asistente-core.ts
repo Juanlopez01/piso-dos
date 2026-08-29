@@ -249,15 +249,24 @@ const MENU = `¡Hola! 👋 Soy el asistente de *Piso 2*. Puedo ayudarte con:
 
 ¿Con qué te ayudo?`
 
-const DERIVAR_MSG = `🙋 Te derivo con una persona del equipo de Piso 2.
-Contanos tu consulta y dejanos un teléfono o mail, y te respondemos apenas podamos. ¡Gracias!`
+const DERIVAR_MSG = `¡Dale! Eso lo dejo coordinado con el equipo y te escribimos en un rato 🙌
+Contanos tu consulta y dejanos un teléfono o mail así te respondemos. ¡Gracias!`
 
-const NO_ENTIENDO_MSG = `Uf, esa consulta no la entendí bien 🤔 Te derivo con una persona del equipo de Piso 2 para que te ayude.
-Contanos un poco más y dejanos un teléfono o mail, y te respondemos apenas podamos. ¡Gracias!`
+const NO_ENTIENDO_MSG = `Dejame chequear eso con el equipo y te escribimos en un ratito 🙌
+Contanos un poco más y dejanos un teléfono o mail así te respondemos. ¡Gracias!`
 
 function esPedidoHumano(q: string): boolean {
     if (q.trim() === '4' || q.trim() === '6') return true
     return /(asesor|un[ao] persona|con alguien|con una persona|humano|recepci|reclamo|queja|asistencia personalizada|hablar con|atencion personal|me (pueden |podrian )?(llama|contact)|contact(en|arme|enme|ar con)|derivar|representante|encargad|quiero que me (atiendan|llamen|contacten))/.test(q)
+}
+
+// Intención de CONCRETAR (anotarse/reservar/pagar/cancelar/factura): fuerza
+// derivación a recep aunque la IA no la haya marcado. Nadie pide "hablar con
+// una persona": la señal es que quiere HACER algo, no solo informarse.
+function esIntencionConcretar(q: string): boolean {
+    return /(me quiero|quiero|quisiera|necesito|me gustaria|me interesa|como (hago|puedo) para)\s*(anotar|inscrib|reservar|pagar|senar|abonar|sacar\s*(un\s*)?(turno|lugar|cupo))/.test(q)
+        || /(reservame|anotame|inscribime|reservar\s*(la|una|el)?\s*(sala|clase|lugar|turno|cupo)|sacar\s*(un\s*)?turno|guardar(me)?\s*(un\s*)?(lugar|cupo)|lo tomo|me lo (guardas|reservas|guardan)|dame un turno)/.test(q)
+        || /(cancelar|reprogramar|pedir factura|quiero factura|necesito factura|hacer(me)? (la )?factura|dar de baja)/.test(q)
 }
 
 async function textoRuteado(pregunta: string): Promise<string | null> {
@@ -327,10 +336,8 @@ async function textoRuteado(pregunta: string): Promise<string | null> {
     return null
 }
 
-// Núcleo público: rutea, detecta derivación, y limpia el formato *negrita*
-// (en Instagram los asteriscos se ven literales). Devuelve `derivar` para que
-// ManyChat/nuestra API avisen a recepción.
-export async function responderAsistente(pregunta: string): Promise<{ respuesta: string; derivar: boolean }> {
+// Router por reglas (fallback): rutea, detecta derivación y limpia *negrita*.
+async function responderPorReglas(pregunta: string): Promise<{ respuesta: string; derivar: boolean }> {
     const q = norm(pregunta || '')
     // 1. Pedido explícito de humano → derivar.
     if (esPedidoHumano(q)) return { respuesta: DERIVAR_MSG.replace(/\*/g, ''), derivar: true }
@@ -338,4 +345,121 @@ export async function responderAsistente(pregunta: string): Promise<{ respuesta:
     const texto = await textoRuteado(pregunta)
     if (texto === null) return { respuesta: NO_ENTIENDO_MSG.replace(/\*/g, ''), derivar: true }
     return { respuesta: texto.replace(/\*/g, ''), derivar: false }
+}
+
+// ---------------------------------------------------------------------------
+// FASE 2 — Capa de IA (OpenAI function-calling sobre las herramientas reales)
+// ---------------------------------------------------------------------------
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+
+const IA_TOOLS = [
+    { type: 'function', function: { name: 'clases', description: 'Horarios de clases (Regular/Especial) por día, ritmo o profesor. Usar para "qué clases hay", horarios, profes, cartelera.', parameters: { type: 'object', properties: { dia: { type: 'string', description: 'Día: "hoy", "manana", "pasado manana", "semana", un día de la semana (ej "sabado"), o una fecha ("30/08" o "30 de agosto"). Vacío = hoy.' }, filtro: { type: 'string', description: 'Opcional: estilo/ritmo (ej "jazz", "heels", "ballet") o nombre del profe (ej "Pedro").' } } } } },
+    { type: 'function', function: { name: 'formaciones', description: 'Lista las formaciones/cursos disponibles.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'precios', description: 'Precios de clases sueltas y packs. Usar para "cuánto sale/vale", valores, abonos, packs.', parameters: { type: 'object', properties: { termino: { type: 'string', description: 'Opcional: filtro como "suelta", "x4", "ballroom".' } } } } },
+    { type: 'function', function: { name: 'alquiler_tarifas', description: 'Tarifas de alquiler de salas (por hora: mañana/noche/finde).', parameters: { type: 'object', properties: { sala: { type: 'string', description: 'Opcional: nombre de sala (ej "sala 1", "blanca", "negra").' } } } } },
+    { type: 'function', function: { name: 'alquiler_disponibilidad', description: 'Horarios LIBRES de una sala en un día puntual, con su tarifa. Requiere la sala; el día por defecto es hoy.', parameters: { type: 'object', properties: { sala: { type: 'string', description: 'Nombre de sala (ej "sala 1", "blanca").' }, dia: { type: 'string', description: '"hoy", "manana", día de la semana o fecha "30/08".' } }, required: ['sala'] } } },
+    { type: 'function', function: { name: 'ubicacion', description: 'Direcciones de las sedes.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'derivar_a_recepcion', description: 'Derivar a una persona del equipo. Usar PROACTIVAMENTE (la persona no va a pedirlo) cuando: quiere CONCRETAR algo, no solo informarse (anotarse/reservar en firme, sacar un lugar, pagar, señar, coordinar un horario o fecha puntual, cancelar/cambiar, pedir factura, temas de su cuenta o pago); hay un reclamo, queja o problema; es un caso personal o que requiere criterio humano (lesiones, recomendaciones a medida, convenios, eventos, prensa, edades/casos no cubiertos por los datos); o cualquier consulta que las herramientas no puedan responder con certeza. Ante la duda, derivar.', parameters: { type: 'object', properties: { motivo: { type: 'string', description: 'Breve motivo de la derivación.' } } } } },
+]
+
+async function ejecutarToolIA(name: string, args: any): Promise<string> {
+    try {
+        if (name === 'clases') {
+            const dia = norm(args?.dia || ''); const filtro = args?.filtro || ''
+            const qFiltro = [dia, filtro].filter(Boolean).join(' ').trim()
+            if (/semana|toda|proxim|cartelera/.test(dia)) return await clasesAgenda({ cuando: 'semana', q: qFiltro })
+            const off = parsearDiaOffset(dia)
+            if (off !== null) return await clasesAgenda({ addDays: off, q: qFiltro })
+            return await clasesAgenda({ cuando: 'hoy', q: qFiltro })
+        }
+        if (name === 'formaciones') return await formaciones()
+        if (name === 'precios') return await preciosPacks({ q: norm(args?.termino || '') })
+        if (name === 'alquiler_tarifas') return await tarifasAlquiler({ salaTexto: args?.sala || undefined })
+        if (name === 'alquiler_disponibilidad') {
+            const off = parsearDiaOffset(norm(args?.dia || ''))
+            return await disponibilidadAlquiler({ salaTexto: args?.sala || '', addDays: off ?? 0 })
+        }
+        if (name === 'ubicacion') return await ubicacion()
+        if (name === 'derivar_a_recepcion') return 'DERIVAR'
+        return 'Herramienta desconocida.'
+    } catch { return 'No pude obtener ese dato en este momento.' }
+}
+
+function systemIA(): string {
+    const fechaTxt = new Date(Date.now() - 3 * 3600_000).toLocaleDateString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: TZ })
+    return `Sos la atención por chat (Instagram/WhatsApp) de Piso 2, un estudio de danza en CABA con dos sedes (Congreso y Obelisco). Hoy es ${fechaTxt}.
+
+La persona que escribe cree que habla con alguien del estudio (NO sabe que sos un asistente). Mantené ese tono humano, cálido y argentino (de "vos"). Nunca digas que sos un bot/asistente ni "te derivo con una persona": cuando haga falta que siga alguien del equipo, se hace con naturalidad y sin cortar la charla (una persona real del equipo continúa el mismo chat).
+
+Respondé con datos REALES obtenidos SOLO con las herramientas. Nunca inventes horarios, precios, profes ni direcciones.
+
+QUÉ RESOLVÉS VOS (respondé directo con las herramientas):
+- Información: qué clases/horarios/profes hay, precios y packs, tarifas de alquiler, horarios libres de una sala, formaciones, direcciones, medios de pago, cómo funciona la web.
+- Mapeo: clases/horarios/profes → "clases"; cuánto sale/valores → "precios"; alquiler → "alquiler_tarifas", o "alquiler_disponibilidad" si dan una sala y un día; direcciones → "ubicacion"; cursos → "formaciones". Podés encadenar herramientas si hay varias partes.
+
+CUÁNDO DERIVÁS (usá "derivar_a_recepcion" — la persona no lo va a pedir, detectalo vos):
+- INTENCIÓN DE CONCRETAR: si expresa que quiere HACER o CERRAR algo, derivá siempre (aunque ya le hayas dado info). Señales: "me quiero anotar", "quiero reservar/reservame/me lo guardás", "lo tomo", "quiero pagar/señar", "cómo me inscribo en X", da un horario o fecha puntual para reservar, quiere cancelar o cambiar, o pide factura.
+- PROBLEMAS: reclamos, quejas, "pagué y no me llegó", "me cobraron mal", "no puedo entrar a la web", temas de su cuenta o pago.
+- FUERA DE LOS DATOS: si preguntan algo puntual que las herramientas NO cubren (edades/niños, niveles, si es apto principiantes, requisitos, lesiones, convenios, eventos, prensa), NO lo afirmes ni lo niegues (no inventes): derivá para que el equipo confirme.
+- Cualquier cosa que no puedas responder con certeza. Ante la duda entre responder o derivar, DERIVÁ.
+
+Para dudas de SOLO información (qué clases hay, precios, horarios libres, direcciones, formaciones) respondé vos directo, sin derivar.
+
+CÓMO DERIVAR (sin romper el tono humano): respondé lo que puedas al toque y ofrecé seguir; pedile un teléfono o mail y un horario, y decile que en un rato le confirman. Ej: "Buenísimo, eso lo dejo coordinado con el equipo y te escribimos en un rato 🙌 ¿me pasás un teléfono o mail por las dudas?".
+
+ESTILO: respuestas breves y claras, listas para un chat. Emojis con moderación. Sin asteriscos ni markdown. Si es solo un saludo, saludá cálido y preguntá en qué ayudás. La web es ${WEB}; se paga en efectivo, transferencia o MercadoPago.`
+}
+
+// Devuelve null si no hay key o la IA falla → el llamador cae a reglas.
+async function responderConIA(pregunta: string): Promise<{ respuesta: string; derivar: boolean } | null> {
+    const key = process.env.OPENAI_API_KEY
+    if (!key || !pregunta?.trim()) return null
+    try {
+        const messages: any[] = [
+            { role: 'system', content: systemIA() },
+            { role: 'user', content: pregunta },
+        ]
+        let derivar = false
+        for (let paso = 0; paso < 4; paso++) {
+            const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: OPENAI_MODEL, temperature: 0.3, messages, tools: IA_TOOLS, tool_choice: 'auto' }),
+            })
+            if (!resp.ok) return null
+            const json: any = await resp.json().catch(() => null)
+            const msg = json?.choices?.[0]?.message
+            if (!msg) return null
+            messages.push(msg)
+            const calls = msg.tool_calls || []
+            if (calls.length) {
+                for (const tc of calls) {
+                    let args: any = {}
+                    try { args = JSON.parse(tc.function?.arguments || '{}') } catch { /* args vacíos */ }
+                    const out = await ejecutarToolIA(tc.function?.name, args)
+                    if (tc.function?.name === 'derivar_a_recepcion') derivar = true
+                    messages.push({ role: 'tool', tool_call_id: tc.id, content: out === 'DERIVAR' ? 'La consulta necesita seguimiento de una persona del equipo. Respondé con naturalidad, SIN decir que sos un bot ni "te derivo con una persona": ofrecé que el equipo lo sigue/coordina, pedile un teléfono o mail y un horario, y decile que en un rato le escriben.' : out })
+                }
+                continue
+            }
+            const texto = (msg.content || '').replace(/\*/g, '').trim()
+            if (!texto) return null
+            return { respuesta: texto, derivar }
+        }
+        return null
+    } catch { return null }
+}
+
+// Núcleo público: intenta la IA (Fase 2); si no hay key o falla, cae al router
+// por reglas. Devuelve `derivar` para que ManyChat/la API avisen a recepción.
+export async function responderAsistente(pregunta: string): Promise<{ respuesta: string; derivar: boolean }> {
+    const q = norm(pregunta || '')
+    // Pedido explícito de humano → derivar sí o sí (no depende de la IA).
+    if (esPedidoHumano(q)) return { respuesta: DERIVAR_MSG.replace(/\*/g, ''), derivar: true }
+    // Intención de concretar → forzamos derivar aunque la IA no lo marque.
+    const forzarDerivar = esIntencionConcretar(q)
+    const ia = await responderConIA(pregunta)
+    if (ia) return { respuesta: ia.respuesta, derivar: ia.derivar || forzarDerivar }
+    const reglas = await responderPorReglas(pregunta)
+    return { respuesta: reglas.respuesta, derivar: reglas.derivar || forzarDerivar }
 }
