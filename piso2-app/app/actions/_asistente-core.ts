@@ -411,14 +411,17 @@ ESTILO: respuestas breves y claras, listas para un chat. Emojis con moderación.
 }
 
 // Devuelve null si no hay key o la IA falla → el llamador cae a reglas.
-async function responderConIA(pregunta: string): Promise<{ respuesta: string; derivar: boolean } | null> {
+// `historial` = turnos previos de ESTE contacto (para conversación con contexto).
+async function responderConIA(pregunta: string, historial: { de: string; texto: string }[] = []): Promise<{ respuesta: string; derivar: boolean } | null> {
     const key = process.env.OPENAI_API_KEY
     if (!key || !pregunta?.trim()) return null
     try {
-        const messages: any[] = [
-            { role: 'system', content: systemIA() },
-            { role: 'user', content: pregunta },
-        ]
+        const messages: any[] = [{ role: 'system', content: systemIA() }]
+        for (const h of historial.slice(-8)) {
+            const t = (h?.texto || '').trim()
+            if (t) messages.push({ role: h.de === 'bot' ? 'assistant' : 'user', content: t })
+        }
+        messages.push({ role: 'user', content: pregunta })
         let derivar = false
         for (let paso = 0; paso < 4; paso++) {
             const resp = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -452,13 +455,13 @@ async function responderConIA(pregunta: string): Promise<{ respuesta: string; de
 
 // Núcleo público: intenta la IA (Fase 2); si no hay key o falla, cae al router
 // por reglas. Devuelve `derivar` para que ManyChat/la API avisen a recepción.
-export async function responderAsistente(pregunta: string): Promise<{ respuesta: string; derivar: boolean }> {
+export async function responderAsistente(pregunta: string, historial: { de: string; texto: string }[] = []): Promise<{ respuesta: string; derivar: boolean }> {
     const q = norm(pregunta || '')
     // Pedido explícito de humano → derivar sí o sí (no depende de la IA).
     if (esPedidoHumano(q)) return { respuesta: DERIVAR_MSG.replace(/\*/g, ''), derivar: true }
     // Intención de concretar → forzamos derivar aunque la IA no lo marque.
     const forzarDerivar = esIntencionConcretar(q)
-    const ia = await responderConIA(pregunta)
+    const ia = await responderConIA(pregunta, historial)
     if (ia) return { respuesta: ia.respuesta, derivar: ia.derivar || forzarDerivar }
     const reglas = await responderPorReglas(pregunta)
     return { respuesta: reglas.respuesta, derivar: reglas.derivar || forzarDerivar }

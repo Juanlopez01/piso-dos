@@ -5,7 +5,7 @@ import { Loader2, Send, Check, MessageCircle, Instagram, User as UserIcon, Refre
 import { toast, Toaster } from 'sonner'
 import { getConsultasAction, responderConsultaAction, marcarResueltaAction } from '@/app/actions/consultas'
 
-type Msg = { de: 'usuario' | 'recep'; texto: string; created_at: string }
+type Msg = { de: 'usuario' | 'recep' | 'bot'; texto: string; created_at: string }
 type Consulta = {
     id: string; created_at: string; canal: string
     contacto_nombre: string | null; contacto_usuario: string | null; subscriber_id: string | null
@@ -102,11 +102,17 @@ export default function ConsultasPage() {
                                     <div className="px-4 pb-4 border-t border-white/5">
                                         {/* Hilo */}
                                         <div className="space-y-2 py-3">
-                                            {c.mensajes.map((m, i) => (
-                                                <div key={i} className={`flex ${m.de === 'recep' ? 'justify-end' : ''}`}>
-                                                    <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap ${m.de === 'recep' ? 'bg-[#D4E655] text-black rounded-tr-sm' : 'bg-[#161616] text-gray-200 rounded-tl-sm'}`}>{m.texto}</div>
-                                                </div>
-                                            ))}
+                                            {c.mensajes.map((m, i) => {
+                                                const mine = m.de === 'recep'
+                                                return (
+                                                    <div key={i} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                                                        <span className="text-[9px] text-gray-500 uppercase tracking-wide mb-0.5 px-1">
+                                                            {mine ? 'Vos' : m.de === 'bot' ? '🤖 Asistente' : nombre}
+                                                        </span>
+                                                        <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap ${mine ? 'bg-[#D4E655] text-black rounded-tr-sm' : m.de === 'bot' ? 'bg-[#12203a] text-blue-100 rounded-tl-sm border border-blue-500/20' : 'bg-[#161616] text-gray-200 rounded-tl-sm'}`}>{m.texto}</div>
+                                                    </div>
+                                                )
+                                            })}
                                             {c.mensajes.length === 0 && <p className="text-xs text-gray-500">{c.consulta}</p>}
                                         </div>
 
