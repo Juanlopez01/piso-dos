@@ -19,6 +19,32 @@ const norm = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[�
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s
 
+// --- Tolerancia a errores de tipeo (la gente escribe rápido y con faltas) ---
+function lev(a: string, b: string): number {
+    const m = a.length, n = b.length
+    if (!m) return n; if (!n) return m
+    const dp = Array.from({ length: n + 1 }, (_, j) => j)
+    for (let i = 1; i <= m; i++) {
+        let prev = dp[0]; dp[0] = i
+        for (let j = 1; j <= n; j++) {
+            const tmp = dp[j]
+            dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1))
+            prev = tmp
+        }
+    }
+    return dp[n]
+}
+// Dos palabras "parecen la misma" si son iguales, una contiene a la otra, o la
+// distancia de edición es chica (tolera 1-2 typos según el largo).
+function pareceIgual(a: string, b: string): boolean {
+    if (!a || !b) return false
+    if (a === b || a.includes(b) || b.includes(a)) return true
+    const min = Math.min(a.length, b.length)
+    if (min < 4) return false
+    return lev(a, b) <= (min <= 6 ? 1 : 2)
+}
+const STOP_FILTRO = new Set(['clase', 'clases', 'profe', 'profes', 'profesor', 'profesora', 'con', 'de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'dia', 'dias', 'hay', 'tenes', 'tienen', 'tiene', 'danza', 'baile', 'estilo', 'ritmo', 'para', 'que', 'cual', 'cuales', 'cuando', 'donde', 'como', 'quiero', 'saber', 'averiguar', 'info', 'informacion', 'sobre', 'dan', 'anotar', 'anotarme', 'hacer'])
+
 // ---- Fechas / horas en horario Argentina ----
 function fechaART(addDays = 0): string {
     return new Date(Date.now() - 3 * 3600_000 + addDays * 86400_000).toISOString().slice(0, 10)
@@ -69,7 +95,7 @@ function etiquetaDia(add: number): string {
 }
 
 // Ritmos/estilos que la gente nombra (para filtrar clases)
-const RITMOS = 'jazz contempo|contempo|contemporaneo|jazz fusion|jazz|ballet|clasico|tecnica clasica|tecnica|heels|stiletto|reggaeton|urban|comercial|lyrical|hip hop|dancehall|salsa|folclore|folklore|elongacion|stretching|acrobacia|coreografia|dance|entrenamiento|pole|telas|flexibilidad|ritmos latinos|latinos'
+const RITMOS = 'jazz contempo|contempo|contemporaneo|contenporaneo|jazz fusion|jazz|ballet|clasico|tecnica clasica|tecnica|heels|hells|stiletto|reggaeton|reggeton|regueton|regaeton|regaton|urban|urbano|comercial|lyrical|hip hop|hiphop|dancehall|salsa|bachata|folclore|folklore|elongacion|stretching|acrobacia|coreografia|coreo|dance|entrenamiento|pole|telas|flexibilidad|ritmos latinos|latinos'
 
 // ---------------------------------------------------------------------------
 // HERRAMIENTAS
@@ -96,7 +122,10 @@ export async function clasesAgenda(opts: { cuando?: 'hoy' | 'manana' | 'semana';
 
     // Aplica un filtro (ritmo o profesor) sobre las clases. Devuelve la etiqueta
     // (" de jazz" / " con Nico"), o '__nomatch__' si no encontró nada, o '' si no había filtro.
-    const aplicarFiltro = (texto: string): string => {
+    // `todos`=true (filtro explícito de la IA): TODOS los tokens deben matchear
+    // (más preciso). `todos`=false (q del router por reglas): alcanza con uno.
+    // El match es tolerante a errores de tipeo (pareceIgual).
+    const aplicarFiltro = (texto: string, todos: boolean): string => {
         const fq = norm(texto)
         const ritmo = new RegExp(`(${RITMOS})`).exec(fq)?.[0]
         if (ritmo) {
@@ -104,24 +133,31 @@ export async function clasesAgenda(opts: { cuando?: 'hoy' | 'manana' | 'semana';
             if (f.length) { clases = f; return ` de ${ritmo}` }
             return '__nomatch__'
         }
-        const toks = fq.split(/\s+/).filter(t => t.length >= 4)
-        if (toks.length) {
-            const f = clases.filter(c => { const p = norm(profeDe(c)); return toks.some(t => p.includes(t)) })
-            if (f.length) { clases = f; return ` con ${profeDe(f[0])}` }
-            return '__nomatch__'
+        const toks = fq.split(/\s+/).filter(t => t.length >= 3 && !STOP_FILTRO.has(t))
+        if (!toks.length) return ''
+        const palabrasDe = (c: any) => (norm(c.nombre) + ' ' + norm(profeDe(c))).split(/\s+/).filter(Boolean)
+        const f = clases.filter(c => {
+            const pal = palabrasDe(c)
+            return todos ? toks.every(t => pal.some(w => pareceIgual(w, t))) : toks.some(t => pal.some(w => pareceIgual(w, t)))
+        })
+        if (f.length) {
+            clases = f
+            const profe = profeDe(f[0])
+            const matchProfe = !!profe && norm(profe).split(/\s+/).some(w => toks.some(t => pareceIgual(w, t)))
+            return matchProfe ? ` con ${profe}` : ` de ${texto.trim()}`
         }
-        return ''
+        return '__nomatch__'
     }
 
     // Filtro por ritmo o profesor. `filtro` explícito (de la IA) informa cuando no
     // encuentra; el `q` (router por reglas) filtra si puede, sin avisar no-match.
     let filtroTxt = ''
     if (opts.filtro && norm(opts.filtro).trim()) {
-        const res = aplicarFiltro(opts.filtro)
+        const res = aplicarFiltro(opts.filtro, true)
         if (res === '__nomatch__') return `No encontré clases de ${opts.filtro.trim()} en la agenda de los próximos días. ¿Querés que te contacte con alguien del equipo para confirmarte sus horarios?`
         filtroTxt = res
     } else if (q.trim()) {
-        const res = aplicarFiltro(q)
+        const res = aplicarFiltro(q, false)
         filtroTxt = res === '__nomatch__' ? '' : res
     }
 
@@ -446,6 +482,8 @@ function systemIA(): string {
     return `Sos la atención por chat (Instagram/WhatsApp) de Piso 2, un estudio de danza en CABA con dos sedes (Congreso y Obelisco). Hoy es ${fechaTxt}.
 
 La persona que escribe cree que habla con alguien del estudio (NO sabe que sos un asistente). Mantené ese tono humano, cálido y argentino (de "vos"). Nunca digas que sos un bot/asistente ni "te derivo con una persona": cuando haga falta que siga alguien del equipo, se hace con naturalidad y sin cortar la charla (una persona real del equipo continúa el mismo chat).
+
+ESCRITURA INFORMAL: la gente escribe rápido, con faltas de ortografía, sin tildes, sin signos de interrogación, en minúscula, con abreviaturas ("q", "xq", "pq", "x", "tmb", "dsp", "porfa") y a veces todo junto. Interpretá la INTENCIÓN igual y respondé; NUNCA les pidas que reescriban ni les corrijas la ortografía. Al pasar datos a las herramientas (día, estilo, nombre de profe), escribilos BIEN corregidos (ej: "regeton"→"reggaeton", "contenporaneo"→"contemporáneo", "jaz"→"jazz", "savado"→"sábado", "nyco chaves"→"Nico Chávez").
 
 Respondé con datos REALES obtenidos SOLO con las herramientas. Nunca inventes horarios, precios, profes ni direcciones.
 
