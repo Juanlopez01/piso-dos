@@ -105,3 +105,98 @@ export async function marcarResueltaAction(consultaId: string, resuelta = true) 
     if (error) return { ok: false, error: error.message }
     return { ok: true }
 }
+
+// ============================================================================
+// CRM del asistente: métricas + historial por contacto (usa asistente_historial)
+// ============================================================================
+const norm = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+const msART = (iso: string) => new Date(new Date(iso).getTime() - 3 * 3600_000) // fecha en ART
+const diaKey = (iso: string) => { const d = msART(iso); return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}` }
+
+function clasificarTema(t: string): string {
+    const q = norm(t)
+    if (/(alquil|reserv|\bsala\b)/.test(q)) return 'Alquiler'
+    if (/(formacion|curso|carrera|profesorado)/.test(q)) return 'Formaciones'
+    if (/(anot|inscrib|sumar|empezar|probar)/.test(q)) return 'Inscripción'
+    if (/(precio|cuanto|cuesta|vale|sale|pack|abono|tarifa|cuota|valor)/.test(q)) return 'Precios'
+    if (/(donde|direccion|ubicacion|\bsede\b|como llego)/.test(q)) return 'Ubicación'
+    if (/(pag|transferencia|mercado|efectivo|tarjeta)/.test(q)) return 'Pagos'
+    if (/(clase|horario|profe|jazz|ballet|heels|reggaeton|contempo|hoy|manana|semana|lunes|martes|miercoles|jueves|viernes|sabado|domingo)/.test(q)) return 'Clases'
+    return 'Otros'
+}
+
+export async function getAsistenteStatsAction(dias = 30) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const desde = new Date(Date.now() - dias * 86400_000).toISOString()
+    const [{ data: hist }, { data: cons }] = await Promise.all([
+        admin.from('asistente_historial').select('subscriber_id, de, texto, created_at').gte('created_at', desde),
+        admin.from('asistente_consultas').select('subscriber_id, estado, created_at').gte('created_at', desde),
+    ])
+    const H = (hist || []) as any[], C = (cons || []) as any[]
+    const usuarioMsgs = H.filter(m => m.de === 'usuario')
+    const contactos = new Set(H.map(m => m.subscriber_id).filter(Boolean))
+    const derivados = new Set(C.map(c => c.subscriber_id).filter(Boolean))
+    const pendientes = C.filter(c => c.estado === 'pendiente').length
+    const resueltas = C.filter(c => c.estado === 'resuelta').length
+    const pctDerivado = contactos.size ? Math.round((derivados.size / contactos.size) * 100) : 0
+
+    const nDias = Math.min(dias, 14)
+    const claves: string[] = []
+    for (let i = nDias - 1; i >= 0; i--) { const d = new Date(Date.now() - 3 * 3600_000 - i * 86400_000); claves.push(`${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}`) }
+    const porDia = claves.map(k => ({
+        dia: k,
+        mensajes: usuarioMsgs.filter(m => diaKey(m.created_at) === k).length,
+        consultas: C.filter(c => diaKey(c.created_at) === k).length,
+    }))
+
+    const porHora = Array.from({ length: 24 }, (_, h) => ({ h, n: usuarioMsgs.filter(m => msART(m.created_at).getUTCHours() === h).length }))
+
+    const temasMap: Record<string, number> = {}
+    for (const m of usuarioMsgs) { const t = clasificarTema(m.texto); temasMap[t] = (temasMap[t] || 0) + 1 }
+    const temas = Object.entries(temasMap).map(([tema, n]) => ({ tema, n })).sort((a, b) => b.n - a.n)
+
+    return {
+        ok: true as const, dias,
+        totales: { contactos: contactos.size, mensajesUsuario: usuarioMsgs.length, consultas: C.length, pendientes, resueltas, pctDerivado },
+        porDia, porHora, temas,
+    }
+}
+
+export async function getContactosAction(dias = 30) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, contactos: [] as any[] }
+    const admin = getAdminClient()
+    const desde = new Date(Date.now() - dias * 86400_000).toISOString()
+    const [{ data: hist }, { data: cons }] = await Promise.all([
+        admin.from('asistente_historial').select('subscriber_id, canal, de, texto, created_at').gte('created_at', desde).order('created_at', { ascending: true }),
+        admin.from('asistente_consultas').select('subscriber_id, contacto_nombre, contacto_usuario, estado'),
+    ])
+    const info: Record<string, { nombre?: string; usuario?: string; derivada?: boolean }> = {}
+    for (const c of (cons || []) as any[]) {
+        if (!c.subscriber_id) continue
+        const prev = info[c.subscriber_id] || {}
+        info[c.subscriber_id] = { nombre: prev.nombre || c.contacto_nombre, usuario: prev.usuario || c.contacto_usuario, derivada: true }
+    }
+    const map: Record<string, any> = {}
+    for (const m of (hist || []) as any[]) {
+        const k = m.subscriber_id; if (!k) continue
+        if (!map[k]) map[k] = { subscriber_id: k, canal: m.canal, nombre: info[k]?.nombre || null, usuario: info[k]?.usuario || null, derivada: !!info[k]?.derivada, mensajes: 0, ultimo: '', ultimoAt: m.created_at }
+        if (m.de === 'usuario') map[k].mensajes++
+        map[k].ultimo = m.texto; map[k].ultimoAt = m.created_at
+    }
+    const contactos = Object.values(map).sort((a: any, b: any) => (a.ultimoAt < b.ultimoAt ? 1 : -1))
+    return { ok: true as const, contactos }
+}
+
+export async function getConversacionContactoAction(subscriberId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, mensajes: [] as any[] }
+    if (!subscriberId) return { ok: false as const, error: 'Falta el contacto', mensajes: [] as any[] }
+    const admin = getAdminClient()
+    const { data } = await admin.from('asistente_historial')
+        .select('de, texto, created_at').eq('subscriber_id', subscriberId)
+        .order('created_at', { ascending: true }).limit(300)
+    return { ok: true as const, mensajes: (data || []) as any[] }
+}
