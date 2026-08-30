@@ -249,11 +249,27 @@ const MENU = `¡Hola! 👋 Soy el asistente de *Piso 2*. Puedo ayudarte con:
 
 ¿Con qué te ayudo?`
 
-const DERIVAR_MSG = `¡Dale! Eso lo dejo coordinado con el equipo y te escribimos en un rato 🙌
+// Horario de atención de recepción (ART). Lun-Vie 8-21, Sáb 10-14, Dom cerrado.
+const HORARIO_TXT = 'Lun a Vie de 8 a 21 hs y Sáb de 10 a 14 hs (domingos cerrado)'
+function enHorarioAtencion(): boolean {
+    const now = new Date(Date.now() - 3 * 3600_000)
+    const dow = now.getUTCDay(); const h = now.getUTCHours()
+    if (dow === 0) return false            // domingo
+    if (dow === 6) return h >= 10 && h < 14 // sábado
+    return h >= 8 && h < 21                 // lun-vie
+}
+function derivarMsg(): string {
+    if (enHorarioAtencion()) return `¡Dale! Eso lo dejo coordinado con el equipo y te escribimos en un rato 🙌
 Contanos tu consulta y dejanos un teléfono o mail así te respondemos. ¡Gracias!`
-
-const NO_ENTIENDO_MSG = `Dejame chequear eso con el equipo y te escribimos en un ratito 🙌
+    return `¡Dale! Eso lo dejo anotado para el equipo 🙌 Ahora estamos fuera del horario de atención (${HORARIO_TXT}), así que te escribimos apenas abramos.
+Dejanos tu consulta y un teléfono o mail así te respondemos. ¡Gracias!`
+}
+function noEntiendoMsg(): string {
+    if (enHorarioAtencion()) return `Dejame chequear eso con el equipo y te escribimos en un ratito 🙌
 Contanos un poco más y dejanos un teléfono o mail así te respondemos. ¡Gracias!`
+    return `Dejame que lo vea con el equipo 🙌 Ahora estamos fuera del horario de atención (${HORARIO_TXT}), así que te escribimos apenas abramos.
+Contanos un poco más y dejanos un teléfono o mail así te respondemos. ¡Gracias!`
+}
 
 function esPedidoHumano(q: string): boolean {
     if (q.trim() === '4' || q.trim() === '6') return true
@@ -269,6 +285,15 @@ function esIntencionConcretar(q: string): boolean {
         || /(cancelar|reprogramar|pedir factura|quiero factura|necesito factura|hacer(me)? (la )?factura|dar de baja)/.test(q)
 }
 
+// Red de seguridad: la IA a veces redacta una derivación pero NO llama a la
+// herramienta (queda derivar=false). Si la RESPUESTA suena a derivación, forzamos.
+function pareceDerivacion(respuesta: string): boolean {
+    const q = norm(respuesta || '')
+    return /(dejame|dejanos|pasame|paseme|deja(r|nos)?)\s+(un|tu|el)?\s*(telefono|tel|mail|email|numero|contacto)/.test(q)
+        || /(el equipo|la recepcion|una persona del equipo)\s+(te|le)?\s*(escrib|confirm|contact|respond|coordin|ayud)/.test(q)
+        || /(te escribimos|te contactamos|te contactan|apenas abramos|cuando abran|lo dejo anotado para el equipo|lo (coordino|dejo coordinado) con el equipo)/.test(q)
+}
+
 async function textoRuteado(pregunta: string): Promise<string | null> {
     const q = norm(pregunta || '')
     if (!q.trim()) return MENU
@@ -279,6 +304,23 @@ async function textoRuteado(pregunta: string): Promise<string | null> {
     // Ubicación
     if (/(donde (estan|queda|es|los encuentro)|direccion|ubicacion|como llego|donde nos|en que (zona|barrio)|mapa|sede)/.test(q) && !/(sala|alquil)/.test(q)) {
         return ubicacion()
+    }
+
+    // FAQs (políticas de la escuela)
+    if (/(vence|vencimiento|caduc|vigencia|cuanto dura|duran los credito|expira)/.test(q)) {
+        return 'Los créditos/packs vencen a los *30 días corridos* desde la compra. ¿Te muestro los precios o las clases?'
+    }
+    if (/(recuper|si falto|si no voy|si no puedo ir|retirar (la|mi) inscrip|me puedo bajar|darme de baja de la clase)/.test(q)) {
+        return 'Si faltás a una clase no se recupera, pero podés *retirar tu inscripción hasta 24 hs antes* de la clase. ¿Te ayudo con algo más?'
+    }
+    if (/(combinable|no combinable|se combina|puedo usar cualquier pack|pase exclusivo)/.test(q)) {
+        return 'Las clases *combinables* se canjean con cualquier pack común. Las *no combinables* tienen sus propios créditos y packs (aparte). ¿Querés que te muestre los precios?'
+    }
+    if (/(clase de prueba|prueba gratis|puedo probar|una clase gratis|clase gratuita)/.test(q)) {
+        return 'No tenemos clase de prueba, pero podés tomar una *clase suelta* cuando quieras. ¿Te muestro los precios o las clases?'
+    }
+    if (/(que llevo|que llevar|que necesito llevar|que ropa|con que voy|requisitos? para)/.test(q)) {
+        return 'Para tu primera clase vení con *ropa cómoda*. ¿Te muestro las clases o los precios?'
     }
 
     // Alquiler de salas
@@ -340,10 +382,10 @@ async function textoRuteado(pregunta: string): Promise<string | null> {
 async function responderPorReglas(pregunta: string): Promise<{ respuesta: string; derivar: boolean }> {
     const q = norm(pregunta || '')
     // 1. Pedido explícito de humano → derivar.
-    if (esPedidoHumano(q)) return { respuesta: DERIVAR_MSG.replace(/\*/g, ''), derivar: true }
+    if (esPedidoHumano(q)) return { respuesta: derivarMsg(), derivar: true }
     // 2. Se entendió → responder. No se entendió (null) → derivar a recepción.
     const texto = await textoRuteado(pregunta)
-    if (texto === null) return { respuesta: NO_ENTIENDO_MSG.replace(/\*/g, ''), derivar: true }
+    if (texto === null) return { respuesta: noEntiendoMsg(), derivar: true }
     return { respuesta: texto.replace(/\*/g, ''), derivar: false }
 }
 
@@ -407,6 +449,16 @@ Para dudas de SOLO información (qué clases hay, precios, horarios libres, dire
 
 CÓMO DERIVAR (sin romper el tono humano): respondé lo que puedas al toque y ofrecé seguir; pedile un teléfono o mail y un horario, y decile que en un rato le confirman. Ej: "Buenísimo, eso lo dejo coordinado con el equipo y te escribimos en un rato 🙌 ¿me pasás un teléfono o mail por las dudas?".
 
+FAQs (respondé directo con estos datos, sin derivar):
+- Créditos/packs: vencen a los 30 días corridos desde la compra.
+- Inasistencias: si faltás NO se recupera; podés retirar tu inscripción a una clase hasta 24 hs antes.
+- Clases "combinables": se canjean con cualquier pack común. "No combinables": tienen sus propios créditos y packs (aparte).
+- No hay clase de prueba (pueden tomar una clase suelta).
+- Primera clase: ropa cómoda. Si preguntan por edad mínima o clases para niños, NO lo afirmes ni lo niegues: derivá.
+- Para packs y valores usá la herramienta "precios".
+
+HORARIO de recepción: ${HORARIO_TXT}. Ahora mismo recepción está ${enHorarioAtencion() ? 'ABIERTA' : 'CERRADA'}. Cuando derives con recepción CERRADA, NO digas "en un rato": aclarale con amabilidad que el equipo le responde en el horario de atención (apenas abran), y pedile igual un teléfono o mail.
+
 ESTILO: respuestas breves y claras, listas para un chat. Emojis con moderación. Sin asteriscos ni markdown. Si es solo un saludo, saludá cálido y preguntá en qué ayudás. La web es ${WEB}; se paga en efectivo, transferencia o MercadoPago.`
 }
 
@@ -458,11 +510,11 @@ async function responderConIA(pregunta: string, historial: { de: string; texto: 
 export async function responderAsistente(pregunta: string, historial: { de: string; texto: string }[] = []): Promise<{ respuesta: string; derivar: boolean }> {
     const q = norm(pregunta || '')
     // Pedido explícito de humano → derivar sí o sí (no depende de la IA).
-    if (esPedidoHumano(q)) return { respuesta: DERIVAR_MSG.replace(/\*/g, ''), derivar: true }
+    if (esPedidoHumano(q)) return { respuesta: derivarMsg(), derivar: true }
     // Intención de concretar → forzamos derivar aunque la IA no lo marque.
     const forzarDerivar = esIntencionConcretar(q)
     const ia = await responderConIA(pregunta, historial)
-    if (ia) return { respuesta: ia.respuesta, derivar: ia.derivar || forzarDerivar }
+    if (ia) return { respuesta: ia.respuesta, derivar: ia.derivar || forzarDerivar || pareceDerivacion(ia.respuesta) }
     const reglas = await responderPorReglas(pregunta)
     return { respuesta: reglas.respuesta, derivar: reglas.derivar || forzarDerivar }
 }
