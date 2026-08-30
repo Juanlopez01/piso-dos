@@ -137,7 +137,9 @@ export async function getAsistenteStatsAction(dias = 30) {
     const H = (hist || []) as any[], C = (cons || []) as any[]
     const usuarioMsgs = H.filter(m => m.de === 'usuario')
     const contactos = new Set(H.map(m => m.subscriber_id).filter(Boolean))
-    const derivados = new Set(C.map(c => c.subscriber_id).filter(Boolean))
+    // Solo derivaciones de contactos que efectivamente chatearon (mismo universo),
+    // para que el % quede acotado 0–100 (evita >100% con consultas viejas sin historial).
+    const derivados = new Set(C.map(c => c.subscriber_id).filter(Boolean).filter((s: string) => contactos.has(s)))
     const pendientes = C.filter(c => c.estado === 'pendiente').length
     const resueltas = C.filter(c => c.estado === 'resuelta').length
     const pctDerivado = contactos.size ? Math.round((derivados.size / contactos.size) * 100) : 0
@@ -159,7 +161,7 @@ export async function getAsistenteStatsAction(dias = 30) {
 
     return {
         ok: true as const, dias,
-        totales: { contactos: contactos.size, mensajesUsuario: usuarioMsgs.length, consultas: C.length, pendientes, resueltas, pctDerivado },
+        totales: { contactos: contactos.size, mensajesUsuario: usuarioMsgs.length, consultas: C.length, derivados: derivados.size, pendientes, resueltas, pctDerivado },
         porDia, porHora, temas,
     }
 }

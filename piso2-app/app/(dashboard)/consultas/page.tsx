@@ -16,7 +16,7 @@ type Consulta = {
 }
 type Stats = {
     dias: number
-    totales: { contactos: number; mensajesUsuario: number; consultas: number; pendientes: number; resueltas: number; pctDerivado: number }
+    totales: { contactos: number; mensajesUsuario: number; consultas: number; derivados: number; pendientes: number; resueltas: number; pctDerivado: number }
     porDia: { dia: string; mensajes: number; consultas: number }[]
     porHora: { h: number; n: number }[]
     temas: { tema: string; n: number }[]
@@ -142,8 +142,8 @@ export default function ConsultasPage() {
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                 <Card label="Contactos" value={stats.totales.contactos} />
                                 <Card label="Mensajes" value={stats.totales.mensajesUsuario} />
-                                <Card label="Bot resolvió solo" value={`${100 - stats.totales.pctDerivado}%`} accent />
-                                <Card label="Derivadas" value={stats.totales.consultas} sub={`${stats.totales.pendientes} pendientes`} />
+                                <Card label="Bot resolvió solo" value={stats.totales.contactos ? `${100 - stats.totales.pctDerivado}%` : '—'} accent />
+                                <Card label="Derivados" value={stats.totales.derivados} sub={`${stats.totales.pctDerivado}% de contactos`} />
                             </div>
 
                             {/* Actividad por día */}
