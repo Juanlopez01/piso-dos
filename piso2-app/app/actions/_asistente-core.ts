@@ -459,7 +459,15 @@ async function ejecutarToolIA(name: string, args: any): Promise<string> {
             const filtro = (args?.filtro || '').toString().trim()
             if (/semana|toda|proxim|cartelera|dias|cualquier/.test(diaArg)) return await clasesAgenda({ cuando: 'semana', filtro })
             const off = parsearDiaOffset(diaArg)
-            if (off !== null) return await clasesAgenda({ addDays: off, filtro })
+            if (off !== null) {
+                const r = await clasesAgenda({ addDays: off, filtro })
+                // Si ese día puntual no tiene ese estilo/profe, probamos la semana.
+                if (filtro && r.startsWith('No encontré')) {
+                    const semana = await clasesAgenda({ cuando: 'semana', filtro })
+                    if (!semana.startsWith('No encontré')) return `Ese día no encontré ${filtro}, pero esta semana sí hay:\n${semana}`
+                }
+                return r
+            }
             // Sin día explícito: con filtro (profe/estilo) buscamos la semana; si no, hoy.
             if (filtro) return await clasesAgenda({ cuando: 'semana', filtro })
             return await clasesAgenda({ cuando: 'hoy' })
