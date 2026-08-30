@@ -76,7 +76,7 @@ const RITMOS = 'jazz contempo|contempo|contemporaneo|jazz fusion|jazz|ballet|cla
 // ---------------------------------------------------------------------------
 
 // Agenda de clases (Regular/Especial), filtrable por día, ritmo o profesor.
-export async function clasesAgenda(opts: { cuando?: 'hoy' | 'manana' | 'semana'; addDays?: number; q?: string } = {}): Promise<string> {
+export async function clasesAgenda(opts: { cuando?: 'hoy' | 'manana' | 'semana'; addDays?: number; q?: string; filtro?: string } = {}): Promise<string> {
     const admin = getAdminClient()
     const q = norm(opts.q || '')
     const diaEsp = typeof opts.addDays === 'number'
@@ -92,27 +92,39 @@ export async function clasesAgenda(opts: { cuando?: 'hoy' | 'manana' | 'semana';
         .order('inicio')
 
     let clases = (data || []) as any[]
+    const cuandoTxt = diaEsp ? etiquetaDia(opts.addDays!) : cuando === 'hoy' ? 'hoy' : cuando === 'manana' ? 'mañana' : 'esta semana'
 
-    // Filtro por ritmo o por profesor mencionado
-    let filtroTxt = ''
-    const ritmo = new RegExp(`(${RITMOS})`).exec(q)?.[0]
-    if (ritmo) {
-        const r = norm(ritmo)
-        const f = clases.filter(c => norm(c.nombre).includes(r))
-        if (f.length) { clases = f; filtroTxt = ` de ${ritmo}` }
-    } else {
-        const profeMatch = clases.find(c => {
-            const p = norm(profeDe(c)); const pn = p.split(' ')[0]
-            return p && (q.includes(p) || (pn.length >= 4 && q.includes(pn)))
-        })
-        if (profeMatch) {
-            const pn = norm(profeDe(profeMatch)).split(' ')[0]
-            clases = clases.filter(c => norm(profeDe(c)).includes(pn))
-            filtroTxt = ` con ${profeDe(profeMatch)}`
+    // Aplica un filtro (ritmo o profesor) sobre las clases. Devuelve la etiqueta
+    // (" de jazz" / " con Nico"), o '__nomatch__' si no encontró nada, o '' si no había filtro.
+    const aplicarFiltro = (texto: string): string => {
+        const fq = norm(texto)
+        const ritmo = new RegExp(`(${RITMOS})`).exec(fq)?.[0]
+        if (ritmo) {
+            const r = norm(ritmo); const f = clases.filter(c => norm(c.nombre).includes(r))
+            if (f.length) { clases = f; return ` de ${ritmo}` }
+            return '__nomatch__'
         }
+        const toks = fq.split(/\s+/).filter(t => t.length >= 4)
+        if (toks.length) {
+            const f = clases.filter(c => { const p = norm(profeDe(c)); return toks.some(t => p.includes(t)) })
+            if (f.length) { clases = f; return ` con ${profeDe(f[0])}` }
+            return '__nomatch__'
+        }
+        return ''
     }
 
-    const cuandoTxt = diaEsp ? etiquetaDia(opts.addDays!) : cuando === 'hoy' ? 'hoy' : cuando === 'manana' ? 'mañana' : 'esta semana'
+    // Filtro por ritmo o profesor. `filtro` explícito (de la IA) informa cuando no
+    // encuentra; el `q` (router por reglas) filtra si puede, sin avisar no-match.
+    let filtroTxt = ''
+    if (opts.filtro && norm(opts.filtro).trim()) {
+        const res = aplicarFiltro(opts.filtro)
+        if (res === '__nomatch__') return `No encontré clases de ${opts.filtro.trim()} en la agenda de los próximos días. ¿Querés que te contacte con alguien del equipo para confirmarte sus horarios?`
+        filtroTxt = res
+    } else if (q.trim()) {
+        const res = aplicarFiltro(q)
+        filtroTxt = res === '__nomatch__' ? '' : res
+    }
+
     if (clases.length === 0) return `No encontré clases${filtroTxt} ${cuandoTxt}. ¿Querés que busque otro día, o te muestro toda la agenda?`
 
     const lineas = clases.slice(0, 30).map(c => {
@@ -395,7 +407,7 @@ async function responderPorReglas(pregunta: string): Promise<{ respuesta: string
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
 const IA_TOOLS = [
-    { type: 'function', function: { name: 'clases', description: 'Horarios de clases (Regular/Especial) por día, ritmo o profesor. Usar para "qué clases hay", horarios, profes, cartelera.', parameters: { type: 'object', properties: { dia: { type: 'string', description: 'Día: "hoy", "manana", "pasado manana", "semana", un día de la semana (ej "sabado"), o una fecha ("30/08" o "30 de agosto"). Vacío = hoy.' }, filtro: { type: 'string', description: 'Opcional: estilo/ritmo (ej "jazz", "heels", "ballet") o nombre del profe (ej "Pedro").' } } } } },
+    { type: 'function', function: { name: 'clases', description: 'Horarios de clases (Regular/Especial) por día, ritmo o profesor. Usar para "qué clases hay", horarios, profes, "qué días da clase X", cartelera.', parameters: { type: 'object', properties: { dia: { type: 'string', description: 'Completar SOLO si el usuario menciona un día concreto ("hoy", "manana", "sabado", "30/08"). Si el usuario NO menciona un día (ej "clases de jazz", "qué días da clase Nico", "cuándo hay reggaeton"), dejar VACÍO o poner "semana" para ver toda la agenda de la semana. Nunca asumas "hoy".' }, filtro: { type: 'string', description: 'Opcional: estilo/ritmo (ej "jazz", "heels", "ballet") o nombre del profe (ej "Nico Chávez"). Poné el estilo O el nombre del profe, no toda la frase.' } } } } },
     { type: 'function', function: { name: 'formaciones', description: 'Lista las formaciones/cursos disponibles.', parameters: { type: 'object', properties: {} } } },
     { type: 'function', function: { name: 'precios', description: 'Precios de clases sueltas y packs. Usar para "cuánto sale/vale", valores, abonos, packs.', parameters: { type: 'object', properties: { termino: { type: 'string', description: 'Opcional: filtro como "suelta", "x4", "ballroom".' } } } } },
     { type: 'function', function: { name: 'alquiler_tarifas', description: 'Tarifas de alquiler de salas (por hora: mañana/noche/finde).', parameters: { type: 'object', properties: { sala: { type: 'string', description: 'Opcional: nombre de sala (ej "sala 1", "blanca", "negra").' } } } } },
@@ -407,12 +419,14 @@ const IA_TOOLS = [
 async function ejecutarToolIA(name: string, args: any): Promise<string> {
     try {
         if (name === 'clases') {
-            const dia = norm(args?.dia || ''); const filtro = args?.filtro || ''
-            const qFiltro = [dia, filtro].filter(Boolean).join(' ').trim()
-            if (/semana|toda|proxim|cartelera/.test(dia)) return await clasesAgenda({ cuando: 'semana', q: qFiltro })
-            const off = parsearDiaOffset(dia)
-            if (off !== null) return await clasesAgenda({ addDays: off, q: qFiltro })
-            return await clasesAgenda({ cuando: 'hoy', q: qFiltro })
+            const diaArg = norm(args?.dia || '')
+            const filtro = (args?.filtro || '').toString().trim()
+            if (/semana|toda|proxim|cartelera|dias|cualquier/.test(diaArg)) return await clasesAgenda({ cuando: 'semana', filtro })
+            const off = parsearDiaOffset(diaArg)
+            if (off !== null) return await clasesAgenda({ addDays: off, filtro })
+            // Sin día explícito: con filtro (profe/estilo) buscamos la semana; si no, hoy.
+            if (filtro) return await clasesAgenda({ cuando: 'semana', filtro })
+            return await clasesAgenda({ cuando: 'hoy' })
         }
         if (name === 'formaciones') return await formaciones()
         if (name === 'precios') return await preciosPacks({ q: norm(args?.termino || '') })
@@ -438,6 +452,7 @@ Respondé con datos REALES obtenidos SOLO con las herramientas. Nunca inventes h
 QUÉ RESOLVÉS VOS (respondé directo con las herramientas):
 - Información: qué clases/horarios/profes hay, precios y packs, tarifas de alquiler, horarios libres de una sala, formaciones, direcciones, medios de pago, cómo funciona la web.
 - Mapeo: clases/horarios/profes → "clases"; cuánto sale/valores → "precios"; alquiler → "alquiler_tarifas", o "alquiler_disponibilidad" si dan una sala y un día; direcciones → "ubicacion"; cursos → "formaciones". Podés encadenar herramientas si hay varias partes.
+- IMPORTANTE con "clases": NO asumas "hoy". Si el usuario pregunta por un profe o un estilo, o "qué días/cuándo da clase X", llamá a "clases" SIN "dia" (o dia="semana") para ver toda la semana. Solo poné "dia" si el usuario nombra un día puntual. Si la herramienta dice que no encontró a ese profe/estilo, no muestres otras clases como si nada: contale que no lo encontraste y ofrecé derivar.
 
 CUÁNDO DERIVÁS (usá "derivar_a_recepcion" — la persona no lo va a pedir, detectalo vos):
 - INTENCIÓN DE CONCRETAR: si expresa que quiere HACER o CERRAR algo, derivá siempre (aunque ya le hayas dado info). Señales: "me quiero anotar", "quiero reservar/reservame/me lo guardás", "lo tomo", "quiero pagar/señar", "cómo me inscribo en X", da un horario o fecha puntual para reservar, quiere cancelar o cambiar, o pide factura.
