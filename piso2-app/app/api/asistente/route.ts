@@ -49,12 +49,15 @@ async function getHistorial(subId: string): Promise<{ de: string; texto: string;
 }
 
 // Registra el turno (mensaje del usuario + respuesta del bot). Best-effort.
+// created_at explícito y distinto: el usuario SIEMPRE antes que el bot (si no,
+// con timestamps iguales el orden queda indefinido y se lee al revés).
 async function logInteraccion(subId: string, canal: string, pregunta: string, respuesta: string) {
     try {
         const admin = getAdminClient()
+        const now = Date.now()
         const rows: any[] = []
-        if (pregunta?.trim()) rows.push({ subscriber_id: subId, canal, de: 'usuario', texto: pregunta })
-        if (respuesta?.trim()) rows.push({ subscriber_id: subId, canal, de: 'bot', texto: respuesta })
+        if (pregunta?.trim()) rows.push({ subscriber_id: subId, canal, de: 'usuario', texto: pregunta, created_at: new Date(now).toISOString() })
+        if (respuesta?.trim()) rows.push({ subscriber_id: subId, canal, de: 'bot', texto: respuesta, created_at: new Date(now + 100).toISOString() })
         if (rows.length) await admin.from('asistente_historial').insert(rows)
     } catch (e: any) {
         console.error('[asistente] no se pudo loguear el historial:', e?.message)
@@ -66,6 +69,28 @@ async function logInteraccion(subId: string, canal: string, pregunta: string, re
 async function capturarConsulta(body: any, pregunta: string, subId: string | null, canal: string) {
     try {
         const admin = getAdminClient()
+
+        // Si el contacto ya tiene una consulta PENDIENTE, la reusamos (no duplicar):
+        // le sumamos al hilo solo los mensajes nuevos y actualizamos el preview.
+        if (subId) {
+            const { data: existente } = await admin.from('asistente_consultas')
+                .select('id').eq('subscriber_id', subId).eq('estado', 'pendiente')
+                .order('created_at', { ascending: false }).limit(1).maybeSingle()
+            if (existente?.id) {
+                const { data: ult } = await admin.from('asistente_consulta_mensajes')
+                    .select('created_at').eq('consulta_id', existente.id)
+                    .order('created_at', { ascending: false }).limit(1).maybeSingle()
+                const desde = ult?.created_at || '1970-01-01T00:00:00Z'
+                const historial = await getHistorial(subId)
+                const nuevos = historial
+                    .filter(h => (h.texto || '').trim() && h.created_at > desde)
+                    .map(h => ({ consulta_id: existente.id, de: h.de, texto: h.texto, created_at: h.created_at }))
+                if (nuevos.length) await admin.from('asistente_consulta_mensajes').insert(nuevos)
+                await admin.from('asistente_consultas').update({ updated_at: new Date().toISOString(), consulta: pregunta || null }).eq('id', existente.id)
+                return
+            }
+        }
+
         const { data: consulta } = await admin.from('asistente_consultas').insert({
             canal,
             contacto_nombre: body?.contacto_nombre?.toString() || null,
