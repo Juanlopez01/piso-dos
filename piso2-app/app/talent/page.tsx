@@ -208,7 +208,9 @@ export default function TalentHome() {
                         {busquedas.length > 0 ? (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto">
                                 {busquedas.map(b => {
-                                    const vencida = b.fecha_limite && new Date(b.fecha_limite) < new Date()
+                                    // Día límite INCLUSIVE (abierta todo ese día, en horario Argentina).
+                                    const hoyART = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10)
+                                    const vencida = b.fecha_limite ? b.fecha_limite < hoyART : false
                                     if (vencida) return null
                                     return (
                                         <Link key={b.id} href={`/talent/busqueda/${b.slug}`} className="group border border-neutral-200 hover:border-neutral-900 rounded-xl p-6 md:p-8 transition-all hover:shadow-lg">

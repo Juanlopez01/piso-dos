@@ -190,7 +190,8 @@ export default function BusquedaPublicaPage() {
         </div>
     )
     const b = busqueda!
-    const vencida = b.fecha_limite && new Date(b.fecha_limite) < new Date()
+    // Día límite INCLUSIVE (abierta todo ese día, en horario Argentina).
+    const vencida = b.fecha_limite ? b.fecha_limite < new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10) : false
     const pdfUrl = form.residenteArg ? '/acuerdos/acuerdo-residente-argentina.pdf' : '/acuerdos/acuerdo-no-residente.pdf'
 
     return (
