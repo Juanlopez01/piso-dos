@@ -3,9 +3,10 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { getBusquedaSeleccionAction, type BusquedaSeleccion } from '@/app/actions/talent'
-import { Loader2, ArrowLeft, MapPin, Play, Ruler, Cake, Globe, Download, Check } from 'lucide-react'
+import { getBusquedaSeleccionAction, togglePreseleccionBusquedaAction, type BusquedaSeleccion } from '@/app/actions/talent'
+import { Loader2, ArrowLeft, MapPin, Play, Ruler, Cake, Globe, Download, Star, Mail, Phone, MessageCircle } from 'lucide-react'
 import { Playfair_Display, Montserrat } from 'next/font/google'
+import { toast, Toaster } from 'sonner'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['400', '500', '600', '700'] })
 const sans = Montserrat({ subsets: ['latin'], weight: ['300', '400', '500', '600'] })
@@ -27,11 +28,11 @@ function CandidatoCard({ p, selected, onToggle }: { p: Postulante; selected: boo
                     ? <img src={fotos[activa]} alt={p.nombre} className="w-full h-full object-cover" />
                     : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-[10px] uppercase tracking-widest">Sin foto</div>}
                 <span className="absolute top-3 left-3 bg-black/80 text-white text-[9px] font-bold tracking-[0.2em] uppercase px-2.5 py-1 rounded-full">#{p.codigo}</span>
-                {/* Checkbox de selección */}
+                {/* Estrella de preselección (se guarda y la ve Piso 2) */}
                 <button onClick={onToggle}
-                    className={`absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center border-2 transition-colors ${selected ? 'bg-neutral-900 border-neutral-900 text-white' : 'bg-white/90 border-white text-transparent hover:border-neutral-900'}`}
-                    title={selected ? 'Quitar de la selección' : 'Seleccionar'}>
-                    <Check size={15} strokeWidth={3} />
+                    className={`absolute top-3 right-3 w-9 h-9 rounded-full flex items-center justify-center border-2 shadow-sm transition-colors ${selected ? 'bg-amber-400 border-amber-400 text-white' : 'bg-white/90 border-white text-neutral-300 hover:text-amber-400 hover:border-amber-400'}`}
+                    title={selected ? 'Quitar preselección' : 'Preseleccionar'}>
+                    <Star size={17} strokeWidth={2.5} fill={selected ? 'currentColor' : 'none'} />
                 </button>
             </div>
 
@@ -73,6 +74,27 @@ function CandidatoCard({ p, selected, onToggle }: { p: Postulante; selected: boo
                         ))}
                     </div>
                 )}
+
+                {/* Contacto: aparece solo cuando Piso 2 lo libera */}
+                {p.contactoLiberado && (p.email || p.telefono) && (
+                    <div className="mt-1 rounded-xl border border-emerald-300 bg-emerald-50 p-3">
+                        <p className="text-[9px] font-bold tracking-[0.2em] uppercase text-emerald-700 mb-1.5">Contacto liberado ✓</p>
+                        {p.email && (
+                            <a href={`mailto:${p.email}`} className="flex items-center gap-1.5 text-[11px] text-neutral-700 hover:text-black break-all">
+                                <Mail size={12} className="shrink-0" /> {p.email}
+                            </a>
+                        )}
+                        {p.telefono && (
+                            <div className="flex items-center gap-3 mt-1">
+                                <span className="flex items-center gap-1.5 text-[11px] text-neutral-700"><Phone size={12} /> {p.telefono}</span>
+                                <a href={`https://wa.me/${String(p.telefono).replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer"
+                                    className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 hover:text-emerald-900">
+                                    <MessageCircle size={12} /> WhatsApp
+                                </a>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
     )
@@ -109,6 +131,12 @@ function PrintCandidato({ p }: { p: Postulante }) {
                         ))}
                     </div>
                 )}
+                {p.contactoLiberado && (p.email || p.telefono) && (
+                    <div style={{ fontSize: '10.5px', marginTop: '4px' }}>
+                        <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#059669' }}>Contacto: </span>
+                        {[p.email, p.telefono].filter(Boolean).join(' · ')}
+                    </div>
+                )}
             </div>
         </div>
     )
@@ -123,15 +151,24 @@ export default function SeleccionBusquedaPage() {
 
     useEffect(() => {
         getBusquedaSeleccionAction(params.slug as string)
-            .then(d => { if (d) setData(d); else setNotFound(true); setLoading(false) })
+            .then(d => {
+                if (d) { setData(d); setSeleccionados(new Set(d.postulantes.filter(p => p.preseleccionado).map(p => p.codigo))) }
+                else setNotFound(true)
+                setLoading(false)
+            })
             .catch(() => { setNotFound(true); setLoading(false) })
     }, [params.slug])
 
-    const toggle = (codigo: string) => setSeleccionados(prev => {
-        const n = new Set(prev)
-        if (n.has(codigo)) n.delete(codigo); else n.add(codigo)
-        return n
-    })
+    // La estrella se guarda (la ve Piso 2). Update optimista + revertir si falla.
+    const toggle = async (p: Postulante) => {
+        const marcar = !seleccionados.has(p.codigo)
+        setSeleccionados(prev => { const n = new Set(prev); marcar ? n.add(p.codigo) : n.delete(p.codigo); return n })
+        const res = await togglePreseleccionBusquedaAction(params.slug as string, p.id, marcar)
+        if (!res.success) {
+            setSeleccionados(prev => { const n = new Set(prev); marcar ? n.delete(p.codigo) : n.add(p.codigo); return n })
+            toast.error('No se pudo guardar la preselección. Probá de nuevo.')
+        }
+    }
 
     if (loading) return (
         <div className="min-h-screen bg-white flex items-center justify-center">
@@ -151,7 +188,6 @@ export default function SeleccionBusquedaPage() {
         : null
 
     const seleccionadosList = data.postulantes.filter(p => seleccionados.has(p.codigo))
-    const todosSeleccionados = data.postulantes.length > 0 && seleccionados.size === data.postulantes.length
 
     return (
         <>
@@ -163,6 +199,7 @@ export default function SeleccionBusquedaPage() {
                 }
                 .impresion { display: none; }
             ` }} />
+            <Toaster position="top-center" richColors />
 
             {/* ====== PANTALLA ====== */}
             <div className={`pantalla min-h-screen bg-white text-neutral-900 ${sans.className}`}>
@@ -196,7 +233,7 @@ export default function SeleccionBusquedaPage() {
                         </div>
                     )}
                     {data.postulantes.length > 0 && (
-                        <p className="text-[11px] text-neutral-500 mt-6">Marcá los candidatos que te interesan y generá un PDF para compartir.</p>
+                        <p className="text-[11px] text-neutral-500 mt-6 max-w-xl mx-auto">Tocá la <Star size={12} className="inline -mt-0.5 text-amber-400" fill="currentColor" /> para <b>preseleccionar</b> a los que te interesan. Piso 2 ve tu preselección y libera los datos de contacto para que avances.</p>
                     )}
                 </header>
 
@@ -208,16 +245,11 @@ export default function SeleccionBusquedaPage() {
                         </div>
                     ) : (
                         <>
-                            <div className="flex items-center justify-between mb-5">
-                                <button
-                                    onClick={() => setSeleccionados(todosSeleccionados ? new Set() : new Set(data.postulantes.map(p => p.codigo)))}
-                                    className="text-[11px] font-semibold uppercase tracking-widest text-neutral-500 hover:text-black transition-colors">
-                                    {todosSeleccionados ? 'Quitar todos' : 'Seleccionar todos'}
-                                </button>
-                                <span className="text-[11px] text-neutral-400">{seleccionados.size} seleccionado{seleccionados.size === 1 ? '' : 's'}</span>
+                            <div className="flex items-center justify-end mb-5">
+                                <span className="text-[11px] text-neutral-400">{seleccionados.size} preseleccionado{seleccionados.size === 1 ? '' : 's'}</span>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                                {data.postulantes.map(p => <CandidatoCard key={p.codigo} p={p} selected={seleccionados.has(p.codigo)} onToggle={() => toggle(p.codigo)} />)}
+                                {data.postulantes.map(p => <CandidatoCard key={p.codigo} p={p} selected={seleccionados.has(p.codigo)} onToggle={() => toggle(p)} />)}
                             </div>
                         </>
                     )}
@@ -231,7 +263,7 @@ export default function SeleccionBusquedaPage() {
                 {seleccionados.size > 0 && (
                     <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-neutral-200 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] z-50">
                         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-4">
-                            <span className="text-sm text-neutral-700 font-medium">{seleccionados.size} candidato{seleccionados.size === 1 ? '' : 's'} seleccionado{seleccionados.size === 1 ? '' : 's'}</span>
+                            <span className="text-sm text-neutral-700 font-medium flex items-center gap-1.5"><Star size={15} className="text-amber-400" fill="currentColor" /> {seleccionados.size} preseleccionado{seleccionados.size === 1 ? '' : 's'}</span>
                             <button onClick={() => window.print()}
                                 className="inline-flex items-center gap-2 bg-neutral-900 text-white text-xs font-semibold uppercase tracking-[0.15em] px-6 py-3.5 rounded-lg hover:bg-black transition-colors">
                                 <Download size={15} /> Descargar PDF

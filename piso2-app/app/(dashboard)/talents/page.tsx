@@ -10,7 +10,7 @@ import {
     listShowsAdminAction, upsertShowAction, toggleShowActivoAction, eliminarShowAction,
     listPostulacionesAction, aceptarPostulacionAction, standbyPostulacionAction, eliminarPostulacionAction,
     listBusquedasAdminAction, upsertBusquedaAction, toggleBusquedaActivaAction, eliminarBusquedaAction,
-    listPostulacionesBusquedaAction, cambiarEstadoPostBusquedaAction, eliminarPostBusquedaAction, aceptarPostBusquedaAction,
+    listPostulacionesBusquedaAction, cambiarEstadoPostBusquedaAction, eliminarPostBusquedaAction, aceptarPostBusquedaAction, toggleContactoLiberadoBusquedaAction,
     getTalentDashboardDataAction, listTalentosParaBusquedaAction, agregarTalentoABusquedaAction, type TalentoParaBusqueda,
     listObrasAdminAction, upsertObraAction, toggleObraActivaAction, eliminarObraAction,
     listPostulacionesObraAction, cambiarEstadoPostObraAction, eliminarPostObraAction,
@@ -139,6 +139,7 @@ export default function TalentsAdminPage() {
     const [postBusqSel, setPostBusqSel] = useState<any | null>(null)
     const [procesandoPostBusq, setProcesandoPostBusq] = useState(false)
     const [filtroPostBusq, setFiltroPostBusq] = useState<'todas' | 'pendiente' | 'standby' | 'descartado'>('todas')
+    const [soloPresel, setSoloPresel] = useState(false)
 
     // Agregar un talento existente (vitrina / postulación) a la búsqueda
     const [modalAgregar, setModalAgregar] = useState(false)
@@ -228,6 +229,21 @@ export default function TalentsAdminPage() {
         const res = await aceptarPostBusquedaAction(id)
         if (res.success) { toast.success('Aceptado. Paso a la vitrina.'); if (busquedaSel) abrirPostsBusqueda(busquedaSel); setPostBusqSel(null); cargar() }
         else toast.error(res.error || 'Error')
+        setProcesandoPostBusq(false)
+    }
+
+    // Libera / oculta el contacto de un candidato (lo ven las chicas en el link de selección).
+    const handleLiberarContacto = async (id: string, valor: boolean) => {
+        setProcesandoPostBusq(true)
+        const res = await toggleContactoLiberadoBusquedaAction(id, valor)
+        if (res.success) {
+            toast.success(valor ? 'Contacto liberado' : 'Contacto ocultado')
+            if (busquedaSel) {
+                const d = await listPostulacionesBusquedaAction(busquedaSel.id)
+                setPostsBusqueda(d)
+                setPostBusqSel((prev: any) => prev ? (d.find((x: any) => x.id === prev.id) || prev) : prev)
+            }
+        } else toast.error(res.error || 'Error')
         setProcesandoPostBusq(false)
     }
 
@@ -722,11 +738,13 @@ export default function TalentsAdminPage() {
                                     standby: postsBusqueda.filter(p => p.estado === 'standby').length,
                                     descartado: postsBusqueda.filter(p => p.estado === 'descartado').length,
                                 }
-                                const filtrados = filtroPostBusq === 'todas'
+                                const preselCount = postsBusqueda.filter(p => p.preseleccionado).length
+                                const base = filtroPostBusq === 'todas'
                                     ? postsBusqueda
                                     : filtroPostBusq === 'pendiente'
                                         ? postsBusqueda.filter(p => !p.estado || p.estado === 'pendiente')
                                         : postsBusqueda.filter(p => p.estado === filtroPostBusq)
+                                const filtrados = soloPresel ? base.filter(p => p.preseleccionado) : base
                                 const chips: { key: typeof filtroPostBusq; label: string }[] = [
                                     { key: 'todas', label: 'Todas' },
                                     { key: 'pendiente', label: 'Nuevas' },
@@ -742,6 +760,10 @@ export default function TalentsAdminPage() {
                                                 {c.label} <span className="opacity-60">({conteo[c.key]})</span>
                                             </button>
                                         ))}
+                                        <button onClick={() => setSoloPresel(v => !v)}
+                                            className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1 ${soloPresel ? 'bg-amber-400 text-white border-amber-400' : 'border-amber-300 text-amber-600 hover:border-amber-500'}`}>
+                                            <Star size={11} fill="currentColor" /> Preseleccionados <span className="opacity-70">({preselCount})</span>
+                                        </button>
                                     </div>
                                     {filtrados.length === 0 ? (
                                         <div className="py-14 text-center border-2 border-dashed border-neutral-200 rounded-2xl">
@@ -759,6 +781,8 @@ export default function TalentsAdminPage() {
                                                     {p.estado === 'standby' ? 'Stand by' : p.estado === 'descartado' ? 'Descartado' : 'Nueva'}
                                                 </span>
                                                 <span className="absolute top-2 left-2 bg-white/90 text-black text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1 rounded-full">#{String(p.id).replace(/-/g, '').slice(0, 4).toUpperCase()}</span>
+                                                {p.preseleccionado && <span className="absolute bottom-2 left-2 bg-amber-400 text-white text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1 rounded-full flex items-center gap-1"><Star size={9} fill="currentColor" /> Preselec.</span>}
+                                                {p.contacto_liberado && <span className="absolute bottom-2 right-2 bg-emerald-500 text-white text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1 rounded-full">Contacto ✓</span>}
                                             </div>
                                             <h3 className="mt-2.5 text-[11px] tracking-[0.15em] uppercase font-semibold truncate">{p.nombre}</h3>
                                             {p.rubro && <p className="text-[9px] tracking-[0.2em] uppercase text-neutral-400 truncate">{p.rubro}</p>}
@@ -840,7 +864,8 @@ export default function TalentsAdminPage() {
                                 {postBusqSel.rubro || 'Sin rubro'}
                                 {postBusqSel.estado === 'standby' ? ' · Stand by' : postBusqSel.estado === 'descartado' ? ' · Descartado' : ''}
                             </p>
-                            <h3 className={`${serif.className} text-2xl md:text-3xl tracking-wide mb-4`}>{postBusqSel.nombre}</h3>
+                            <h3 className={`${serif.className} text-2xl md:text-3xl tracking-wide mb-2`}>{postBusqSel.nombre}</h3>
+                            {postBusqSel.preseleccionado && <p className="mb-4 inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-3 py-1"><Star size={12} fill="currentColor" /> Preseleccionado por los seleccionadores</p>}
 
                             <div className="flex flex-wrap gap-4 text-xs text-neutral-600 mb-2">
                                 {postBusqSel.sexo && <span><b className="text-neutral-900">{postBusqSel.sexo === 'varones' ? 'Masculino' : 'Femenino'}</b></span>}
@@ -859,6 +884,18 @@ export default function TalentsAdminPage() {
                                     className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition-colors mb-4">
                                     <MessageCircle size={14} /> Contactar por WhatsApp
                                 </a>
+                            )}
+
+                            {(postBusqSel.email || postBusqSel.telefono) && (
+                                <div className="mb-4">
+                                    <button disabled={procesandoPostBusq} onClick={() => handleLiberarContacto(postBusqSel.id, !postBusqSel.contacto_liberado)}
+                                        className={`w-full inline-flex items-center justify-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] px-4 py-2.5 rounded transition-colors disabled:opacity-40 ${postBusqSel.contacto_liberado ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-amber-400 text-white hover:bg-amber-500'}`}>
+                                        {postBusqSel.contacto_liberado
+                                            ? <><EyeOff size={14} /> Ocultar contacto a los seleccionadores</>
+                                            : <><Star size={14} fill="currentColor" /> Liberar contacto a los seleccionadores</>}
+                                    </button>
+                                    <p className="text-[10px] text-neutral-400 mt-1.5 text-center">{postBusqSel.contacto_liberado ? 'Las chicas ven el email y teléfono en el link de selección.' : 'Al liberar, las chicas verán el contacto para avanzar.'}</p>
+                                </div>
                             )}
 
                             {postBusqSel.descripcion && <p className="text-sm text-neutral-600 leading-relaxed mb-4 whitespace-pre-line">{postBusqSel.descripcion}</p>}

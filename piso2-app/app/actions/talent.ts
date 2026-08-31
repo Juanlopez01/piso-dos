@@ -698,6 +698,7 @@ export type BusquedaSeleccion = {
     descripcion: string | null
     requisitos: string | null
     postulantes: {
+        id: string               // id real (uuid, sin PII) — para marcar preselección
         codigo: string           // referencia estable p/ que el cliente diga "me interesa el AB12"
         nombre: string           // enmascarado: "Melina G."
         rubro: string | null
@@ -708,6 +709,11 @@ export type BusquedaSeleccion = {
         descripcion: string | null
         fotos: string[]
         videos: string[]
+        preseleccionado: boolean
+        contactoLiberado: boolean
+        // Contacto: SOLO si Piso 2 lo liberó para este candidato. Si no, null.
+        email: string | null
+        telefono: string | null
     }[]
 }
 
@@ -731,12 +737,13 @@ export async function getBusquedaSeleccionAction(slug: string): Promise<Busqueda
 
     const { data: posts } = await admin
         .from('talent_busqueda_postulaciones')
-        .select('id, nombre, rubro, edad, altura, nacionalidad, sexo, descripcion, fotos, videos, estado, created_at')
+        .select('id, nombre, rubro, edad, altura, nacionalidad, sexo, descripcion, fotos, videos, estado, created_at, preseleccionado, contacto_liberado, email, telefono')
         .eq('busqueda_id', b.id)
         .neq('estado', 'descartado')   // el seleccionador no ve los descartados
         .order('created_at', { ascending: true })
 
     const postulantes = (posts || []).map((p: any) => ({
+        id: p.id,
         codigo: String(p.id).replace(/-/g, '').slice(0, 4).toUpperCase(),
         nombre: enmascararNombre(p.nombre),
         rubro: p.rubro,
@@ -747,6 +754,11 @@ export async function getBusquedaSeleccionAction(slug: string): Promise<Busqueda
         descripcion: p.descripcion,
         fotos: p.fotos || [],
         videos: p.videos || [],
+        preseleccionado: !!p.preseleccionado,
+        contactoLiberado: !!p.contacto_liberado,
+        // Contacto liberado por Piso 2 → recién ahí se comparte. Si no, null.
+        email: p.contacto_liberado ? (p.email || null) : null,
+        telefono: p.contacto_liberado ? (p.telefono || null) : null,
     }))
 
     return {
@@ -757,6 +769,37 @@ export async function getBusquedaSeleccionAction(slug: string): Promise<Busqueda
         requisitos: b.requisitos,
         postulantes,
     }
+}
+
+// Marca/desmarca la preselección (⭐) de un candidato desde el link de selección.
+// Sin login: el acceso lo da el link de la búsqueda (verificamos que el candidato
+// pertenezca a esa búsqueda por slug).
+export async function togglePreseleccionBusquedaAction(slug: string, postulacionId: string, valor: boolean) {
+    const admin = getAdminClient()
+    const { data: b } = await admin.from('talent_busquedas').select('id').eq('slug', slug).maybeSingle()
+    if (!b) return { success: false, error: 'Búsqueda no encontrada.' }
+    const { data: p } = await admin.from('talent_busqueda_postulaciones').select('id').eq('id', postulacionId).eq('busqueda_id', b.id).maybeSingle()
+    if (!p) return { success: false, error: 'Candidato no encontrado.' }
+    const { error } = await admin.from('talent_busqueda_postulaciones').update({
+        preseleccionado: valor,
+        preseleccionado_at: valor ? new Date().toISOString() : null,
+    }).eq('id', postulacionId)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+// Piso 2 (admin) libera / oculta el contacto de un candidato. Solo con contacto
+// liberado el seleccionador ve email/teléfono en el link de selección.
+export async function toggleContactoLiberadoBusquedaAction(id: string, valor: boolean) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('talent_busqueda_postulaciones').update({
+        contacto_liberado: valor,
+        contacto_liberado_at: valor ? new Date().toISOString() : null,
+    }).eq('id', id)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
 }
 
 export async function crearPostulacionBusquedaAction(payload: {
