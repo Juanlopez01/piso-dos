@@ -43,7 +43,7 @@ export async function getEventosAction() {
     const admin = getAdminClient()
 
     const { data: eventos } = await admin.from('eventos')
-        .select('id, nombre, fecha, lugar, estado, created_at').order('fecha', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false })
+        .select('id, nombre, fecha, lugar, estado, venta_online, created_at').order('fecha', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false })
 
     const ids = (eventos || []).map((e: any) => e.id)
     const recaudado: Record<string, number> = {}
@@ -241,4 +241,110 @@ export async function anularVentaAction(ventaId: string) {
     const { error } = await admin.from('evento_ventas').update({ estado: 'anulada' }).eq('id', ventaId)
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
+}
+
+export async function toggleVentaOnlineAction(eventoId: string, valor: boolean) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('eventos').update({ venta_online: valor }).eq('id', eventoId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+// ============================================================================
+// PÚBLICO — venta online de entradas (sin cuenta)
+// ============================================================================
+
+// Evento + entradas disponibles, SOLO si está activo y con venta online habilitada.
+export async function getEventoPublicoAction(eventoId: string) {
+    const admin = getAdminClient()
+    const { data: evento } = await admin.from('eventos')
+        .select('id, nombre, descripcion, fecha, lugar, estado, venta_online').eq('id', eventoId).maybeSingle()
+    if (!evento || !evento.venta_online || evento.estado !== 'activo') return null
+
+    const { data: entradas } = await admin.from('evento_entradas').select('*').eq('evento_id', eventoId).eq('activo', true).order('orden')
+    const vendidas = await vendidasPorEntrada(admin, eventoId)
+    const entradasDisp = (entradas || []).map((e: any) => ({
+        id: e.id, nombre: e.nombre, precio: Number(e.precio),
+        disponible: Math.max(0, (e.cupo || 0) - (vendidas[e.id] || 0)),
+    }))
+    return {
+        id: evento.id, nombre: evento.nombre, descripcion: evento.descripcion,
+        fecha: evento.fecha, lugar: evento.lugar, entradas: entradasDisp,
+    }
+}
+
+// Crea la orden (venta pendiente) online y devuelve el id + token para el pago.
+export async function crearOrdenEventoAction(payload: {
+    evento_id: string
+    comprador_nombre: string
+    comprador_email: string
+    comprador_contacto?: string
+    items: { entrada_id: string; cantidad: number }[]
+}) {
+    const admin = getAdminClient()
+    const { data: evento } = await admin.from('eventos').select('id, estado, venta_online').eq('id', payload.evento_id).maybeSingle()
+    if (!evento || !evento.venta_online || evento.estado !== 'activo') return { ok: false as const, error: 'El evento no está disponible para compra online.' }
+    if (!payload.comprador_nombre?.trim()) return { ok: false as const, error: 'Completá tu nombre.' }
+    if (!payload.comprador_email?.includes('@')) return { ok: false as const, error: 'Completá un email válido.' }
+
+    const items = (payload.items || []).filter(i => i.entrada_id && Number(i.cantidad) > 0)
+    if (!items.length) return { ok: false as const, error: 'Elegí al menos una entrada.' }
+
+    const { data: entradas } = await admin.from('evento_entradas').select('id, nombre, precio, cupo').eq('evento_id', payload.evento_id)
+    const mapa: Record<string, any> = {}
+    for (const e of (entradas || []) as any[]) mapa[e.id] = e
+    const vendidas = await vendidasPorEntrada(admin, payload.evento_id)
+
+    let total = 0
+    const filas: any[] = []
+    for (const it of items) {
+        const e = mapa[it.entrada_id]
+        if (!e) return { ok: false as const, error: 'Entrada inválida.' }
+        const disp = Math.max(0, (e.cupo || 0) - (vendidas[e.id] || 0))
+        const cant = Math.floor(Number(it.cantidad))
+        if (cant > disp) return { ok: false as const, error: `No hay cupo suficiente de "${e.nombre}" (quedan ${disp}).` }
+        total += cant * Number(e.precio || 0)
+        filas.push({ entrada_id: e.id, cantidad: cant, precio_unit: Number(e.precio || 0) })
+    }
+    if (total <= 0) return { ok: false as const, error: 'El total debe ser mayor a 0.' }
+
+    const token = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2) + Date.now().toString(36))
+    const { data: venta, error } = await admin.from('evento_ventas').insert({
+        evento_id: payload.evento_id,
+        comprador_nombre: payload.comprador_nombre.trim(),
+        comprador_contacto: payload.comprador_contacto?.trim() || payload.comprador_email.trim(),
+        medio_pago: 'mercadopago', total, estado: 'pendiente', canal: 'online', token,
+    }).select('id').single()
+    if (error || !venta) return { ok: false as const, error: error?.message || 'No se pudo crear la orden.' }
+
+    const { error: errItems } = await admin.from('evento_venta_items').insert(filas.map(f => ({ ...f, venta_id: venta.id })))
+    if (errItems) { await admin.from('evento_ventas').delete().eq('id', venta.id); return { ok: false as const, error: errItems.message } }
+
+    return { ok: true as const, ventaId: venta.id, token, total }
+}
+
+// Entradas (con su código para el QR) de una venta pagada — página pública por token.
+export async function getEntradasPublicasAction(ventaId: string, token: string) {
+    const admin = getAdminClient()
+    const { data: venta } = await admin.from('evento_ventas')
+        .select('id, evento_id, comprador_nombre, estado, total, token').eq('id', ventaId).maybeSingle()
+    if (!venta || !token || venta.token !== token) return { ok: false as const, error: 'Entradas no encontradas.' }
+
+    const { data: evento } = await admin.from('eventos').select('nombre, fecha, lugar').eq('id', venta.evento_id).maybeSingle()
+    const { data: tickets } = await admin.from('evento_tickets')
+        .select('codigo, entrada_id, usado').eq('venta_id', ventaId).order('created_at')
+    const entradaIds = [...new Set((tickets || []).map((t: any) => t.entrada_id))]
+    const nombreEntrada: Record<string, string> = {}
+    if (entradaIds.length) {
+        const { data: ents } = await admin.from('evento_entradas').select('id, nombre').in('id', entradaIds)
+        for (const e of (ents || []) as any[]) nombreEntrada[e.id] = e.nombre
+    }
+    return {
+        ok: true as const,
+        estado: venta.estado, comprador: venta.comprador_nombre, total: Number(venta.total),
+        evento: { nombre: evento?.nombre || 'Evento', fecha: evento?.fecha || null, lugar: evento?.lugar || null },
+        tickets: (tickets || []).map((t: any) => ({ codigo: t.codigo, entrada: nombreEntrada[t.entrada_id] || 'Entrada', usado: t.usado })),
+    }
 }

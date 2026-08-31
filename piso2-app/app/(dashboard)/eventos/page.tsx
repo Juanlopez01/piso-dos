@@ -1,17 +1,17 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users } from 'lucide-react'
+import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
-    getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction,
+    getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction,
     eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction,
 } from '@/app/actions/eventos'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
 type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number }
 type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; created_at: string; items: { nombre: string; cantidad: number; precio_unit: number }[] }
-type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string }
+type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Sin fecha'
@@ -164,6 +164,17 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         if (r.ok) cargar(); else toast.error(r.error || 'Error')
     }
 
+    const toggleOnline = async () => {
+        const nuevo = !evento?.venta_online
+        const r = await toggleVentaOnlineAction(eventoId, nuevo)
+        if (r.ok) setEvento(ev => ev ? { ...ev, venta_online: nuevo } : ev)
+        else toast.error(r.error || 'Error')
+    }
+    const copiarLinkCompra = () => {
+        navigator.clipboard.writeText(`${window.location.origin}/evento/${eventoId}`)
+        toast.success('Link de compra copiado')
+    }
+
     const setEstado = async (estado: 'borrador' | 'activo' | 'finalizado') => {
         const r = await cambiarEstadoEventoAction(eventoId, estado)
         if (r.ok) setEvento(ev => ev ? { ...ev, estado } : ev); else toast.error(r.error || 'Error')
@@ -220,10 +231,24 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
             </div>
 
             {/* estado */}
-            <div className="flex gap-2 mb-5">
+            <div className="flex gap-2 mb-4">
                 {(['borrador', 'activo', 'finalizado'] as const).map(s => (
                     <button key={s} onClick={() => setEstado(s)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-colors ${evento.estado === s ? ESTADOS[s].cls + ' ring-1 ring-white/20' : 'bg-white/5 text-gray-500 hover:text-white'}`}>{ESTADOS[s].label}</button>
                 ))}
+            </div>
+
+            {/* venta online */}
+            <div className="flex flex-wrap items-center gap-2 mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                <Globe size={15} className={evento.venta_online ? 'text-[#D4E655]' : 'text-gray-500'} />
+                <span className="text-xs font-semibold text-gray-300">Venta online</span>
+                <button onClick={toggleOnline} className={`ml-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide transition-colors ${evento.venta_online ? 'bg-[#D4E655] text-black' : 'bg-white/10 text-gray-400'}`}>{evento.venta_online ? 'Activada' : 'Desactivada'}</button>
+                {evento.venta_online && (
+                    <>
+                        <button onClick={copiarLinkCompra} className="ml-auto flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide bg-white/5 hover:bg-white/10 text-gray-300 px-3 py-1.5 rounded-lg"><Copy size={12} /> Copiar link</button>
+                        <a href={`/evento/${eventoId}`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide bg-white/5 hover:bg-white/10 text-gray-300 px-3 py-1.5 rounded-lg"><Ticket size={12} /> Ver</a>
+                    </>
+                )}
+                {!evento.venta_online && <span className="ml-auto text-[10px] text-gray-500">Activala y compartí el link para vender entradas online.</span>}
             </div>
 
             {/* stats */}

@@ -87,6 +87,38 @@ export async function POST(request: Request) {
                 return NextResponse.json({ message: 'Sin metadata' }, { status: 200 });
             }
 
+            // ===== EVENTO (Ticketera): confirmar venta + generar entradas con QR =====
+            // Va ANTES del candado de pagos_online (los compradores de entradas no
+            // tienen cuenta). Idempotente por el estado 'pendiente'.
+            if (metadata.tipo_pago === 'evento_entrada' && metadata.evento_venta_id) {
+                const ventaId = metadata.evento_venta_id;
+                const { data: ventaEv } = await supabase.from('evento_ventas')
+                    .update({ estado: 'confirmada', mp_payment_id: paymentIdToProcess.toString() })
+                    .eq('id', ventaId).eq('estado', 'pendiente').select('id').maybeSingle();
+                if (ventaEv) {
+                    const { data: itemsEv } = await supabase.from('evento_venta_items').select('entrada_id, cantidad').eq('venta_id', ventaId);
+                    const ticketsEv: any[] = [];
+                    for (const it of (itemsEv || []) as any[]) {
+                        for (let n = 0; n < (it.cantidad || 0); n++) {
+                            ticketsEv.push({
+                                venta_id: ventaId, entrada_id: it.entrada_id,
+                                codigo: `E-${String(ventaId).slice(0, 8)}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+                            });
+                        }
+                    }
+                    if (ticketsEv.length) await supabase.from('evento_tickets').insert(ticketsEv);
+                    try {
+                        const { data: staffEv } = await supabase.from('profiles').select('id').in('rol', ['admin', 'recepcion']);
+                        if (staffEv?.length) await supabase.from('notificaciones').insert(staffEv.map((s: any) => ({
+                            usuario_id: s.id, titulo: '🎟️ Venta de entradas online',
+                            mensaje: `Se vendieron ${ticketsEv.length} entrada(s) de un evento por $${Number(payment.transaction_amount).toLocaleString('es-AR')}.`,
+                            link: '/eventos', categoria: 'venta',
+                        })));
+                    } catch { /* notif best-effort */ }
+                }
+                return NextResponse.json({ success: true }, { status: 200 });
+            }
+
             const mpPaymentIdStr = paymentIdToProcess.toString();
             const montoAbonado = payment.transaction_amount;
             const userIdFinal = metadata.usuario_id || metadata.user_id;
