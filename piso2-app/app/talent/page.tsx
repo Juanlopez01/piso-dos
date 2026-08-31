@@ -202,46 +202,68 @@ export default function TalentHome() {
                     {/* BÚSQUEDAS ABIERTAS */}
                     <section id="busquedas" className="max-w-6xl mx-auto px-6 md:px-10 pb-8">
                         <div className="text-center mb-10">
-                            <h2 className={`${serif.className} text-3xl md:text-5xl tracking-[0.2em] uppercase`}>Búsquedas abiertas</h2>
+                            <h2 className={`${serif.className} text-3xl md:text-5xl tracking-[0.2em] uppercase`}>Búsquedas</h2>
                             <p className="text-neutral-500 text-sm mt-3 max-w-lg mx-auto">Estamos buscando talentos para estos proyectos. Postulate directamente.</p>
                         </div>
                         {busquedas.length > 0 ? (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto">
-                                {busquedas.map(b => {
-                                    // Día límite INCLUSIVE (abierta todo ese día, en horario Argentina).
-                                    const hoyART = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10)
-                                    const vencida = b.fecha_limite ? b.fecha_limite < hoyART : false
-                                    if (vencida) return null
-                                    return (
-                                        <Link key={b.id} href={`/talent/busqueda/${b.slug}`} className="group border border-neutral-200 hover:border-neutral-900 rounded-xl p-6 md:p-8 transition-all hover:shadow-lg">
-                                            <h3 className={`${serif.className} text-xl md:text-2xl tracking-wide group-hover:tracking-wider transition-all`}>{b.titulo}</h3>
-                                            <div className="flex flex-wrap items-center gap-3 mt-3 text-[10px] text-neutral-400">
-                                                {b.ubicacion && (
-                                                    <span className="flex items-center gap-1"><MapPin size={11} /> {b.ubicacion}</span>
-                                                )}
-                                                {b.categoria && b.categoria !== 'todos' && (
-                                                    <span className="border border-neutral-200 px-2.5 py-0.5 rounded-full uppercase tracking-widest font-semibold">
-                                                        {b.categoria === 'mujeres' ? 'Mujeres' : 'Varones'}
-                                                    </span>
-                                                )}
-                                                {b.fecha_limite && (
-                                                    <span className="flex items-center gap-1">
-                                                        <CalendarDays size={11} />
-                                                        Hasta {new Date(b.fecha_limite + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })}
-                                                    </span>
-                                                )}
+                            <>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto">
+                                    {busquedas.map(b => {
+                                        // Día límite INCLUSIVE (abierta todo ese día, en horario Argentina).
+                                        const hoyART = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10)
+                                        const vencida = b.fecha_limite ? b.fecha_limite < hoyART : false
+                                        const cerrada = !b.activa || vencida
+
+                                        if (cerrada) return (
+                                            <div key={b.id} className="relative border border-neutral-200 rounded-xl p-6 md:p-8 bg-neutral-50 opacity-70">
+                                                <span className="absolute top-4 right-4 text-[9px] font-bold uppercase tracking-widest bg-neutral-700 text-white px-2.5 py-1 rounded-full">Búsqueda cerrada</span>
+                                                <h3 className={`${serif.className} text-xl md:text-2xl tracking-wide pr-28`}>{b.titulo}</h3>
+                                                <div className="flex flex-wrap items-center gap-3 mt-3 text-[10px] text-neutral-400">
+                                                    {b.ubicacion && <span className="flex items-center gap-1"><MapPin size={11} /> {b.ubicacion}</span>}
+                                                    {b.categoria && b.categoria !== 'todos' && (
+                                                        <span className="border border-neutral-200 px-2.5 py-0.5 rounded-full uppercase tracking-widest font-semibold">{b.categoria === 'mujeres' ? 'Mujeres' : 'Varones'}</span>
+                                                    )}
+                                                </div>
+                                                {b.descripcion && <p className="text-neutral-500 text-sm mt-3 line-clamp-2 font-light leading-relaxed">{b.descripcion}</p>}
+                                                <span className="inline-flex items-center gap-1.5 mt-5 text-[11px] font-semibold tracking-[0.15em] uppercase text-neutral-400">Esta búsqueda cerró</span>
                                             </div>
-                                            {b.descripcion && <p className="text-neutral-500 text-sm mt-3 line-clamp-2 font-light leading-relaxed">{b.descripcion}</p>}
-                                            <span className="inline-flex items-center gap-1.5 mt-5 text-[11px] font-semibold tracking-[0.15em] uppercase text-neutral-900 group-hover:gap-2.5 transition-all">
-                                                Postularme <ArrowRight size={13} />
-                                            </span>
-                                        </Link>
-                                    )
-                                })}
-                            </div>
+                                        )
+
+                                        return (
+                                            <Link key={b.id} href={`/talent/busqueda/${b.slug}`} className="group border border-neutral-200 hover:border-neutral-900 rounded-xl p-6 md:p-8 transition-all hover:shadow-lg">
+                                                <h3 className={`${serif.className} text-xl md:text-2xl tracking-wide group-hover:tracking-wider transition-all`}>{b.titulo}</h3>
+                                                <div className="flex flex-wrap items-center gap-3 mt-3 text-[10px] text-neutral-400">
+                                                    {b.ubicacion && (
+                                                        <span className="flex items-center gap-1"><MapPin size={11} /> {b.ubicacion}</span>
+                                                    )}
+                                                    {b.categoria && b.categoria !== 'todos' && (
+                                                        <span className="border border-neutral-200 px-2.5 py-0.5 rounded-full uppercase tracking-widest font-semibold">
+                                                            {b.categoria === 'mujeres' ? 'Mujeres' : 'Varones'}
+                                                        </span>
+                                                    )}
+                                                    {b.fecha_limite && (
+                                                        <span className="flex items-center gap-1">
+                                                            <CalendarDays size={11} />
+                                                            Hasta {new Date(b.fecha_limite + 'T12:00:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'long' })}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                {b.descripcion && <p className="text-neutral-500 text-sm mt-3 line-clamp-2 font-light leading-relaxed">{b.descripcion}</p>}
+                                                <span className="inline-flex items-center gap-1.5 mt-5 text-[11px] font-semibold tracking-[0.15em] uppercase text-neutral-900 group-hover:gap-2.5 transition-all">
+                                                    Postularme <ArrowRight size={13} />
+                                                </span>
+                                            </Link>
+                                        )
+                                    })}
+                                </div>
+                                <div className="text-center mt-10">
+                                    <p className="text-neutral-500 text-sm mb-4 max-w-md mx-auto">¿No hay una búsqueda para vos ahora? Sumate igual como talento de Piso 2 y te tenemos en cuenta para las próximas.</p>
+                                    <Link href="/talent/postular" className="inline-block text-[11px] font-semibold tracking-[0.2em] uppercase border border-neutral-900 px-8 py-3.5 hover:bg-neutral-900 hover:text-white transition-colors">Sumate como talento</Link>
+                                </div>
+                            </>
                         ) : (
                             <div className="py-16 md:py-20 text-center border border-dashed border-neutral-200 rounded-2xl">
-                                <p className="text-neutral-400 text-xs md:text-sm uppercase tracking-[0.4em]">No hay búsquedas abiertas por ahora</p>
+                                <p className="text-neutral-400 text-xs md:text-sm uppercase tracking-[0.4em]">No hay búsquedas por ahora</p>
                                 <Link href="/talent/postular" className="inline-block mt-8 text-[11px] font-semibold tracking-[0.2em] uppercase border border-neutral-900 px-8 py-3.5 hover:bg-neutral-900 hover:text-white transition-colors">Sumate como talento</Link>
                             </div>
                         )}

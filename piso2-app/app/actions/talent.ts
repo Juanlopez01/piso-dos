@@ -655,6 +655,7 @@ export type BusquedaPublica = {
     categoria: string | null
     fecha_limite: string | null
     slug: string
+    activa: boolean
 }
 
 function generarSlug(titulo: string): string {
@@ -665,12 +666,14 @@ function generarSlug(titulo: string): string {
         + '-' + Math.random().toString(36).slice(2, 6)
 }
 
+// Devuelve TODAS las búsquedas (activas primero, luego cerradas) para la portada:
+// las cerradas se muestran con cartel "Cerrada" para mantener el interés.
 export async function getBusquedasActivasAction(): Promise<BusquedaPublica[]> {
     const admin = getAdminClient()
     const { data } = await admin
         .from('talent_busquedas')
-        .select('id, titulo, descripcion, requisitos, ubicacion, categoria, fecha_limite, slug')
-        .eq('activa', true)
+        .select('id, titulo, descripcion, requisitos, ubicacion, categoria, fecha_limite, slug, activa')
+        .order('activa', { ascending: false })
         .order('created_at', { ascending: false })
     return (data || []) as BusquedaPublica[]
 }
@@ -679,7 +682,7 @@ export async function getBusquedaBySlugAction(slug: string): Promise<BusquedaPub
     const admin = getAdminClient()
     const { data } = await admin
         .from('talent_busquedas')
-        .select('id, titulo, descripcion, requisitos, ubicacion, categoria, fecha_limite, slug')
+        .select('id, titulo, descripcion, requisitos, ubicacion, categoria, fecha_limite, slug, activa')
         .eq('slug', slug)
         .eq('activa', true)
         .maybeSingle()
