@@ -23,3 +23,15 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+/* Input compartido (módulo Eventos / formularios) */
+.inp {
+  background-color: #111111;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  color: #ffffff;
+  outline: none;
+}
+.inp:focus { border-color: #D4E655; }
+.inp::placeholder { color: #6b7280; }
