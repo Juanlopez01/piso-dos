@@ -1028,13 +1028,22 @@ export async function agregarTalentoABusquedaAction(busquedaId: string, origen: 
         }
     } else {
         const { data } = await admin.from('talent_postulaciones')
-            .select('nombre, rubro, edad, altura, nacionalidad, sexo, descripcion, fotos, videos, foto_url, video_url')
+            .select('nombre, rubro, edad, altura, nacionalidad, sexo, descripcion, fotos, videos, foto_url, video_url, user_id')
             .eq('id', refId).maybeSingle()
-        if (data) row = {
-            nombre: data.nombre, rubro: data.rubro, edad: data.edad, altura: data.altura,
-            nacionalidad: data.nacionalidad, sexo: data.sexo, descripcion: data.descripcion,
-            fotos: (data.fotos && data.fotos.length) ? data.fotos : (data.foto_url ? [data.foto_url] : []),
-            videos: (data.videos && data.videos.length) ? data.videos : (data.video_url ? [data.video_url] : []),
+        if (data) {
+            // El contacto vive en el perfil del usuario que se postuló (no en la postulación).
+            let email: string | null = null, telefono: string | null = null
+            if (data.user_id) {
+                const { data: prof } = await admin.from('profiles').select('email, telefono').eq('id', data.user_id).maybeSingle()
+                email = prof?.email || null; telefono = prof?.telefono || null
+            }
+            row = {
+                nombre: data.nombre, rubro: data.rubro, edad: data.edad, altura: data.altura,
+                nacionalidad: data.nacionalidad, sexo: data.sexo, descripcion: data.descripcion,
+                fotos: (data.fotos && data.fotos.length) ? data.fotos : (data.foto_url ? [data.foto_url] : []),
+                videos: (data.videos && data.videos.length) ? data.videos : (data.video_url ? [data.video_url] : []),
+                email, telefono,
+            }
         }
     }
     if (!row) return { success: false, error: 'No se encontró el perfil.' }
@@ -1048,8 +1057,8 @@ export async function agregarTalentoABusquedaAction(busquedaId: string, origen: 
     const { error } = await admin.from('talent_busqueda_postulaciones').insert({
         busqueda_id: busquedaId,
         nombre: row.nombre,
-        email: null,
-        telefono: null,
+        email: row.email || null,
+        telefono: row.telefono || null,
         rubro: row.rubro || null,
         descripcion: row.descripcion || null,
         edad: row.edad,
