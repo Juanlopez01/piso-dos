@@ -184,7 +184,8 @@ export async function POST(request: Request) {
                             .eq('venta_id', metadata.venta_id);
 
                         const ahoraD = new Date();
-                        const vto = new Date(ahoraD.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+                        // Compra online: tope 60 días. La vigencia real arranca (30d) en la 1ª clase que use.
+                        const vto = new Date(ahoraD.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString();
 
                         for (const it of (items || []) as any[]) {
                             const prod = Array.isArray(it.producto) ? it.producto[0] : it.producto;
@@ -279,7 +280,8 @@ export async function POST(request: Request) {
                 const tipoClaseSeguro = tipo_clase || 'regular';
 
                 const ahora = new Date();
-                const fechaVencimiento = new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+                // Compra online: tope 60 días. La vigencia real arranca (30d) en la 1ª clase que use.
+                const fechaVencimiento = new Date(ahora.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString();
 
                 // 1. Guardar info del pack (¡AHORA PARA TODOS LOS TIPOS DE PACKS!)
                 const { error: errPack } = await supabase.from('alumno_packs').insert({

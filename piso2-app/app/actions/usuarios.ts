@@ -252,7 +252,8 @@ export async function asignarPackAction(
             monto_abonado: monto,
             metodo_pago: metodoPago, // 🎯 ACÁ BLINDAMOS EL FUTURO
             fecha_compra: ahora.toISOString(),
-            fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            // Carga manual: tope 60 días. La vigencia real (30d) arranca en la 1ª clase que use.
+            fecha_vencimiento: new Date(ahora.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString(),
             estado: 'activo'
         });
 

@@ -14,6 +14,32 @@ const getAdminClient = () => {
     )
 }
 
+// ============================================================================
+// VIGENCIA DE PACKS: el reloj arranca en la PRIMERA clase que se usa (no en la
+// compra). Vence a los 30 días de esa primera clase, pero NUNCA más de 60 días
+// desde la compra (tope, por si nunca la usan o arrancan muy tarde).
+// ============================================================================
+const _DIA = 24 * 60 * 60 * 1000
+function calcVencimientoPack(fechaCompraISO: string, claseInicioISO: string): string {
+    const tope = new Date(fechaCompraISO).getTime() + 60 * _DIA
+    const desdeClase = new Date(claseInicioISO).getTime() + 30 * _DIA
+    return new Date(Math.min(tope, desdeClase)).toISOString()
+}
+// Fecha de vencimiento "sin usar": el tope de 60 días desde la compra.
+function vencimientoTope(fechaCompraISO: string): string {
+    return new Date(new Date(fechaCompraISO).getTime() + 60 * _DIA).toISOString()
+}
+// Arranca la vigencia de un pack en su primera clase usada (si aún no arrancó).
+async function iniciarVigenciaPack(admin: any, packId: string | null | undefined, claseInicioISO: string | null | undefined) {
+    if (!packId || !claseInicioISO) return
+    const { data: pk } = await admin.from('alumno_packs').select('fecha_compra, fecha_primera_asistencia').eq('id', packId).maybeSingle()
+    if (!pk || pk.fecha_primera_asistencia) return // ya arrancó
+    await admin.from('alumno_packs').update({
+        fecha_primera_asistencia: claseInicioISO,
+        fecha_vencimiento: calcVencimientoPack(pk.fecha_compra || new Date().toISOString(), claseInicioISO),
+    }).eq('id', packId)
+}
+
 export async function toggleAsistenciaAction(inscripcionId: string, presente: boolean) {
     const supabase = await createClient()
     const supabaseAdmin = getAdminClient()
@@ -308,6 +334,8 @@ export async function procesarInscripcionAction(payload: any) {
                         creditos_restantes: nuevosRestantes,
                         estado: nuevosRestantes === 0 ? 'agotado' : 'activo'
                     }).eq('id', packActivo.id);
+                    // Si es la primera clase que usa este pack, arranca su vigencia (30d desde la clase, tope 60d).
+                    await iniciarVigenciaPack(supabaseAdmin, packActivo.id, claseDb.inicio);
                 }
 
                 await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', { p_usuario_id: payload.p_user_id, p_referencia: paseReferencia, p_cantidad: -1 })
@@ -346,7 +374,9 @@ export async function procesarInscripcionAction(payload: any) {
                     precio_total: totalPack,
                     metodo_pago: payload.p_metodo_pago,
                     fecha_compra: ahora.toISOString(),
-                    fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                    // Vigencia anclada a la primera clase (esta) — tope 60 días desde la compra.
+                    fecha_vencimiento: calcVencimientoPack(ahora.toISOString(), claseDb.inicio),
+                    fecha_primera_asistencia: claseDb.inicio,
                     estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
                 }).select().single();
 
@@ -412,6 +442,8 @@ export async function procesarInscripcionAction(payload: any) {
                         creditos_restantes: nuevosRestantes,
                         estado: nuevosRestantes === 0 ? 'agotado' : 'activo'
                     }).eq('id', packActivo.id);
+                    // Si es la primera clase que usa este pack, arranca su vigencia (30d desde la clase, tope 60d).
+                    await iniciarVigenciaPack(supabaseAdmin, packActivo.id, claseDb.inicio);
                 }
 
                 await supabaseAdmin.from('profiles').update({ [campoCredito]: (perfil as any)[campoCredito] - 1 }).eq('id', payload.p_user_id);
@@ -451,7 +483,9 @@ export async function procesarInscripcionAction(payload: any) {
                     precio_total: totalPack,
                     metodo_pago: payload.p_metodo_pago,
                     fecha_compra: ahora.toISOString(),
-                    fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                    // Vigencia anclada a la primera clase (esta) — tope 60 días desde la compra.
+                    fecha_vencimiento: calcVencimientoPack(ahora.toISOString(), claseDb.inicio),
+                    fecha_primera_asistencia: claseDb.inicio,
                     estado: (creditosDelPack - 1) > 0 ? 'activo' : 'agotado'
                 }).select().single();
 
@@ -765,7 +799,9 @@ export async function convertirAsistenteAPackAction(payload: {
                 cantidad_inicial: Number(prod.creditos), creditos_restantes: delta,
                 monto_abonado: montoTotal, precio_total: Number(prod.precio),
                 metodo_pago: payload.metodoPago, fecha_compra: ahora.toISOString(),
-                fecha_vencimiento: new Date(ahora.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                // Nace de una suelta que ya se tomó → la vigencia arranca ahora (30d, tope 60d).
+                fecha_vencimiento: calcVencimientoPack(ahora.toISOString(), ahora.toISOString()),
+                fecha_primera_asistencia: ahora.toISOString(),
                 estado: 'activo'
             }).select('id').single()
             if (nuevoPack?.id) await admin.from('inscripciones').update({ pack_usado_id: nuevoPack.id }).eq('id', insc.id)
