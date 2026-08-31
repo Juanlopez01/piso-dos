@@ -17,7 +17,7 @@ import {
     acortarLinkAction
 } from '@/app/actions/talent'
 import { toast, Toaster } from 'sonner'
-import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users, Share2, MessageCircle, Globe } from 'lucide-react'
+import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users, Share2, MessageCircle, Globe, FileSignature } from 'lucide-react'
 import { Playfair_Display } from 'next/font/google'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['500', '600', '700'] })
@@ -907,6 +907,20 @@ export default function TalentsAdminPage() {
                                             <Play size={13} /> Video {postBusqSel.videos.length > 1 ? i + 1 : ''}
                                         </a>
                                     ))}
+                                </div>
+                            )}
+
+                            {postBusqSel.perfil?.acuerdo_aceptado && (
+                                <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-3 mb-4">
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 mb-1.5 flex items-center gap-1"><FileSignature size={12} /> Acuerdo firmado</p>
+                                    <p className="text-[11px] text-neutral-600">Versión: <b>{postBusqSel.perfil.acuerdo_version === 'residente' ? 'Residente Argentina' : 'No residente'}</b></p>
+                                    <p className="text-[11px] text-neutral-600">Aclaración: <b>{postBusqSel.perfil.firma_aclaracion}</b> · DNI: <b>{postBusqSel.perfil.firma_dni}</b></p>
+                                    {postBusqSel.perfil.representante_nombre && <p className="text-[11px] text-neutral-600">Rep. legal: <b>{postBusqSel.perfil.representante_nombre}</b> · DNI {postBusqSel.perfil.representante_dni}</p>}
+                                    {postBusqSel.perfil.firma_fecha && <p className="text-[11px] text-neutral-500">{new Date(postBusqSel.perfil.firma_fecha).toLocaleString('es-AR')}{postBusqSel.perfil.firma_ubicacion ? ' · ' + postBusqSel.perfil.firma_ubicacion : ''}</p>}
+                                    <div className="flex gap-4 mt-2">
+                                        {postBusqSel.perfil.firma_url && <a href={postBusqSel.perfil.firma_url} target="_blank" rel="noreferrer" className="text-[10px] font-semibold uppercase tracking-widest underline text-emerald-700">Ver firma</a>}
+                                        <a href={postBusqSel.perfil.acuerdo_version === 'residente' ? '/acuerdos/acuerdo-residente-argentina.pdf' : '/acuerdos/acuerdo-no-residente.pdf'} target="_blank" rel="noreferrer" className="text-[10px] font-semibold uppercase tracking-widest underline text-emerald-700">Ver acuerdo</a>
+                                    </div>
                                 </div>
                             )}
 
