@@ -1,4 +1,4 @@
-import { Home, Calendar as CalendarIcon, Users, Settings, Package, ShoppingBag, MapPin, Bell, UserCircle, GraduationCap, UsersRound, Search, ShoppingBagIcon, BookOpen, Wallet, FileSpreadsheet, Megaphone, Sparkles, Link2, Bot, MessageCircle, Ticket } from 'lucide-react'
+import { Home, Calendar as CalendarIcon, Users, Settings, Package, ShoppingBag, MapPin, Bell, UserCircle, GraduationCap, UsersRound, Search, ShoppingBagIcon, BookOpen, Wallet, FileSpreadsheet, Megaphone, Sparkles, Link2, Bot, MessageCircle, Ticket, Theater } from 'lucide-react'
 
 export const menuItems = [
     // --- TOP: LOS 4 BOTONES DE ALUMNOS Y PROFES (Para el menú del celu) ---
@@ -43,6 +43,7 @@ export const menuItems = [
     { name: 'Asistente', href: '/asistente-test', icon: Bot, roles: ['admin'] },
     { name: 'Consultas', href: '/consultas', icon: MessageCircle, roles: ['admin', 'recepcion'] },
     { name: 'Eventos', href: '/eventos', icon: Ticket, roles: ['admin', 'recepcion'] },
+    { name: 'Curaduría', href: '/curaduria', icon: Theater, roles: ['admin', 'recepcion'] },
     { name: 'Sumate a Talent', href: '/talent/postular', icon: Sparkles, roles: ['alumno', 'profesor', 'coordinador'] },
     { name: 'La Liga', href: '/la-liga', icon: GraduationCap, roles: ['admin', 'profesor', 'coordinador', 'alumno', 'auxiliar'] },
     { name: 'Alquilar sala', href: '/alquilar-sala', icon: ShoppingBagIcon, roles: ['admin', 'profesor', 'coordinador', 'alumno'] },

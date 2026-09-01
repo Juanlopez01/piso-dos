@@ -58,6 +58,7 @@ function MobileNavContent() {
             'Asistente',
             'Consultas',
             'Eventos',
+            'Curaduría',
             'Liquidaciones',
             'Remarketing',
             'Caja',
@@ -84,9 +85,10 @@ function MobileNavContent() {
                     'La Liga',
                     'Grupos',
                     'Consultas',
-                    'Eventos'
+                    'Eventos',
+                    'Curaduría'
                 ].includes(item.name)
-            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Consultas', 'Eventos'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Consultas', 'Eventos', 'Curaduría'].includes(item.name)
         }
 
         // 🚀 ROL AUXILIAR: Mismo menú cerrado que recepción, ve Grupos y Alquileres pero NUNCA La Liga.
