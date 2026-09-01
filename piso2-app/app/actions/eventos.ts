@@ -526,3 +526,28 @@ export async function getEntradasPublicasAction(ventaId: string, token: string) 
         tickets: (tickets || []).map((t: any) => ({ codigo: t.codigo, entrada: nombreEntrada[t.entrada_id] || 'Entrada', usado: t.usado })),
     }
 }
+
+// ---- Ficha técnica (Fase 2) -------------------------------------------------
+// El "perfil vivo" de la obra: sonido, luces, proyecciones, armado, datos de
+// función y acuerdo de sala. Se guarda como JSON en el evento y el equipo la
+// edita las veces que haga falta.
+
+export async function getFichaTecnicaAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { data: evento } = await admin.from('eventos')
+        .select('id, nombre, ficha_tecnica').eq('id', eventoId).single()
+    if (!evento) return { ok: false as const, error: 'Evento no encontrado' }
+    return { ok: true as const, nombre: evento.nombre, ficha: evento.ficha_tecnica || {} }
+}
+
+export async function guardarFichaTecnicaAction(eventoId: string, ficha: Record<string, any>) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const payload = { ...(ficha || {}), _updated_at: new Date().toISOString(), _updated_by: perm.userId }
+    const { error } = await admin.from('eventos').update({ ficha_tecnica: payload }).eq('id', eventoId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}

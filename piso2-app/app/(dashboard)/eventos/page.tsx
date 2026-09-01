@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download } from 'lucide-react'
+import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
     getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
@@ -284,6 +284,11 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                     <BarChart3 size={15} /> Reporte
                 </button>
             </div>
+
+            {/* ficha técnica */}
+            <Link href={`/eventos/${eventoId}/ficha`} className="w-full flex items-center justify-center gap-2 mb-2 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
+                <ClipboardList size={14} /> Ficha técnica de la obra (sonido, luces, armado…)
+            </Link>
 
             {/* acceso de la compañía */}
             <button onClick={copiarLinkCompania} className="w-full flex items-center justify-center gap-2 mb-5 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
