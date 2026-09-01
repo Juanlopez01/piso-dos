@@ -379,6 +379,82 @@ export async function getCheckinStatsAction(eventoId: string) {
     return { ok: true as const, nombre: ev?.nombre || 'Evento', total, usados }
 }
 
+// Reporte completo de un evento: desglose por tipo/canal/medio, check-in y
+// listado de compradores (para ver en pantalla y exportar a CSV).
+export async function getReporteEventoAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+
+    const { data: evento } = await admin.from('eventos').select('nombre, fecha, lugar').eq('id', eventoId).maybeSingle()
+    const { data: entradas } = await admin.from('evento_entradas').select('id, nombre, precio, cupo, orden').eq('evento_id', eventoId).order('orden')
+    const { data: ventas } = await admin.from('evento_ventas')
+        .select('id, comprador_nombre, comprador_contacto, medio_pago, total, canal, created_at')
+        .eq('evento_id', eventoId).eq('estado', 'confirmada').order('created_at', { ascending: false })
+
+    const ventaIds = (ventas || []).map((v: any) => v.id)
+    let items: any[] = [], tickets: any[] = []
+    if (ventaIds.length) {
+        const [it, tk] = await Promise.all([
+            admin.from('evento_venta_items').select('venta_id, entrada_id, cantidad, precio_unit').in('venta_id', ventaIds),
+            admin.from('evento_tickets').select('venta_id, usado').in('venta_id', ventaIds),
+        ])
+        items = it.data || []; tickets = tk.data || []
+    }
+
+    const nombreEnt: Record<string, string> = {}
+    for (const e of (entradas || []) as any[]) nombreEnt[e.id] = e.nombre
+
+    // Por tipo de entrada
+    const porTipo = (entradas || []).map((e: any) => {
+        const its = items.filter(i => i.entrada_id === e.id)
+        const vendidas = its.reduce((s, i) => s + (i.cantidad || 0), 0)
+        const recaudado = its.reduce((s, i) => s + (i.cantidad || 0) * Number(i.precio_unit || 0), 0)
+        return { nombre: e.nombre, precio: Number(e.precio), cupo: e.cupo || 0, vendidas, disponible: Math.max(0, (e.cupo || 0) - vendidas), recaudado }
+    })
+
+    // Por canal y medio de pago
+    const porCanal: Record<string, { cant: number; monto: number }> = {}
+    const porMedio: Record<string, { cant: number; monto: number }> = {}
+    for (const v of (ventas || []) as any[]) {
+        const c = v.canal || 'mostrador', m = v.medio_pago || 'efectivo'
+        porCanal[c] = { cant: (porCanal[c]?.cant || 0) + 1, monto: (porCanal[c]?.monto || 0) + Number(v.total || 0) }
+        porMedio[m] = { cant: (porMedio[m]?.cant || 0) + 1, monto: (porMedio[m]?.monto || 0) + Number(v.total || 0) }
+    }
+
+    // Check-in
+    const totalTickets = tickets.length
+    const usados = tickets.filter(t => t.usado).length
+
+    // Filas (listado de compradores) para pantalla / CSV
+    const filas = (ventas || []).map((v: any) => {
+        const its = items.filter(i => i.venta_id === v.id)
+        const tks = tickets.filter(t => t.venta_id === v.id)
+        return {
+            comprador: v.comprador_nombre || 'Sin nombre',
+            contacto: v.comprador_contacto || '',
+            detalle: its.map(i => `${i.cantidad}× ${nombreEnt[i.entrada_id] || 'Entrada'}`).join(' · '),
+            entradas: its.reduce((s, i) => s + (i.cantidad || 0), 0),
+            total: Number(v.total || 0),
+            canal: v.canal || 'mostrador',
+            medio: v.medio_pago || 'efectivo',
+            ingresados: `${tks.filter(t => t.usado).length}/${tks.length}`,
+            fecha: v.created_at,
+        }
+    })
+
+    const recaudado = (ventas || []).reduce((s: number, v: any) => s + Number(v.total || 0), 0)
+    const vendidasTot = porTipo.reduce((s, t) => s + t.vendidas, 0)
+    const cupoTot = porTipo.reduce((s, t) => s + t.cupo, 0)
+
+    return {
+        ok: true as const,
+        evento: { nombre: evento?.nombre || 'Evento', fecha: evento?.fecha || null, lugar: evento?.lugar || null },
+        totales: { recaudado, vendidas: vendidasTot, cupo: cupoTot, ventas: (ventas || []).length, ingresados: usados, tickets: totalTickets },
+        porTipo, porCanal, porMedio, filas,
+    }
+}
+
 // Entradas (con su código para el QR) de una venta pagada — página pública por token.
 export async function getEntradasPublicasAction(ventaId: string, token: string) {
     const admin = getAdminClient()

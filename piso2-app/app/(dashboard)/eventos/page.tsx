@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine } from 'lucide-react'
+import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
-    getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction,
+    getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction,
     eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction,
 } from '@/app/actions/eventos'
 
@@ -176,6 +176,23 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         toast.success('Link de compra copiado')
     }
 
+    const [reporte, setReporte] = useState<any>(null)
+    const abrirReporte = async () => {
+        const r = await getReporteEventoAction(eventoId)
+        if (r.ok) setReporte(r); else toast.error((r as any).error || 'Error')
+    }
+    const descargarCSV = () => {
+        if (!reporte) return
+        const head = ['Comprador', 'Contacto', 'Entradas', 'Detalle', 'Total', 'Canal', 'Medio', 'Ingresados', 'Fecha']
+        const rows = reporte.filas.map((f: any) => [f.comprador, f.contacto, f.entradas, f.detalle, f.total, f.canal, f.medio, f.ingresados, new Date(f.fecha).toLocaleString('es-AR')])
+        const csv = [head, ...rows].map((r: any[]) => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n')
+        const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url; a.download = `reporte-${(evento?.nombre || 'evento').replace(/[^a-z0-9]+/gi, '-')}.csv`; a.click()
+        URL.revokeObjectURL(url)
+    }
+
     const setEstado = async (estado: 'borrador' | 'activo' | 'finalizado') => {
         const r = await cambiarEstadoEventoAction(eventoId, estado)
         if (r.ok) setEvento(ev => ev ? { ...ev, estado } : ev); else toast.error(r.error || 'Error')
@@ -252,10 +269,66 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                 {!evento.venta_online && <span className="ml-auto text-[10px] text-gray-500">Activala y compartí el link para vender entradas online.</span>}
             </div>
 
-            {/* check-in */}
-            <Link href={`/eventos/${eventoId}/checkin`} className="flex items-center justify-center gap-2 mb-5 bg-[#D4E655] text-black font-bold py-3 rounded-xl uppercase text-xs tracking-wide hover:bg-white transition-colors">
-                <ScanLine size={16} /> Check-in — escanear entradas
-            </Link>
+            {/* check-in + reporte */}
+            <div className="grid grid-cols-2 gap-2 mb-5">
+                <Link href={`/eventos/${eventoId}/checkin`} className="flex items-center justify-center gap-2 bg-[#D4E655] text-black font-bold py-3 rounded-xl uppercase text-[11px] tracking-wide hover:bg-white transition-colors">
+                    <ScanLine size={15} /> Check-in
+                </Link>
+                <button onClick={abrirReporte} className="flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-200 font-bold py-3 rounded-xl uppercase text-[11px] tracking-wide hover:border-white/30 transition-colors">
+                    <BarChart3 size={15} /> Reporte
+                </button>
+            </div>
+
+            {reporte && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setReporte(null)}>
+                    <div className="bg-[#09090b] border border-white/10 rounded-t-2xl md:rounded-2xl w-full max-w-2xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-white/10 flex items-center justify-between shrink-0">
+                            <div><p className="font-black uppercase tracking-tight flex items-center gap-2"><BarChart3 size={18} className="text-[#D4E655]" /> Reporte</p><p className="text-[11px] text-gray-500 truncate">{reporte.evento.nombre}</p></div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={descargarCSV} className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide bg-[#D4E655] text-black px-3 py-2 rounded-lg"><Download size={13} /> CSV</button>
+                                <button onClick={() => setReporte(null)} className="p-2 bg-white/5 rounded-full text-gray-300"><X size={16} /></button>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                <Stat label="Recaudado" value={pesos(reporte.totales.recaudado)} accent icon={DollarSign} />
+                                <Stat label="Vendidas" value={`${reporte.totales.vendidas}${reporte.totales.cupo ? ` / ${reporte.totales.cupo}` : ''}`} icon={Ticket} />
+                                <Stat label="Ventas" value={reporte.totales.ventas} icon={Users} />
+                                <Stat label="Ingresados" value={`${reporte.totales.ingresados}/${reporte.totales.tickets}`} icon={ScanLine} />
+                            </div>
+                            <div>
+                                <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">Por tipo de entrada</p>
+                                <div className="space-y-1.5">
+                                    {reporte.porTipo.map((t: any, i: number) => (
+                                        <div key={i} className="flex items-center justify-between bg-[#0e0e10] border border-white/10 rounded-lg px-3 py-2 text-sm">
+                                            <span className="font-medium">{t.nombre}</span>
+                                            <span className="text-gray-400 text-xs">{t.vendidas}/{t.cupo} · {pesos(t.recaudado)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">Por canal</p>{Object.entries(reporte.porCanal).map(([k, v]: [string, any]) => (<div key={k} className="flex justify-between text-sm text-gray-300 capitalize mb-1"><span>{k}</span><span className="text-gray-500 text-xs">{v.cant} · {pesos(v.monto)}</span></div>))}</div>
+                                <div><p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">Por medio</p>{Object.entries(reporte.porMedio).map(([k, v]: [string, any]) => (<div key={k} className="flex justify-between text-sm text-gray-300 capitalize mb-1"><span>{k}</span><span className="text-gray-500 text-xs">{v.cant} · {pesos(v.monto)}</span></div>))}</div>
+                            </div>
+                            <div>
+                                <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">Compradores ({reporte.filas.length})</p>
+                                <div className="space-y-1.5">
+                                    {reporte.filas.map((f: any, i: number) => (
+                                        <div key={i} className="bg-[#0e0e10] border border-white/10 rounded-lg px-3 py-2">
+                                            <div className="flex justify-between items-start gap-2">
+                                                <div className="min-w-0"><p className="font-medium text-sm truncate">{f.comprador}</p><p className="text-[11px] text-gray-500 truncate">{f.detalle}{f.contacto ? ` · ${f.contacto}` : ''}</p></div>
+                                                <div className="text-right shrink-0"><p className="text-[#D4E655] font-bold text-sm">{pesos(f.total)}</p><p className="text-[10px] text-gray-500 capitalize">{f.canal} · {f.ingresados} ✓</p></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {reporte.filas.length === 0 && <p className="text-xs text-gray-500">Sin ventas confirmadas todavía.</p>}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* stats */}
             <div className="grid grid-cols-3 gap-3 mb-6">
