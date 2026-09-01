@@ -455,6 +455,54 @@ export async function getReporteEventoAction(eventoId: string) {
     }
 }
 
+// ============================================================================
+// ACCESO DE LA COMPAÑÍA — link propio por función; el elenco ve SUS ventas en
+// vivo, sin acceso al resto del sistema.
+// ============================================================================
+
+// Admin: obtiene (o genera) el token del link de la compañía para un evento.
+export async function getLinkCompaniaAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { data: ev } = await admin.from('eventos').select('token_compania').eq('id', eventoId).maybeSingle()
+    if (!ev) return { ok: false as const, error: 'Evento no encontrado' }
+    let token = ev.token_compania
+    if (!token) {
+        token = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2) + Date.now().toString(36))
+        await admin.from('eventos').update({ token_compania: token }).eq('id', eventoId)
+    }
+    return { ok: true as const, token }
+}
+
+// Público (por token): ventas del evento en vivo, SOLO agregados (sin datos de
+// los compradores ni acceso a otra cosa).
+export async function getVentasCompaniaAction(eventoId: string, token: string) {
+    const admin = getAdminClient()
+    const { data: ev } = await admin.from('eventos').select('nombre, fecha, lugar, token_compania').eq('id', eventoId).maybeSingle()
+    if (!ev || !token || ev.token_compania !== token) return { ok: false as const, error: 'Link inválido' }
+
+    const { data: entradas } = await admin.from('evento_entradas').select('id, nombre, precio, cupo, orden').eq('evento_id', eventoId).order('orden')
+    const { data: ventas } = await admin.from('evento_ventas').select('id, total').eq('evento_id', eventoId).eq('estado', 'confirmada')
+    const vids = (ventas || []).map((v: any) => v.id)
+    let items: any[] = []
+    if (vids.length) { const { data } = await admin.from('evento_venta_items').select('entrada_id, cantidad, precio_unit').in('venta_id', vids); items = data || [] }
+
+    const porTipo = (entradas || []).map((e: any) => {
+        const its = items.filter(i => i.entrada_id === e.id)
+        const vend = its.reduce((s, i) => s + (i.cantidad || 0), 0)
+        return { nombre: e.nombre, precio: Number(e.precio), cupo: e.cupo || 0, vendidas: vend, disponible: Math.max(0, (e.cupo || 0) - vend), recaudado: its.reduce((s, i) => s + (i.cantidad || 0) * Number(i.precio_unit || 0), 0) }
+    })
+    const recaudado = (ventas || []).reduce((s: number, v: any) => s + Number(v.total || 0), 0)
+    const vendidas = porTipo.reduce((s, t) => s + t.vendidas, 0)
+    const cupo = porTipo.reduce((s, t) => s + t.cupo, 0)
+    return {
+        ok: true as const,
+        evento: { nombre: ev.nombre, fecha: ev.fecha, lugar: ev.lugar },
+        porTipo, recaudado, vendidas, cupo, soldOut: cupo > 0 && vendidas >= cupo,
+    }
+}
+
 // Entradas (con su código para el QR) de una venta pagada — página pública por token.
 export async function getEntradasPublicasAction(ventaId: string, token: string) {
     const admin = getAdminClient()

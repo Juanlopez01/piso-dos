@@ -49,6 +49,7 @@ export async function proxy(request: NextRequest) {
             (request.nextUrl.pathname.startsWith('/talent') && !request.nextUrl.pathname.startsWith('/talent/postular')) ||
             request.nextUrl.pathname.startsWith('/evento/') || // Compra pública de entradas (PISO2E); el panel /eventos sigue protegido
             request.nextUrl.pathname.startsWith('/entradas/') || // Entradas con QR (link público por token)
+            request.nextUrl.pathname.startsWith('/compania/') || // Acceso de la compañía: ventas en vivo por token (sin login)
             request.nextUrl.pathname.startsWith('/cartelera') || // Cartelera pública de clases: se ve sin login; reservar pide login
             request.nextUrl.pathname.startsWith('/streaming') ||
             request.nextUrl.pathname.startsWith('/nueva-generacion') ||

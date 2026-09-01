@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
-    getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction,
+    getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
     eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction,
 } from '@/app/actions/eventos'
 
@@ -175,6 +175,12 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         navigator.clipboard.writeText(`${window.location.origin}/evento/${eventoId}`)
         toast.success('Link de compra copiado')
     }
+    const copiarLinkCompania = async () => {
+        const r = await getLinkCompaniaAction(eventoId)
+        if (!r.ok) return toast.error((r as any).error || 'Error')
+        navigator.clipboard.writeText(`${window.location.origin}/compania/${eventoId}?t=${r.token}`)
+        toast.success('Link de la compañía copiado (ve las ventas en vivo)')
+    }
 
     const [reporte, setReporte] = useState<any>(null)
     const abrirReporte = async () => {
@@ -278,6 +284,11 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                     <BarChart3 size={15} /> Reporte
                 </button>
             </div>
+
+            {/* acceso de la compañía */}
+            <button onClick={copiarLinkCompania} className="w-full flex items-center justify-center gap-2 mb-5 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
+                <Copy size={14} /> Copiar link para la compañía (ve sus ventas en vivo)
+            </button>
 
             {reporte && (
                 <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setReporte(null)}>
