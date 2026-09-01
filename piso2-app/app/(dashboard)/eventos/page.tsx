@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy } from 'lucide-react'
+import Link from 'next/link'
+import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
     getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction,
@@ -250,6 +251,11 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                 )}
                 {!evento.venta_online && <span className="ml-auto text-[10px] text-gray-500">Activala y compartí el link para vender entradas online.</span>}
             </div>
+
+            {/* check-in */}
+            <Link href={`/eventos/${eventoId}/checkin`} className="flex items-center justify-center gap-2 mb-5 bg-[#D4E655] text-black font-bold py-3 rounded-xl uppercase text-xs tracking-wide hover:bg-white transition-colors">
+                <ScanLine size={16} /> Check-in — escanear entradas
+            </Link>
 
             {/* stats */}
             <div className="grid grid-cols-3 gap-3 mb-6">

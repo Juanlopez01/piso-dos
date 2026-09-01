@@ -325,6 +325,60 @@ export async function crearOrdenEventoAction(payload: {
     return { ok: true as const, ventaId: venta.id, token, total }
 }
 
+// ============================================================================
+// CHECK-IN (Fase 3) — escaneo del QR en la puerta + reportes
+// ============================================================================
+
+// Valida un ticket por su código (lo que trae el QR) para un evento dado.
+// Si es válido y no usado, lo marca usado. Devuelve el resultado para la UI.
+export async function validarTicketAction(eventoId: string, codigo: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { estado: 'error' as const, msg: perm.error || 'Sin permisos' }
+    const cod = (codigo || '').trim()
+    if (!cod) return { estado: 'error' as const, msg: 'Código vacío' }
+    const admin = getAdminClient()
+
+    const { data: tk } = await admin.from('evento_tickets').select('id, venta_id, entrada_id, usado, usado_at').eq('codigo', cod).maybeSingle()
+    if (!tk) return { estado: 'invalida' as const, msg: 'Entrada no encontrada' }
+
+    const { data: venta } = await admin.from('evento_ventas').select('evento_id, comprador_nombre, estado').eq('id', tk.venta_id).maybeSingle()
+    if (!venta || venta.evento_id !== eventoId) return { estado: 'otro_evento' as const, msg: 'Esta entrada es de otro evento' }
+    if (venta.estado === 'anulada') return { estado: 'anulada' as const, msg: 'La venta de esta entrada fue anulada' }
+
+    const { data: ent } = await admin.from('evento_entradas').select('nombre').eq('id', tk.entrada_id).maybeSingle()
+    const info = { entrada: ent?.nombre || 'Entrada', comprador: venta.comprador_nombre || 'Sin nombre' }
+
+    if (tk.usado) return { estado: 'usada' as const, msg: 'Esta entrada YA fue usada', usadoAt: tk.usado_at, ...info }
+
+    await admin.from('evento_tickets').update({ usado: true, usado_at: new Date().toISOString() }).eq('id', tk.id)
+    return { estado: 'valida' as const, msg: '¡Adelante!', ...info }
+}
+
+// Deshace un check-in (por si escanearon de más).
+export async function desmarcarTicketAction(codigo: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('evento_tickets').update({ usado: false, usado_at: null }).eq('codigo', (codigo || '').trim())
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+// Progreso de check-in de un evento (usadas / total de entradas confirmadas).
+export async function getCheckinStatsAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, nombre: '', total: 0, usados: 0 }
+    const admin = getAdminClient()
+    const { data: ev } = await admin.from('eventos').select('nombre').eq('id', eventoId).maybeSingle()
+    const { data: ventas } = await admin.from('evento_ventas').select('id').eq('evento_id', eventoId).eq('estado', 'confirmada')
+    const ids = (ventas || []).map((v: any) => v.id)
+    if (!ids.length) return { ok: true as const, nombre: ev?.nombre || 'Evento', total: 0, usados: 0 }
+    const { data: tks } = await admin.from('evento_tickets').select('usado').in('venta_id', ids)
+    const total = (tks || []).length
+    const usados = (tks || []).filter((t: any) => t.usado).length
+    return { ok: true as const, nombre: ev?.nombre || 'Evento', total, usados }
+}
+
 // Entradas (con su código para el QR) de una venta pagada — página pública por token.
 export async function getEntradasPublicasAction(ventaId: string, token: string) {
     const admin = getAdminClient()
