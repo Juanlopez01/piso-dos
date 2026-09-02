@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale, EyeOff, UserPlus } from 'lucide-react'
+import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale, EyeOff, UserPlus, AlertTriangle } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 import {
     getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
-    eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction,
+    eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction, reembolsarVentaAction, cancelarEventoAction,
     getEquipoAction, guardarMiembroEquipoAction, eliminarMiembroEquipoAction,
     getBorderauxAction, setRepartoPctAction, toggleIncluirEquipoAction, guardarGastoAction, eliminarGastoAction,
     getInvitadosAction, guardarInvitadoAction, togglePresenteInvitadoAction, eliminarInvitadoAction,
@@ -15,8 +15,8 @@ import {
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
 type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number; oculta?: boolean; codigo_promo?: string | null }
-type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; created_at: string; items: { nombre: string; cantidad: number; precio_unit: number }[] }
-type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean }
+type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; canal?: string | null; reembolsada?: boolean; created_at: string; items: { nombre: string; cantidad: number; precio_unit: number }[] }
+type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean; cancelado?: boolean }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Sin fecha'
@@ -258,10 +258,24 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         else toast.error(r.error || 'Error')
         setVendiendo(false)
     }
-    const anular = async (id: string) => {
-        if (!confirm('¿Anular esta venta? Se libera el cupo.')) return
-        const r = await anularVentaAction(id)
-        if (r.ok) cargar(); else toast.error(r.error || 'Error')
+    const reembolsar = async (v: Venta) => {
+        const esOnline = v.canal === 'online'
+        const msg = esOnline
+            ? `¿Reembolsar esta venta? Se devuelve ${pesos(v.total)} por Mercado Pago y se anulan sus entradas.`
+            : `¿Reembolsar esta venta? Marcala como devuelta (${pesos(v.total)} en mano) y se anulan sus entradas.`
+        if (!confirm(msg)) return
+        const r = await reembolsarVentaAction(v.id)
+        if (r.ok) { toast.success(r.viaMP ? 'Reembolsado por Mercado Pago' : 'Marcada como reembolsada (en mano)'); cargar() }
+        else toast.error(r.error || 'Error')
+    }
+
+    // --- cancelar función ---
+    const [cancelacion, setCancelacion] = useState<any>(null)
+    const cancelarFuncion = async () => {
+        if (!confirm(`¿Cancelar la función "${evento?.nombre}"?\n\nSe reembolsan TODAS las ventas confirmadas (Mercado Pago las online, en mano las de mostrador) y se cortan las ventas nuevas. No se puede deshacer.`)) return
+        const r = await cancelarEventoAction(eventoId)
+        if (r.ok) { setCancelacion(r); toast.success('Función cancelada'); cargar() }
+        else toast.error((r as any).error || 'Error')
     }
 
     // --- equipo de función ---
@@ -374,7 +388,7 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
 
             <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
-                    <h1 className="text-2xl font-black tracking-tight">{evento.nombre}</h1>
+                    <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">{evento.nombre} {evento.cancelado && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 uppercase font-bold">Cancelada</span>}</h1>
                     <p className="text-[11px] text-gray-500 mt-1 flex items-center gap-3 flex-wrap">
                         <span className="flex items-center gap-1"><CalendarDays size={12} /> {fmtFecha(evento.fecha)}</span>
                         {evento.lugar && <span className="flex items-center gap-1"><MapPin size={12} /> {evento.lugar}</span>}
@@ -383,11 +397,20 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                 <button onClick={borrarEvento} className="text-gray-600 hover:text-red-400 p-2"><Trash2 size={16} /></button>
             </div>
 
+            {evento.cancelado && (
+                <div className="mb-4 rounded-xl bg-red-500/10 border border-red-500/30 p-3 text-[12px] text-red-300 flex items-center gap-2">
+                    <AlertTriangle size={15} /> Función cancelada. Las ventas nuevas están cortadas y las confirmadas fueron reembolsadas.
+                </div>
+            )}
+
             {/* estado */}
-            <div className="flex gap-2 mb-4">
+            <div className="flex flex-wrap gap-2 mb-4">
                 {(['borrador', 'activo', 'finalizado'] as const).map(s => (
                     <button key={s} onClick={() => setEstado(s)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-colors ${evento.estado === s ? ESTADOS[s].cls + ' ring-1 ring-white/20' : 'bg-white/5 text-gray-500 hover:text-white'}`}>{ESTADOS[s].label}</button>
                 ))}
+                {!evento.cancelado && (
+                    <button onClick={cancelarFuncion} className="ml-auto px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-colors flex items-center gap-1.5"><AlertTriangle size={13} /> Cancelar función</button>
+                )}
             </div>
 
             {/* venta online */}
@@ -468,6 +491,45 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                                         </div>
                                     ))}
                                     {reporte.filas.length === 0 && <p className="text-xs text-gray-500">Sin ventas confirmadas todavía.</p>}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* resultado de cancelación */}
+            {cancelacion && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setCancelacion(null)}>
+                    <div className="bg-[#09090b] border border-white/10 rounded-t-2xl md:rounded-2xl w-full max-w-lg max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-4 border-b border-white/10">
+                            <div><p className="font-black uppercase tracking-tight flex items-center gap-2"><AlertTriangle size={18} className="text-red-400" /> Función cancelada</p><p className="text-[11px] text-gray-500 truncate">{cancelacion.nombre}</p></div>
+                            <button onClick={() => setCancelacion(null)} className="p-2 bg-white/5 rounded-full text-gray-300"><X size={16} /></button>
+                        </div>
+                        <div className="p-4 overflow-y-auto space-y-4">
+                            <div className="grid grid-cols-2 gap-2">
+                                <Stat label="Reembolsadas" value={cancelacion.reembolsadasOk} icon={Check} />
+                                <Stat label="Monto devuelto" value={pesos(cancelacion.montoTotal)} accent icon={DollarSign} />
+                            </div>
+                            {cancelacion.fallidas > 0 && <p className="text-[12px] text-red-400 flex items-center gap-1.5"><AlertTriangle size={14} /> {cancelacion.fallidas} venta(s) no se pudieron reembolsar por Mercado Pago — reintentá "Reembolsar" en cada una.</p>}
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Avisar a los compradores ({cancelacion.afectados.length})</p>
+                                    <button onClick={() => { navigator.clipboard.writeText(cancelacion.afectados.map((a: any) => a.contacto).filter(Boolean).join(', ')); toast.success('Contactos copiados') }} className="text-[10px] font-bold uppercase tracking-wide text-gray-400 hover:text-white flex items-center gap-1"><Copy size={12} /> Copiar contactos</button>
+                                </div>
+                                <div className="rounded-lg bg-[#0e0e10] border border-white/10 p-3 mb-2">
+                                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-1">Mensaje sugerido</p>
+                                    <p className="text-[12px] text-gray-300">Hola! Lamentablemente la función <b>“{cancelacion.nombre}”</b> fue cancelada. Te devolvimos el importe de tu entrada{cancelacion.montoTotal ? '' : ''}. Ante cualquier duda escribinos. ¡Gracias!</p>
+                                    <button onClick={() => { navigator.clipboard.writeText(`Hola! Lamentablemente la función “${cancelacion.nombre}” fue cancelada. Te devolvimos el importe de tu entrada. Ante cualquier duda escribinos. ¡Gracias!`); toast.success('Mensaje copiado') }} className="mt-2 text-[10px] font-bold uppercase tracking-wide bg-white/5 text-gray-300 px-2.5 py-1.5 rounded-lg flex items-center gap-1"><Copy size={12} /> Copiar mensaje</button>
+                                </div>
+                                <div className="space-y-1.5">
+                                    {cancelacion.afectados.map((a: any, i: number) => (
+                                        <div key={i} className="bg-[#0e0e10] border border-white/10 rounded-lg px-3 py-2 flex justify-between items-center gap-2">
+                                            <div className="min-w-0"><p className="text-sm font-medium truncate">{a.nombre}</p><p className="text-[11px] text-gray-500 truncate">{a.contacto || 'sin contacto'} · {a.canal}</p></div>
+                                            <div className="text-right shrink-0"><p className="text-sm text-gray-300">{pesos(a.total)}</p><p className={`text-[9px] uppercase font-bold ${String(a.reembolso).startsWith('FALLÓ') ? 'text-red-400' : 'text-emerald-400'}`}>{a.reembolso}</p></div>
+                                        </div>
+                                    ))}
+                                    {cancelacion.afectados.length === 0 && <p className="text-xs text-gray-500">No había ventas confirmadas.</p>}
                                 </div>
                             </div>
                         </div>
@@ -587,13 +649,15 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                             <div key={v.id} className={`bg-[#0e0e10] border rounded-xl p-3 ${v.estado === 'anulada' ? 'border-red-500/20 opacity-60' : 'border-white/10'}`}>
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="min-w-0">
-                                        <p className="font-bold text-sm truncate">{v.comprador_nombre || 'Sin nombre'} {v.estado === 'anulada' && <span className="text-[9px] text-red-400 uppercase">· anulada</span>}</p>
+                                        <p className="font-bold text-sm truncate">{v.comprador_nombre || 'Sin nombre'}
+                                            {v.reembolsada ? <span className="text-[9px] text-amber-400 uppercase"> · reembolsada</span> : v.estado === 'anulada' && <span className="text-[9px] text-red-400 uppercase"> · anulada</span>}
+                                        </p>
                                         <p className="text-[11px] text-gray-500 truncate">{v.items.map(i => `${i.cantidad}× ${i.nombre}`).join(' · ')}</p>
-                                        <p className="text-[10px] text-gray-600 capitalize">{v.medio_pago} · {fmtFecha(v.created_at)}</p>
+                                        <p className="text-[10px] text-gray-600 capitalize">{v.canal || 'mostrador'} · {v.medio_pago} · {fmtFecha(v.created_at)}</p>
                                     </div>
                                     <div className="text-right shrink-0">
                                         <p className="font-black text-[#D4E655]">{pesos(v.total)}</p>
-                                        {v.estado === 'confirmada' && <button onClick={() => anular(v.id)} className="text-[10px] text-gray-500 hover:text-red-400 uppercase font-semibold">Anular</button>}
+                                        {v.estado === 'confirmada' && <button onClick={() => reembolsar(v)} className="text-[10px] text-gray-500 hover:text-amber-400 uppercase font-semibold">Reembolsar</button>}
                                     </div>
                                 </div>
                             </div>

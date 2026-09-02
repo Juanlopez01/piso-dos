@@ -79,7 +79,7 @@ export async function getEventoAction(eventoId: string) {
     }))
 
     const { data: ventas } = await admin.from('evento_ventas')
-        .select('id, comprador_nombre, comprador_contacto, medio_pago, total, estado, created_at')
+        .select('id, comprador_nombre, comprador_contacto, medio_pago, total, estado, canal, reembolsada, created_at')
         .eq('evento_id', eventoId).order('created_at', { ascending: false })
     const ventaIds = (ventas || []).map((v: any) => v.id)
     let itemsByVenta: Record<string, any[]> = {}
@@ -203,6 +203,9 @@ export async function registrarVentaAction(data: {
     const items = (data.items || []).filter(i => i.entrada_id && Number(i.cantidad) > 0)
     if (!items.length) return { ok: false as const, error: 'Elegí al menos una entrada.' }
 
+    const { data: evChk } = await admin.from('eventos').select('cancelado').eq('id', data.evento_id).maybeSingle()
+    if (evChk?.cancelado) return { ok: false as const, error: 'Esta función está cancelada.' }
+
     // Traer entradas + validar cupo disponible
     const { data: entradas } = await admin.from('evento_entradas').select('id, nombre, precio, cupo').eq('evento_id', data.evento_id)
     const mapa: Record<string, any> = {}
@@ -264,6 +267,110 @@ export async function anularVentaAction(ventaId: string) {
     const { error } = await admin.from('evento_ventas').update({ estado: 'anulada' }).eq('id', ventaId)
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
+}
+
+// ---- Reembolsos / devoluciones ----------------------------------------------
+
+// Devuelve el pago en Mercado Pago (refund total). Idempotente por venta.
+async function reembolsarPagoMP(paymentId: string, ventaId: string): Promise<{ ok: boolean; refundId?: string; error?: string }> {
+    try {
+        const res = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}/refunds`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN || ''}`,
+                'Content-Type': 'application/json',
+                'X-Idempotency-Key': `refund-${ventaId}`,
+            },
+            body: JSON.stringify({}), // sin amount = reembolso total
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) return { ok: false, error: data?.message || `MP respondió ${res.status}` }
+        return { ok: true, refundId: String(data?.id ?? '') }
+    } catch (e: any) {
+        return { ok: false, error: e?.message || 'No se pudo contactar a Mercado Pago' }
+    }
+}
+
+// Reembolsa UNA venta: online -> refund por MP; mostrador -> devolución en mano.
+// En ambos casos la venta queda 'anulada' (libera cupo + invalida sus QR).
+export async function reembolsarVentaAction(ventaId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+
+    const { data: v } = await admin.from('evento_ventas')
+        .select('id, estado, canal, mp_payment_id, total, reembolsada').eq('id', ventaId).maybeSingle()
+    if (!v) return { ok: false as const, error: 'Venta no encontrada.' }
+    if (v.reembolsada) return { ok: false as const, error: 'Esta venta ya fue reembolsada.' }
+
+    let ref = 'manual'
+    if (v.canal === 'online' && v.mp_payment_id) {
+        const r = await reembolsarPagoMP(v.mp_payment_id, v.id)
+        if (!r.ok) return { ok: false as const, error: `No se pudo reembolsar en Mercado Pago: ${r.error}` }
+        ref = r.refundId || 'mp'
+    }
+
+    const { error } = await admin.from('evento_ventas')
+        .update({ estado: 'anulada', reembolsada: true, reembolso_at: new Date().toISOString(), reembolso_ref: ref })
+        .eq('id', ventaId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const, canal: v.canal, total: Number(v.total || 0), viaMP: ref !== 'manual' }
+}
+
+// Cancela la función entera: reembolsa todas las ventas confirmadas, marca la
+// función cancelada (corta ventas nuevas) y devuelve la lista de compradores
+// (con contacto) para avisarles + un mensaje listo.
+export async function cancelarEventoAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+
+    const { data: ev } = await admin.from('eventos').select('id, nombre, fecha, cancelado').eq('id', eventoId).maybeSingle()
+    if (!ev) return { ok: false as const, error: 'Función no encontrada.' }
+
+    const { data: ventas } = await admin.from('evento_ventas')
+        .select('id, comprador_nombre, comprador_contacto, canal, mp_payment_id, total, reembolsada')
+        .eq('evento_id', eventoId).eq('estado', 'confirmada')
+
+    const afectados: any[] = []
+    let reembolsadasOk = 0, fallidas = 0, montoTotal = 0
+    for (const v of (ventas || []) as any[]) {
+        let ref = 'manual', okRef = true, err = ''
+        if (v.canal === 'online' && v.mp_payment_id && !v.reembolsada) {
+            const r = await reembolsarPagoMP(v.mp_payment_id, v.id)
+            if (r.ok) ref = r.refundId || 'mp'; else { okRef = false; err = r.error || 'Error MP' }
+        }
+        if (okRef) {
+            await admin.from('evento_ventas').update({
+                estado: 'anulada', reembolsada: true, reembolso_at: new Date().toISOString(), reembolso_ref: ref,
+            }).eq('id', v.id)
+            reembolsadasOk++; montoTotal += Number(v.total || 0)
+        } else {
+            // No pudimos reembolsar en MP: la dejamos confirmada para reintentar a mano.
+            fallidas++
+        }
+        afectados.push({
+            nombre: v.comprador_nombre || 'Sin nombre', contacto: v.comprador_contacto || '',
+            canal: v.canal || 'mostrador', total: Number(v.total || 0), reembolso: okRef ? (ref === 'manual' ? 'en mano' : 'MP') : `FALLÓ (${err})`,
+        })
+    }
+
+    await admin.from('eventos').update({
+        cancelado: true, cancelado_at: new Date().toISOString(), estado: 'finalizado', venta_online: false,
+    }).eq('id', eventoId)
+
+    // Aviso a recep/admin (los compradores no son suscriptores de ManyChat:
+    // el aviso a ellos se manda a mano con la lista que devolvemos).
+    try {
+        const { data: staff } = await admin.from('profiles').select('id').in('rol', ['admin', 'recepcion'])
+        if (staff?.length) await admin.from('notificaciones').insert(staff.map((s: any) => ({
+            usuario_id: s.id, titulo: '⛔ Función cancelada',
+            mensaje: `Se canceló "${ev.nombre}". ${reembolsadasOk} venta(s) reembolsada(s)${fallidas ? `, ${fallidas} con error de MP` : ''}.`,
+            link: '/eventos', categoria: 'evento',
+        })))
+    } catch { /* best-effort */ }
+
+    return { ok: true as const, nombre: ev.nombre, reembolsadasOk, fallidas, montoTotal, afectados }
 }
 
 export async function toggleVentaOnlineAction(eventoId: string, valor: boolean) {
