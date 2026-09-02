@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation'
 import { getEventoPublicoAction, crearOrdenEventoAction } from '@/app/actions/eventos'
 import { toast, Toaster } from 'sonner'
 import { Loader2, CalendarDays, MapPin, Minus, Plus, Ticket } from 'lucide-react'
+import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 
 type Entrada = { id: string; nombre: string; precio: number; disponible: number }
 type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; entradas: Entrada[] }
@@ -114,9 +115,15 @@ export default function EventoPublicoPage() {
 
                 {/* Total + pagar */}
                 <div className="sticky bottom-0 bg-neutral-50 pt-4 mt-6 pb-6">
+                    {totalEntradas > 0 && (
+                        <div className="space-y-1 mb-3 text-sm">
+                            <div className="flex items-center justify-between text-neutral-500"><span>{totalEntradas} entrada{totalEntradas === 1 ? '' : 's'}</span><span>{pesos(total)}</span></div>
+                            <div className="flex items-center justify-between text-neutral-500"><span>Cargo de servicio ({SERVICIO_PCT}%)</span><span>{pesos(montoServicio(total))}</span></div>
+                        </div>
+                    )}
                     <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm text-neutral-500">{totalEntradas} entrada{totalEntradas === 1 ? '' : 's'}</span>
-                        <span className="text-2xl font-black">{pesos(total)}</span>
+                        <span className="text-sm font-bold text-neutral-700">Total</span>
+                        <span className="text-2xl font-black">{pesos(conServicio(total))}</span>
                     </div>
                     <button onClick={pagar} disabled={pagando || totalEntradas === 0}
                         className="w-full bg-[#009ee3] text-white font-bold py-4 rounded-xl uppercase text-xs tracking-widest hover:brightness-95 transition disabled:opacity-40 flex items-center justify-center gap-2">

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale, EyeOff, UserPlus } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 import {
     getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
     eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction,
@@ -314,8 +315,10 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         const lin: any[] = [
             ['BORDERAUX', evento?.nombre || ''],
             [],
-            ['Ingresos por ventas', borderaux.ingresos],
+            ['Ingresos totales', borderaux.ingresos],
             ['Ventas confirmadas', borderaux.ventasCount],
+            [`Cargo de servicio (${SERVICIO_PCT}%) → Piso 2`, borderaux.servicio],
+            ['Valor de entradas (base a repartir)', borderaux.baseEntradas],
             [],
             ['DEDUCCIONES'],
             [`Equipo de función${borderaux.incluirEquipo ? '' : ' (NO incluido)'}`, borderaux.totalEquipo],
@@ -324,7 +327,9 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
             [],
             ['Neto a repartir', borderaux.neto],
             [`Compañía (${borderaux.pct}%)`, borderaux.compania],
-            [`Piso 2 (${100 - borderaux.pct}%)`, borderaux.piso2],
+            [`Piso 2 reparto (${100 - borderaux.pct}%)`, borderaux.piso2Reparto],
+            [`Servicio (${SERVICIO_PCT}%)`, borderaux.servicio],
+            ['Piso 2 total (reparto + servicio)', borderaux.piso2],
         ]
         const csv = lin.map((r: any[]) => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n')
         const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
@@ -551,8 +556,8 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                                 {MEDIOS.map(m => <option key={m} value={m}>{m}</option>)}
                             </select>
                             <div className="text-right px-2">
-                                <p className="text-[10px] text-gray-500 uppercase">Total</p>
-                                <p className="text-lg font-black text-[#D4E655]">{pesos(totalVenta)}</p>
+                                <p className="text-[10px] text-gray-500 uppercase">Total {totalVenta > 0 && <span className="normal-case">(entradas {pesos(totalVenta)} + {SERVICIO_PCT}% servicio {pesos(montoServicio(totalVenta))})</span>}</p>
+                                <p className="text-lg font-black text-[#D4E655]">{pesos(conServicio(totalVenta))}</p>
                             </div>
                         </div>
                         <button onClick={registrar} disabled={vendiendo || totalEntradasVenta === 0} className="w-full bg-[#D4E655] text-black font-bold py-3 rounded-xl uppercase text-xs tracking-wide hover:bg-white disabled:opacity-40 flex items-center justify-center gap-2">
@@ -681,12 +686,18 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                     <p className="text-[11px] text-gray-500 -mt-1 mb-3 flex items-center gap-1.5"><Scale size={13} className="text-[#D4E655]" /> Ingresos menos deducciones, repartido con la compañía.</p>
 
                     {/* ingresos */}
-                    <div className="flex items-center justify-between bg-[#0e0e10] border border-white/10 rounded-xl p-3 mb-3">
-                        <div>
-                            <p className="text-sm font-bold text-gray-100">Ingresos por ventas</p>
-                            <p className="text-[10px] text-gray-500">{borderaux.ventasCount} venta{borderaux.ventasCount === 1 ? '' : 's'} confirmada{borderaux.ventasCount === 1 ? '' : 's'}</p>
+                    <div className="bg-[#0e0e10] border border-white/10 rounded-xl p-3 mb-3">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm font-bold text-gray-100">Ingresos totales</p>
+                                <p className="text-[10px] text-gray-500">{borderaux.ventasCount} venta{borderaux.ventasCount === 1 ? '' : 's'} confirmada{borderaux.ventasCount === 1 ? '' : 's'}</p>
+                            </div>
+                            <p className="font-black text-[#D4E655]">{pesos(borderaux.ingresos)}</p>
                         </div>
-                        <p className="font-black text-[#D4E655]">{pesos(borderaux.ingresos)}</p>
+                        <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
+                            <div className="flex items-center justify-between text-[11px]"><span className="text-gray-500">Cargo de servicio ({SERVICIO_PCT}%) → Piso 2</span><span className="text-gray-400">{pesos(borderaux.servicio)}</span></div>
+                            <div className="flex items-center justify-between text-[11px]"><span className="text-gray-500">Valor de entradas (base a repartir)</span><span className="text-gray-300 font-semibold">{pesos(borderaux.baseEntradas)}</span></div>
+                        </div>
                     </div>
 
                     {/* deducciones */}
@@ -743,18 +754,20 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                     </div>
 
                     <div className="rounded-xl bg-[#D4E655]/10 border border-[#D4E655]/30 p-4 mb-3">
-                        <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center justify-between mb-1">
                             <span className="text-xs font-bold uppercase tracking-widest text-gray-300">Neto a repartir</span>
                             <span className={`font-black ${borderaux.neto < 0 ? 'text-red-400' : 'text-white'}`}>{pesos(borderaux.neto)}</span>
                         </div>
+                        <p className="text-[10px] text-gray-500 mb-2">Valor de entradas − deducciones (el servicio no se reparte).</p>
                         <div className="grid grid-cols-2 gap-3">
                             <div className="rounded-lg bg-black/30 p-3">
                                 <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Compañía ({borderaux.pct}%)</p>
                                 <p className="text-lg font-black text-[#D4E655]">{pesos(borderaux.compania)}</p>
                             </div>
                             <div className="rounded-lg bg-black/30 p-3">
-                                <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Piso 2 ({100 - borderaux.pct}%)</p>
+                                <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Piso 2</p>
                                 <p className="text-lg font-black text-white">{pesos(borderaux.piso2)}</p>
+                                <p className="text-[9px] text-gray-500 mt-0.5">{pesos(borderaux.piso2Reparto)} ({100 - borderaux.pct}%) + {pesos(borderaux.servicio)} servicio</p>
                             </div>
                         </div>
                     </div>
@@ -762,7 +775,6 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                     <button onClick={descargarBorderaux} className="w-full flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-200 font-bold py-2.5 rounded-xl uppercase text-[11px] tracking-wide hover:border-white/30 transition-colors">
                         <Download size={14} /> Descargar borderaux (CSV)
                     </button>
-                    <p className="text-[10px] text-gray-600 mt-2 text-center">Pendiente: tratamiento del 10% de servicio (a definir).</p>
                 </Seccion>
             )}
         </div>

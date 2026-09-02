@@ -1,6 +1,7 @@
 import { MercadoPagoConfig, Preference } from 'mercadopago'
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { montoServicio, SERVICIO_PCT } from '@/utils/servicio'
 
 // ============================================================================
 // Preferencia de MercadoPago para la compra de ENTRADAS de un evento (PISO2E).
@@ -43,6 +44,10 @@ export async function POST(request: Request) {
             unit_price: Number(it.precio_unit),
             currency_id: 'ARS',
         }))
+        // 10% de servicio, sumado arriba del valor de las entradas.
+        const base = items.reduce((a: number, it: any) => a + (Number(it.cantidad) || 1) * Number(it.precio_unit || 0), 0)
+        const servicio = montoServicio(base)
+        if (servicio > 0) mpItems.push({ id: 'servicio', title: `Cargo de servicio (${SERVICIO_PCT}%)`, quantity: 1, unit_price: servicio, currency_id: 'ARS' })
 
         const mpPayload: any = {
             body: {

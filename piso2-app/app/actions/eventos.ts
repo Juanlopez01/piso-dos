@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { montoServicio } from '@/utils/servicio'
 
 // ============================================================================
 // PISO2E · Ticketera (Fase 1 interna). Gestión de eventos (muestras/shows),
@@ -219,13 +220,15 @@ export async function registrarVentaAction(data: {
         total += cant * Number(e.precio || 0)
         rows.push({ entrada_id: e.id, cantidad: cant, precio_unit: Number(e.precio || 0) })
     }
+    // El 10% de servicio se suma arriba del valor de las entradas.
+    const totalFinal = total + montoServicio(total)
 
     const { data: venta, error } = await admin.from('evento_ventas').insert({
         evento_id: data.evento_id,
         comprador_nombre: data.comprador_nombre?.trim() || null,
         comprador_contacto: data.comprador_contacto?.trim() || null,
         medio_pago: data.medio_pago || 'efectivo',
-        total,
+        total: totalFinal,
         vendido_por: perm.userId,
     }).select('id').single()
     if (error || !venta) return { ok: false as const, error: error?.message || 'No se pudo registrar la venta.' }
@@ -235,7 +238,7 @@ export async function registrarVentaAction(data: {
         await admin.from('evento_ventas').delete().eq('id', venta.id) // rollback best-effort
         return { ok: false as const, error: errItems.message }
     }
-    return { ok: true as const, id: venta.id, total }
+    return { ok: true as const, id: venta.id, total: totalFinal }
 }
 
 export async function anularVentaAction(ventaId: string) {
@@ -317,20 +320,22 @@ export async function crearOrdenEventoAction(payload: {
         filas.push({ entrada_id: e.id, cantidad: cant, precio_unit: Number(e.precio || 0) })
     }
     if (total <= 0) return { ok: false as const, error: 'El total debe ser mayor a 0.' }
+    // El 10% de servicio se suma arriba del valor de las entradas.
+    const totalFinal = total + montoServicio(total)
 
     const token = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2) + Date.now().toString(36))
     const { data: venta, error } = await admin.from('evento_ventas').insert({
         evento_id: payload.evento_id,
         comprador_nombre: payload.comprador_nombre.trim(),
         comprador_contacto: payload.comprador_contacto?.trim() || payload.comprador_email.trim(),
-        medio_pago: 'mercadopago', total, estado: 'pendiente', canal: 'online', token,
+        medio_pago: 'mercadopago', total: totalFinal, estado: 'pendiente', canal: 'online', token,
     }).select('id').single()
     if (error || !venta) return { ok: false as const, error: error?.message || 'No se pudo crear la orden.' }
 
     const { error: errItems } = await admin.from('evento_venta_items').insert(filas.map(f => ({ ...f, venta_id: venta.id })))
     if (errItems) { await admin.from('evento_ventas').delete().eq('id', venta.id); return { ok: false as const, error: errItems.message } }
 
-    return { ok: true as const, ventaId: venta.id, token, total }
+    return { ok: true as const, ventaId: venta.id, token, total: totalFinal }
 }
 
 // ============================================================================
@@ -620,9 +625,20 @@ export async function getBorderauxAction(eventoId: string) {
     if (!ev) return { ok: false as const, error: 'Evento no encontrado' }
 
     const { data: ventas } = await admin.from('evento_ventas')
-        .select('total, estado').eq('evento_id', eventoId).eq('estado', 'confirmada')
+        .select('id, total, estado').eq('evento_id', eventoId).eq('estado', 'confirmada')
     const ingresos = (ventas || []).reduce((a: number, v: any) => a + Number(v.total || 0), 0)
     const ventasCount = (ventas || []).length
+
+    // Separamos el valor base de las entradas (lo que se reparte) del 10% de
+    // servicio (que es de Piso 2). base = suma de los ítems; servicio = lo cobrado
+    // por encima. Robusto también para ventas viejas sin servicio (servicio = 0).
+    const ventaIds = (ventas || []).map((v: any) => v.id)
+    let baseEntradas = 0
+    if (ventaIds.length) {
+        const { data: items } = await admin.from('evento_venta_items').select('cantidad, precio_unit').in('venta_id', ventaIds)
+        baseEntradas = (items || []).reduce((a: number, it: any) => a + Number(it.cantidad || 0) * Number(it.precio_unit || 0), 0)
+    }
+    const servicio = Math.max(0, ingresos - baseEntradas)
 
     const { data: equipoRows } = await admin.from('evento_equipo').select('monto').eq('evento_id', eventoId)
     const totalEquipo = (equipoRows || []).reduce((a: number, m: any) => a + Number(m.monto || 0), 0)
@@ -633,18 +649,22 @@ export async function getBorderauxAction(eventoId: string) {
 
     const incluirEquipo = ev.borderaux_incluir_equipo !== false
     const deducido = totalGastos + (incluirEquipo ? totalEquipo : 0)
-    const neto = ingresos - deducido
+    // El reparto se hace sobre el VALOR BASE de las entradas (sin el servicio).
+    const neto = baseEntradas - deducido
     const pct = Number(ev.reparto_compania_pct ?? 70)
     const compania = Math.round(neto * pct) / 100
-    const piso2 = neto - compania
+    const piso2Reparto = neto - compania
+    // El 10% de servicio va entero a Piso 2, aparte del reparto.
+    const piso2 = piso2Reparto + servicio
 
     return {
         ok: true as const,
         nombre: ev.nombre,
         ingresos, ventasCount,
+        baseEntradas, servicio,
         totalEquipo, incluirEquipo,
         gastos: (gastos || []) as any[], totalGastos,
-        deducido, neto, pct, compania, piso2,
+        deducido, neto, pct, compania, piso2Reparto, piso2,
     }
 }
 
