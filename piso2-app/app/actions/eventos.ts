@@ -222,6 +222,7 @@ export async function registrarVentaAction(data: {
     }
     // El 10% de servicio se suma arriba del valor de las entradas.
     const totalFinal = total + montoServicio(total)
+    const token = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2) + Date.now().toString(36))
 
     const { data: venta, error } = await admin.from('evento_ventas').insert({
         evento_id: data.evento_id,
@@ -229,6 +230,7 @@ export async function registrarVentaAction(data: {
         comprador_contacto: data.comprador_contacto?.trim() || null,
         medio_pago: data.medio_pago || 'efectivo',
         total: totalFinal,
+        estado: 'confirmada', canal: 'mostrador', token,
         vendido_por: perm.userId,
     }).select('id').single()
     if (error || !venta) return { ok: false as const, error: error?.message || 'No se pudo registrar la venta.' }
@@ -238,7 +240,21 @@ export async function registrarVentaAction(data: {
         await admin.from('evento_ventas').delete().eq('id', venta.id) // rollback best-effort
         return { ok: false as const, error: errItems.message }
     }
-    return { ok: true as const, id: venta.id, total: totalFinal }
+
+    // Generamos un ticket con QR por cada unidad, para que el check-in valga
+    // también para las ventas de mostrador (mismo formato que las online).
+    const ticketsMostrador: any[] = []
+    for (const r of rows) {
+        for (let n = 0; n < r.cantidad; n++) {
+            ticketsMostrador.push({
+                venta_id: venta.id, entrada_id: r.entrada_id,
+                codigo: `E-${String(venta.id).slice(0, 8)}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+            })
+        }
+    }
+    if (ticketsMostrador.length) await admin.from('evento_tickets').insert(ticketsMostrador)
+
+    return { ok: true as const, id: venta.id, total: totalFinal, token }
 }
 
 export async function anularVentaAction(ventaId: string) {
@@ -506,7 +522,9 @@ export async function getVentasCompaniaAction(eventoId: string, token: string) {
         const vend = its.reduce((s, i) => s + (i.cantidad || 0), 0)
         return { nombre: e.nombre, precio: Number(e.precio), cupo: e.cupo || 0, vendidas: vend, disponible: Math.max(0, (e.cupo || 0) - vend), recaudado: its.reduce((s, i) => s + (i.cantidad || 0) * Number(i.precio_unit || 0), 0) }
     })
-    const recaudado = (ventas || []).reduce((s: number, v: any) => s + Number(v.total || 0), 0)
+    // Recaudación que ve la compañía = valor de las entradas (base), SIN el 10%
+    // de servicio (ese cargo es de Piso 2 y no forma parte del reparto).
+    const recaudado = porTipo.reduce((s, t) => s + t.recaudado, 0)
     const vendidas = porTipo.reduce((s, t) => s + t.vendidas, 0)
     const cupo = porTipo.reduce((s, t) => s + t.cupo, 0)
     return {

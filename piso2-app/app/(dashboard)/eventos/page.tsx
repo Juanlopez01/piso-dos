@@ -245,6 +245,7 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
     const [contacto, setContacto] = useState('')
     const [medio, setMedio] = useState('efectivo')
     const [vendiendo, setVendiendo] = useState(false)
+    const [ultimaVenta, setUltimaVenta] = useState<{ id: string; token: string } | null>(null)
     const totalVenta = entradas.reduce((s, e) => s + (cant[e.id] || 0) * e.precio, 0)
     const totalEntradasVenta = entradas.reduce((s, e) => s + (cant[e.id] || 0), 0)
 
@@ -253,7 +254,7 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         if (!items.length) return toast.error('Elegí al menos una entrada')
         setVendiendo(true)
         const r = await registrarVentaAction({ evento_id: eventoId, comprador_nombre: comprador, comprador_contacto: contacto, medio_pago: medio, items })
-        if (r.ok) { toast.success(`Venta registrada · ${pesos(r.total)}`); setCant({}); setComprador(''); setContacto(''); cargar() }
+        if (r.ok) { toast.success(`Venta registrada · ${pesos(r.total)}`); setUltimaVenta({ id: r.id, token: (r as any).token }); setCant({}); setComprador(''); setContacto(''); cargar() }
         else toast.error(r.error || 'Error')
         setVendiendo(false)
     }
@@ -563,6 +564,15 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                         <button onClick={registrar} disabled={vendiendo || totalEntradasVenta === 0} className="w-full bg-[#D4E655] text-black font-bold py-3 rounded-xl uppercase text-xs tracking-wide hover:bg-white disabled:opacity-40 flex items-center justify-center gap-2">
                             {vendiendo ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Registrar venta ({totalEntradasVenta} entrada{totalEntradasVenta === 1 ? '' : 's'})
                         </button>
+                        {ultimaVenta?.token && (
+                            <div className="flex items-center justify-between gap-2 bg-[#D4E655]/10 border border-[#D4E655]/30 rounded-xl px-3 py-2.5">
+                                <span className="text-[11px] text-gray-300">Última venta lista, con sus QR.</span>
+                                <div className="flex gap-2">
+                                    <a href={`/entradas/${ultimaVenta.id}?t=${ultimaVenta.token}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-[#D4E655] text-black px-3 py-1.5 rounded-lg"><Ticket size={12} /> Ver entradas</a>
+                                    <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/entradas/${ultimaVenta.id}?t=${ultimaVenta.token}`); toast.success('Link de las entradas copiado') }} className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-white/5 text-gray-300 px-3 py-1.5 rounded-lg"><Copy size={12} /> Copiar</button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </Seccion>
             )}
