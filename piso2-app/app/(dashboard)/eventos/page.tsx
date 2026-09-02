@@ -2,17 +2,18 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale } from 'lucide-react'
+import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale, EyeOff, UserPlus } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
     getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
     eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction,
     getEquipoAction, guardarMiembroEquipoAction, eliminarMiembroEquipoAction,
     getBorderauxAction, setRepartoPctAction, toggleIncluirEquipoAction, guardarGastoAction, eliminarGastoAction,
+    getInvitadosAction, guardarInvitadoAction, togglePresenteInvitadoAction, eliminarInvitadoAction,
 } from '@/app/actions/eventos'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
-type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number }
+type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number; oculta?: boolean; codigo_promo?: string | null }
 type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; created_at: string; items: { nombre: string; cantidad: number; precio_unit: number }[] }
 type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean }
 
@@ -141,7 +142,14 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
     const [equipo, setEquipo] = useState<any[]>([])
     const [totalEquipo, setTotalEquipo] = useState(0)
     const [borderaux, setBorderaux] = useState<any>(null)
+    const [invitados, setInvitados] = useState<any[]>([])
+    const [invStats, setInvStats] = useState({ total: 0, presentes: 0 })
     const [loading, setLoading] = useState(true)
+
+    const cargarInvitados = async () => {
+        const r = await getInvitadosAction(eventoId)
+        if (r.ok) { setInvitados(r.invitados); setInvStats({ total: r.totalInvitados, presentes: r.presentes }) }
+    }
 
     const cargarBorderaux = async () => {
         const r = await getBorderauxAction(eventoId)
@@ -159,21 +167,27 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         if (r.ok) { setEquipo(r.equipo); setTotalEquipo(r.totalEquipo) }
         cargarBorderaux()
     }
-    useEffect(() => { cargar(); cargarEquipo() }, [eventoId])
+    useEffect(() => { cargar(); cargarEquipo(); cargarInvitados() }, [eventoId])
 
     // --- entradas (alta/edición inline) ---
-    const [nuevaEnt, setNuevaEnt] = useState({ nombre: '', precio: '', cupo: '' })
+    const [nuevaEnt, setNuevaEnt] = useState({ nombre: '', precio: '', cupo: '', oculta: false, codigo_promo: '' })
     const [editEnt, setEditEnt] = useState<string | null>(null)
-    const [editVals, setEditVals] = useState({ nombre: '', precio: '', cupo: '' })
+    const [editVals, setEditVals] = useState({ nombre: '', precio: '', cupo: '', oculta: false, codigo_promo: '' })
 
     const agregarEntrada = async () => {
         if (!nuevaEnt.nombre.trim()) return toast.error('Nombre de la entrada')
-        const r = await guardarEntradaAction({ evento_id: eventoId, nombre: nuevaEnt.nombre, precio: Number(nuevaEnt.precio), cupo: Number(nuevaEnt.cupo), orden: entradas.length })
-        if (r.ok) { setNuevaEnt({ nombre: '', precio: '', cupo: '' }); cargar() } else toast.error(r.error || 'Error')
+        if (nuevaEnt.oculta && !nuevaEnt.codigo_promo.trim()) return toast.error('Ponele un código de promo a la entrada oculta')
+        const r = await guardarEntradaAction({ evento_id: eventoId, nombre: nuevaEnt.nombre, precio: Number(nuevaEnt.precio), cupo: Number(nuevaEnt.cupo), orden: entradas.length, oculta: nuevaEnt.oculta, codigo_promo: nuevaEnt.codigo_promo })
+        if (r.ok) { setNuevaEnt({ nombre: '', precio: '', cupo: '', oculta: false, codigo_promo: '' }); cargar() } else toast.error(r.error || 'Error')
     }
     const guardarEdit = async (id: string) => {
-        const r = await guardarEntradaAction({ id, evento_id: eventoId, nombre: editVals.nombre, precio: Number(editVals.precio), cupo: Number(editVals.cupo) })
+        if (editVals.oculta && !editVals.codigo_promo.trim()) return toast.error('Ponele un código de promo a la entrada oculta')
+        const r = await guardarEntradaAction({ id, evento_id: eventoId, nombre: editVals.nombre, precio: Number(editVals.precio), cupo: Number(editVals.cupo), oculta: editVals.oculta, codigo_promo: editVals.codigo_promo })
         if (r.ok) { setEditEnt(null); cargar() } else toast.error(r.error || 'Error')
+    }
+    const copiarLinkPromo = (codigo: string) => {
+        navigator.clipboard.writeText(`${window.location.origin}/evento/${eventoId}?promo=${encodeURIComponent(codigo)}`)
+        toast.success('Link con la promo copiado')
     }
     const borrarEntrada = async (id: string) => {
         const r = await eliminarEntradaAction(id)
@@ -320,6 +334,28 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         URL.revokeObjectURL(url)
     }
 
+    // --- invitados ---
+    const [nuevoInv, setNuevoInv] = useState({ nombre: '', contacto: '', cantidad: '1' })
+    const [editInv, setEditInv] = useState<string | null>(null)
+    const [editInvVals, setEditInvVals] = useState({ nombre: '', contacto: '', cantidad: '1' })
+    const agregarInvitado = async () => {
+        if (!nuevoInv.nombre.trim()) return toast.error('Nombre del invitado')
+        const r = await guardarInvitadoAction({ evento_id: eventoId, nombre: nuevoInv.nombre, contacto: nuevoInv.contacto, cantidad: Number(nuevoInv.cantidad) })
+        if (r.ok) { setNuevoInv({ nombre: '', contacto: '', cantidad: '1' }); cargarInvitados() } else toast.error(r.error || 'Error')
+    }
+    const guardarEditInv = async (id: string) => {
+        const r = await guardarInvitadoAction({ id, evento_id: eventoId, nombre: editInvVals.nombre, contacto: editInvVals.contacto, cantidad: Number(editInvVals.cantidad) })
+        if (r.ok) { setEditInv(null); cargarInvitados() } else toast.error(r.error || 'Error')
+    }
+    const togglePresente = async (id: string, valor: boolean) => {
+        const r = await togglePresenteInvitadoAction(id, valor)
+        if (r.ok) cargarInvitados(); else toast.error(r.error || 'Error')
+    }
+    const borrarInvitado = async (id: string) => {
+        const r = await eliminarInvitadoAction(id)
+        if (r.ok) cargarInvitados(); else toast.error(r.error || 'Error')
+    }
+
     if (loading || !evento) return <div className="min-h-[50vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
 
     const recaudado = ventas.filter(v => v.estado === 'confirmada').reduce((s, v) => s + Number(v.total), 0)
@@ -446,31 +482,47 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                     {entradas.map(e => (
                         <div key={e.id} className="bg-[#0e0e10] border border-white/10 rounded-xl p-3">
                             {editEnt === e.id ? (
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <input value={editVals.nombre} onChange={ev => setEditVals(v => ({ ...v, nombre: ev.target.value }))} className="inp flex-1 min-w-[120px]" />
-                                    <input value={editVals.precio} onChange={ev => setEditVals(v => ({ ...v, precio: ev.target.value }))} type="number" placeholder="Precio" className="inp w-24" />
-                                    <input value={editVals.cupo} onChange={ev => setEditVals(v => ({ ...v, cupo: ev.target.value }))} type="number" placeholder="Cupo" className="inp w-20" />
-                                    <button onClick={() => guardarEdit(e.id)} className="bg-[#D4E655] text-black p-2 rounded-lg"><Check size={15} /></button>
-                                    <button onClick={() => setEditEnt(null)} className="bg-white/10 text-gray-300 p-2 rounded-lg"><X size={15} /></button>
+                                <div className="space-y-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <input value={editVals.nombre} onChange={ev => setEditVals(v => ({ ...v, nombre: ev.target.value }))} className="inp flex-1 min-w-[120px]" />
+                                        <input value={editVals.precio} onChange={ev => setEditVals(v => ({ ...v, precio: ev.target.value }))} type="number" placeholder="Precio" className="inp w-24" />
+                                        <input value={editVals.cupo} onChange={ev => setEditVals(v => ({ ...v, cupo: ev.target.value }))} type="number" placeholder="Cupo" className="inp w-20" />
+                                        <button onClick={() => guardarEdit(e.id)} className="bg-[#D4E655] text-black p-2 rounded-lg"><Check size={15} /></button>
+                                        <button onClick={() => setEditEnt(null)} className="bg-white/10 text-gray-300 p-2 rounded-lg"><X size={15} /></button>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button type="button" onClick={() => setEditVals(v => ({ ...v, oculta: !v.oculta }))} className={`flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${editVals.oculta ? 'bg-purple-500/15 border-purple-400/40 text-purple-300' : 'bg-white/5 border-white/10 text-gray-400'}`}><EyeOff size={13} /> Oculta (promo)</button>
+                                        {editVals.oculta && <input value={editVals.codigo_promo} onChange={ev => setEditVals(v => ({ ...v, codigo_promo: ev.target.value }))} placeholder="Código de promo" className="inp flex-1 min-w-[120px]" />}
+                                    </div>
                                 </div>
                             ) : (
                                 <div className="flex items-center gap-3">
                                     <div className="flex-1 min-w-0">
-                                        <p className="font-bold text-sm truncate">{e.nombre}</p>
+                                        <p className="font-bold text-sm truncate flex items-center gap-1.5">{e.nombre} {e.oculta && <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 uppercase font-bold"><EyeOff size={10} /> Oculta</span>}</p>
                                         <p className="text-[11px] text-gray-500">{pesos(e.precio)} · {e.vendidas}/{e.cupo} vendidas · <span className={e.disponible > 0 ? 'text-[#D4E655]' : 'text-red-400'}>{e.disponible} libres</span></p>
+                                        {e.oculta && e.codigo_promo && (
+                                            <button onClick={() => copiarLinkPromo(e.codigo_promo!)} className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-purple-300/80 hover:text-purple-300"><Copy size={11} /> Copiar link con promo “{e.codigo_promo}”</button>
+                                        )}
                                     </div>
-                                    <button onClick={() => { setEditEnt(e.id); setEditVals({ nombre: e.nombre, precio: String(e.precio), cupo: String(e.cupo) }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>
+                                    <button onClick={() => { setEditEnt(e.id); setEditVals({ nombre: e.nombre, precio: String(e.precio), cupo: String(e.cupo), oculta: !!e.oculta, codigo_promo: e.codigo_promo || '' }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>
                                     <button onClick={() => borrarEntrada(e.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>
                                 </div>
                             )}
                         </div>
                     ))}
                     {/* alta */}
-                    <div className="flex flex-wrap items-center gap-2 bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3">
-                        <input value={nuevaEnt.nombre} onChange={e => setNuevaEnt(v => ({ ...v, nombre: e.target.value }))} placeholder="Tipo (General, VIP…)" className="inp flex-1 min-w-[120px]" />
-                        <input value={nuevaEnt.precio} onChange={e => setNuevaEnt(v => ({ ...v, precio: e.target.value }))} type="number" placeholder="Precio" className="inp w-24" />
-                        <input value={nuevaEnt.cupo} onChange={e => setNuevaEnt(v => ({ ...v, cupo: e.target.value }))} type="number" placeholder="Cupo" className="inp w-20" />
-                        <button onClick={agregarEntrada} className="bg-[#D4E655] text-black px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1"><Plus size={14} /> Agregar</button>
+                    <div className="bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <input value={nuevaEnt.nombre} onChange={e => setNuevaEnt(v => ({ ...v, nombre: e.target.value }))} placeholder="Tipo (General, VIP, 2x1…)" className="inp flex-1 min-w-[120px]" />
+                            <input value={nuevaEnt.precio} onChange={e => setNuevaEnt(v => ({ ...v, precio: e.target.value }))} type="number" placeholder="Precio" className="inp w-24" />
+                            <input value={nuevaEnt.cupo} onChange={e => setNuevaEnt(v => ({ ...v, cupo: e.target.value }))} type="number" placeholder="Cupo" className="inp w-20" />
+                            <button onClick={agregarEntrada} className="bg-[#D4E655] text-black px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1"><Plus size={14} /> Agregar</button>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button type="button" onClick={() => setNuevaEnt(v => ({ ...v, oculta: !v.oculta }))} className={`flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${nuevaEnt.oculta ? 'bg-purple-500/15 border-purple-400/40 text-purple-300' : 'bg-white/5 border-white/10 text-gray-400'}`}><EyeOff size={13} /> Oculta (promo)</button>
+                            {nuevaEnt.oculta && <input value={nuevaEnt.codigo_promo} onChange={e => setNuevaEnt(v => ({ ...v, codigo_promo: e.target.value }))} placeholder="Código de promo (ej: 2x1, AMIGOS)" className="inp flex-1 min-w-[140px]" />}
+                        </div>
+                        {nuevaEnt.oculta && <p className="text-[10px] text-gray-500">No aparece en la venta pública; solo con el link <span className="text-purple-300">?promo=código</span>.</p>}
                     </div>
                 </div>
             </Seccion>
@@ -533,6 +585,52 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                         ))}
                     </div>
                 )}
+            </Seccion>
+
+            {/* lista de invitados */}
+            <Seccion titulo="Lista de invitados">
+                <p className="text-[11px] text-gray-500 -mt-1 mb-3 flex items-center gap-1.5"><UserPlus size={13} className="text-[#D4E655]" /> Cupos sin cargo. En la puerta se marca “llegó”.</p>
+                <div className="space-y-2">
+                    {invitados.map(inv => (
+                        <div key={inv.id} className="bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                            {editInv === inv.id ? (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <input value={editInvVals.nombre} onChange={e => setEditInvVals(v => ({ ...v, nombre: e.target.value }))} placeholder="Nombre" className="inp flex-1 min-w-[110px]" />
+                                    <input value={editInvVals.contacto} onChange={e => setEditInvVals(v => ({ ...v, contacto: e.target.value }))} placeholder="Contacto" className="inp w-32" />
+                                    <input value={editInvVals.cantidad} onChange={e => setEditInvVals(v => ({ ...v, cantidad: e.target.value }))} type="number" min={1} placeholder="Cant." className="inp w-16" />
+                                    <button onClick={() => guardarEditInv(inv.id)} className="bg-[#D4E655] text-black p-2 rounded-lg"><Check size={15} /></button>
+                                    <button onClick={() => setEditInv(null)} className="bg-white/10 text-gray-300 p-2 rounded-lg"><X size={15} /></button>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-3">
+                                    <button onClick={() => togglePresente(inv.id, !inv.presente)} className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border transition-colors ${inv.presente ? 'bg-[#D4E655] border-[#D4E655]' : 'border-white/25'}`} title={inv.presente ? 'Llegó' : 'Marcar llegada'}>
+                                        {inv.presente && <Check size={13} className="text-black" strokeWidth={3} />}
+                                    </button>
+                                    <div className="flex-1 min-w-0">
+                                        <p className={`font-bold text-sm truncate ${inv.presente ? 'text-gray-100' : 'text-gray-300'}`}>{inv.nombre} {inv.cantidad > 1 && <span className="text-[10px] font-semibold text-gray-500">×{inv.cantidad}</span>}</p>
+                                        {inv.contacto && <p className="text-[11px] text-gray-500 truncate">{inv.contacto}</p>}
+                                    </div>
+                                    {inv.presente && <span className="text-[10px] text-[#D4E655] uppercase font-bold tracking-wide">Llegó</span>}
+                                    <button onClick={() => { setEditInv(inv.id); setEditInvVals({ nombre: inv.nombre, contacto: inv.contacto || '', cantidad: String(inv.cantidad || 1) }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>
+                                    <button onClick={() => borrarInvitado(inv.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                    {/* alta */}
+                    <div className="flex flex-wrap items-center gap-2 bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3">
+                        <input value={nuevoInv.nombre} onChange={e => setNuevoInv(v => ({ ...v, nombre: e.target.value }))} placeholder="Nombre del invitado" className="inp flex-1 min-w-[120px]" />
+                        <input value={nuevoInv.contacto} onChange={e => setNuevoInv(v => ({ ...v, contacto: e.target.value }))} placeholder="Contacto (opcional)" className="inp w-32" />
+                        <input value={nuevoInv.cantidad} onChange={e => setNuevoInv(v => ({ ...v, cantidad: e.target.value }))} type="number" min={1} placeholder="Cant." className="inp w-16" />
+                        <button onClick={agregarInvitado} className="bg-[#D4E655] text-black px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1"><Plus size={14} /> Agregar</button>
+                    </div>
+                    {invitados.length > 0 && (
+                        <div className="flex items-center justify-between pt-1 px-1">
+                            <span className="text-[11px] text-gray-500 uppercase tracking-widest font-bold">Invitados</span>
+                            <span className="font-black text-white">{invStats.presentes}/{invStats.total} llegaron</span>
+                        </div>
+                    )}
+                </div>
             </Seccion>
 
             {/* equipo de función */}

@@ -149,17 +149,21 @@ export async function eliminarEventoAction(eventoId: string) {
 
 // ---- Tipos de entrada -------------------------------------------------------
 
-export async function guardarEntradaAction(data: { id?: string; evento_id: string; nombre: string; precio: number; cupo: number; orden?: number }) {
+export async function guardarEntradaAction(data: { id?: string; evento_id: string; nombre: string; precio: number; cupo: number; orden?: number; oculta?: boolean; codigo_promo?: string }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     if (!data.nombre?.trim()) return { ok: false as const, error: 'Poné un nombre a la entrada.' }
     const admin = getAdminClient()
+    const oculta = !!data.oculta
     const row = {
         evento_id: data.evento_id,
         nombre: data.nombre.trim(),
         precio: Number(data.precio) || 0,
         cupo: Math.max(0, Math.floor(Number(data.cupo) || 0)),
         orden: Number(data.orden) || 0,
+        oculta,
+        // Solo las ocultas usan código de promo; para las visibles lo limpiamos.
+        codigo_promo: oculta ? (data.codigo_promo?.trim() || null) : null,
     }
     if (data.id) {
         const { error } = await admin.from('evento_entradas').update(row).eq('id', data.id)
@@ -257,7 +261,7 @@ export async function toggleVentaOnlineAction(eventoId: string, valor: boolean) 
 // ============================================================================
 
 // Evento + entradas disponibles, SOLO si está activo y con venta online habilitada.
-export async function getEventoPublicoAction(eventoId: string) {
+export async function getEventoPublicoAction(eventoId: string, promo?: string) {
     const admin = getAdminClient()
     const { data: evento } = await admin.from('eventos')
         .select('id, nombre, descripcion, fecha, lugar, estado, venta_online').eq('id', eventoId).maybeSingle()
@@ -265,10 +269,14 @@ export async function getEventoPublicoAction(eventoId: string) {
 
     const { data: entradas } = await admin.from('evento_entradas').select('*').eq('evento_id', eventoId).eq('activo', true).order('orden')
     const vendidas = await vendidasPorEntrada(admin, eventoId)
-    const entradasDisp = (entradas || []).map((e: any) => ({
-        id: e.id, nombre: e.nombre, precio: Number(e.precio),
-        disponible: Math.max(0, (e.cupo || 0) - (vendidas[e.id] || 0)),
-    }))
+    const promoCode = (promo || '').trim()
+    const entradasDisp = (entradas || [])
+        // Las ocultas solo aparecen si el link trae su código de promo.
+        .filter((e: any) => !e.oculta || (!!promoCode && e.codigo_promo === promoCode))
+        .map((e: any) => ({
+            id: e.id, nombre: e.nombre, precio: Number(e.precio),
+            disponible: Math.max(0, (e.cupo || 0) - (vendidas[e.id] || 0)),
+        }))
     return {
         id: evento.id, nombre: evento.nombre, descripcion: evento.descripcion,
         fecha: evento.fecha, lugar: evento.lugar, entradas: entradasDisp,
@@ -680,6 +688,61 @@ export async function eliminarGastoAction(id: string) {
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
     const { error } = await admin.from('evento_gastos').delete().eq('id', id)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+// ---- Listas de invitados ----------------------------------------------------
+// Cupos sin cargo por función. El jefe de sala marca "presente" al ingresar.
+
+export async function getInvitadosAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, invitados: [] as any[], totalInvitados: 0, presentes: 0 }
+    const admin = getAdminClient()
+    const { data } = await admin.from('evento_invitados')
+        .select('id, nombre, contacto, cantidad, notas, presente, created_at').eq('evento_id', eventoId).order('created_at')
+    const invitados = (data || []) as any[]
+    const totalInvitados = invitados.reduce((a, i) => a + Number(i.cantidad || 1), 0)
+    const presentes = invitados.filter(i => i.presente).reduce((a, i) => a + Number(i.cantidad || 1), 0)
+    return { ok: true as const, invitados, totalInvitados, presentes }
+}
+
+export async function guardarInvitadoAction(data: { id?: string; evento_id: string; nombre: string; contacto?: string; cantidad?: number; notas?: string }) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    if (!data.nombre?.trim()) return { ok: false as const, error: 'Poné el nombre del invitado.' }
+    const admin = getAdminClient()
+    const row = {
+        evento_id: data.evento_id,
+        nombre: data.nombre.trim(),
+        contacto: data.contacto?.trim() || null,
+        cantidad: Math.max(1, Math.floor(Number(data.cantidad) || 1)),
+        notas: data.notas?.trim() || null,
+    }
+    if (data.id) {
+        const { error } = await admin.from('evento_invitados').update(row).eq('id', data.id)
+        if (error) return { ok: false as const, error: error.message }
+        return { ok: true as const }
+    }
+    const { error } = await admin.from('evento_invitados').insert({ ...row, created_by: perm.userId })
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+export async function togglePresenteInvitadoAction(id: string, valor: boolean) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('evento_invitados').update({ presente: !!valor }).eq('id', id)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+export async function eliminarInvitadoAction(id: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('evento_invitados').delete().eq('id', id)
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
 }

@@ -27,11 +27,20 @@ export async function crearPropuestaObraAction(payload: {
     titulo: string; director?: string; compania?: string; tipo_obra?: string
     participantes?: number; duracion_min?: number; descripcion?: string
     instagram?: string; email?: string; telefono?: string
-    videos?: string[]; imagenes?: string[]
+    videos?: string[]; imagenes?: string[]; convocatoria_id?: string
 }) {
     if (!payload.titulo?.trim()) return { ok: false as const, error: 'Poné el nombre de la obra.' }
     if (!payload.email?.includes('@') && !payload.telefono?.trim()) return { ok: false as const, error: 'Dejanos un email o teléfono de contacto.' }
     const admin = getAdminClient()
+
+    // Si viene atada a un ciclo, validamos que exista y esté abierto.
+    let convocatoriaId: string | null = null
+    if (payload.convocatoria_id) {
+        const { data: c } = await admin.from('convocatorias').select('id, activa, fecha_limite').eq('id', payload.convocatoria_id).maybeSingle()
+        if (!c || !cicloAbierto(c)) return { ok: false as const, error: 'Esta convocatoria ya está cerrada.' }
+        convocatoriaId = c.id
+    }
+
     const { error } = await admin.from('obra_propuestas').insert({
         titulo: payload.titulo.trim(),
         director: payload.director?.trim() || null,
@@ -45,7 +54,88 @@ export async function crearPropuestaObraAction(payload: {
         telefono: payload.telefono?.trim() || null,
         videos: (payload.videos || []).filter(Boolean),
         imagenes: (payload.imagenes || []).filter(Boolean),
+        convocatoria_id: convocatoriaId,
     })
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+// ---- Ciclos / búsquedas puntuales ----
+// Un ciclo está "abierto" si está activo y (sin fecha límite o la fecha no pasó).
+function cicloAbierto(c: { activa: boolean; fecha_limite: string | null }) {
+    if (!c.activa) return false
+    if (!c.fecha_limite) return true
+    // Comparación por fecha ART (inclusive del día límite).
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' })
+    return c.fecha_limite >= hoy
+}
+
+function slugify(s: string) {
+    return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'ciclo'
+}
+
+// Público: trae un ciclo por slug (para el form dirigido).
+export async function getConvocatoriaBySlugAction(slug: string) {
+    const admin = getAdminClient()
+    const { data: c } = await admin.from('convocatorias')
+        .select('id, titulo, descripcion, activa, fecha_limite, slug').eq('slug', slug).maybeSingle()
+    if (!c) return null
+    return { ...c, abierta: cicloAbierto(c) }
+}
+
+// Público: lista los ciclos abiertos (para mostrarlos en la convocatoria general).
+export async function getCiclosActivosAction() {
+    const admin = getAdminClient()
+    const { data } = await admin.from('convocatorias')
+        .select('id, titulo, descripcion, slug, activa, fecha_limite').eq('activa', true).order('created_at', { ascending: false })
+    return (data || []).filter((c: any) => cicloAbierto(c))
+}
+
+// Admin: todos los ciclos.
+export async function getConvocatoriasAction() {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, ciclos: [] as any[] }
+    const admin = getAdminClient()
+    const { data } = await admin.from('convocatorias')
+        .select('id, titulo, descripcion, slug, activa, fecha_limite, created_at').order('created_at', { ascending: false })
+    const ciclos = (data || []).map((c: any) => ({ ...c, abierta: cicloAbierto(c) }))
+    return { ok: true as const, ciclos }
+}
+
+export async function crearConvocatoriaAction(data: { titulo: string; descripcion?: string; fecha_limite?: string }) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    if (!data.titulo?.trim()) return { ok: false as const, error: 'Poné un título al ciclo.' }
+    const admin = getAdminClient()
+    const base = slugify(data.titulo)
+    const slug = `${base}-${Math.random().toString(36).slice(2, 6)}`
+    const { error } = await admin.from('convocatorias').insert({
+        titulo: data.titulo.trim(),
+        descripcion: data.descripcion?.trim() || null,
+        fecha_limite: data.fecha_limite || null,
+        slug,
+        created_by: perm.userId,
+    })
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const, slug }
+}
+
+export async function toggleConvocatoriaActivaAction(id: string, activa: boolean) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('convocatorias').update({ activa: !!activa }).eq('id', id)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+export async function eliminarConvocatoriaAction(id: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    // Las propuestas ya recibidas quedan (convocatoria_id pasa a null por el FK).
+    const { error } = await admin.from('convocatorias').delete().eq('id', id)
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
 }
@@ -59,7 +149,17 @@ export async function getPropuestasObraAction() {
     // Las rechazadas ("no aprobadas") quedan reservadas SOLO para admin.
     if (perm.rol !== 'admin') q = q.neq('estado', 'rechazada')
     const { data } = await q
-    return { ok: true as const, propuestas: (data || []) as any[], esAdmin: perm.rol === 'admin' }
+    const propuestas = (data || []) as any[]
+
+    // Adjuntamos el título del ciclo al que pertenece cada propuesta (si tiene).
+    const cicloIds = [...new Set(propuestas.map(p => p.convocatoria_id).filter(Boolean))]
+    if (cicloIds.length) {
+        const { data: ciclos } = await admin.from('convocatorias').select('id, titulo').in('id', cicloIds)
+        const titulo: Record<string, string> = {}
+        for (const c of (ciclos || []) as any[]) titulo[c.id] = c.titulo
+        for (const p of propuestas) p.convocatoria_titulo = p.convocatoria_id ? (titulo[p.convocatoria_id] || null) : null
+    }
+    return { ok: true as const, propuestas, esAdmin: perm.rol === 'admin' }
 }
 
 export async function curarPropuestaAction(id: string, decision: 'aceptada' | 'rechazada', nota?: string) {

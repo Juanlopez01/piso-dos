@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Theater, RefreshCw, Copy, Check, X, Trash2, Play, Instagram, Inbox, Ticket } from 'lucide-react'
+import { Loader2, Theater, RefreshCw, Copy, Check, X, Trash2, Play, Inbox, Ticket, Plus, Megaphone, Power } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
-import { getPropuestasObraAction, curarPropuestaAction, eliminarPropuestaAction } from '@/app/actions/convocatoria'
+import {
+    getPropuestasObraAction, curarPropuestaAction, eliminarPropuestaAction,
+    getConvocatoriasAction, crearConvocatoriaAction, toggleConvocatoriaActivaAction, eliminarConvocatoriaAction,
+} from '@/app/actions/convocatoria'
 
 type Estado = 'pendiente' | 'aceptada' | 'rechazada'
 type Propuesta = {
@@ -12,7 +15,9 @@ type Propuesta = {
     tipo_obra: string | null; participantes: number | null; duracion_min: number | null; descripcion: string | null
     instagram: string | null; email: string | null; telefono: string | null; videos: string[]; imagenes: string[]
     estado: Estado; nota_curaduria: string | null; evento_id: string | null
+    convocatoria_id: string | null; convocatoria_titulo?: string | null
 }
+type Ciclo = { id: string; titulo: string; descripcion: string | null; slug: string; activa: boolean; fecha_limite: string | null; abierta: boolean }
 
 const hora = (iso: string) => new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 
@@ -22,6 +27,10 @@ export default function CuraduriaPage() {
     const [loading, setLoading] = useState(true)
     const [tab, setTab] = useState<Estado>('pendiente')
     const [procesando, setProcesando] = useState<string | null>(null)
+    const [ciclos, setCiclos] = useState<Ciclo[]>([])
+    const [panelCiclos, setPanelCiclos] = useState(false)
+    const [nuevoCiclo, setNuevoCiclo] = useState({ titulo: '', descripcion: '', fecha_limite: '' })
+    const [filtro, setFiltro] = useState<string>('todas') // 'todas' | 'general' | cicloId
 
     const cargar = async () => {
         setLoading(true)
@@ -30,7 +39,27 @@ export default function CuraduriaPage() {
         else toast.error(r.error || 'Error')
         setLoading(false)
     }
-    useEffect(() => { cargar() }, [])
+    const cargarCiclos = async () => {
+        const r = await getConvocatoriasAction()
+        if (r.ok) setCiclos(r.ciclos as Ciclo[])
+    }
+    useEffect(() => { cargar(); cargarCiclos() }, [])
+
+    const crearCiclo = async () => {
+        if (!nuevoCiclo.titulo.trim()) return toast.error('Poné un título al ciclo')
+        const r = await crearConvocatoriaAction({ titulo: nuevoCiclo.titulo, descripcion: nuevoCiclo.descripcion, fecha_limite: nuevoCiclo.fecha_limite || undefined })
+        if (r.ok) { toast.success('Ciclo creado'); setNuevoCiclo({ titulo: '', descripcion: '', fecha_limite: '' }); cargarCiclos() } else toast.error((r as any).error || 'Error')
+    }
+    const toggleCiclo = async (c: Ciclo) => {
+        const r = await toggleConvocatoriaActivaAction(c.id, !c.activa)
+        if (r.ok) cargarCiclos(); else toast.error((r as any).error || 'Error')
+    }
+    const borrarCiclo = async (c: Ciclo) => {
+        if (!confirm(`¿Borrar el ciclo "${c.titulo}"? Las propuestas ya recibidas quedan.`)) return
+        const r = await eliminarConvocatoriaAction(c.id)
+        if (r.ok) { cargarCiclos(); cargar() } else toast.error((r as any).error || 'Error')
+    }
+    const copiarLinkCiclo = (slug: string) => { navigator.clipboard.writeText(`${window.location.origin}/convocatoria/${slug}`); toast.success('Link del ciclo copiado') }
 
     const aceptar = async (p: Propuesta) => {
         setProcesando(p.id)
@@ -57,7 +86,8 @@ export default function CuraduriaPage() {
         aceptada: props.filter(p => p.estado === 'aceptada').length,
         rechazada: props.filter(p => p.estado === 'rechazada').length,
     }
-    const lista = props.filter(p => p.estado === tab)
+    const pasaFiltro = (p: Propuesta) => filtro === 'todas' ? true : filtro === 'general' ? !p.convocatoria_id : p.convocatoria_id === filtro
+    const lista = props.filter(p => p.estado === tab && pasaFiltro(p))
     const tabs: { k: Estado; label: string; show: boolean }[] = [
         { k: 'pendiente', label: 'Pendientes', show: true },
         { k: 'aceptada', label: 'Aceptadas', show: true },
@@ -73,17 +103,60 @@ export default function CuraduriaPage() {
                     <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">PISO2E · Convocatoria de obras</p>
                 </div>
                 <div className="flex gap-2">
-                    <button onClick={copiarLink} className="px-4 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white text-xs font-bold uppercase tracking-wide flex items-center gap-2"><Copy size={14} /> Link convocatoria</button>
+                    <button onClick={() => setPanelCiclos(v => !v)} className={`px-4 py-2.5 rounded-xl border text-xs font-bold uppercase tracking-wide flex items-center gap-2 transition-colors ${panelCiclos ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] border-white/10 text-gray-300 hover:text-white'}`}><Megaphone size={14} /> Ciclos</button>
+                    <button onClick={copiarLink} className="px-4 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white text-xs font-bold uppercase tracking-wide flex items-center gap-2"><Copy size={14} /> Link general</button>
                     <button onClick={cargar} className="px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white"><RefreshCw size={16} /></button>
                 </div>
             </div>
 
-            <div className="flex flex-wrap gap-2 mb-6">
+            {/* panel de ciclos / búsquedas */}
+            {panelCiclos && (
+                <div className="max-w-3xl mx-auto mb-6 bg-[#09090b] border border-white/10 rounded-2xl p-4">
+                    <p className="text-xs font-black uppercase tracking-widest text-gray-300 mb-1">Ciclos / búsquedas puntuales</p>
+                    <p className="text-[11px] text-gray-500 mb-3">Cada ciclo tiene su propio link para compartir. La convocatoria general sigue abierta siempre.</p>
+
+                    <div className="space-y-2 mb-4">
+                        {ciclos.map(c => (
+                            <div key={c.id} className="bg-[#0e0e10] border border-white/10 rounded-xl p-3 flex items-center gap-3">
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-bold text-sm truncate flex items-center gap-2">{c.titulo}
+                                        {c.abierta ? <span className="text-[9px] px-2 py-0.5 rounded-full bg-[#D4E655]/20 text-[#D4E655] uppercase font-bold">Abierta</span>
+                                            : <span className="text-[9px] px-2 py-0.5 rounded-full bg-white/10 text-gray-400 uppercase font-bold">Cerrada</span>}
+                                    </p>
+                                    <p className="text-[11px] text-gray-500 truncate">/{c.slug}{c.fecha_limite ? ` · hasta ${c.fecha_limite}` : ''}</p>
+                                </div>
+                                <button onClick={() => copiarLinkCiclo(c.slug)} className="text-gray-400 hover:text-white p-1.5" title="Copiar link"><Copy size={15} /></button>
+                                <button onClick={() => toggleCiclo(c)} className={`p-1.5 ${c.activa ? 'text-[#D4E655]' : 'text-gray-600'} hover:text-white`} title={c.activa ? 'Cerrar' : 'Reabrir'}><Power size={15} /></button>
+                                <button onClick={() => borrarCiclo(c)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={15} /></button>
+                            </div>
+                        ))}
+                        {ciclos.length === 0 && <p className="text-xs text-gray-500">Todavía no hay ciclos. Creá el primero abajo.</p>}
+                    </div>
+
+                    <div className="border-t border-white/5 pt-3 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <input value={nuevoCiclo.titulo} onChange={e => setNuevoCiclo(v => ({ ...v, titulo: e.target.value }))} placeholder="Título del ciclo (ej: Ciclo de Danza · Marzo)" className="inp flex-1 min-w-[180px]" />
+                            <input value={nuevoCiclo.fecha_limite} onChange={e => setNuevoCiclo(v => ({ ...v, fecha_limite: e.target.value }))} type="date" className="inp w-40" title="Fecha límite (opcional)" />
+                            <button onClick={crearCiclo} className="bg-[#D4E655] text-black px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1"><Plus size={14} /> Crear</button>
+                        </div>
+                        <textarea value={nuevoCiclo.descripcion} onChange={e => setNuevoCiclo(v => ({ ...v, descripcion: e.target.value }))} placeholder="Descripción / bases del ciclo (opcional)" rows={2} className="inp w-full resize-none" />
+                    </div>
+                </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2 mb-6">
                 {tabs.filter(t => t.show).map(t => (
                     <button key={t.k} onClick={() => setTab(t.k)} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide border transition-colors flex items-center gap-2 ${tab === t.k ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-300 border-white/10'}`}>
                         {t.label} <span className={`min-w-5 h-5 px-1 flex items-center justify-center rounded-full text-[10px] font-black ${tab === t.k ? 'bg-black text-[#D4E655]' : 'bg-white/10 text-gray-400'}`}>{conteo[t.k]}</span>
                     </button>
                 ))}
+                {ciclos.length > 0 && (
+                    <select value={filtro} onChange={e => setFiltro(e.target.value)} className="ml-auto bg-[#111] border border-white/10 rounded-xl px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-gray-300 outline-none">
+                        <option value="todas">Todas las convocatorias</option>
+                        <option value="general">General</option>
+                        {ciclos.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
+                    </select>
+                )}
             </div>
 
             {loading ? (
@@ -103,6 +176,9 @@ export default function CuraduriaPage() {
                                     <div className="flex items-center gap-2 flex-wrap">
                                         <h3 className="font-bold truncate">{p.titulo}</h3>
                                         {p.tipo_obra && <span className="text-[9px] px-2 py-0.5 rounded-full bg-white/10 text-gray-300 uppercase font-bold">{p.tipo_obra}</span>}
+                                        {p.convocatoria_titulo
+                                            ? <span className="text-[9px] px-2 py-0.5 rounded-full bg-[#D4E655]/15 text-[#D4E655] uppercase font-bold flex items-center gap-1"><Megaphone size={9} /> {p.convocatoria_titulo}</span>
+                                            : <span className="text-[9px] px-2 py-0.5 rounded-full bg-white/5 text-gray-500 uppercase font-bold">General</span>}
                                     </div>
                                     <p className="text-[11px] text-gray-400 mt-1">
                                         {[p.director && `Dir: ${p.director}`, p.compania, p.participantes != null && `${p.participantes} integrantes`, p.duracion_min != null && `${p.duracion_min} min`].filter(Boolean).join(' · ')}

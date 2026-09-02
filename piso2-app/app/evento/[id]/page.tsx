@@ -24,7 +24,7 @@ export default function EventoPublicoPage() {
     const [pagando, setPagando] = useState(false)
 
     useEffect(() => {
-        getEventoPublicoAction(params.id as string)
+        getEventoPublicoAction(params.id as string, qs.get('promo') || undefined)
             .then(d => { setEv(d as Evento | null); setLoading(false) })
             .catch(() => setLoading(false))
         if (qs.get('pago') === 'error') toast.error('El pago no se completó. Podés intentar de nuevo.')
