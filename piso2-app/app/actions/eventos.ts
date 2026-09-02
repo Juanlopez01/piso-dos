@@ -551,3 +551,48 @@ export async function guardarFichaTecnicaAction(eventoId: string, ficha: Record<
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
 }
+
+// ---- Equipo de función ------------------------------------------------------
+// Quién trabajó en la función y su cachet. Son los gastos que alimentan el Borderaux.
+
+export async function getEquipoAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, equipo: [] as any[], totalEquipo: 0 }
+    const admin = getAdminClient()
+    const { data } = await admin.from('evento_equipo')
+        .select('id, nombre, rol, monto, notas, created_at').eq('evento_id', eventoId).order('created_at')
+    const equipo = (data || []) as any[]
+    const totalEquipo = equipo.reduce((a, m) => a + Number(m.monto || 0), 0)
+    return { ok: true as const, equipo, totalEquipo }
+}
+
+export async function guardarMiembroEquipoAction(data: { id?: string; evento_id: string; nombre: string; rol?: string; monto?: number; notas?: string }) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    if (!data.nombre?.trim()) return { ok: false as const, error: 'Poné el nombre de quien trabajó.' }
+    const admin = getAdminClient()
+    const row = {
+        evento_id: data.evento_id,
+        nombre: data.nombre.trim(),
+        rol: data.rol?.trim() || null,
+        monto: Math.max(0, Number(data.monto) || 0),
+        notas: data.notas?.trim() || null,
+    }
+    if (data.id) {
+        const { error } = await admin.from('evento_equipo').update(row).eq('id', data.id)
+        if (error) return { ok: false as const, error: error.message }
+        return { ok: true as const }
+    }
+    const { error } = await admin.from('evento_equipo').insert({ ...row, created_by: perm.userId })
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+export async function eliminarMiembroEquipoAction(id: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('evento_equipo').delete().eq('id', id)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}

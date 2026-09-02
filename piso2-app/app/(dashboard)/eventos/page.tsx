@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList } from 'lucide-react'
+import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
     getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
     eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction,
+    getEquipoAction, guardarMiembroEquipoAction, eliminarMiembroEquipoAction,
 } from '@/app/actions/eventos'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
@@ -136,6 +137,8 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
     const [evento, setEvento] = useState<Evento | null>(null)
     const [entradas, setEntradas] = useState<Entrada[]>([])
     const [ventas, setVentas] = useState<Venta[]>([])
+    const [equipo, setEquipo] = useState<any[]>([])
+    const [totalEquipo, setTotalEquipo] = useState(0)
     const [loading, setLoading] = useState(true)
 
     const cargar = async () => {
@@ -144,7 +147,11 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         else toast.error(r.error || 'Error')
         setLoading(false)
     }
-    useEffect(() => { cargar() }, [eventoId])
+    const cargarEquipo = async () => {
+        const r = await getEquipoAction(eventoId)
+        if (r.ok) { setEquipo(r.equipo); setTotalEquipo(r.totalEquipo) }
+    }
+    useEffect(() => { cargar(); cargarEquipo() }, [eventoId])
 
     // --- entradas (alta/edición inline) ---
     const [nuevaEnt, setNuevaEnt] = useState({ nombre: '', precio: '', cupo: '' })
@@ -231,6 +238,24 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         if (!confirm('¿Anular esta venta? Se libera el cupo.')) return
         const r = await anularVentaAction(id)
         if (r.ok) cargar(); else toast.error(r.error || 'Error')
+    }
+
+    // --- equipo de función ---
+    const [nuevoMiembro, setNuevoMiembro] = useState({ nombre: '', rol: '', monto: '' })
+    const [editMiembro, setEditMiembro] = useState<string | null>(null)
+    const [editMiembroVals, setEditMiembroVals] = useState({ nombre: '', rol: '', monto: '' })
+    const agregarMiembro = async () => {
+        if (!nuevoMiembro.nombre.trim()) return toast.error('Nombre de quien trabajó')
+        const r = await guardarMiembroEquipoAction({ evento_id: eventoId, nombre: nuevoMiembro.nombre, rol: nuevoMiembro.rol, monto: Number(nuevoMiembro.monto) })
+        if (r.ok) { setNuevoMiembro({ nombre: '', rol: '', monto: '' }); cargarEquipo() } else toast.error(r.error || 'Error')
+    }
+    const guardarEditMiembro = async (id: string) => {
+        const r = await guardarMiembroEquipoAction({ id, evento_id: eventoId, nombre: editMiembroVals.nombre, rol: editMiembroVals.rol, monto: Number(editMiembroVals.monto) })
+        if (r.ok) { setEditMiembro(null); cargarEquipo() } else toast.error(r.error || 'Error')
+    }
+    const borrarMiembro = async (id: string) => {
+        const r = await eliminarMiembroEquipoAction(id)
+        if (r.ok) cargarEquipo(); else toast.error(r.error || 'Error')
     }
 
     if (loading || !evento) return <div className="min-h-[50vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
@@ -446,6 +471,48 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                         ))}
                     </div>
                 )}
+            </Seccion>
+
+            {/* equipo de función */}
+            <Seccion titulo="Equipo de función">
+                <p className="text-[11px] text-gray-500 -mt-1 mb-3 flex items-center gap-1.5"><HardHat size={13} className="text-[#D4E655]" /> Quién trabajó en la función y su cachet. Alimenta el borderaux.</p>
+                <div className="space-y-2">
+                    {equipo.map(m => (
+                        <div key={m.id} className="bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                            {editMiembro === m.id ? (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <input value={editMiembroVals.nombre} onChange={e => setEditMiembroVals(v => ({ ...v, nombre: e.target.value }))} placeholder="Nombre" className="inp flex-1 min-w-[110px]" />
+                                    <input value={editMiembroVals.rol} onChange={e => setEditMiembroVals(v => ({ ...v, rol: e.target.value }))} placeholder="Rol" className="inp w-28" />
+                                    <input value={editMiembroVals.monto} onChange={e => setEditMiembroVals(v => ({ ...v, monto: e.target.value }))} type="number" placeholder="Cachet" className="inp w-24" />
+                                    <button onClick={() => guardarEditMiembro(m.id)} className="bg-[#D4E655] text-black p-2 rounded-lg"><Check size={15} /></button>
+                                    <button onClick={() => setEditMiembro(null)} className="bg-white/10 text-gray-300 p-2 rounded-lg"><X size={15} /></button>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-3">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-bold text-sm truncate">{m.nombre} {m.rol && <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">· {m.rol}</span>}</p>
+                                        <p className="text-[11px] text-gray-500">{pesos(Number(m.monto))}</p>
+                                    </div>
+                                    <button onClick={() => { setEditMiembro(m.id); setEditMiembroVals({ nombre: m.nombre, rol: m.rol || '', monto: String(m.monto || '') }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>
+                                    <button onClick={() => borrarMiembro(m.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                    {/* alta */}
+                    <div className="flex flex-wrap items-center gap-2 bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3">
+                        <input value={nuevoMiembro.nombre} onChange={e => setNuevoMiembro(v => ({ ...v, nombre: e.target.value }))} placeholder="Nombre" className="inp flex-1 min-w-[110px]" />
+                        <input value={nuevoMiembro.rol} onChange={e => setNuevoMiembro(v => ({ ...v, rol: e.target.value }))} placeholder="Rol (sonido, luces…)" className="inp w-36" />
+                        <input value={nuevoMiembro.monto} onChange={e => setNuevoMiembro(v => ({ ...v, monto: e.target.value }))} type="number" placeholder="Cachet" className="inp w-24" />
+                        <button onClick={agregarMiembro} className="bg-[#D4E655] text-black px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1"><Plus size={14} /> Agregar</button>
+                    </div>
+                    {equipo.length > 0 && (
+                        <div className="flex items-center justify-between pt-1 px-1">
+                            <span className="text-[11px] text-gray-500 uppercase tracking-widest font-bold">Total equipo</span>
+                            <span className="font-black text-white">{pesos(totalEquipo)}</span>
+                        </div>
+                    )}
+                </div>
             </Seccion>
         </div>
     )
