@@ -66,9 +66,20 @@ async function logInteraccion(subId: string, canal: string, pregunta: string, re
 
 // Guarda la consulta derivada + arma el hilo con la conversación previa (contexto
 // para recep) + avisa a recep/admin. Best-effort.
+// ManyChat manda el literal "{{full_name}}" (o similar) cuando no puede resolver
+// la variable. Eso NO es un nombre: lo tratamos como vacío.
+function limpioODefault(v: any): string | null {
+    const s = (v ?? '').toString().trim()
+    if (!s) return null
+    if (/\{\{.*\}\}/.test(s)) return null // placeholder de ManyChat sin resolver
+    return s
+}
+
 async function capturarConsulta(body: any, pregunta: string, subId: string | null, canal: string) {
     try {
         const admin = getAdminClient()
+        const nombre = limpioODefault(body?.contacto_nombre)
+        const usuario = limpioODefault(body?.contacto_usuario)
 
         // Si el contacto ya tiene una consulta PENDIENTE, la reusamos (no duplicar):
         // le sumamos al hilo solo los mensajes nuevos y actualizamos el preview.
@@ -93,8 +104,8 @@ async function capturarConsulta(body: any, pregunta: string, subId: string | nul
 
         const { data: consulta } = await admin.from('asistente_consultas').insert({
             canal,
-            contacto_nombre: body?.contacto_nombre?.toString() || null,
-            contacto_usuario: body?.contacto_usuario?.toString() || null,
+            contacto_nombre: nombre,
+            contacto_usuario: usuario,
             subscriber_id: subId,
             consulta: pregunta || null,
         }).select('id').single()
@@ -112,7 +123,7 @@ async function capturarConsulta(body: any, pregunta: string, subId: string | nul
         // Notificar a admin + recepción (campanita)
         const { data: staff } = await admin.from('profiles').select('id').in('rol', ['admin', 'recepcion'])
         if (staff?.length) {
-            const quien = body?.contacto_nombre || body?.contacto_usuario || 'Alguien'
+            const quien = nombre || usuario || 'Alguien'
             await admin.from('notificaciones').insert(staff.map((s: any) => ({
                 usuario_id: s.id,
                 titulo: '🙋 Nueva consulta del asistente',
