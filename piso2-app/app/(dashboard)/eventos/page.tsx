@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat } from 'lucide-react'
+import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
     getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
     eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction,
     getEquipoAction, guardarMiembroEquipoAction, eliminarMiembroEquipoAction,
+    getBorderauxAction, setRepartoPctAction, toggleIncluirEquipoAction, guardarGastoAction, eliminarGastoAction,
 } from '@/app/actions/eventos'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
@@ -139,17 +140,24 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
     const [ventas, setVentas] = useState<Venta[]>([])
     const [equipo, setEquipo] = useState<any[]>([])
     const [totalEquipo, setTotalEquipo] = useState(0)
+    const [borderaux, setBorderaux] = useState<any>(null)
     const [loading, setLoading] = useState(true)
 
+    const cargarBorderaux = async () => {
+        const r = await getBorderauxAction(eventoId)
+        if (r.ok) setBorderaux(r)
+    }
     const cargar = async () => {
         const r = await getEventoAction(eventoId)
         if (r.ok) { setEvento(r.evento as Evento); setEntradas(r.entradas as Entrada[]); setVentas(r.ventas as Venta[]) }
         else toast.error(r.error || 'Error')
+        cargarBorderaux()
         setLoading(false)
     }
     const cargarEquipo = async () => {
         const r = await getEquipoAction(eventoId)
         if (r.ok) { setEquipo(r.equipo); setTotalEquipo(r.totalEquipo) }
+        cargarBorderaux()
     }
     useEffect(() => { cargar(); cargarEquipo() }, [eventoId])
 
@@ -256,6 +264,60 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
     const borrarMiembro = async (id: string) => {
         const r = await eliminarMiembroEquipoAction(id)
         if (r.ok) cargarEquipo(); else toast.error(r.error || 'Error')
+    }
+
+    // --- borderaux ---
+    const [nuevoGasto, setNuevoGasto] = useState({ concepto: '', monto: '' })
+    const [editGasto, setEditGasto] = useState<string | null>(null)
+    const [editGastoVals, setEditGastoVals] = useState({ concepto: '', monto: '' })
+    const [pctInput, setPctInput] = useState('')
+    useEffect(() => { if (borderaux) setPctInput(String(borderaux.pct)) }, [borderaux?.pct])
+
+    const guardarPct = async () => {
+        const p = Math.max(0, Math.min(100, Number(pctInput) || 0))
+        const r = await setRepartoPctAction(eventoId, p)
+        if (r.ok) cargarBorderaux(); else toast.error(r.error || 'Error')
+    }
+    const toggleEquipoBorderaux = async () => {
+        const r = await toggleIncluirEquipoAction(eventoId, !(borderaux?.incluirEquipo))
+        if (r.ok) cargarBorderaux(); else toast.error(r.error || 'Error')
+    }
+    const agregarGasto = async () => {
+        if (!nuevoGasto.concepto.trim()) return toast.error('Concepto del gasto')
+        const r = await guardarGastoAction({ evento_id: eventoId, concepto: nuevoGasto.concepto, monto: Number(nuevoGasto.monto) })
+        if (r.ok) { setNuevoGasto({ concepto: '', monto: '' }); cargarBorderaux() } else toast.error(r.error || 'Error')
+    }
+    const guardarEditGasto = async (id: string) => {
+        const r = await guardarGastoAction({ id, evento_id: eventoId, concepto: editGastoVals.concepto, monto: Number(editGastoVals.monto) })
+        if (r.ok) { setEditGasto(null); cargarBorderaux() } else toast.error(r.error || 'Error')
+    }
+    const borrarGasto = async (id: string) => {
+        const r = await eliminarGastoAction(id)
+        if (r.ok) cargarBorderaux(); else toast.error(r.error || 'Error')
+    }
+    const descargarBorderaux = () => {
+        if (!borderaux) return
+        const lin: any[] = [
+            ['BORDERAUX', evento?.nombre || ''],
+            [],
+            ['Ingresos por ventas', borderaux.ingresos],
+            ['Ventas confirmadas', borderaux.ventasCount],
+            [],
+            ['DEDUCCIONES'],
+            [`Equipo de función${borderaux.incluirEquipo ? '' : ' (NO incluido)'}`, borderaux.totalEquipo],
+            ...borderaux.gastos.map((g: any) => [g.concepto, Number(g.monto)]),
+            ['Total deducido', borderaux.deducido],
+            [],
+            ['Neto a repartir', borderaux.neto],
+            [`Compañía (${borderaux.pct}%)`, borderaux.compania],
+            [`Piso 2 (${100 - borderaux.pct}%)`, borderaux.piso2],
+        ]
+        const csv = lin.map((r: any[]) => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n')
+        const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url; a.download = `borderaux-${(evento?.nombre || 'evento').replace(/[^a-z0-9]+/gi, '-')}.csv`; a.click()
+        URL.revokeObjectURL(url)
     }
 
     if (loading || !evento) return <div className="min-h-[50vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
@@ -514,6 +576,97 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                     )}
                 </div>
             </Seccion>
+
+            {/* borderaux / liquidación */}
+            {borderaux && (
+                <Seccion titulo="Borderaux / liquidación">
+                    <p className="text-[11px] text-gray-500 -mt-1 mb-3 flex items-center gap-1.5"><Scale size={13} className="text-[#D4E655]" /> Ingresos menos deducciones, repartido con la compañía.</p>
+
+                    {/* ingresos */}
+                    <div className="flex items-center justify-between bg-[#0e0e10] border border-white/10 rounded-xl p-3 mb-3">
+                        <div>
+                            <p className="text-sm font-bold text-gray-100">Ingresos por ventas</p>
+                            <p className="text-[10px] text-gray-500">{borderaux.ventasCount} venta{borderaux.ventasCount === 1 ? '' : 's'} confirmada{borderaux.ventasCount === 1 ? '' : 's'}</p>
+                        </div>
+                        <p className="font-black text-[#D4E655]">{pesos(borderaux.ingresos)}</p>
+                    </div>
+
+                    {/* deducciones */}
+                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">Deducciones</p>
+                    <div className="space-y-2 mb-3">
+                        {/* equipo de función (auto) */}
+                        <div className="flex items-center gap-3 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                            <button onClick={toggleEquipoBorderaux} className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border transition-colors ${borderaux.incluirEquipo ? 'bg-[#D4E655] border-[#D4E655]' : 'border-white/25'}`}>
+                                {borderaux.incluirEquipo && <Check size={13} className="text-black" strokeWidth={3} />}
+                            </button>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-100">Equipo de función</p>
+                                <p className="text-[10px] text-gray-500">{borderaux.incluirEquipo ? 'Se descuenta del reparto' : 'No se descuenta'}</p>
+                            </div>
+                            <p className={`font-bold ${borderaux.incluirEquipo ? 'text-gray-200' : 'text-gray-600 line-through'}`}>{pesos(borderaux.totalEquipo)}</p>
+                        </div>
+                        {/* gastos manuales */}
+                        {borderaux.gastos.map((g: any) => (
+                            <div key={g.id} className="bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                                {editGasto === g.id ? (
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <input value={editGastoVals.concepto} onChange={e => setEditGastoVals(v => ({ ...v, concepto: e.target.value }))} placeholder="Concepto" className="inp flex-1 min-w-[120px]" />
+                                        <input value={editGastoVals.monto} onChange={e => setEditGastoVals(v => ({ ...v, monto: e.target.value }))} type="number" placeholder="Monto" className="inp w-24" />
+                                        <button onClick={() => guardarEditGasto(g.id)} className="bg-[#D4E655] text-black p-2 rounded-lg"><Check size={15} /></button>
+                                        <button onClick={() => setEditGasto(null)} className="bg-white/10 text-gray-300 p-2 rounded-lg"><X size={15} /></button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-3">
+                                        <p className="flex-1 min-w-0 text-sm font-medium text-gray-100 truncate">{g.concepto}</p>
+                                        <p className="font-bold text-gray-200">{pesos(Number(g.monto))}</p>
+                                        <button onClick={() => { setEditGasto(g.id); setEditGastoVals({ concepto: g.concepto, monto: String(g.monto || '') }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>
+                                        <button onClick={() => borrarGasto(g.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                        {/* alta gasto */}
+                        <div className="flex flex-wrap items-center gap-2 bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3">
+                            <input value={nuevoGasto.concepto} onChange={e => setNuevoGasto(v => ({ ...v, concepto: e.target.value }))} placeholder="Concepto (servicio, gasto…)" className="inp flex-1 min-w-[120px]" />
+                            <input value={nuevoGasto.monto} onChange={e => setNuevoGasto(v => ({ ...v, monto: e.target.value }))} type="number" placeholder="Monto" className="inp w-24" />
+                            <button onClick={agregarGasto} className="bg-[#D4E655] text-black px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1"><Plus size={14} /> Agregar</button>
+                        </div>
+                        <div className="flex items-center justify-between pt-1 px-1">
+                            <span className="text-[11px] text-gray-500 uppercase tracking-widest font-bold">Total deducido</span>
+                            <span className="font-black text-white">{pesos(borderaux.deducido)}</span>
+                        </div>
+                    </div>
+
+                    {/* reparto */}
+                    <div className="flex items-center gap-2 mb-3">
+                        <span className="text-[11px] text-gray-400 font-semibold">% para la compañía</span>
+                        <input value={pctInput} onChange={e => setPctInput(e.target.value)} onBlur={guardarPct} type="number" min={0} max={100} className="inp w-20 text-center" />
+                        <span className="text-[11px] text-gray-600">Piso 2: {100 - (Number(pctInput) || 0)}%</span>
+                    </div>
+
+                    <div className="rounded-xl bg-[#D4E655]/10 border border-[#D4E655]/30 p-4 mb-3">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold uppercase tracking-widest text-gray-300">Neto a repartir</span>
+                            <span className={`font-black ${borderaux.neto < 0 ? 'text-red-400' : 'text-white'}`}>{pesos(borderaux.neto)}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="rounded-lg bg-black/30 p-3">
+                                <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Compañía ({borderaux.pct}%)</p>
+                                <p className="text-lg font-black text-[#D4E655]">{pesos(borderaux.compania)}</p>
+                            </div>
+                            <div className="rounded-lg bg-black/30 p-3">
+                                <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Piso 2 ({100 - borderaux.pct}%)</p>
+                                <p className="text-lg font-black text-white">{pesos(borderaux.piso2)}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onClick={descargarBorderaux} className="w-full flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-200 font-bold py-2.5 rounded-xl uppercase text-[11px] tracking-wide hover:border-white/30 transition-colors">
+                        <Download size={14} /> Descargar borderaux (CSV)
+                    </button>
+                    <p className="text-[10px] text-gray-600 mt-2 text-center">Pendiente: tratamiento del 10% de servicio (a definir).</p>
+                </Seccion>
+            )}
         </div>
     )
 }

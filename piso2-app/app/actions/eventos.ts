@@ -596,3 +596,90 @@ export async function eliminarMiembroEquipoAction(id: string) {
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
 }
+
+// ---- Borderaux / liquidación ------------------------------------------------
+// Ingresos (ventas confirmadas) menos deducciones (equipo de función + gastos)
+// y reparto del neto entre compañía y Piso 2 según un % configurable.
+// Pendiente (para el final): tratamiento del 10% de servicio.
+
+export async function getBorderauxAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+
+    const { data: ev } = await admin.from('eventos')
+        .select('nombre, reparto_compania_pct, borderaux_incluir_equipo').eq('id', eventoId).single()
+    if (!ev) return { ok: false as const, error: 'Evento no encontrado' }
+
+    const { data: ventas } = await admin.from('evento_ventas')
+        .select('total, estado').eq('evento_id', eventoId).eq('estado', 'confirmada')
+    const ingresos = (ventas || []).reduce((a: number, v: any) => a + Number(v.total || 0), 0)
+    const ventasCount = (ventas || []).length
+
+    const { data: equipoRows } = await admin.from('evento_equipo').select('monto').eq('evento_id', eventoId)
+    const totalEquipo = (equipoRows || []).reduce((a: number, m: any) => a + Number(m.monto || 0), 0)
+
+    const { data: gastos } = await admin.from('evento_gastos')
+        .select('id, concepto, monto, created_at').eq('evento_id', eventoId).order('created_at')
+    const totalGastos = (gastos || []).reduce((a: number, g: any) => a + Number(g.monto || 0), 0)
+
+    const incluirEquipo = ev.borderaux_incluir_equipo !== false
+    const deducido = totalGastos + (incluirEquipo ? totalEquipo : 0)
+    const neto = ingresos - deducido
+    const pct = Number(ev.reparto_compania_pct ?? 70)
+    const compania = Math.round(neto * pct) / 100
+    const piso2 = neto - compania
+
+    return {
+        ok: true as const,
+        nombre: ev.nombre,
+        ingresos, ventasCount,
+        totalEquipo, incluirEquipo,
+        gastos: (gastos || []) as any[], totalGastos,
+        deducido, neto, pct, compania, piso2,
+    }
+}
+
+export async function setRepartoPctAction(eventoId: string, pct: number) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const p = Math.max(0, Math.min(100, Number(pct) || 0))
+    const admin = getAdminClient()
+    const { error } = await admin.from('eventos').update({ reparto_compania_pct: p }).eq('id', eventoId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+export async function toggleIncluirEquipoAction(eventoId: string, valor: boolean) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('eventos').update({ borderaux_incluir_equipo: !!valor }).eq('id', eventoId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+export async function guardarGastoAction(data: { id?: string; evento_id: string; concepto: string; monto?: number }) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    if (!data.concepto?.trim()) return { ok: false as const, error: 'Poné un concepto al gasto.' }
+    const admin = getAdminClient()
+    const row = { evento_id: data.evento_id, concepto: data.concepto.trim(), monto: Math.max(0, Number(data.monto) || 0) }
+    if (data.id) {
+        const { error } = await admin.from('evento_gastos').update(row).eq('id', data.id)
+        if (error) return { ok: false as const, error: error.message }
+        return { ok: true as const }
+    }
+    const { error } = await admin.from('evento_gastos').insert({ ...row, created_by: perm.userId })
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+export async function eliminarGastoAction(id: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('evento_gastos').delete().eq('id', id)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
