@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale, EyeOff, UserPlus, AlertTriangle } from 'lucide-react'
+import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale, EyeOff, UserPlus, AlertTriangle, ShoppingCart, MessageCircle } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 import {
@@ -11,6 +11,7 @@ import {
     getEquipoAction, guardarMiembroEquipoAction, eliminarMiembroEquipoAction,
     getBorderauxAction, setRepartoPctAction, toggleIncluirEquipoAction, guardarGastoAction, eliminarGastoAction,
     getInvitadosAction, guardarInvitadoAction, togglePresenteInvitadoAction, eliminarInvitadoAction,
+    getCarritosAbandonadosAction, descartarCarritoAction,
 } from '@/app/actions/eventos'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
@@ -20,6 +21,13 @@ type Evento = { id: string; nombre: string; descripcion: string | null; fecha: s
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Sin fecha'
+const haceCuanto = (iso: string) => {
+    const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+    if (min < 60) return `hace ${min} min`
+    const hs = Math.floor(min / 60)
+    if (hs < 24) return `hace ${hs} h`
+    return `hace ${Math.floor(hs / 24)} d`
+}
 const ESTADOS: Record<string, { label: string; cls: string }> = {
     borrador: { label: 'Borrador', cls: 'bg-white/10 text-gray-300' },
     activo: { label: 'Activo', cls: 'bg-[#D4E655]/20 text-[#D4E655]' },
@@ -145,11 +153,16 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
     const [borderaux, setBorderaux] = useState<any>(null)
     const [invitados, setInvitados] = useState<any[]>([])
     const [invStats, setInvStats] = useState({ total: 0, presentes: 0 })
+    const [carritos, setCarritos] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
 
     const cargarInvitados = async () => {
         const r = await getInvitadosAction(eventoId)
         if (r.ok) { setInvitados(r.invitados); setInvStats({ total: r.totalInvitados, presentes: r.presentes }) }
+    }
+    const cargarCarritos = async () => {
+        const r = await getCarritosAbandonadosAction(eventoId)
+        if (r.ok) setCarritos(r.carritos)
     }
 
     const cargarBorderaux = async () => {
@@ -161,6 +174,7 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         if (r.ok) { setEvento(r.evento as Evento); setEntradas(r.entradas as Entrada[]); setVentas(r.ventas as Venta[]) }
         else toast.error(r.error || 'Error')
         cargarBorderaux()
+        cargarCarritos()
         setLoading(false)
     }
     const cargarEquipo = async () => {
@@ -267,6 +281,15 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         const r = await reembolsarVentaAction(v.id)
         if (r.ok) { toast.success(r.viaMP ? 'Reembolsado por Mercado Pago' : 'Marcada como reembolsada (en mano)'); cargar() }
         else toast.error(r.error || 'Error')
+    }
+
+    // --- carritos abandonados ---
+    const mensajeCarrito = (c: any) => `Hola ${c.nombre}! Vimos que empezaste a comprar tu entrada para "${evento?.nombre}" y no llegaste a completar el pago. Podés terminarla acá: ${window.location.origin}/evento/${eventoId} . ¡Te esperamos!`
+    const copiarMsgCarrito = (c: any) => { navigator.clipboard.writeText(mensajeCarrito(c)); toast.success('Mensaje copiado') }
+    const descartarCarrito = async (id: string) => {
+        if (!confirm('¿Descartar esta orden pendiente? No se puede deshacer.')) return
+        const r = await descartarCarritoAction(id)
+        if (r.ok) cargarCarritos(); else toast.error((r as any).error || 'Error')
     }
 
     // --- cancelar función ---
@@ -665,6 +688,32 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                     </div>
                 )}
             </Seccion>
+
+            {/* carritos abandonados */}
+            {carritos.length > 0 && (
+                <Seccion titulo={`Carritos abandonados (${carritos.length})`}>
+                    <p className="text-[11px] text-gray-500 -mt-1 mb-3 flex items-center gap-1.5"><ShoppingCart size={13} className="text-[#D4E655]" /> Empezaron la compra online y no pagaron. Escribiles para que la completen.</p>
+                    <div className="space-y-2">
+                        {carritos.map(c => (
+                            <div key={c.id} className="bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-sm truncate">{c.nombre}</p>
+                                        <p className="text-[11px] text-gray-500 truncate">{c.detalle || 'Sin detalle'} · {pesos(c.total)}</p>
+                                        <p className="text-[10px] text-gray-600">{c.contacto || 'sin contacto'} · {haceCuanto(c.created_at)}</p>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <button onClick={() => copiarMsgCarrito(c)} className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-[#D4E655]/15 text-[#D4E655] px-2.5 py-1.5 rounded-lg" title="Copiar mensaje para invitarlo a completar"><MessageCircle size={12} /> Mensaje</button>
+                                        {c.contacto && <button onClick={() => { navigator.clipboard.writeText(c.contacto); toast.success('Contacto copiado') }} className="text-gray-400 hover:text-white p-1.5" title="Copiar contacto"><Copy size={13} /></button>}
+                                        <button onClick={() => descartarCarrito(c.id)} className="text-gray-600 hover:text-red-400 p-1.5" title="Descartar"><Trash2 size={13} /></button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                        <button onClick={() => { navigator.clipboard.writeText(carritos.map(c => c.contacto).filter(Boolean).join(', ')); toast.success('Contactos copiados') }} className="w-full flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-300 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wide hover:border-white/30"><Copy size={12} /> Copiar todos los contactos</button>
+                    </div>
+                </Seccion>
+            )}
 
             {/* lista de invitados */}
             <Seccion titulo="Lista de invitados">

@@ -891,3 +891,51 @@ export async function eliminarInvitadoAction(id: string) {
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
 }
+
+// ---- Carritos abandonados ---------------------------------------------------
+// Órdenes online que iniciaron el checkout (estado 'pendiente') y no se pagaron.
+// Ya tienen nombre + contacto + qué eligieron: sirve para recuperarlas.
+
+export async function getCarritosAbandonadosAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, carritos: [] as any[] }
+    const admin = getAdminClient()
+
+    const { data: ventas } = await admin.from('evento_ventas')
+        .select('id, comprador_nombre, comprador_contacto, total, created_at')
+        .eq('evento_id', eventoId).eq('estado', 'pendiente').order('created_at', { ascending: false })
+    const ids = (ventas || []).map((v: any) => v.id)
+    if (!ids.length) return { ok: true as const, carritos: [] as any[] }
+
+    const { data: entradas } = await admin.from('evento_entradas').select('id, nombre').eq('evento_id', eventoId)
+    const nombreEnt: Record<string, string> = {}
+    for (const e of (entradas || []) as any[]) nombreEnt[e.id] = e.nombre
+    const { data: items } = await admin.from('evento_venta_items').select('venta_id, entrada_id, cantidad').in('venta_id', ids)
+    const itemsByVenta: Record<string, string[]> = {}
+    for (const it of (items || []) as any[]) {
+        (itemsByVenta[it.venta_id] ||= []).push(`${it.cantidad}× ${nombreEnt[it.entrada_id] || 'Entrada'}`)
+    }
+    const carritos = (ventas || []).map((v: any) => ({
+        id: v.id,
+        nombre: v.comprador_nombre || 'Sin nombre',
+        contacto: v.comprador_contacto || '',
+        detalle: (itemsByVenta[v.id] || []).join(' · '),
+        total: Number(v.total || 0),
+        created_at: v.created_at,
+    }))
+    return { ok: true as const, carritos }
+}
+
+export async function descartarCarritoAction(ventaId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    // Solo se descartan órdenes que nunca se pagaron.
+    const { data: v } = await admin.from('evento_ventas').select('estado').eq('id', ventaId).maybeSingle()
+    if (!v) return { ok: false as const, error: 'Orden no encontrada.' }
+    if (v.estado !== 'pendiente') return { ok: false as const, error: 'Esta orden ya no está pendiente.' }
+    await admin.from('evento_venta_items').delete().eq('venta_id', ventaId)
+    const { error } = await admin.from('evento_ventas').delete().eq('id', ventaId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
