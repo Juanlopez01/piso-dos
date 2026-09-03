@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Theater, RefreshCw, Copy, Check, X, Trash2, Play, Inbox, Ticket, Plus, Megaphone, Power } from 'lucide-react'
+import { Loader2, Theater, RefreshCw, Copy, Check, X, Trash2, Play, Inbox, Ticket, Plus, Megaphone, Power, Upload } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { createClient } from '@/utils/supabase/client'
+import { optimizeImage } from '@/utils/optimizeImage'
 import {
     getPropuestasObraAction, curarPropuestaAction, eliminarPropuestaAction,
     getConvocatoriasAction, crearConvocatoriaAction, toggleConvocatoriaActivaAction, eliminarConvocatoriaAction,
@@ -29,7 +31,22 @@ export default function CuraduriaPage() {
     const [procesando, setProcesando] = useState<string | null>(null)
     const [ciclos, setCiclos] = useState<Ciclo[]>([])
     const [panelCiclos, setPanelCiclos] = useState(false)
-    const [nuevoCiclo, setNuevoCiclo] = useState({ titulo: '', descripcion: '', fecha_limite: '' })
+    const [nuevoCiclo, setNuevoCiclo] = useState({ titulo: '', descripcion: '', fecha_limite: '', flyer_url: '' })
+    const [supabase] = useState(() => createClient())
+    const [subiendoFlyer, setSubiendoFlyer] = useState(false)
+    const subirFlyer = async (file: File | null) => {
+        if (!file) return
+        setSubiendoFlyer(true)
+        try {
+            const opt = await optimizeImage(file, { maxDim: 1600 })
+            const ext = opt.name.split('.').pop()
+            const path = `convocatorias/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+            const { error } = await supabase.storage.from('talent').upload(path, opt)
+            if (error) throw error
+            setNuevoCiclo(v => ({ ...v, flyer_url: supabase.storage.from('talent').getPublicUrl(path).data.publicUrl }))
+        } catch (e: any) { toast.error('No se pudo subir el flyer: ' + (e.message || '')) }
+        setSubiendoFlyer(false)
+    }
     const [filtro, setFiltro] = useState<string>('todas') // 'todas' | 'general' | cicloId
 
     const cargar = async () => {
@@ -47,8 +64,8 @@ export default function CuraduriaPage() {
 
     const crearCiclo = async () => {
         if (!nuevoCiclo.titulo.trim()) return toast.error('Poné un título al ciclo')
-        const r = await crearConvocatoriaAction({ titulo: nuevoCiclo.titulo, descripcion: nuevoCiclo.descripcion, fecha_limite: nuevoCiclo.fecha_limite || undefined })
-        if (r.ok) { toast.success('Ciclo creado'); setNuevoCiclo({ titulo: '', descripcion: '', fecha_limite: '' }); cargarCiclos() } else toast.error((r as any).error || 'Error')
+        const r = await crearConvocatoriaAction({ titulo: nuevoCiclo.titulo, descripcion: nuevoCiclo.descripcion, fecha_limite: nuevoCiclo.fecha_limite || undefined, flyer_url: nuevoCiclo.flyer_url || undefined })
+        if (r.ok) { toast.success('Ciclo creado'); setNuevoCiclo({ titulo: '', descripcion: '', fecha_limite: '', flyer_url: '' }); cargarCiclos() } else toast.error((r as any).error || 'Error')
     }
     const toggleCiclo = async (c: Ciclo) => {
         const r = await toggleConvocatoriaActivaAction(c.id, !c.activa)
@@ -140,6 +157,12 @@ export default function CuraduriaPage() {
                             <button onClick={crearCiclo} className="bg-[#D4E655] text-black px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1"><Plus size={14} /> Crear</button>
                         </div>
                         <textarea value={nuevoCiclo.descripcion} onChange={e => setNuevoCiclo(v => ({ ...v, descripcion: e.target.value }))} placeholder="Descripción / bases del ciclo (opcional)" rows={2} className="inp w-full resize-none" />
+                        <div className="flex items-center gap-3">
+                            {nuevoCiclo.flyer_url
+                                ? <div className="relative w-16 h-20 rounded-lg overflow-hidden border border-white/10 shrink-0"><img src={nuevoCiclo.flyer_url} alt="" className="w-full h-full object-cover" /><button type="button" onClick={() => setNuevoCiclo(v => ({ ...v, flyer_url: '' }))} className="absolute top-0.5 right-0.5 bg-black/70 text-white rounded-full p-0.5"><X size={11} /></button></div>
+                                : <label className="w-16 h-20 border border-dashed border-white/20 rounded-lg flex items-center justify-center cursor-pointer hover:border-white/40 text-gray-500 shrink-0">{subiendoFlyer ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}<input type="file" accept="image/*" className="hidden" onChange={e => subirFlyer(e.target.files?.[0] || null)} /></label>}
+                            <span className="text-[11px] text-gray-500">{nuevoCiclo.flyer_url ? 'Flyer cargado — se muestra en la página de postulación.' : 'Flyer del ciclo (opcional)'}</span>
+                        </div>
                     </div>
                 </div>
             )}

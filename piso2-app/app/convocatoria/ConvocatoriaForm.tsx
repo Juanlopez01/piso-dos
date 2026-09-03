@@ -11,7 +11,7 @@ const TIPOS = ['Danza', 'Teatro', 'Música', 'Mixta', 'Artes vivas', 'Muestra']
 const inp = 'w-full bg-white border border-neutral-300 rounded-lg px-4 py-3 text-sm text-neutral-900 outline-none focus:border-black transition-colors'
 const lbl = 'text-[10px] font-semibold tracking-[0.15em] uppercase text-neutral-500 block mb-1.5'
 
-type Ciclo = { id: string; titulo: string; descripcion?: string | null }
+type Ciclo = { id: string; titulo: string; descripcion?: string | null; flyer_url?: string | null }
 
 export default function ConvocatoriaForm({ ciclo }: { ciclo?: Ciclo | null }) {
     const [supabase] = useState(() => createClient())
@@ -81,6 +81,7 @@ export default function ConvocatoriaForm({ ciclo }: { ciclo?: Ciclo | null }) {
             <div className="bg-black text-white py-3 text-center"><span className="font-black tracking-tighter text-lg">PISO<span className="text-[#D4E655]">2</span></span></div>
 
             <div className="max-w-lg mx-auto px-5 py-8">
+                {ciclo?.flyer_url && <img src={ciclo.flyer_url} alt="" className="w-full rounded-xl mb-5 object-cover" />}
                 <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.25em] text-neutral-400 mb-1"><Theater size={14} /> {ciclo ? 'Convocatoria' : 'Convocatoria de obras'}</div>
                 <h1 className="text-2xl md:text-3xl font-black tracking-tight">{ciclo ? ciclo.titulo : 'Proponé tu obra en Piso 2'}</h1>
                 {ciclo?.descripcion

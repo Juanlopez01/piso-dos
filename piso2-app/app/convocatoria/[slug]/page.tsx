@@ -23,5 +23,5 @@ export default async function ConvocatoriaCicloPage({ params }: { params: Promis
         </div>
     )
 
-    return <ConvocatoriaForm ciclo={{ id: ciclo.id, titulo: ciclo.titulo, descripcion: ciclo.descripcion }} />
+    return <ConvocatoriaForm ciclo={{ id: ciclo.id, titulo: ciclo.titulo, descripcion: ciclo.descripcion, flyer_url: (ciclo as any).flyer_url }} />
 }

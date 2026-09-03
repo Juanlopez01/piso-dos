@@ -82,7 +82,7 @@ function slugify(s: string) {
 export async function getConvocatoriaBySlugAction(slug: string) {
     const admin = getAdminClient()
     const { data: c } = await admin.from('convocatorias')
-        .select('id, titulo, descripcion, activa, fecha_limite, slug').eq('slug', slug).maybeSingle()
+        .select('id, titulo, descripcion, activa, fecha_limite, slug, flyer_url').eq('slug', slug).maybeSingle()
     if (!c) return null
     return { ...c, abierta: cicloAbierto(c) }
 }
@@ -101,12 +101,12 @@ export async function getConvocatoriasAction() {
     if (!perm.ok) return { ok: false as const, error: perm.error, ciclos: [] as any[] }
     const admin = getAdminClient()
     const { data } = await admin.from('convocatorias')
-        .select('id, titulo, descripcion, slug, activa, fecha_limite, created_at').order('created_at', { ascending: false })
+        .select('id, titulo, descripcion, slug, activa, fecha_limite, flyer_url, created_at').order('created_at', { ascending: false })
     const ciclos = (data || []).map((c: any) => ({ ...c, abierta: cicloAbierto(c) }))
     return { ok: true as const, ciclos }
 }
 
-export async function crearConvocatoriaAction(data: { titulo: string; descripcion?: string; fecha_limite?: string }) {
+export async function crearConvocatoriaAction(data: { titulo: string; descripcion?: string; fecha_limite?: string; flyer_url?: string }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     if (!data.titulo?.trim()) return { ok: false as const, error: 'Poné un título al ciclo.' }
@@ -117,6 +117,7 @@ export async function crearConvocatoriaAction(data: { titulo: string; descripcio
         titulo: data.titulo.trim(),
         descripcion: data.descripcion?.trim() || null,
         fecha_limite: data.fecha_limite || null,
+        flyer_url: data.flyer_url?.trim() || null,
         slug,
         created_by: perm.userId,
     })
