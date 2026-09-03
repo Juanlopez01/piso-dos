@@ -6,6 +6,7 @@ import { Triangle, X, Menu, ArrowUpRight, UserIcon, Ticket, CalendarDays, MapPin
 import { Montserrat } from 'next/font/google'
 import { createClient } from '@/utils/supabase/client'
 import { getCarteleraEscenaAction } from '@/app/actions/eventos'
+import { getCiclosActivosAction } from '@/app/actions/convocatoria'
 
 const montserrat = Montserrat({
     subsets: ['latin'],
@@ -19,8 +20,12 @@ export default function EscenaPage() {
     const [lightboxImg, setLightboxImg] = useState<string | null>(null)
     const [loggedUser, setLoggedUser] = useState<any>(null)
     const [cartelera, setCartelera] = useState<any[] | null>(null)
+    const [convocatorias, setConvocatorias] = useState<any[]>([])
 
-    useEffect(() => { getCarteleraEscenaAction().then(r => setCartelera(r.cards)).catch(() => setCartelera([])) }, [])
+    useEffect(() => {
+        getCarteleraEscenaAction().then(r => setCartelera(r.cards)).catch(() => setCartelera([]))
+        getCiclosActivosAction().then(r => setConvocatorias(r || [])).catch(() => setConvocatorias([]))
+    }, [])
     const fmtFechaC = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: 'long' }) : 'Fecha a confirmar'
 
     useEffect(() => {
@@ -159,6 +164,34 @@ export default function EscenaPage() {
                         })}
                     </div>
                 )}
+            </section>
+
+            {/* --- CONVOCATORIAS ABIERTAS (postularse) --- */}
+            <section id="convocatorias" className="max-w-7xl mx-auto px-6 py-20 border-t border-white/5">
+                <div className="flex items-center gap-2 mb-2"><Triangle className="text-[#D4E655] fill-[#D4E655]" size={14} /><span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">Convocatorias</span></div>
+                <h2 className="text-4xl md:text-6xl font-black uppercase tracking-tighter mb-4 leading-none">¿Tenés una <span className="text-[#D4E655]">obra?</span></h2>
+                <p className="text-gray-400 text-sm md:text-base max-w-xl leading-relaxed mb-10">Proponé tu obra para que la programemos en Piso 2. Es gratis postular.</p>
+
+                {convocatorias.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
+                        {convocatorias.map((c: any) => (
+                            <Link key={c.id} href={`/convocatoria/${c.slug}`} className="group bg-[#09090b] border border-white/10 hover:border-[#D4E655]/40 rounded-2xl overflow-hidden transition-all flex flex-col">
+                                {c.flyer_url
+                                    ? <div className="relative aspect-video bg-zinc-900 overflow-hidden"><img src={c.flyer_url} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" /></div>
+                                    : <div className="relative aspect-video bg-zinc-900 flex items-center justify-center text-gray-700"><Triangle size={40} strokeWidth={1.5} /></div>}
+                                <div className="p-5 flex flex-col flex-1">
+                                    <h3 className="font-black uppercase tracking-tight text-lg leading-tight">{c.titulo}</h3>
+                                    {c.fecha_limite && <p className="text-[11px] text-gray-500 mt-2">Hasta el {new Date(c.fecha_limite + 'T00:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: 'long' })}</p>}
+                                    <span className="mt-4 inline-flex items-center justify-center gap-2 bg-[#D4E655] text-black font-black uppercase px-4 py-2.5 text-[11px] tracking-[0.15em] rounded-lg group-hover:bg-white transition-colors">Postularme <ArrowRight size={14} /></span>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+                )}
+
+                <Link href="/convocatoria" className="inline-flex items-center gap-3 border border-white/20 hover:border-[#D4E655] text-white font-bold uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl transition-colors">
+                    {convocatorias.length > 0 ? 'Convocatoria general' : 'Proponer mi obra'} <ArrowRight size={16} />
+                </Link>
             </section>
 
             {/* --- INFO ESCÉNICO & INMERSIVO --- */}

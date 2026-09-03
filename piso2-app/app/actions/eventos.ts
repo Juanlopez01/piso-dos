@@ -149,8 +149,26 @@ export async function eliminarEventoAction(eventoId: string) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
+    // Con ventas CONFIRMADAS no se borra (hay dinero cobrado): mejor finalizarlo.
     const { count } = await admin.from('evento_ventas').select('id', { count: 'exact', head: true }).eq('evento_id', eventoId).eq('estado', 'confirmada')
     if ((count || 0) > 0) return { ok: false as const, error: 'No se puede borrar: el evento ya tiene ventas. Marcalo como finalizado.' }
+
+    // Borramos los hijos en orden (los venta_items apuntan a las entradas, así que
+    // hay que sacarlos antes de que la cascada intente borrar las entradas).
+    const { data: ventas } = await admin.from('evento_ventas').select('id').eq('evento_id', eventoId)
+    const ventaIds = (ventas || []).map((v: any) => v.id)
+    if (ventaIds.length) {
+        await admin.from('evento_tickets').delete().in('venta_id', ventaIds)
+        await admin.from('evento_venta_items').delete().in('venta_id', ventaIds)
+    }
+    await admin.from('evento_ventas').delete().eq('evento_id', eventoId)
+    await admin.from('evento_entradas').delete().eq('evento_id', eventoId)
+    await admin.from('evento_gastos').delete().eq('evento_id', eventoId)
+    await admin.from('evento_equipo').delete().eq('evento_id', eventoId)
+    await admin.from('evento_invitados').delete().eq('evento_id', eventoId)
+    // Desvinculamos las obras que apuntaban a este evento (no las borramos).
+    await admin.from('obra_propuestas').update({ evento_id: null }).eq('evento_id', eventoId)
+
     const { error } = await admin.from('eventos').delete().eq('id', eventoId)
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
