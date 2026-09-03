@@ -473,14 +473,11 @@ export async function crearOrdenEventoAction(payload: {
 // CHECK-IN (Fase 3) — escaneo del QR en la puerta + reportes
 // ============================================================================
 
-// Valida un ticket por su código (lo que trae el QR) para un evento dado.
-// Si es válido y no usado, lo marca usado. Devuelve el resultado para la UI.
-export async function validarTicketAction(eventoId: string, codigo: string) {
-    const perm = await requireStaff()
-    if (!perm.ok) return { estado: 'error' as const, msg: perm.error || 'Sin permisos' }
+// Lógica de validación de un ticket (compartida por el check-in del staff y el
+// de la puerta externa). Recibe el admin ya resuelto.
+async function validarTicketConAdmin(admin: any, eventoId: string, codigo: string) {
     const cod = (codigo || '').trim()
     if (!cod) return { estado: 'error' as const, msg: 'Código vacío' }
-    const admin = getAdminClient()
 
     const { data: tk } = await admin.from('evento_tickets').select('id, venta_id, entrada_id, usado, usado_at').eq('codigo', cod).maybeSingle()
     if (!tk) return { estado: 'invalida' as const, msg: 'Entrada no encontrada' }
@@ -496,6 +493,15 @@ export async function validarTicketAction(eventoId: string, codigo: string) {
 
     await admin.from('evento_tickets').update({ usado: true, usado_at: new Date().toISOString() }).eq('id', tk.id)
     return { estado: 'valida' as const, msg: '¡Adelante!', ...info }
+}
+
+// Valida un ticket por su código (lo que trae el QR) para un evento dado.
+// Si es válido y no usado, lo marca usado. Devuelve el resultado para la UI.
+export async function validarTicketAction(eventoId: string, codigo: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { estado: 'error' as const, msg: perm.error || 'Sin permisos' }
+    const admin = getAdminClient()
+    return await validarTicketConAdmin(admin, eventoId, codigo)
 }
 
 // Deshace un check-in (por si escanearon de más).
@@ -1038,4 +1044,145 @@ export async function getCicloPublicoAction(slug: string) {
         })
     }
     return { nombre: c.nombre, descripcion: c.descripcion, flyer_url: c.flyer_url, slug: c.slug, fechas }
+}
+
+// ---- Traspaso de fecha de entradas (#7) -------------------------------------
+// Mueve una venta confirmada a otra función del mismo ciclo (mapeando los tipos
+// de entrada por nombre y validando cupo en el destino).
+
+export async function getFechasHermanasAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, fechas: [] as any[] }
+    const admin = getAdminClient()
+    const { data: ev } = await admin.from('eventos').select('ciclo_id').eq('id', eventoId).maybeSingle()
+    if (!ev?.ciclo_id) return { ok: true as const, fechas: [] as any[] }
+    const { data } = await admin.from('eventos')
+        .select('id, fecha, lugar').eq('ciclo_id', ev.ciclo_id).neq('id', eventoId).eq('cancelado', false).order('fecha')
+    return { ok: true as const, fechas: (data || []) as any[] }
+}
+
+export async function traspasarVentaAction(ventaId: string, destinoEventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+
+    const { data: venta } = await admin.from('evento_ventas').select('id, evento_id, estado').eq('id', ventaId).maybeSingle()
+    if (!venta) return { ok: false as const, error: 'Venta no encontrada.' }
+    if (venta.estado !== 'confirmada') return { ok: false as const, error: 'Solo se traspasan ventas confirmadas.' }
+    if (venta.evento_id === destinoEventoId) return { ok: false as const, error: 'Ya es la misma fecha.' }
+
+    const { data: origen } = await admin.from('eventos').select('ciclo_id').eq('id', venta.evento_id).maybeSingle()
+    const { data: destino } = await admin.from('eventos').select('id, ciclo_id, cancelado').eq('id', destinoEventoId).maybeSingle()
+    if (!destino || destino.cancelado) return { ok: false as const, error: 'La fecha de destino no está disponible.' }
+    if (!origen?.ciclo_id || origen.ciclo_id !== destino.ciclo_id) return { ok: false as const, error: 'Solo se traspasa entre fechas del mismo ciclo.' }
+
+    const { data: items } = await admin.from('evento_venta_items').select('id, entrada_id, cantidad').eq('venta_id', ventaId)
+    const { data: entOrigen } = await admin.from('evento_entradas').select('id, nombre').eq('evento_id', venta.evento_id)
+    const { data: entDestino } = await admin.from('evento_entradas').select('id, nombre, cupo').eq('evento_id', destinoEventoId)
+    const nombreDeOrigen: Record<string, string> = {}
+    for (const e of (entOrigen || []) as any[]) nombreDeOrigen[e.id] = e.nombre
+    const destinoPorNombre: Record<string, any> = {}
+    for (const e of (entDestino || []) as any[]) destinoPorNombre[e.nombre] = e
+    const vendidasDestino = await vendidasPorEntrada(admin, destinoEventoId)
+
+    const mapeo: { itemId: string; nuevaEntrada: string }[] = []
+    for (const it of (items || []) as any[]) {
+        const nombre = nombreDeOrigen[it.entrada_id]
+        const dest = destinoPorNombre[nombre]
+        if (!dest) return { ok: false as const, error: `La fecha de destino no tiene el tipo "${nombre}".` }
+        const disp = Math.max(0, (dest.cupo || 0) - (vendidasDestino[dest.id] || 0))
+        if (it.cantidad > disp) return { ok: false as const, error: `No hay cupo de "${nombre}" en la fecha destino (quedan ${disp}).` }
+        mapeo.push({ itemId: it.id, nuevaEntrada: dest.id })
+    }
+
+    await admin.from('evento_ventas').update({ evento_id: destinoEventoId }).eq('id', ventaId)
+    for (const m of mapeo) await admin.from('evento_venta_items').update({ entrada_id: m.nuevaEntrada }).eq('id', m.itemId)
+    const { data: tks } = await admin.from('evento_tickets').select('id, entrada_id').eq('venta_id', ventaId)
+    for (const t of (tks || []) as any[]) {
+        const dest = destinoPorNombre[nombreDeOrigen[t.entrada_id]]
+        if (dest) await admin.from('evento_tickets').update({ entrada_id: dest.id, usado: false, usado_at: null }).eq('id', t.id)
+    }
+    return { ok: true as const }
+}
+
+// ---- Link de puerta para gente externa (#9) ---------------------------------
+// Un token por evento habilita /puerta/[eventoId]?t=token para leer QR + cargar
+// ventas en la puerta, sin cuenta. Autoriza por token (no por sesión).
+
+async function puertaAutorizada(admin: any, eventoId: string, token: string) {
+    if (!token) return false
+    const { data: ev } = await admin.from('eventos').select('token_puerta').eq('id', eventoId).maybeSingle()
+    return !!ev && ev.token_puerta === token
+}
+
+export async function getLinkPuertaAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { data: ev } = await admin.from('eventos').select('token_puerta').eq('id', eventoId).maybeSingle()
+    if (!ev) return { ok: false as const, error: 'Evento no encontrado' }
+    let token = ev.token_puerta
+    if (!token) {
+        token = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2) + Date.now().toString(36))
+        await admin.from('eventos').update({ token_puerta: token }).eq('id', eventoId)
+    }
+    return { ok: true as const, token }
+}
+
+export async function getPuertaDataAction(eventoId: string, token: string) {
+    const admin = getAdminClient()
+    if (!(await puertaAutorizada(admin, eventoId, token))) return { ok: false as const, error: 'Link inválido' }
+    const { data: ev } = await admin.from('eventos').select('nombre, fecha, lugar, cancelado').eq('id', eventoId).maybeSingle()
+    if (!ev || ev.cancelado) return { ok: false as const, error: 'Este evento no está disponible.' }
+    const { data: entradas } = await admin.from('evento_entradas').select('id, nombre, precio, cupo').eq('evento_id', eventoId).eq('activo', true).order('orden')
+    const vendidas = await vendidasPorEntrada(admin, eventoId)
+    const ents = (entradas || []).map((e: any) => ({ id: e.id, nombre: e.nombre, precio: Number(e.precio), disponible: Math.max(0, (e.cupo || 0) - (vendidas[e.id] || 0)) }))
+    const { data: ventas } = await admin.from('evento_ventas').select('id').eq('evento_id', eventoId).eq('estado', 'confirmada')
+    const ids = (ventas || []).map((v: any) => v.id)
+    let total = 0, usados = 0
+    if (ids.length) { const { data: tks } = await admin.from('evento_tickets').select('usado').in('venta_id', ids); total = (tks || []).length; usados = (tks || []).filter((t: any) => t.usado).length }
+    return { ok: true as const, nombre: ev.nombre, fecha: ev.fecha, lugar: ev.lugar, entradas: ents, stats: { total, usados } }
+}
+
+export async function validarTicketPuertaAction(eventoId: string, token: string, codigo: string) {
+    const admin = getAdminClient()
+    if (!(await puertaAutorizada(admin, eventoId, token))) return { estado: 'error' as const, msg: 'Link inválido' }
+    return await validarTicketConAdmin(admin, eventoId, codigo)
+}
+
+export async function registrarVentaPuertaAction(payload: { eventoId: string; token: string; comprador_nombre?: string; medio_pago?: string; items: { entrada_id: string; cantidad: number }[] }) {
+    const admin = getAdminClient()
+    if (!(await puertaAutorizada(admin, payload.eventoId, payload.token))) return { ok: false as const, error: 'Link inválido' }
+    const { data: evChk } = await admin.from('eventos').select('cancelado').eq('id', payload.eventoId).maybeSingle()
+    if (evChk?.cancelado) return { ok: false as const, error: 'Esta función está cancelada.' }
+
+    const items = (payload.items || []).filter(i => i.entrada_id && Number(i.cantidad) > 0)
+    if (!items.length) return { ok: false as const, error: 'Elegí al menos una entrada.' }
+    const { data: entradas } = await admin.from('evento_entradas').select('id, nombre, precio, cupo').eq('evento_id', payload.eventoId)
+    const mapa: Record<string, any> = {}
+    for (const e of (entradas || []) as any[]) mapa[e.id] = e
+    const vendidas = await vendidasPorEntrada(admin, payload.eventoId)
+    let total = 0
+    const rows: any[] = []
+    for (const it of items) {
+        const e = mapa[it.entrada_id]
+        if (!e) return { ok: false as const, error: 'Entrada inválida.' }
+        const disp = Math.max(0, (e.cupo || 0) - (vendidas[e.id] || 0))
+        const cant = Math.floor(Number(it.cantidad))
+        if (cant > disp) return { ok: false as const, error: `No hay cupo de "${e.nombre}" (quedan ${disp}).` }
+        total += cant * Number(e.precio || 0)
+        rows.push({ entrada_id: e.id, cantidad: cant, precio_unit: Number(e.precio || 0) })
+    }
+    const totalFinal = total + montoServicio(total)
+    const tk = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2) + Date.now().toString(36))
+    const { data: venta, error } = await admin.from('evento_ventas').insert({
+        evento_id: payload.eventoId, comprador_nombre: payload.comprador_nombre?.trim() || null,
+        medio_pago: payload.medio_pago || 'efectivo', total: totalFinal, estado: 'confirmada', canal: 'puerta', token: tk,
+    }).select('id').single()
+    if (error || !venta) return { ok: false as const, error: error?.message || 'No se pudo registrar la venta.' }
+    await admin.from('evento_venta_items').insert(rows.map(r => ({ ...r, venta_id: venta.id })))
+    const tickets: any[] = []
+    for (const r of rows) for (let n = 0; n < r.cantidad; n++) tickets.push({ venta_id: venta.id, entrada_id: r.entrada_id, codigo: `E-${String(venta.id).slice(0, 8)}-${Math.random().toString(36).slice(2, 8).toUpperCase()}` })
+    if (tickets.length) await admin.from('evento_tickets').insert(tickets)
+    return { ok: true as const, id: venta.id, token: tk, total: totalFinal }
 }

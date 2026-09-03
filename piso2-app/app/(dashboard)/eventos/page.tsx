@@ -18,6 +18,7 @@ import {
     getInvitadosAction, guardarInvitadoAction, togglePresenteInvitadoAction, eliminarInvitadoAction,
     getCarritosAbandonadosAction, descartarCarritoAction,
     getCiclosEventoAction, crearCicloEventoAction, asignarCicloAction, duplicarEventoAction,
+    getLinkPuertaAction, getFechasHermanasAction, traspasarVentaAction,
 } from '@/app/actions/eventos'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
@@ -377,6 +378,25 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         if (r.ok) cargarObras(); else toast.error((r as any).error || 'Error')
     }
 
+    // --- link de puerta (gente externa) ---
+    const copiarLinkPuerta = async () => {
+        const r = await getLinkPuertaAction(eventoId)
+        if (!r.ok) return toast.error((r as any).error || 'Error')
+        navigator.clipboard.writeText(`${window.location.origin}/puerta/${eventoId}?t=${r.token}`)
+        toast.success('Link de puerta copiado (leer QR + cargar ventas)')
+    }
+
+    // --- traspaso de fecha ---
+    const [fechasHermanas, setFechasHermanas] = useState<any[]>([])
+    const [traspasando, setTraspasando] = useState<string | null>(null)
+    useEffect(() => { (async () => { const r = await getFechasHermanasAction(eventoId); if (r.ok) setFechasHermanas(r.fechas) })() }, [eventoId, evento?.ciclo_id])
+    const traspasar = async (ventaId: string, destino: string) => {
+        if (!destino) return
+        const r = await traspasarVentaAction(ventaId, destino)
+        if (r.ok) { toast.success('Entradas traspasadas a la otra fecha'); setTraspasando(null); cargar() }
+        else toast.error((r as any).error || 'Error')
+    }
+
     // --- cancelar función ---
     const [cancelacion, setCancelacion] = useState<any>(null)
     const cancelarFuncion = async () => {
@@ -620,8 +640,13 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
             </Link>
 
             {/* acceso de la compañía */}
-            <button onClick={copiarLinkCompania} className="w-full flex items-center justify-center gap-2 mb-5 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
+            <button onClick={copiarLinkCompania} className="w-full flex items-center justify-center gap-2 mb-2 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
                 <Copy size={14} /> Copiar link para la compañía (ve sus ventas en vivo)
+            </button>
+
+            {/* link de puerta para gente externa */}
+            <button onClick={copiarLinkPuerta} className="w-full flex items-center justify-center gap-2 mb-5 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
+                <ScanLine size={14} /> Copiar link de puerta (gente externa: leer QR + vender)
             </button>
 
             {reporte && (
@@ -834,9 +859,21 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                                     </div>
                                     <div className="text-right shrink-0">
                                         <p className="font-black text-[#D4E655]">{pesos(v.total)}</p>
-                                        {v.estado === 'confirmada' && <button onClick={() => reembolsar(v)} className="text-[10px] text-gray-500 hover:text-amber-400 uppercase font-semibold">Reembolsar</button>}
+                                        {v.estado === 'confirmada' && <div className="flex gap-2 justify-end">
+                                            {fechasHermanas.length > 0 && <button onClick={() => setTraspasando(traspasando === v.id ? null : v.id)} className="text-[10px] text-gray-500 hover:text-blue-400 uppercase font-semibold">Traspasar</button>}
+                                            <button onClick={() => reembolsar(v)} className="text-[10px] text-gray-500 hover:text-amber-400 uppercase font-semibold">Reembolsar</button>
+                                        </div>}
                                     </div>
                                 </div>
+                                {traspasando === v.id && (
+                                    <div className="mt-2 pt-2 border-t border-white/5 flex items-center gap-2">
+                                        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Mover a:</span>
+                                        <select defaultValue="" onChange={e => traspasar(v.id, e.target.value)} className="inp flex-1 text-xs">
+                                            <option value="">Elegir fecha…</option>
+                                            {fechasHermanas.map(f => <option key={f.id} value={f.id}>{f.fecha ? new Date(f.fecha).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Sin fecha'}</option>)}
+                                        </select>
+                                    </div>
+                                )}
                             </div>
                         ))}
                     </div>
