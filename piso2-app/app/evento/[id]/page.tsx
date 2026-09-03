@@ -8,7 +8,7 @@ import { Loader2, CalendarDays, MapPin, Minus, Plus, Ticket } from 'lucide-react
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 
 type Entrada = { id: string; nombre: string; precio: number; disponible: number }
-type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; entradas: Entrada[] }
+type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; flyer_url?: string | null; entradas: Entrada[] }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' }) : null
@@ -22,6 +22,7 @@ export default function EventoPublicoPage() {
     const [nombre, setNombre] = useState('')
     const [email, setEmail] = useState('')
     const [tel, setTel] = useState('')
+    const [acepta, setAcepta] = useState(false)
     const [pagando, setPagando] = useState(false)
 
     useEffect(() => {
@@ -45,6 +46,7 @@ export default function EventoPublicoPage() {
         if (!items.length) return toast.error('Elegí al menos una entrada.')
         if (!nombre.trim()) return toast.error('Completá tu nombre.')
         if (!email.includes('@')) return toast.error('Completá un email válido.')
+        if (!acepta) return toast.error('Aceptá las condiciones de compra para continuar.')
         setPagando(true)
         try {
             const orden = await crearOrdenEventoAction({ evento_id: ev.id, comprador_nombre: nombre, comprador_email: email, comprador_contacto: tel, items })
@@ -75,6 +77,7 @@ export default function EventoPublicoPage() {
             </div>
 
             <div className="max-w-lg mx-auto px-5 py-8">
+                {ev.flyer_url && <img src={ev.flyer_url} alt="" className="w-full rounded-xl mb-5 object-cover" />}
                 <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.25em] text-neutral-400 mb-2"><Ticket size={13} /> Entradas</div>
                 <h1 className="text-2xl md:text-3xl font-black tracking-tight">{ev.nombre}</h1>
                 <div className="flex flex-wrap gap-4 mt-3 text-xs text-neutral-500">
@@ -125,7 +128,11 @@ export default function EventoPublicoPage() {
                         <span className="text-sm font-bold text-neutral-700">Total</span>
                         <span className="text-2xl font-black">{pesos(conServicio(total))}</span>
                     </div>
-                    <button onClick={pagar} disabled={pagando || totalEntradas === 0}
+                    <label className="flex items-start gap-2 mb-3 cursor-pointer">
+                        <input type="checkbox" checked={acepta} onChange={e => setAcepta(e.target.checked)} className="mt-0.5 w-4 h-4 accent-black shrink-0" />
+                        <span className="text-[11px] text-neutral-500 leading-snug">Entiendo y acepto que <b>no se realizan reintegros, devoluciones ni cambios</b> de entradas compradas.</span>
+                    </label>
+                    <button onClick={pagar} disabled={pagando || totalEntradas === 0 || !acepta}
                         className="w-full bg-[#009ee3] text-white font-bold py-4 rounded-xl uppercase text-xs tracking-widest hover:brightness-95 transition disabled:opacity-40 flex items-center justify-center gap-2">
                         {pagando ? <Loader2 size={16} className="animate-spin" /> : null} Pagar con Mercado Pago
                     </button>

@@ -45,7 +45,15 @@ export default function ConvocatoriaForm({ ciclo }: { ciclo?: Ciclo | null }) {
 
     const enviar = async () => {
         if (!f.titulo.trim()) return toast.error('Poné el nombre de la obra.')
+        if (!f.director.trim()) return toast.error('Completá el/los director/es.')
+        if (!f.compania.trim()) return toast.error('Completá la compañía / elenco.')
+        if (!f.tipo) return toast.error('Elegí el tipo de obra.')
+        if (!f.participantes) return toast.error('Indicá la cantidad de participantes.')
+        if (!f.duracion) return toast.error('Indicá la duración.')
+        if (!f.descripcion.trim()) return toast.error('Contanos de qué trata la obra.')
         if (!f.email.includes('@') && !f.telefono.trim()) return toast.error('Dejanos un email o teléfono.')
+        if (imagenes.length === 0) return toast.error('Subí al menos una foto (flyer) de la obra.')
+        if (videos.filter(v => v.trim()).length === 0) return toast.error('Dejá al menos un link de video.')
         setEnviando(true)
         const r = await crearPropuestaObraAction({
             titulo: f.titulo, director: f.director, compania: f.compania, tipo_obra: f.tipo || undefined,
@@ -82,24 +90,25 @@ export default function ConvocatoriaForm({ ciclo }: { ciclo?: Ciclo | null }) {
                 <div className="mt-6 space-y-4">
                     <div><label className={lbl}>Nombre de la obra *</label><input value={f.titulo} onChange={e => set('titulo', e.target.value)} className={inp} /></div>
                     <div className="grid grid-cols-2 gap-3">
-                        <div><label className={lbl}>Director/es</label><input value={f.director} onChange={e => set('director', e.target.value)} className={inp} /></div>
-                        <div><label className={lbl}>Compañía / elenco</label><input value={f.compania} onChange={e => set('compania', e.target.value)} className={inp} /></div>
+                        <div><label className={lbl}>Director/es *</label><input value={f.director} onChange={e => set('director', e.target.value)} className={inp} /></div>
+                        <div><label className={lbl}>Compañía / elenco *</label><input value={f.compania} onChange={e => set('compania', e.target.value)} className={inp} /></div>
                     </div>
                     <div className="grid grid-cols-3 gap-3">
-                        <div><label className={lbl}>Tipo</label><select value={f.tipo} onChange={e => set('tipo', e.target.value)} className={inp}><option value="">Elegir…</option>{TIPOS.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-                        <div><label className={lbl}>Participantes</label><input type="number" min={1} value={f.participantes} onChange={e => set('participantes', e.target.value)} className={inp} /></div>
-                        <div><label className={lbl}>Duración (min)</label><input type="number" min={1} value={f.duracion} onChange={e => set('duracion', e.target.value)} className={inp} /></div>
+                        <div><label className={lbl}>Tipo *</label><select value={f.tipo} onChange={e => set('tipo', e.target.value)} className={inp}><option value="">Elegir…</option>{TIPOS.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+                        <div><label className={lbl}>Participantes *</label><input type="number" min={1} value={f.participantes} onChange={e => set('participantes', e.target.value)} className={inp} /></div>
+                        <div><label className={lbl}>Duración (min) *</label><input type="number" min={1} value={f.duracion} onChange={e => set('duracion', e.target.value)} className={inp} /></div>
                     </div>
-                    <div><label className={lbl}>Descripción</label><textarea rows={3} value={f.descripcion} onChange={e => set('descripcion', e.target.value)} className={`${inp} resize-none`} placeholder="De qué trata, estilo, antecedentes…" /></div>
+                    <div><label className={lbl}>Descripción *</label><textarea rows={3} value={f.descripcion} onChange={e => set('descripcion', e.target.value)} className={`${inp} resize-none`} placeholder="De qué trata, estilo, antecedentes…" /></div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div><label className={lbl}>Instagram (obra/director)</label><input value={f.instagram} onChange={e => set('instagram', e.target.value)} className={inp} placeholder="@…" /></div>
-                        <div><label className={lbl}>Email de contacto</label><input type="email" value={f.email} onChange={e => set('email', e.target.value)} className={inp} /></div>
+                        <div><label className={lbl}>Email de contacto *</label><input type="email" value={f.email} onChange={e => set('email', e.target.value)} className={inp} /></div>
                     </div>
-                    <div><label className={lbl}>Teléfono</label><input value={f.telefono} onChange={e => set('telefono', e.target.value)} className={inp} placeholder="+54 11 …" /></div>
+                    <div><label className={lbl}>Teléfono *</label><input value={f.telefono} onChange={e => set('telefono', e.target.value)} className={inp} placeholder="+54 11 …" /></div>
+                    <p className="text-[11px] text-neutral-400 -mt-1">* Todos los campos son obligatorios (podés dejar email <b>o</b> teléfono).</p>
 
                     {/* imágenes */}
                     <div>
-                        <label className={lbl}>Imágenes de la obra (hasta 6)</label>
+                        <label className={lbl}>Foto / flyer de la obra * (hasta 6)</label>
                         <div className="flex flex-wrap gap-2">
                             {imagenes.map((u, i) => (
                                 <div key={i} className="relative w-20 h-24 overflow-hidden bg-neutral-100 border border-neutral-200 rounded">
@@ -118,7 +127,7 @@ export default function ConvocatoriaForm({ ciclo }: { ciclo?: Ciclo | null }) {
 
                     {/* videos */}
                     <div>
-                        <label className={lbl}>Links de video (opcional)</label>
+                        <label className={lbl}>Links de video * (al menos 1)</label>
                         <div className="space-y-2">
                             {videos.map((v, i) => (
                                 <div key={i} className="relative">

@@ -2,9 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale, EyeOff, UserPlus, AlertTriangle, ShoppingCart, MessageCircle } from 'lucide-react'
+import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale, EyeOff, UserPlus, AlertTriangle, ShoppingCart, MessageCircle, CalendarPlus, Layers, Upload, Image as ImageIcon, Theater } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { createClient } from '@/utils/supabase/client'
+import { optimizeImage } from '@/utils/optimizeImage'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
+import {
+    getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction,
+} from '@/app/actions/convocatoria'
 import {
     getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
     eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction, reembolsarVentaAction, cancelarEventoAction,
@@ -12,12 +17,13 @@ import {
     getBorderauxAction, setRepartoPctAction, toggleIncluirEquipoAction, guardarGastoAction, eliminarGastoAction,
     getInvitadosAction, guardarInvitadoAction, togglePresenteInvitadoAction, eliminarInvitadoAction,
     getCarritosAbandonadosAction, descartarCarritoAction,
+    getCiclosEventoAction, crearCicloEventoAction, asignarCicloAction, duplicarEventoAction,
 } from '@/app/actions/eventos'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
 type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number; oculta?: boolean; codigo_promo?: string | null }
 type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; canal?: string | null; reembolsada?: boolean; created_at: string; items: { nombre: string; cantidad: number; precio_unit: number }[] }
-type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean; cancelado?: boolean }
+type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean; cancelado?: boolean; ciclo_id?: string | null; ciclo?: { nombre: string; slug: string } | null }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Sin fecha'
@@ -108,17 +114,45 @@ export default function EventosPage() {
     )
 }
 
+// Subida de flyer reusable → devuelve la URL pública (bucket talent, carpeta eventos/).
+function FlyerUploader({ value, onChange }: { value: string; onChange: (url: string) => void }) {
+    const [supabase] = useState(() => createClient())
+    const [subiendo, setSubiendo] = useState(false)
+    const subir = async (file: File | null) => {
+        if (!file) return
+        setSubiendo(true)
+        try {
+            const opt = await optimizeImage(file, { maxDim: 1600 })
+            const ext = opt.name.split('.').pop()
+            const path = `eventos/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+            const { error } = await supabase.storage.from('talent').upload(path, opt)
+            if (error) throw error
+            onChange(supabase.storage.from('talent').getPublicUrl(path).data.publicUrl)
+        } catch (e: any) { toast.error('No se pudo subir el flyer: ' + (e.message || '')) }
+        setSubiendo(false)
+    }
+    return (
+        <div className="flex items-center gap-3">
+            {value
+                ? <div className="relative w-16 h-20 rounded-lg overflow-hidden border border-white/10 shrink-0"><img src={value} alt="" className="w-full h-full object-cover" /><button type="button" onClick={() => onChange('')} className="absolute top-0.5 right-0.5 bg-black/70 text-white rounded-full p-0.5"><X size={11} /></button></div>
+                : <label className="w-16 h-20 border border-dashed border-white/20 rounded-lg flex items-center justify-center cursor-pointer hover:border-white/40 text-gray-500 shrink-0">{subiendo ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}<input type="file" accept="image/*" className="hidden" onChange={e => subir(e.target.files?.[0] || null)} /></label>}
+            <span className="text-[11px] text-gray-500">{value ? 'Flyer cargado' : 'Subí el flyer del evento (opcional)'}</span>
+        </div>
+    )
+}
+
 function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
     const [nombre, setNombre] = useState('')
     const [fecha, setFecha] = useState('')
     const [lugar, setLugar] = useState('')
     const [descripcion, setDescripcion] = useState('')
+    const [flyer, setFlyer] = useState('')
     const [saving, setSaving] = useState(false)
 
     const crear = async () => {
         if (!nombre.trim()) return toast.error('Poné un nombre')
         setSaving(true)
-        const r = await crearEventoAction({ nombre, fecha: fecha || null, lugar, descripcion })
+        const r = await crearEventoAction({ nombre, fecha: fecha || null, lugar, descripcion, flyer_url: flyer })
         if (r.ok) { toast.success('Evento creado'); onCreated(r.id) }
         else { toast.error(r.error || 'Error'); setSaving(false) }
     }
@@ -135,6 +169,7 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
                     <Campo label="Fecha y hora"><input type="datetime-local" value={fecha} onChange={e => setFecha(e.target.value)} className="inp w-full" /></Campo>
                     <Campo label="Lugar"><input value={lugar} onChange={e => setLugar(e.target.value)} placeholder="Teatro / Sede Obelisco…" className="inp w-full" /></Campo>
                     <Campo label="Descripción (opcional)"><textarea value={descripcion} onChange={e => setDescripcion(e.target.value)} rows={2} className="inp w-full resize-none" /></Campo>
+                    <Campo label="Flyer"><FlyerUploader value={flyer} onChange={setFlyer} /></Campo>
                     <button onClick={crear} disabled={saving} className="w-full bg-[#D4E655] text-black font-bold py-3 rounded-xl uppercase text-xs tracking-wide hover:bg-white disabled:opacity-50 flex items-center justify-center gap-2">
                         {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Crear evento
                     </button>
@@ -290,6 +325,56 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         if (!confirm('¿Descartar esta orden pendiente? No se puede deshacer.')) return
         const r = await descartarCarritoAction(id)
         if (r.ok) cargarCarritos(); else toast.error((r as any).error || 'Error')
+    }
+
+    // --- ciclo (varias fechas) ---
+    const [ciclos, setCiclos] = useState<any[]>([])
+    const [nombreCiclo, setNombreCiclo] = useState('')
+    const [fechaDup, setFechaDup] = useState('')
+    const cargarCiclos = async () => { const r = await getCiclosEventoAction(); if (r.ok) setCiclos(r.ciclos) }
+    useEffect(() => { cargarCiclos() }, [])
+    const crearCiclo = async () => {
+        const nombre = nombreCiclo.trim() || evento?.nombre || ''
+        if (!nombre) return toast.error('Poné un nombre al ciclo')
+        const r = await crearCicloEventoAction({ nombre, eventoId })
+        if (r.ok) { toast.success('Ciclo creado. Esta función quedó como su primera fecha.'); setNombreCiclo(''); cargar(); cargarCiclos() }
+        else toast.error((r as any).error || 'Error')
+    }
+    const asignarCiclo = async (cicloId: string) => {
+        const r = await asignarCicloAction(eventoId, cicloId || null)
+        if (r.ok) cargar(); else toast.error((r as any).error || 'Error')
+    }
+    const duplicarFecha = async () => {
+        const r = await duplicarEventoAction(eventoId, fechaDup || null)
+        if (r.ok) { toast.success('Fecha duplicada (en borrador). Revisala y activala.'); setFechaDup('') }
+        else toast.error((r as any).error || 'Error')
+    }
+    const copiarLinkCiclo = () => {
+        if (!evento?.ciclo?.slug) return
+        navigator.clipboard.writeText(`${window.location.origin}/ciclo/${evento.ciclo.slug}`)
+        toast.success('Link del ciclo copiado')
+    }
+    const cambiarFlyer = async (url: string) => {
+        const r = await editarEventoAction(eventoId, { flyer_url: url || null })
+        if (r.ok) setEvento(ev => ev ? { ...ev, flyer_url: url || null } as any : ev); else toast.error((r as any).error || 'Error')
+    }
+
+    // --- obras del evento (varias obras en un programa) ---
+    const [obras, setObras] = useState<any[]>([])
+    const [obrasDisp, setObrasDisp] = useState<any[]>([])
+    const cargarObras = async () => {
+        const [a, b] = await Promise.all([getObrasDeEventoAction(eventoId), getObrasAceptadasDisponiblesAction(eventoId)])
+        if (a.ok) setObras(a.obras)
+        if (b.ok) setObrasDisp(b.obras)
+    }
+    useEffect(() => { cargarObras() }, [eventoId])
+    const agregarObra = async (propuestaId: string) => {
+        const r = await vincularObraAEventoAction(propuestaId, eventoId)
+        if (r.ok) cargarObras(); else toast.error((r as any).error || 'Error')
+    }
+    const quitarObra = async (propuestaId: string) => {
+        const r = await desvincularObraAction(propuestaId)
+        if (r.ok) cargarObras(); else toast.error((r as any).error || 'Error')
     }
 
     // --- cancelar función ---
@@ -448,6 +533,75 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                     </>
                 )}
                 {!evento.venta_online && <span className="ml-auto text-[10px] text-gray-500">Activala y compartí el link para vender entradas online.</span>}
+            </div>
+
+            {/* ciclo de varias fechas */}
+            <div className="mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                    <Layers size={15} className={evento.ciclo_id ? 'text-[#D4E655]' : 'text-gray-500'} />
+                    <span className="text-xs font-semibold text-gray-300">Ciclo / varias fechas</span>
+                </div>
+                {evento.ciclo_id ? (
+                    <div className="space-y-2">
+                        <p className="text-[11px] text-gray-400">Esta función es parte del ciclo <b className="text-gray-200">“{evento.ciclo?.nombre}”</b>. El público elige la fecha en el link del ciclo.</p>
+                        <div className="flex flex-wrap gap-2">
+                            <button onClick={copiarLinkCiclo} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide bg-[#D4E655]/15 text-[#D4E655] px-3 py-1.5 rounded-lg"><Copy size={12} /> Copiar link del ciclo</button>
+                            <a href={`/ciclo/${evento.ciclo?.slug}`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide bg-white/5 hover:bg-white/10 text-gray-300 px-3 py-1.5 rounded-lg"><Ticket size={12} /> Ver ciclo</a>
+                            <button onClick={() => asignarCiclo('')} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide bg-white/5 hover:bg-white/10 text-gray-400 px-3 py-1.5 rounded-lg"><X size={12} /> Quitar del ciclo</button>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/5">
+                            <span className="text-[11px] text-gray-500">Duplicar a otra fecha:</span>
+                            <input value={fechaDup} onChange={e => setFechaDup(e.target.value)} type="datetime-local" className="inp w-52" />
+                            <button onClick={duplicarFecha} className="bg-[#D4E655] text-black px-3 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wide flex items-center gap-1"><CalendarPlus size={13} /> Duplicar función</button>
+                        </div>
+                        <p className="text-[10px] text-gray-600">La copia clona los tipos de entrada y queda en borrador para revisarla.</p>
+                    </div>
+                ) : (
+                    <div className="space-y-2">
+                        <p className="text-[11px] text-gray-500">Si esta obra se repite en varias fechas, agrupalas en un ciclo: el público entra a un solo link y elige la función.</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <input value={nombreCiclo} onChange={e => setNombreCiclo(e.target.value)} placeholder={`Nombre del ciclo (ej: ${evento.nombre})`} className="inp flex-1 min-w-[160px]" />
+                            <button onClick={crearCiclo} className="bg-[#D4E655] text-black px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1"><Plus size={14} /> Crear ciclo</button>
+                        </div>
+                        {ciclos.length > 0 && (
+                            <div className="flex items-center gap-2">
+                                <span className="text-[11px] text-gray-500">o sumala a uno:</span>
+                                <select onChange={e => e.target.value && asignarCiclo(e.target.value)} defaultValue="" className="inp flex-1">
+                                    <option value="">Elegir ciclo…</option>
+                                    {ciclos.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                                </select>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* flyer del evento */}
+            <div className="mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2"><ImageIcon size={15} className="text-gray-400" /><span className="text-xs font-semibold text-gray-300">Flyer del evento</span></div>
+                <FlyerUploader value={(evento as any).flyer_url || ''} onChange={cambiarFlyer} />
+            </div>
+
+            {/* obras del evento (programa) */}
+            <div className="mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2"><Theater size={15} className="text-gray-400" /><span className="text-xs font-semibold text-gray-300">Obras en este evento</span></div>
+                {obras.length > 0 ? (
+                    <div className="space-y-1.5 mb-2">
+                        {obras.map(o => (
+                            <div key={o.id} className="flex items-center gap-2 bg-[#111] border border-white/10 rounded-lg px-3 py-2">
+                                {o.imagenes?.[0] && <img src={o.imagenes[0]} alt="" className="w-8 h-10 object-cover rounded shrink-0" />}
+                                <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{o.titulo}</p><p className="text-[10px] text-gray-500 truncate">{[o.compania, o.duracion_min && `${o.duracion_min} min`].filter(Boolean).join(' · ')}</p></div>
+                                <button onClick={() => quitarObra(o.id)} className="text-gray-600 hover:text-red-400 p-1"><X size={14} /></button>
+                            </div>
+                        ))}
+                    </div>
+                ) : <p className="text-[11px] text-gray-500 mb-2">Sin obras vinculadas. Podés armar un programa con varias obras aprobadas.</p>}
+                {obrasDisp.length > 0 && (
+                    <select onChange={e => { if (e.target.value) { agregarObra(e.target.value); e.target.value = '' } }} defaultValue="" className="inp w-full">
+                        <option value="">+ Agregar obra aprobada…</option>
+                        {obrasDisp.map(o => <option key={o.id} value={o.id}>{o.titulo}{o.compania ? ` — ${o.compania}` : ''}</option>)}
+                    </select>
+                )}
             </div>
 
             {/* check-in + reporte */}

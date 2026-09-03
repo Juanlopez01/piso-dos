@@ -51,6 +51,7 @@ export async function proxy(request: NextRequest) {
             request.nextUrl.pathname.startsWith('/entradas/') || // Entradas con QR (link público por token)
             request.nextUrl.pathname.startsWith('/compania/') || // Acceso de la compañía: ventas en vivo por token (sin login)
             request.nextUrl.pathname.startsWith('/convocatoria') || // Convocatoria de obras: form público para proponer (sin login)
+            request.nextUrl.pathname.startsWith('/ciclo/') || // Ciclo de varias fechas: el público elige la función (sin login)
             request.nextUrl.pathname.startsWith('/cartelera') || // Cartelera pública de clases: se ve sin login; reservar pide login
             request.nextUrl.pathname.startsWith('/streaming') ||
             request.nextUrl.pathname.startsWith('/nueva-generacion') ||

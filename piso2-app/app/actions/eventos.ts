@@ -72,6 +72,12 @@ export async function getEventoAction(eventoId: string) {
     const { data: evento } = await admin.from('eventos').select('*').eq('id', eventoId).single()
     if (!evento) return { ok: false as const, error: 'Evento no encontrado' }
 
+    // Si pertenece a un ciclo, adjuntamos su nombre + slug (para el link público).
+    if (evento.ciclo_id) {
+        const { data: ciclo } = await admin.from('evento_ciclos').select('nombre, slug').eq('id', evento.ciclo_id).maybeSingle()
+        ;(evento as any).ciclo = ciclo || null
+    }
+
     const { data: entradas } = await admin.from('evento_entradas').select('*').eq('evento_id', eventoId).order('orden')
     const vendidas = await vendidasPorEntrada(admin, eventoId)
     const entradasConDisp = (entradas || []).map((e: any) => ({
@@ -98,7 +104,7 @@ export async function getEventoAction(eventoId: string) {
 
 // ---- Eventos ----------------------------------------------------------------
 
-export async function crearEventoAction(data: { nombre: string; descripcion?: string; fecha?: string | null; lugar?: string }) {
+export async function crearEventoAction(data: { nombre: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     if (!data.nombre?.trim()) return { ok: false as const, error: 'Poné un nombre al evento.' }
@@ -108,13 +114,14 @@ export async function crearEventoAction(data: { nombre: string; descripcion?: st
         descripcion: data.descripcion?.trim() || null,
         fecha: data.fecha || null,
         lugar: data.lugar?.trim() || null,
+        flyer_url: data.flyer_url?.trim() || null,
         created_by: perm.userId,
     }).select('id').single()
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const, id: ev.id }
 }
 
-export async function editarEventoAction(eventoId: string, patch: { nombre?: string; descripcion?: string; fecha?: string | null; lugar?: string }) {
+export async function editarEventoAction(eventoId: string, patch: { nombre?: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string | null }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
@@ -123,6 +130,7 @@ export async function editarEventoAction(eventoId: string, patch: { nombre?: str
     if (patch.descripcion !== undefined) upd.descripcion = patch.descripcion?.trim() || null
     if (patch.fecha !== undefined) upd.fecha = patch.fecha || null
     if (patch.lugar !== undefined) upd.lugar = patch.lugar?.trim() || null
+    if (patch.flyer_url !== undefined) upd.flyer_url = patch.flyer_url || null
     const { error } = await admin.from('eventos').update(upd).eq('id', eventoId)
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
@@ -390,7 +398,7 @@ export async function toggleVentaOnlineAction(eventoId: string, valor: boolean) 
 export async function getEventoPublicoAction(eventoId: string, promo?: string) {
     const admin = getAdminClient()
     const { data: evento } = await admin.from('eventos')
-        .select('id, nombre, descripcion, fecha, lugar, estado, venta_online').eq('id', eventoId).maybeSingle()
+        .select('id, nombre, descripcion, fecha, lugar, estado, venta_online, flyer_url').eq('id', eventoId).maybeSingle()
     if (!evento || !evento.venta_online || evento.estado !== 'activo') return null
 
     const { data: entradas } = await admin.from('evento_entradas').select('*').eq('evento_id', eventoId).eq('activo', true).order('orden')
@@ -405,7 +413,7 @@ export async function getEventoPublicoAction(eventoId: string, promo?: string) {
         }))
     return {
         id: evento.id, nombre: evento.nombre, descripcion: evento.descripcion,
-        fecha: evento.fecha, lugar: evento.lugar, entradas: entradasDisp,
+        fecha: evento.fecha, lugar: evento.lugar, flyer_url: evento.flyer_url, entradas: entradasDisp,
     }
 }
 
@@ -938,4 +946,96 @@ export async function descartarCarritoAction(ventaId: string) {
     const { error } = await admin.from('evento_ventas').delete().eq('id', ventaId)
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
+}
+
+// ---- Ciclos de varias fechas ------------------------------------------------
+// Un ciclo agrupa varias funciones (cada una es un evento hermano). El público
+// entra por /ciclo/[slug] y elige la fecha.
+
+function slugCiclo(nombre: string) {
+    const base = (nombre || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'ciclo'
+    return `${base}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+export async function getCiclosEventoAction() {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, ciclos: [] as any[] }
+    const admin = getAdminClient()
+    const { data } = await admin.from('evento_ciclos').select('id, nombre, slug, flyer_url, activo, created_at').order('created_at', { ascending: false })
+    return { ok: true as const, ciclos: (data || []) as any[] }
+}
+
+// Crea un ciclo. Si viene eventoId, ata esa función al ciclo recién creado.
+export async function crearCicloEventoAction(data: { nombre: string; descripcion?: string; flyer_url?: string; eventoId?: string }) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    if (!data.nombre?.trim()) return { ok: false as const, error: 'Poné un nombre al ciclo.' }
+    const admin = getAdminClient()
+    const slug = slugCiclo(data.nombre)
+    const { data: c, error } = await admin.from('evento_ciclos').insert({
+        nombre: data.nombre.trim(), descripcion: data.descripcion?.trim() || null,
+        flyer_url: data.flyer_url?.trim() || null, slug, created_by: perm.userId,
+    }).select('id, slug').single()
+    if (error || !c) return { ok: false as const, error: error?.message || 'No se pudo crear el ciclo.' }
+    if (data.eventoId) await admin.from('eventos').update({ ciclo_id: c.id }).eq('id', data.eventoId)
+    return { ok: true as const, id: c.id, slug: c.slug }
+}
+
+export async function asignarCicloAction(eventoId: string, cicloId: string | null) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('eventos').update({ ciclo_id: cicloId }).eq('id', eventoId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+// Duplica una función a otra fecha (mismo ciclo), clonando sus tipos de entrada.
+// La copia queda en borrador para revisarla antes de activarla.
+export async function duplicarEventoAction(eventoId: string, fecha: string | null) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { data: ev } = await admin.from('eventos').select('*').eq('id', eventoId).single()
+    if (!ev) return { ok: false as const, error: 'Función no encontrada.' }
+
+    const { data: nueva, error } = await admin.from('eventos').insert({
+        nombre: ev.nombre, descripcion: ev.descripcion, lugar: ev.lugar,
+        ciclo_id: ev.ciclo_id, flyer_url: ev.flyer_url, fecha: fecha || null,
+        estado: 'borrador', venta_online: ev.venta_online, created_by: perm.userId,
+    }).select('id').single()
+    if (error || !nueva) return { ok: false as const, error: error?.message || 'No se pudo duplicar.' }
+
+    const { data: entradas } = await admin.from('evento_entradas').select('nombre, precio, cupo, orden, oculta, codigo_promo, activo').eq('evento_id', eventoId)
+    if (entradas?.length) {
+        await admin.from('evento_entradas').insert(entradas.map((e: any) => ({ ...e, evento_id: nueva.id })))
+    }
+    return { ok: true as const, id: nueva.id }
+}
+
+// Público (por slug): el ciclo + sus fechas activas (para elegir cuál comprar).
+export async function getCicloPublicoAction(slug: string) {
+    const admin = getAdminClient()
+    const { data: c } = await admin.from('evento_ciclos')
+        .select('id, nombre, descripcion, flyer_url, activo, slug').eq('slug', slug).maybeSingle()
+    if (!c || !c.activo) return null
+
+    const { data: eventos } = await admin.from('eventos')
+        .select('id, fecha, lugar, venta_online')
+        .eq('ciclo_id', c.id).eq('estado', 'activo').eq('cancelado', false)
+        .order('fecha', { ascending: true, nullsFirst: false })
+
+    const fechas: any[] = []
+    for (const e of (eventos || []) as any[]) {
+        const { data: ents } = await admin.from('evento_entradas').select('id, cupo').eq('evento_id', e.id).eq('activo', true)
+        const vendidas = await vendidasPorEntrada(admin, e.id)
+        const cupo = (ents || []).reduce((a: number, x: any) => a + (x.cupo || 0), 0)
+        const vend = (ents || []).reduce((a: number, x: any) => a + (vendidas[x.id] || 0), 0)
+        fechas.push({
+            id: e.id, fecha: e.fecha, lugar: e.lugar,
+            comprable: !!e.venta_online, agotado: cupo > 0 && vend >= cupo,
+        })
+    }
+    return { nombre: c.nombre, descripcion: c.descripcion, flyer_url: c.flyer_url, slug: c.slug, fechas }
 }

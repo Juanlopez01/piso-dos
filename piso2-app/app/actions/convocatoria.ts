@@ -31,6 +31,9 @@ export async function crearPropuestaObraAction(payload: {
 }) {
     if (!payload.titulo?.trim()) return { ok: false as const, error: 'Poné el nombre de la obra.' }
     if (!payload.email?.includes('@') && !payload.telefono?.trim()) return { ok: false as const, error: 'Dejanos un email o teléfono de contacto.' }
+    // Obligatorios: al menos 1 foto (flyer) y 1 video.
+    if (!(payload.imagenes || []).filter(Boolean).length) return { ok: false as const, error: 'Subí al menos una foto de la obra (flyer).' }
+    if (!(payload.videos || []).filter(Boolean).length) return { ok: false as const, error: 'Dejá al menos un link de video.' }
     const admin = getAdminClient()
 
     // Si viene atada a un ciclo, validamos que exista y esté abierto.
@@ -177,6 +180,7 @@ export async function curarPropuestaAction(id: string, decision: 'aceptada' | 'r
             .filter(Boolean).join('\n')
         const { data: ev } = await admin.from('eventos').insert({
             nombre: p.titulo, descripcion: desc || null, estado: 'borrador', created_by: perm.userId,
+            flyer_url: (p.imagenes || [])[0] || null, // primera foto de la obra = flyer del evento
         }).select('id').single()
         if (ev?.id) patch.evento_id = ev.id
     }
@@ -184,6 +188,65 @@ export async function curarPropuestaAction(id: string, decision: 'aceptada' | 'r
     const { error } = await admin.from('obra_propuestas').update(patch).eq('id', id)
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const, eventoId: patch.evento_id || p.evento_id || null }
+}
+
+// ---- Varias obras en un evento ----
+// Un evento (función) puede juntar más de una obra aprobada (un programa).
+// Las obras se vinculan por obra_propuestas.evento_id.
+
+export async function getObrasDeEventoAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, obras: [] as any[] }
+    const admin = getAdminClient()
+    const { data } = await admin.from('obra_propuestas')
+        .select('id, titulo, director, compania, duracion_min, imagenes')
+        .eq('evento_id', eventoId).eq('estado', 'aceptada').order('created_at')
+    return { ok: true as const, obras: (data || []) as any[] }
+}
+
+// Obras aceptadas que se pueden sumar (no están ya en este evento).
+export async function getObrasAceptadasDisponiblesAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, obras: [] as any[] }
+    const admin = getAdminClient()
+    const { data } = await admin.from('obra_propuestas')
+        .select('id, titulo, compania, evento_id')
+        .eq('estado', 'aceptada').order('created_at', { ascending: false })
+    const obras = (data || []).filter((o: any) => o.evento_id !== eventoId)
+    return { ok: true as const, obras }
+}
+
+export async function vincularObraAEventoAction(propuestaId: string, eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    // Si la obra tenía su propio evento auto-creado y quedó vacío (sin entradas ni
+    // ventas, en borrador), lo limpiamos para no dejar funciones huérfanas.
+    const { data: obra } = await admin.from('obra_propuestas').select('evento_id').eq('id', propuestaId).maybeSingle()
+    const anterior = obra?.evento_id
+    const { error } = await admin.from('obra_propuestas').update({ evento_id: eventoId }).eq('id', propuestaId)
+    if (error) return { ok: false as const, error: error.message }
+    if (anterior && anterior !== eventoId) {
+        const [{ count: ents }, { count: vts }, { data: evPrev }] = await Promise.all([
+            admin.from('evento_entradas').select('id', { count: 'exact', head: true }).eq('evento_id', anterior),
+            admin.from('evento_ventas').select('id', { count: 'exact', head: true }).eq('evento_id', anterior),
+            admin.from('eventos').select('estado, ciclo_id').eq('id', anterior).maybeSingle(),
+        ])
+        const { count: otras } = await admin.from('obra_propuestas').select('id', { count: 'exact', head: true }).eq('evento_id', anterior)
+        if ((ents || 0) === 0 && (vts || 0) === 0 && (otras || 0) === 0 && evPrev?.estado === 'borrador' && !evPrev?.ciclo_id) {
+            await admin.from('eventos').delete().eq('id', anterior)
+        }
+    }
+    return { ok: true as const }
+}
+
+export async function desvincularObraAction(propuestaId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('obra_propuestas').update({ evento_id: null }).eq('id', propuestaId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
 }
 
 export async function eliminarPropuestaAction(id: string) {
