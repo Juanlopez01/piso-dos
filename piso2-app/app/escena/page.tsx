@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Triangle, X, Menu, ArrowUpRight, UserIcon } from 'lucide-react'
+import { Triangle, X, Menu, ArrowUpRight, UserIcon, Ticket, CalendarDays, MapPin, ArrowRight } from 'lucide-react'
 import { Montserrat } from 'next/font/google'
 import { createClient } from '@/utils/supabase/client'
+import { getCarteleraEscenaAction } from '@/app/actions/eventos'
 
 const montserrat = Montserrat({
     subsets: ['latin'],
@@ -17,6 +18,10 @@ export default function EscenaPage() {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
     const [lightboxImg, setLightboxImg] = useState<string | null>(null)
     const [loggedUser, setLoggedUser] = useState<any>(null)
+    const [cartelera, setCartelera] = useState<any[] | null>(null)
+
+    useEffect(() => { getCarteleraEscenaAction().then(r => setCartelera(r.cards)).catch(() => setCartelera([])) }, [])
+    const fmtFechaC = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: 'long' }) : 'Fecha a confirmar'
 
     useEffect(() => {
         const fetchUser = async () => {
@@ -114,6 +119,46 @@ export default function EscenaPage() {
                         </p>
                     </div>
                 </div>
+            </section>
+
+            {/* --- CARTELERA (obras/funciones a la venta) --- */}
+            <section id="cartelera" className="max-w-7xl mx-auto px-6 py-20 border-t border-white/5">
+                <div className="flex items-center gap-2 mb-2"><Ticket className="text-[#D4E655]" size={16} /><span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">Cartelera</span></div>
+                <h2 className="text-4xl md:text-6xl font-black uppercase tracking-tighter mb-10 leading-none">En <span className="text-[#D4E655]">cartelera</span></h2>
+
+                {cartelera === null ? (
+                    <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-[#D4E655]/40 border-t-[#D4E655] rounded-full animate-spin" /></div>
+                ) : cartelera.length === 0 ? (
+                    <div className="rounded-3xl border border-dashed border-white/15 bg-[#09090b]/60 py-20 text-center">
+                        <Ticket className="mx-auto text-gray-600 mb-4" size={40} />
+                        <p className="text-2xl md:text-3xl font-black uppercase tracking-tighter text-gray-400">Próximamente</p>
+                        <p className="text-gray-500 text-sm mt-2">Muy pronto vas a poder ver y comprar las funciones acá.</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                        {cartelera.map((c, i) => {
+                            const Card = (
+                                <div className="group bg-[#09090b] border border-white/10 hover:border-[#D4E655]/40 rounded-2xl overflow-hidden transition-all h-full flex flex-col">
+                                    <div className="relative aspect-[3/4] bg-zinc-900 overflow-hidden">
+                                        {c.flyer
+                                            ? <img src={c.flyer} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                                            : <div className="w-full h-full flex items-center justify-center text-gray-700"><Triangle size={60} strokeWidth={1.5} /></div>}
+                                        {!c.comprable && <span className="absolute top-3 left-3 bg-black/70 text-[#D4E655] text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full">Próximamente</span>}
+                                    </div>
+                                    <div className="p-5 flex flex-col flex-1">
+                                        <h3 className="font-black uppercase tracking-tight text-lg leading-tight">{c.titulo}</h3>
+                                        <p className="text-[11px] text-gray-500 mt-2 flex items-center gap-1.5 capitalize"><CalendarDays size={13} /> {fmtFechaC(c.fecha)}</p>
+                                        {c.lugar && <p className="text-[11px] text-gray-500 mt-1 flex items-center gap-1.5"><MapPin size={13} /> {c.lugar}</p>}
+                                        {c.comprable && <span className="mt-4 inline-flex items-center justify-center gap-2 bg-[#D4E655] text-black font-black uppercase px-4 py-2.5 text-[11px] tracking-[0.15em] rounded-lg group-hover:bg-white transition-colors">Comprar <ArrowRight size={14} /></span>}
+                                    </div>
+                                </div>
+                            )
+                            return c.href
+                                ? <Link key={i} href={c.href} className="block h-full">{Card}</Link>
+                                : <div key={i} className="h-full">{Card}</div>
+                        })}
+                    </div>
+                )}
             </section>
 
             {/* --- INFO ESCÉNICO & INMERSIVO --- */}

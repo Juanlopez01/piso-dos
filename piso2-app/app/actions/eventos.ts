@@ -1186,3 +1186,43 @@ export async function registrarVentaPuertaAction(payload: { eventoId: string; to
     if (tickets.length) await admin.from('evento_tickets').insert(tickets)
     return { ok: true as const, id: venta.id, token: tk, total: totalFinal }
 }
+
+// ---- Cartelera pública de Escena (obras/funciones a la venta) ---------------
+// Muestra los eventos activos (agrupando los ciclos en una sola tarjeta).
+// Sin login. Si no hay nada, el front muestra "Próximamente".
+export async function getCarteleraEscenaAction() {
+    const admin = getAdminClient()
+    const { data: eventos } = await admin.from('eventos')
+        .select('id, nombre, fecha, lugar, flyer_url, venta_online, ciclo_id')
+        .eq('estado', 'activo').eq('cancelado', false)
+        .order('fecha', { ascending: true, nullsFirst: false })
+
+    const cicloIds = [...new Set((eventos || []).map((e: any) => e.ciclo_id).filter(Boolean))]
+    const ciclos: Record<string, any> = {}
+    if (cicloIds.length) {
+        const { data } = await admin.from('evento_ciclos').select('id, nombre, slug, flyer_url, activo').in('id', cicloIds)
+        for (const c of (data || []) as any[]) ciclos[c.id] = c
+    }
+
+    const cards: any[] = []
+    const ciclosVistos = new Set<string>()
+    for (const e of (eventos || []) as any[]) {
+        if (e.ciclo_id && ciclos[e.ciclo_id]?.activo) {
+            if (ciclosVistos.has(e.ciclo_id)) continue // el ciclo se muestra una sola vez
+            ciclosVistos.add(e.ciclo_id)
+            const c = ciclos[e.ciclo_id]
+            cards.push({
+                tipo: 'ciclo', titulo: c.nombre, fecha: e.fecha, lugar: e.lugar,
+                flyer: c.flyer_url || e.flyer_url || null,
+                href: `/ciclo/${c.slug}`, comprable: true,
+            })
+        } else {
+            cards.push({
+                tipo: 'evento', titulo: e.nombre, fecha: e.fecha, lugar: e.lugar,
+                flyer: e.flyer_url || null,
+                href: e.venta_online ? `/evento/${e.id}` : null, comprable: !!e.venta_online,
+            })
+        }
+    }
+    return { cards }
+}

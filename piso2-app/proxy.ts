@@ -55,6 +55,7 @@ export async function proxy(request: NextRequest) {
             request.nextUrl.pathname.startsWith('/puerta/') || // Puerta: personal externo lee QR + carga ventas por token (sin login)
             request.nextUrl.pathname.startsWith('/cartelera') || // Cartelera pública de clases: se ve sin login; reservar pide login
             request.nextUrl.pathname.startsWith('/streaming') ||
+            request.nextUrl.pathname.startsWith('/escena') || // Landing 2E + cartelera pública de obras
             request.nextUrl.pathname.startsWith('/nueva-generacion') ||
             request.nextUrl.pathname.startsWith('/instalar') // 🚀 EL PASE VIP PARA MERCADO PAGO
 

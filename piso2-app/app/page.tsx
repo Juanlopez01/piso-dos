@@ -3,8 +3,9 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { ArrowUpRight, Triangle, Play, ArrowRight, Menu, X, MapPin, Instagram, Mail, InstagramIcon, Loader2, User as UserIcon, MonitorSmartphone, Music } from 'lucide-react'
+import { ArrowUpRight, Triangle, Play, ArrowRight, Menu, X, MapPin, Instagram, Mail, InstagramIcon, Loader2, User as UserIcon, MonitorSmartphone, Music, Ticket, CalendarDays } from 'lucide-react'
 import { Montserrat } from 'next/font/google'
+import { getCarteleraEscenaAction } from '@/app/actions/eventos'
 
 const montserrat = Montserrat({
   subsets: ['latin'],
@@ -15,6 +16,9 @@ export default function LandingPage() {
   const [activeSection, setActiveSection] = useState<'2m' | '2e' | '2s'>('2m')
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [loggedUser, setLoggedUser] = useState<any>(null)
+  const [cartelera, setCartelera] = useState<any[] | null>(null)
+
+  useEffect(() => { getCarteleraEscenaAction().then(r => setCartelera(r.cards)).catch(() => setCartelera([])) }, [])
 
   // NUEVO: Efecto para buscar si hay sesión activa
   useEffect(() => {
@@ -92,6 +96,7 @@ export default function LandingPage() {
             <button onClick={() => window.scrollTo(0, 0)} className="hover:text-white transition-colors">INICIO</button>
             <button onClick={() => scrollTo('ecosistema')} className="hover:text-white transition-colors">ECOSISTEMA</button>
             <Link href="/cartelera" className="text-[#D4E655] hover:text-white transition-colors">Clases</Link>
+            <Link href="/escena#cartelera" className="text-[#D4E655] hover:text-white transition-colors">Escena</Link>
             <Link href="/talent" className="hover:text-white transition-colors">Talents</Link>
             <Link href="/alquiler" className="hover:text-white transition-colors">Salas</Link>
             <Link href="/nueva-generacion" className="text-[#D4E655] hover:text-white transition-colors">NUEVA GEN</Link>
@@ -118,6 +123,7 @@ export default function LandingPage() {
         <button onClick={() => { window.scrollTo(0, 0); setIsMobileMenuOpen(false) }} className="text-2xl font-black text-white uppercase tracking-widest hover:text-[#D4E655]">INICIO</button>
         <button onClick={() => scrollTo('ecosistema')} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">ECOSISTEMA</button>
         <Link href="/cartelera" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Clases</Link>
+        <Link href="/escena#cartelera" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Escena</Link>
         <Link href="/talent" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Talents</Link>
         <Link href="/alquiler" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-gray-500 uppercase tracking-widest hover:text-[#D4E655]">Salas</Link>
         <Link href="/nueva-generacion" onClick={() => setIsMobileMenuOpen(false)} className="text-2xl font-black text-[#D4E655] uppercase tracking-widest hover:text-white">Nueva Generación</Link>
@@ -200,8 +206,10 @@ export default function LandingPage() {
             </div>
             <div className="p-10 md:p-16 flex flex-col justify-center">
               <h2 className="text-4xl md:text-7xl font-black uppercase tracking-tighter mb-6 leading-[0.9]">Sala de <br /><span className="text-[#D4E655]">Teatro.</span></h2>
-              <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed mb-8 font-medium">Un espacio íntimo y técnicamente equipado para puestas en escena, ensayos y muestras.</p>
-              <div><a href='/escena'><button className="inline-flex items-center gap-3 border border-white/20 hover:border-[#D4E655] text-white font-bold uppercase px-8 py-4 text-xs tracking-[0.2em] transition-colors">MÁS INFO</button></a>
+              <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed mb-8 font-medium">Un espacio íntimo y técnicamente equipado para puestas en escena, ensayos y muestras. Mirá las obras en cartelera y comprá tu entrada.</p>
+              <div className="flex flex-wrap gap-3">
+                <Link href="/escena#cartelera" className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 hover:bg-white transition-all text-xs tracking-[0.2em]">VER CARTELERA <ArrowRight size={16} /></Link>
+                <Link href="/escena" className="inline-flex items-center gap-3 border border-white/20 hover:border-[#D4E655] text-white font-bold uppercase px-8 py-4 text-xs tracking-[0.2em] transition-colors">MÁS INFO</Link>
               </div></div>
           </div>
 
@@ -301,6 +309,50 @@ export default function LandingPage() {
 
           </div>
 
+        </div>
+      </section>
+
+      {/* --- BANDA: CARTELERA ESCENA / OBRAS (2E) --- */}
+      <section className="py-20 px-6 border-t border-white/5 relative overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] bg-[#D4E655]/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="max-w-5xl mx-auto relative z-10">
+          <div className="flex items-center gap-2 mb-6">
+            <Ticket className="text-[#D4E655]" size={14} />
+            <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">2E · Escena — En cartelera</span>
+          </div>
+
+          {cartelera === null ? (
+            <div className="flex justify-center py-10"><Loader2 className="animate-spin text-[#D4E655]" /></div>
+          ) : cartelera.length === 0 ? (
+            <Link href="/escena" className="group block bg-[#09090b]/60 backdrop-blur-md border border-dashed border-white/15 hover:border-[#D4E655]/40 rounded-3xl p-10 md:p-14 text-center transition-all">
+              <Ticket className="mx-auto text-gray-600 mb-4" size={36} />
+              <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tighter text-gray-400">Próximamente</h2>
+              <p className="text-gray-500 text-sm mt-3">Muy pronto vas a poder comprar entradas para nuestras funciones.</p>
+            </Link>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {cartelera.slice(0, 4).map((c, i) => {
+                  const Inner = (
+                    <div className="group bg-[#09090b] border border-white/10 hover:border-[#D4E655]/40 rounded-2xl overflow-hidden transition-all h-full flex flex-col">
+                      <div className="relative aspect-[3/4] bg-zinc-900 overflow-hidden">
+                        {c.flyer ? <img src={c.flyer} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" /> : <div className="w-full h-full flex items-center justify-center text-gray-700"><Triangle size={48} strokeWidth={1.5} /></div>}
+                        {!c.comprable && <span className="absolute top-2 left-2 bg-black/70 text-[#D4E655] text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Próximamente</span>}
+                      </div>
+                      <div className="p-3">
+                        <h3 className="font-black uppercase tracking-tight text-sm leading-tight line-clamp-2">{c.titulo}</h3>
+                        {c.fecha && <p className="text-[10px] text-gray-500 mt-1.5 flex items-center gap-1 capitalize"><CalendarDays size={11} /> {new Date(c.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })}</p>}
+                      </div>
+                    </div>
+                  )
+                  return c.href ? <Link key={i} href={c.href} className="block h-full">{Inner}</Link> : <div key={i} className="h-full">{Inner}</div>
+                })}
+              </div>
+              <div className="mt-8 text-center">
+                <Link href="/escena#cartelera" className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl hover:bg-white transition-colors">Ver toda la cartelera <ArrowRight size={16} /></Link>
+              </div>
+            </>
+          )}
         </div>
       </section>
 
