@@ -193,6 +193,52 @@ export async function formaciones(): Promise<string> {
     return `🎓 *Formaciones disponibles*\n${items.join('\n')}\n\n_Para info de inscripción, fechas de inicio y requisitos, decime "quiero hablar con una persona" y te contacta el equipo._`
 }
 
+// Compañías / Grupos: elencos que entrenan y producen juntos. Damos el rango de
+// cuota mensual (de la BDD) y ofrecemos coordinar el ingreso con el equipo.
+export async function grupos(): Promise<string> {
+    const admin = getAdminClient()
+    const [{ data: comps }, { data: planes }] = await Promise.all([
+        admin.from('companias').select('precio_cuota'),
+        admin.from('companias_planes').select('precio_transf, precio_efvo'),
+    ])
+    const precios: number[] = [
+        ...(comps || []).map((c: any) => Number(c.precio_cuota)).filter((n: number) => n > 0),
+        ...(planes || []).map((p: any) => Number(p.precio_transf)).filter((n: number) => n > 0),
+        ...(planes || []).map((p: any) => Number(p.precio_efvo)).filter((n: number) => n > 0),
+    ]
+    let precioTxt = ''
+    if (precios.length) {
+        const mn = Math.min(...precios), mx = Math.max(...precios)
+        precioTxt = mn === mx ? ` La cuota mensual es de ${pesos(mn)}.` : ` La cuota mensual va de ${pesos(mn)} a ${pesos(mx)} según el grupo y el plan.`
+    }
+    return `👥 Las *Compañías / Grupos* son elencos que entrenan y producen juntos durante el año.${precioTxt} El ingreso se coordina con el equipo según tu nivel y el grupo. ¿Querés que te contacte una persona para sumarte?`
+}
+
+// La Liga: programa de formación por niveles. Damos la cuota mensual vigente (BDD).
+export async function laLiga(): Promise<string> {
+    const admin = getAdminClient()
+    const { data } = await admin.from('liga_cuotas')
+        .select('anio, mes, nivel, precio_transf, precio_efvo')
+        .order('anio', { ascending: false }).order('mes', { ascending: false }).limit(12)
+    const rows = (data || []) as any[]
+    let precioTxt = ''
+    if (rows.length) {
+        const top = rows[0]
+        const ult = rows.filter(r => r.anio === top.anio && r.mes === top.mes)
+        const tr = ult.map(r => Number(r.precio_transf)).filter(n => n > 0)
+        const ef = ult.map(r => Number(r.precio_efvo)).filter(n => n > 0)
+        const rango = (a: number[]) => { const mn = Math.min(...a), mx = Math.max(...a); return mn === mx ? pesos(mn) : `${pesos(mn)}–${pesos(mx)}` }
+        if (tr.length && ef.length) precioTxt = ` La cuota mensual es ${rango(tr)} por transferencia / ${rango(ef)} en efectivo (según nivel).`
+        else if (tr.length) precioTxt = ` La cuota mensual es ${rango(tr)}.`
+    }
+    return `🏆 *La Liga* es nuestro programa de formación: entrenás y rendís por niveles a lo largo del año.${precioTxt} Para el ingreso, los niveles y cuándo arranca, te contacto con el equipo. ¿Te paso con una persona?`
+}
+
+// "Programa" a secas (ambiguo): ofrecemos las dos opciones.
+export async function programaAmbiguo(): Promise<string> {
+    return `Cuando hablamos de "programa" puede ser dos cosas:\n\n👥 *Compañías / Grupos*: elencos que entrenan y producen juntos.\n🏆 *La Liga*: nuestro programa de formación por niveles.\n\n¿Sobre cuál querés que te cuente?`
+}
+
 // Precios de packs / productos activos y visibles, filtrable por texto.
 export async function preciosPacks(opts: { q?: string } = {}): Promise<string> {
     const admin = getAdminClient()
@@ -384,16 +430,19 @@ async function textoRuteado(pregunta: string): Promise<string | null> {
         return base
     }
 
+    // "Programa": Compañías/Grupos o la Formación de La Liga (lee la BDD).
+    // Va ANTES de precios/formaciones para que "la liga"/"grupos" no caiga en
+    // packs de clases ni en cursos.
+    if (/(programa|compañ|compania|companias|\bgrupos?\b|la liga|\bliga\b)/.test(q)) {
+        if (/\bliga\b/.test(q)) return laLiga()
+        if (/(compañ|compania|companias|\bgrupos?\b)/.test(q)) return grupos()
+        return programaAmbiguo() // "programa" a secas → ofrecer las dos
+    }
+
     // Precios (gana sobre "clase": "cuánto sale una clase" → precios)
     const esPrecio = /(precio|cuesta|cuanto (sale|vale|cuesta|es|sal)|cuanto\s|valor|abono|cuota|pack|salen?|tarifa de clase|arancel)/.test(q)
     if (esPrecio) {
         return preciosPacks({ q })
-    }
-
-    // "Programa" (ambiguo): Compañías/Grupos o la Formación de La Liga.
-    // Va ANTES de formaciones para que "la liga"/"programa" no caiga en cursos.
-    if (/(programa|compañ|compania|companias|\bgrupos?\b|la liga|\bliga\b)/.test(q)) {
-        return `Cuando hablamos de "programa" puede ser dos cosas: nuestras *Compañías/Grupos* (elencos que entrenan y producen juntos) o la *Formación de La Liga* (nuestro programa de formación). ¿Sobre cuál querés info? Si te querés sumar, te paso con el equipo para darte todos los detalles.`
     }
 
     // Formaciones (cursos)
@@ -451,6 +500,8 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 const IA_TOOLS = [
     { type: 'function', function: { name: 'clases', description: 'Horarios de clases (Regular/Especial) por día, ritmo o profesor. Usar para "qué clases hay", horarios, profes, "qué días da clase X", cartelera.', parameters: { type: 'object', properties: { dia: { type: 'string', description: 'Completar SOLO si el usuario menciona un día concreto ("hoy", "manana", "sabado", "30/08"). Si el usuario NO menciona un día (ej "clases de jazz", "qué días da clase Nico", "cuándo hay reggaeton"), dejar VACÍO o poner "semana" para ver toda la agenda de la semana. Nunca asumas "hoy".' }, filtro: { type: 'string', description: 'Opcional: estilo/ritmo (ej "jazz", "heels", "ballet") o nombre del profe (ej "Nico Chávez"). Poné el estilo O el nombre del profe, no toda la frase.' } } } } },
     { type: 'function', function: { name: 'formaciones', description: 'Lista las formaciones/cursos disponibles.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'grupos', description: 'Info de las Compañías/Grupos (elencos que entrenan y producen juntos): cuota mensual. Usar para "grupos", "compañías", o "el programa" cuando se refiere a los grupos. NO es lo mismo que formaciones/cursos.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'la_liga', description: 'Info de La Liga: programa de formación por niveles, con su cuota mensual vigente. Usar para "La Liga" o "la formación de la liga".', parameters: { type: 'object', properties: {} } } },
     { type: 'function', function: { name: 'precios', description: 'Precios de clases sueltas y packs. Usar para "cuánto sale/vale", valores, abonos, packs.', parameters: { type: 'object', properties: { termino: { type: 'string', description: 'Opcional: filtro como "suelta", "x4", "ballroom".' } } } } },
     { type: 'function', function: { name: 'alquiler_tarifas', description: 'Tarifas de alquiler de salas (por hora: mañana/noche/finde).', parameters: { type: 'object', properties: { sala: { type: 'string', description: 'Opcional: nombre de sala (ej "sala 1", "blanca", "negra").' } } } } },
     { type: 'function', function: { name: 'alquiler_disponibilidad', description: 'Horarios LIBRES de una sala en un día puntual, con su tarifa. Requiere la sala; el día por defecto es hoy.', parameters: { type: 'object', properties: { sala: { type: 'string', description: 'Nombre de sala (ej "sala 1", "blanca").' }, dia: { type: 'string', description: '"hoy", "manana", día de la semana o fecha "30/08".' } }, required: ['sala'] } } },
@@ -479,6 +530,8 @@ async function ejecutarToolIA(name: string, args: any): Promise<string> {
             return await clasesAgenda({ cuando: 'hoy' })
         }
         if (name === 'formaciones') return await formaciones()
+        if (name === 'grupos') return await grupos()
+        if (name === 'la_liga') return await laLiga()
         if (name === 'precios') return await preciosPacks({ q: norm(args?.termino || '') })
         if (name === 'alquiler_tarifas') return await tarifasAlquiler({ salaTexto: args?.sala || undefined })
         if (name === 'alquiler_disponibilidad') {
@@ -512,7 +565,7 @@ CUÁNDO DERIVÁS (usá "derivar_a_recepcion" — la persona no lo va a pedir, de
 - FUERA DE LOS DATOS: si preguntan algo puntual que las herramientas NO cubren (edades/niños, niveles, si es apto principiantes, requisitos, lesiones, convenios, eventos, prensa), NO lo afirmes ni lo niegues (no inventes): derivá para que el equipo confirme.
 - Cualquier cosa que no puedas responder con certeza. Ante la duda entre responder o derivar, DERIVÁ.
 
-"PROGRAMA" (¡ojo, es ambiguo!): cuando alguien pregunta por "el programa", "los grupos", "las compañías" o "la liga / la formación de La Liga", NO se refiere a las "formaciones/cursos" comunes. Puede ser dos cosas: (a) nuestras Compañías/Grupos (elencos que entrenan y producen juntos), o (b) la Formación de La Liga (nuestro programa de formación). No tenés herramienta con esos datos: explicá brevemente las dos opciones, preguntá a cuál se refiere, y para inscribirse o dar detalles concretos derivá al equipo con "derivar_a_recepcion". Nunca respondas a "programa/grupos/compañías/liga" con la info de cursos.
+"PROGRAMA" (¡ojo, es ambiguo!): cuando alguien pregunta por "el programa", "los grupos", "las compañías" o "la liga / la formación de La Liga", NO se refiere a las "formaciones/cursos" comunes ni a los "precios" de clases. Puede ser: (a) las Compañías/Grupos → usá la herramienta "grupos"; o (b) La Liga (formación por niveles) → usá "la_liga". Si dice "programa" a secas y no queda claro, preguntá a cuál se refiere. El ingreso a grupos/La Liga lo coordina el equipo: después de dar la info, si se quiere sumar, derivá con "derivar_a_recepcion". Nunca respondas a "programa/grupos/compañías/liga" con la info de cursos ni con los packs de clases.
 
 Para dudas de SOLO información (qué clases hay, precios, horarios libres, direcciones, formaciones) respondé vos directo, sin derivar.
 
