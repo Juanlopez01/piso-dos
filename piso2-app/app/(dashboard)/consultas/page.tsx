@@ -1,12 +1,21 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X } from 'lucide-react'
+import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
     getConsultasAction, responderConsultaAction, marcarResueltaAction,
     getAsistenteStatsAction, getContactosAction, getConversacionContactoAction,
 } from '@/app/actions/consultas'
+
+// Estilo por canal (para separar visualmente IG / WhatsApp con el mismo formato).
+type CanalId = 'instagram' | 'whatsapp'
+const canalInfo = (c: string | null) => {
+    if (c === 'whatsapp') return { label: 'WhatsApp', Icon: MessageCircle, color: 'text-emerald-400', bg: 'bg-emerald-500/15', chip: 'bg-emerald-500/15 text-emerald-400' }
+    if (c === 'instagram') return { label: 'Instagram', Icon: Instagram, color: 'text-pink-400', bg: 'bg-pink-500/15', chip: 'bg-pink-500/15 text-pink-400' }
+    return { label: c || '—', Icon: MessageCircle, color: 'text-gray-400', bg: 'bg-white/5', chip: 'bg-white/10 text-gray-400' }
+}
+const norm = (s: string) => (s || '').toLowerCase()
 
 type Msg = { de: 'usuario' | 'recep' | 'bot'; texto: string; created_at: string }
 type Consulta = {
@@ -29,6 +38,10 @@ type Tab = 'resumen' | 'bandeja' | 'contactos'
 export default function ConsultasPage() {
     const [tab, setTab] = useState<Tab>('bandeja')
 
+    // Filtros compartidos (canal + búsqueda)
+    const [canal, setCanal] = useState<'todos' | CanalId>('todos')
+    const [busqueda, setBusqueda] = useState('')
+
     // Bandeja
     const [consultas, setConsultas] = useState<Consulta[]>([])
     const [loading, setLoading] = useState(true)
@@ -49,6 +62,29 @@ export default function ConsultasPage() {
     const [loadingConv, setLoadingConv] = useState(false)
 
     const pendientesCount = consultas.filter(c => c.estado === 'pendiente').length
+
+    // Conteo por canal + filtrado (canal + texto), compartido bandeja/contactos.
+    const contarPorCanal = (arr: { canal: string }[]) => ({
+        todos: arr.length,
+        instagram: arr.filter(x => x.canal === 'instagram').length,
+        whatsapp: arr.filter(x => x.canal === 'whatsapp').length,
+    })
+    const consultasFiltradas = consultas.filter(c => {
+        if (canal !== 'todos' && c.canal !== canal) return false
+        if (busqueda.trim()) {
+            const q = norm(busqueda)
+            return norm(c.contacto_nombre || '').includes(q) || norm(c.contacto_usuario || '').includes(q) || norm(c.consulta || '').includes(q)
+        }
+        return true
+    })
+    const contactosFiltrados = contactos.filter(c => {
+        if (canal !== 'todos' && c.canal !== canal) return false
+        if (busqueda.trim()) {
+            const q = norm(busqueda)
+            return norm(c.nombre || '').includes(q) || norm(c.usuario || '').includes(q) || norm(c.ultimo || '').includes(q)
+        }
+        return true
+    })
 
     const cargar = async () => {
         setLoading(true)
@@ -205,39 +241,45 @@ export default function ConsultasPage() {
             {/* ================= BANDEJA ================= */}
             {tab === 'bandeja' && (
                 <>
-                    <div className="flex justify-end gap-2 mb-4 max-w-2xl mx-auto">
-                        <button onClick={() => setSoloPend(v => !v)} className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide border transition-colors ${soloPend ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-300 border-white/10'}`}>
-                            {soloPend ? 'Pendientes' : 'Todas'}
-                        </button>
-                        <button onClick={cargar} className="px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white"><RefreshCw size={16} /></button>
+                    <div className="max-w-2xl mx-auto mb-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                            <Buscador value={busqueda} onChange={setBusqueda} placeholder="Buscar por nombre, usuario o texto…" />
+                            <button onClick={() => setSoloPend(v => !v)} className={`shrink-0 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide border transition-colors ${soloPend ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-300 border-white/10'}`}>
+                                {soloPend ? 'Pendientes' : 'Todas'}
+                            </button>
+                            <button onClick={cargar} className="shrink-0 px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white"><RefreshCw size={16} /></button>
+                        </div>
+                        <CanalFiltro value={canal} onChange={setCanal} counts={contarPorCanal(consultas)} />
                     </div>
 
                     {loading ? (
                         <div className="min-h-[40vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
-                    ) : consultas.length === 0 ? (
+                    ) : consultasFiltradas.length === 0 ? (
                         <div className="min-h-[40vh] flex flex-col items-center justify-center text-center text-gray-500 gap-2">
                             <Inbox size={34} className="opacity-40" />
-                            <p className="text-sm font-medium">{soloPend ? 'No hay consultas pendientes. 🎉' : 'Todavía no hay consultas.'}</p>
+                            <p className="text-sm font-medium">{busqueda || canal !== 'todos' ? 'Nada coincide con el filtro.' : soloPend ? 'No hay consultas pendientes. 🎉' : 'Todavía no hay consultas.'}</p>
                         </div>
                     ) : (
                         <div className="max-w-2xl mx-auto space-y-3">
-                            {consultas.map(c => {
+                            {consultasFiltradas.map(c => {
                                 const isOpen = abierta === c.id
                                 const nombre = c.contacto_nombre || c.contacto_usuario || 'Contacto'
+                                const ci = canalInfo(c.canal)
                                 return (
                                     <div key={c.id} className={`bg-[#09090b] border rounded-2xl overflow-hidden transition-colors ${isOpen ? 'border-[#D4E655]/40' : 'border-white/10'}`}>
                                         <button onClick={() => { setAbierta(isOpen ? null : c.id); setRespuesta('') }} className="w-full text-left p-4 flex items-start gap-3">
-                                            <div className="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center shrink-0 text-[#D4E655]">
-                                                {c.canal === 'instagram' ? <Instagram size={17} /> : <MessageCircle size={17} />}
+                                            <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${ci.bg} ${ci.color}`}>
+                                                <ci.Icon size={17} />
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 flex-wrap">
                                                     <p className="font-bold text-sm truncate">{nombre}</p>
-                                                    {c.contacto_usuario && <span className="text-[11px] text-gray-500 truncate">@{c.contacto_usuario.replace(/^@/, '')}</span>}
+                                                    <span className={`text-[8px] px-1.5 py-0.5 rounded-full uppercase font-bold ${ci.chip}`}>{ci.label}</span>
                                                     {c.estado === 'resuelta' && <span className="text-[9px] bg-green-500/15 text-green-400 px-2 py-0.5 rounded-full uppercase font-bold">Resuelta</span>}
                                                 </div>
+                                                {c.contacto_usuario && <p className="text-[11px] text-gray-500 truncate">{c.canal === 'whatsapp' ? c.contacto_usuario : '@' + c.contacto_usuario.replace(/^@/, '')}</p>}
                                                 <p className="text-gray-400 text-sm mt-0.5 line-clamp-2">{c.consulta}</p>
-                                                <p className="text-[10px] text-gray-600 mt-1 uppercase tracking-wide">{c.canal} · {hora(c.created_at)}</p>
+                                                <p className="text-[10px] text-gray-600 mt-1 uppercase tracking-wide">{hora(c.created_at)}</p>
                                             </div>
                                         </button>
 
@@ -284,31 +326,40 @@ export default function ConsultasPage() {
             {/* ================= CONTACTOS ================= */}
             {tab === 'contactos' && (
                 <div className="max-w-2xl mx-auto">
-                    <div className="flex justify-end mb-4">
-                        <button onClick={cargarContactos} className="px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white"><RefreshCw size={16} /></button>
+                    <div className="mb-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                            <Buscador value={busqueda} onChange={setBusqueda} placeholder="Buscar contacto por nombre, usuario o mensaje…" />
+                            <button onClick={cargarContactos} className="shrink-0 px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white"><RefreshCw size={16} /></button>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                            <CanalFiltro value={canal} onChange={setCanal} counts={contarPorCanal(contactos)} />
+                            <span className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">{contactosFiltrados.length} contacto{contactosFiltrados.length === 1 ? '' : 's'}</span>
+                        </div>
                     </div>
                     {loadingContactos ? (
                         <div className="min-h-[40vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
-                    ) : contactos.length === 0 ? (
+                    ) : contactosFiltrados.length === 0 ? (
                         <div className="min-h-[40vh] flex flex-col items-center justify-center text-center text-gray-500 gap-2">
                             <Users size={34} className="opacity-40" />
-                            <p className="text-sm font-medium">Todavía no hay contactos registrados.</p>
+                            <p className="text-sm font-medium">{busqueda || canal !== 'todos' ? 'Nada coincide con el filtro.' : 'Todavía no hay contactos registrados.'}</p>
                         </div>
                     ) : (
                         <div className="space-y-2">
-                            {contactos.map(c => {
+                            {contactosFiltrados.map(c => {
                                 const nombre = c.nombre || c.usuario || 'Contacto'
+                                const ci = canalInfo(c.canal)
                                 return (
                                     <button key={c.subscriber_id} onClick={() => abrirContacto(c)} className="w-full text-left bg-[#09090b] border border-white/10 rounded-2xl p-4 flex items-start gap-3 hover:border-[#D4E655]/40 transition-colors">
-                                        <div className="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center shrink-0 text-[#D4E655]">
-                                            {c.canal === 'instagram' ? <Instagram size={17} /> : <MessageCircle size={17} />}
+                                        <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${ci.bg} ${ci.color}`}>
+                                            <ci.Icon size={17} />
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 flex-wrap">
                                                 <p className="font-bold text-sm truncate">{nombre}</p>
-                                                {c.usuario && <span className="text-[11px] text-gray-500 truncate">@{c.usuario.replace(/^@/, '')}</span>}
+                                                <span className={`text-[8px] px-1.5 py-0.5 rounded-full uppercase font-bold ${ci.chip}`}>{ci.label}</span>
                                                 {c.derivada && <span className="text-[9px] bg-orange-500/15 text-orange-400 px-2 py-0.5 rounded-full uppercase font-bold">Derivó</span>}
                                             </div>
+                                            {c.usuario && <p className="text-[11px] text-gray-500 truncate">{c.canal === 'whatsapp' ? c.usuario : '@' + c.usuario.replace(/^@/, '')}</p>}
                                             <p className="text-gray-400 text-sm mt-0.5 line-clamp-1">{c.ultimo}</p>
                                             <p className="text-[10px] text-gray-600 mt-1 uppercase tracking-wide">{c.mensajes} msg · {hora(c.ultimoAt)}</p>
                                         </div>
@@ -359,6 +410,35 @@ function Card({ label, value, sub, accent }: { label: string; value: any; sub?: 
             <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">{label}</p>
             <p className={`text-2xl font-black mt-1 ${accent ? 'text-[#D4E655]' : 'text-white'}`}>{value}</p>
             {sub && <p className="text-[10px] text-gray-500 mt-0.5">{sub}</p>}
+        </div>
+    )
+}
+
+function Buscador({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+    return (
+        <div className="relative flex-1">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+            <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className="w-full bg-[#111] border border-white/10 rounded-xl pl-9 pr-8 py-2.5 text-sm text-white outline-none focus:border-[#D4E655]" />
+            {value && <button onClick={() => onChange('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"><X size={14} /></button>}
+        </div>
+    )
+}
+
+function CanalFiltro({ value, onChange, counts }: { value: 'todos' | CanalId; onChange: (v: 'todos' | CanalId) => void; counts: { todos: number; instagram: number; whatsapp: number } }) {
+    const Opt = ({ id, label, Icon, color }: { id: 'todos' | CanalId; label: string; Icon: any; color?: string }) => {
+        const active = value === id
+        return (
+            <button onClick={() => onChange(id)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-colors border ${active ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-300 border-white/10 hover:text-white'}`}>
+                {Icon && <Icon size={13} className={active ? '' : color} />} {label}
+                <span className={`min-w-4 h-4 px-1 flex items-center justify-center rounded-full text-[9px] font-black ${active ? 'bg-black/20 text-black' : 'bg-white/10 text-gray-400'}`}>{counts[id]}</span>
+            </button>
+        )
+    }
+    return (
+        <div className="flex gap-1.5">
+            <Opt id="todos" label="Todas" Icon={null} />
+            <Opt id="instagram" label="IG" Icon={Instagram} color="text-pink-400" />
+            <Opt id="whatsapp" label="WA" Icon={MessageCircle} color="text-emerald-400" />
         </div>
     )
 }
