@@ -390,7 +390,13 @@ async function textoRuteado(pregunta: string): Promise<string | null> {
         return preciosPacks({ q })
     }
 
-    // Formaciones
+    // "Programa" (ambiguo): Compañías/Grupos o la Formación de La Liga.
+    // Va ANTES de formaciones para que "la liga"/"programa" no caiga en cursos.
+    if (/(programa|compañ|compania|companias|\bgrupos?\b|la liga|\bliga\b)/.test(q)) {
+        return `Cuando hablamos de "programa" puede ser dos cosas: nuestras *Compañías/Grupos* (elencos que entrenan y producen juntos) o la *Formación de La Liga* (nuestro programa de formación). ¿Sobre cuál querés info? Si te querés sumar, te paso con el equipo para darte todos los detalles.`
+    }
+
+    // Formaciones (cursos)
     if (/(formacion|formaciones|curso|carrera|profesorado|elenco de formacion)/.test(q)) {
         return formaciones()
     }
@@ -505,6 +511,8 @@ CUÁNDO DERIVÁS (usá "derivar_a_recepcion" — la persona no lo va a pedir, de
 - PROBLEMAS: reclamos, quejas, "pagué y no me llegó", "me cobraron mal", "no puedo entrar a la web", temas de su cuenta o pago.
 - FUERA DE LOS DATOS: si preguntan algo puntual que las herramientas NO cubren (edades/niños, niveles, si es apto principiantes, requisitos, lesiones, convenios, eventos, prensa), NO lo afirmes ni lo niegues (no inventes): derivá para que el equipo confirme.
 - Cualquier cosa que no puedas responder con certeza. Ante la duda entre responder o derivar, DERIVÁ.
+
+"PROGRAMA" (¡ojo, es ambiguo!): cuando alguien pregunta por "el programa", "los grupos", "las compañías" o "la liga / la formación de La Liga", NO se refiere a las "formaciones/cursos" comunes. Puede ser dos cosas: (a) nuestras Compañías/Grupos (elencos que entrenan y producen juntos), o (b) la Formación de La Liga (nuestro programa de formación). No tenés herramienta con esos datos: explicá brevemente las dos opciones, preguntá a cuál se refiere, y para inscribirse o dar detalles concretos derivá al equipo con "derivar_a_recepcion". Nunca respondas a "programa/grupos/compañías/liga" con la info de cursos.
 
 Para dudas de SOLO información (qué clases hay, precios, horarios libres, direcciones, formaciones) respondé vos directo, sin derivar.
 
