@@ -26,6 +26,7 @@ type Consulta = {
 type Stats = {
     dias: number
     totales: { contactos: number; mensajesUsuario: number; consultas: number; derivados: number; pendientes: number; resueltas: number; pctDerivado: number }
+    porCanal: { canal: string; contactos: number; mensajes: number; derivados: number }[]
     porDia: { dia: string; mensajes: number; consultas: number }[]
     porHora: { h: number; n: number }[]
     temas: { tema: string; n: number }[]
@@ -181,6 +182,28 @@ export default function ConsultasPage() {
                                 <Card label="Bot resolvió solo" value={stats.totales.contactos ? `${100 - stats.totales.pctDerivado}%` : '—'} accent />
                                 <Card label="Derivados" value={stats.totales.derivados} sub={`${stats.totales.pctDerivado}% de contactos`} />
                             </div>
+
+                            {/* Desglose por canal */}
+                            <Panel title="Por canal" icon={Users}>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
+                                    {stats.porCanal.map(pc => {
+                                        const ci = canalInfo(pc.canal)
+                                        return (
+                                            <div key={pc.canal} className="rounded-xl bg-[#0e0e10] border border-white/10 p-3">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <span className={`w-7 h-7 rounded-full flex items-center justify-center ${ci.bg} ${ci.color}`}><ci.Icon size={14} /></span>
+                                                    <span className="font-bold text-sm">{ci.label}</span>
+                                                </div>
+                                                <div className="grid grid-cols-3 gap-2 text-center">
+                                                    <div><p className="text-lg font-black text-white">{pc.contactos}</p><p className="text-[9px] text-gray-500 uppercase tracking-widest">Contactos</p></div>
+                                                    <div><p className="text-lg font-black text-white">{pc.mensajes}</p><p className="text-[9px] text-gray-500 uppercase tracking-widest">Mensajes</p></div>
+                                                    <div><p className="text-lg font-black text-orange-400">{pc.derivados}</p><p className="text-[9px] text-gray-500 uppercase tracking-widest">Derivados</p></div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </Panel>
 
                             {/* Actividad por día */}
                             <Panel title="Actividad por día" icon={BarChart3}>

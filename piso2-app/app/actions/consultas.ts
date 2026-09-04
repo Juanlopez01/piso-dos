@@ -131,10 +131,19 @@ export async function getAsistenteStatsAction(dias = 30) {
     const admin = getAdminClient()
     const desde = new Date(Date.now() - dias * 86400_000).toISOString()
     const [{ data: hist }, { data: cons }] = await Promise.all([
-        admin.from('asistente_historial').select('subscriber_id, de, texto, created_at').gte('created_at', desde),
-        admin.from('asistente_consultas').select('subscriber_id, estado, created_at').gte('created_at', desde),
+        admin.from('asistente_historial').select('subscriber_id, canal, de, texto, created_at').gte('created_at', desde),
+        admin.from('asistente_consultas').select('subscriber_id, canal, estado, created_at').gte('created_at', desde),
     ])
     const H = (hist || []) as any[], C = (cons || []) as any[]
+
+    // Desglose por canal (Instagram vs WhatsApp).
+    const porCanal = (['instagram', 'whatsapp'] as const).map(cn => {
+        const hc = H.filter(m => m.canal === cn)
+        const contactosC = new Set(hc.map(m => m.subscriber_id).filter(Boolean))
+        const mensajesC = hc.filter(m => m.de === 'usuario').length
+        const derivadosC = new Set(C.filter(c => c.canal === cn).map(c => c.subscriber_id).filter(Boolean).filter((s: string) => contactosC.has(s)))
+        return { canal: cn, contactos: contactosC.size, mensajes: mensajesC, derivados: derivadosC.size }
+    })
     const usuarioMsgs = H.filter(m => m.de === 'usuario')
     const contactos = new Set(H.map(m => m.subscriber_id).filter(Boolean))
     // Solo derivaciones de contactos que efectivamente chatearon (mismo universo),
@@ -162,7 +171,7 @@ export async function getAsistenteStatsAction(dias = 30) {
     return {
         ok: true as const, dias,
         totales: { contactos: contactos.size, mensajesUsuario: usuarioMsgs.length, consultas: C.length, derivados: derivados.size, pendientes, resueltas, pctDerivado },
-        porDia, porHora, temas,
+        porCanal, porDia, porHora, temas,
     }
 }
 
