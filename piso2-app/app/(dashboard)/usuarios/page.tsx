@@ -219,7 +219,7 @@ function UsuariosContent() {
     const filteredUsers = users.filter((u: UsuarioDirectorio) => {
         let matchesRole = true
         if (roleFilter === 'staff' && userRole !== 'admin') return false
-        if (roleFilter === 'staff') matchesRole = u.rol === 'admin' || u.rol === 'recepcion' || u.rol === 'auxiliar' || u.rol === 'coordinador'
+        if (roleFilter === 'staff') matchesRole = u.rol === 'admin' || u.rol === 'recepcion' || u.rol === 'auxiliar' || u.rol === 'coordinador' || u.rol === 'curador'
         else if (roleFilter !== 'todos') matchesRole = u.rol === roleFilter
         else if (userRole !== 'admin' && (u.rol === 'admin' || u.rol === 'recepcion' || u.rol === 'auxiliar')) matchesRole = false
 
@@ -800,7 +800,7 @@ function UsuariosContent() {
                                 </div>
                             )}
 
-                            <div className={`absolute top-0 right-0 px-3 py-1.5 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${u.rol === 'admin' ? 'bg-red-500/20 text-red-500' : u.rol === 'recepcion' ? 'bg-blue-500/20 text-blue-500' : u.rol === 'profesor' ? 'bg-purple-500/20 text-purple-500' : u.rol === 'auxiliar' ? 'bg-indigo-500/20 text-indigo-400' : u.rol === 'coordinador' ? 'bg-pink-500/20 text-pink-400' : 'bg-white/5 text-gray-500'}`}>
+                            <div className={`absolute top-0 right-0 px-3 py-1.5 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${u.rol === 'admin' ? 'bg-red-500/20 text-red-500' : u.rol === 'recepcion' ? 'bg-blue-500/20 text-blue-500' : u.rol === 'profesor' ? 'bg-purple-500/20 text-purple-500' : u.rol === 'auxiliar' ? 'bg-indigo-500/20 text-indigo-400' : u.rol === 'coordinador' ? 'bg-pink-500/20 text-pink-400' : u.rol === 'curador' ? 'bg-[#D4E655]/20 text-[#D4E655]' : 'bg-white/5 text-gray-500'}`}>
                                 {u.rol}
                             </div>
 
@@ -915,6 +915,7 @@ function UsuariosContent() {
                                                     <option value="admin" disabled={!isAdmin}>Admin</option>
                                                     <option value="recepcion" disabled={!isAdmin}>Recep.</option>
                                                     <option value="auxiliar" disabled={!isAdmin}>Auxiliar</option>
+                                                    <option value="curador" disabled={!isAdmin}>Curador</option>
                                                     <option value="coordinador">Coordinador</option>
                                                     <option value="vendedor">Vendedor</option>
                                                     <option value="profesor">Profe</option>
@@ -1446,6 +1447,7 @@ function UsuariosContent() {
                                                 <option value="recepcion">Recepción</option>
                                                 <option value="auxiliar">Auxiliar</option>
                                                 <option value="vendedor">Vendedor</option>
+                                                <option value="curador">Curador</option>
                                             </>
                                         )}
                                     </select>

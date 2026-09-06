@@ -38,6 +38,7 @@ export default function LandingPage() {
         if (userRole === 'admin') destinationUrl = '/admin'
         else if (userRole === 'profesor') destinationUrl = '/mis-clases'
         else if (userRole === 'recepcion') destinationUrl = '/caja'
+        else if (userRole === 'curador') destinationUrl = '/curaduria'
 
         setLoggedUser({
           nombre: profile?.nombre || session.user.user_metadata?.nombre || 'Mi Perfil',

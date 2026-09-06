@@ -65,6 +65,11 @@ function SidebarContent() {
             return ['Inicio', 'Explorar', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Sumate a Talent'].includes(item.name)
         }
 
+        // 🎭 ROL CURADOR (Chifle): Curaduría (ve postulaciones y elige) + Eventos + básicos.
+        if (userRole === 'curador') {
+            return ['Inicio', 'Curaduría', 'Eventos', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        }
+
         return item.roles.includes(userRole || 'visitante')
     })
 

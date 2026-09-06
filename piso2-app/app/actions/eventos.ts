@@ -15,7 +15,7 @@ const getAdminClient = () => createAdminClient(
     { auth: { persistSession: false, autoRefreshToken: false } }
 )
 
-const ROLES_STAFF = ['admin', 'recepcion']
+const ROLES_STAFF = ['admin', 'recepcion', 'curador']
 async function requireStaff() {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()
