@@ -121,36 +121,43 @@ export async function guardarValorHoraRecepAction(valor: number) {
     return { success: true }
 }
 
-// Registra el pago al staff como un egreso en la caja activa
+// Registra el pago al staff como egreso. Admin → sale del pozo (turno_id null,
+// sin caja). Recepción → requiere su turno de caja abierto.
 export async function pagarStaffAction(uid: string, nombre: string, monto: number, metodo: string, mesKey: string) {
-    const supabase = await createClient() // <--- EL AWAIT VA ACÁ TAMBIÉN
+    const supabase = await createClient()
 
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { success: false, error: "No autenticado" }
 
-    // Buscar si el admin tiene un turno de caja abierto
-    const { data: caja } = await supabase
-        .from('caja_turnos')
-        .select('id')
-        .eq('usuario_id', user.id)
-        .eq('estado', 'abierta')
-        .single()
-
-    if (!caja) return { success: false, error: "Debes tener un turno de caja abierto para registrar un egreso." }
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', user.id).single()
+    const rol = perfil?.rol
 
     // El concepto tiene un formato específico para que el sistema lo reconozca después
     const concepto = `Pago Staff | ID: ${uid} | Mes: ${mesKey} | ${nombre}`
 
-    const { error } = await supabase
-        .from('caja_movimientos')
-        .insert({
-            turno_id: caja.id,
-            tipo: 'egreso',
-            monto: monto,
-            metodo_pago: metodo,
-            concepto: concepto
+    if (rol === 'admin') {
+        // Admin: el pago resta directo del pozo (dinero digital recaudado), sin caja.
+        const adminSupabase = getAdminClient()
+        const { error } = await adminSupabase.from('caja_movimientos').insert({
+            turno_id: null, tipo: 'egreso', monto, metodo_pago: metodo, concepto,
+            origen_referencia: 'pago_staff_admin',
         })
+        if (error) return { success: false, error: error.message }
+        return { success: true }
+    }
 
-    if (error) return { success: false, error: error.message }
-    return { success: true }
+    if (rol === 'recepcion') {
+        const { data: caja } = await supabase
+            .from('caja_turnos').select('id')
+            .eq('usuario_id', user.id).eq('estado', 'abierta').maybeSingle()
+        if (!caja) return { success: false, error: "¡Caja Cerrada! Abrí tu turno en Finanzas para poder pagar." }
+
+        const { error } = await supabase.from('caja_movimientos').insert({
+            turno_id: caja.id, tipo: 'egreso', monto, metodo_pago: metodo, concepto,
+        })
+        if (error) return { success: false, error: error.message }
+        return { success: true }
+    }
+
+    return { success: false, error: 'No tenés permisos para realizar esta acción.' }
 }
