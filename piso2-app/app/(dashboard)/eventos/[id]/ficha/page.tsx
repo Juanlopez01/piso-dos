@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { Loader2, ArrowLeft, Save, Music, Sun, MonitorPlay, Boxes, CalendarClock, FileSignature, Check } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { useCash } from '@/context/CashContext'
 import { getFichaTecnicaAction, guardarFichaTecnicaAction } from '@/app/actions/eventos'
 
 type Ficha = Record<string, any>
@@ -12,6 +13,8 @@ type Ficha = Record<string, any>
 export default function FichaTecnicaPage() {
     const params = useParams()
     const eventoId = params.id as string
+    const { userRole } = useCash()
+    const soloLectura = userRole === 'curador'
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [nombre, setNombre] = useState('')
@@ -57,8 +60,10 @@ export default function FichaTecnicaPage() {
                     <h1 className="text-2xl font-black tracking-tight">{nombre}</h1>
                     <p className="text-xs text-gray-500 mt-1">Completala entre todos. Se guarda y la ve todo el equipo. Podés entrar y salir las veces que haga falta.</p>
                     {updatedAt && <p className="text-[10px] text-gray-600 mt-1">Última edición: {new Date(updatedAt).toLocaleString('es-AR')}</p>}
+                    {soloLectura && <p className="mt-2 rounded-lg bg-[#D4E655]/10 border border-[#D4E655]/30 p-2.5 text-[11px] text-[#D4E655] font-semibold">Modo solo lectura: podés ver la ficha, no editarla.</p>}
                 </div>
 
+                <fieldset disabled={soloLectura} className="min-w-0 border-0 p-0 m-0 disabled:opacity-100">
                 {/* Función */}
                 <Section icon={CalendarClock} title="Función">
                     <Txt label="Días y horarios de función posibles" v={f.dias_horarios} on={v => set('dias_horarios', v)} ph="Ej: viernes 21h, sábado 20h y 22h" />
@@ -109,16 +114,17 @@ export default function FichaTecnicaPage() {
                     <Chk label="Acuerdo firmado y entregado" v={f.acuerdo_firmado} on={v => set('acuerdo_firmado', v)} />
                     <Area label="Notas del acuerdo (servicios pactados, valores, observaciones)" v={f.acuerdo_notas} on={v => set('acuerdo_notas', v)} ph="Servicios contratados a Piso 2, valores acordados, aclaraciones" />
                 </Section>
+                </fieldset>
             </div>
 
             {/* barra fija guardar */}
-            <div className="fixed bottom-0 left-0 right-0 bg-[#09090b]/95 backdrop-blur border-t border-white/10 p-3 z-40">
+            {!soloLectura && <div className="fixed bottom-0 left-0 right-0 bg-[#09090b]/95 backdrop-blur border-t border-white/10 p-3 z-40">
                 <div className="max-w-2xl mx-auto">
                     <button onClick={guardar} disabled={saving} className="w-full flex items-center justify-center gap-2 bg-[#D4E655] text-black font-black py-3.5 rounded-xl uppercase text-sm tracking-wide hover:bg-white transition-colors disabled:opacity-60">
                         {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Guardar ficha
                     </button>
                 </div>
-            </div>
+            </div>}
         </div>
     )
 }

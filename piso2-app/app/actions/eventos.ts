@@ -15,13 +15,16 @@ const getAdminClient = () => createAdminClient(
     { auth: { persistSession: false, autoRefreshToken: false } }
 )
 
-const ROLES_STAFF = ['admin', 'recepcion', 'curador']
-async function requireStaff() {
+// El curador (Chifle) tiene acceso de SOLO LECTURA: puede ver, no editar.
+// requireStaff() = escritura (admin/recepción); requireStaff(true) = lectura (+ curador).
+const ROLES_STAFF = ['admin', 'recepcion']
+async function requireStaff(soloLectura = false) {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return { ok: false as const, error: 'No autorizado' }
     const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
-    if (!perfil || !ROLES_STAFF.includes(perfil.rol)) return { ok: false as const, error: 'Sin permisos' }
+    const rolesOk = soloLectura ? [...ROLES_STAFF, 'curador'] : ROLES_STAFF
+    if (!perfil || !rolesOk.includes(perfil.rol)) return { ok: false as const, error: 'Sin permisos' }
     return { ok: true as const, userId: session.user.id }
 }
 
@@ -39,7 +42,7 @@ async function vendidasPorEntrada(admin: any, eventoId: string): Promise<Record<
 // ---- Lectura ----------------------------------------------------------------
 
 export async function getEventosAction() {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error, eventos: [] as any[] }
     const admin = getAdminClient()
 
@@ -65,7 +68,7 @@ export async function getEventosAction() {
 }
 
 export async function getEventoAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
 
@@ -534,7 +537,7 @@ export async function desmarcarTicketAction(codigo: string) {
 
 // Progreso de check-in de un evento (usadas / total de entradas confirmadas).
 export async function getCheckinStatsAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error, nombre: '', total: 0, usados: 0 }
     const admin = getAdminClient()
     const { data: ev } = await admin.from('eventos').select('nombre').eq('id', eventoId).maybeSingle()
@@ -550,7 +553,7 @@ export async function getCheckinStatsAction(eventoId: string) {
 // Reporte completo de un evento: desglose por tipo/canal/medio, check-in y
 // listado de compradores (para ver en pantalla y exportar a CSV).
 export async function getReporteEventoAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
 
@@ -630,7 +633,7 @@ export async function getReporteEventoAction(eventoId: string) {
 
 // Admin: obtiene (o genera) el token del link de la compañía para un evento.
 export async function getLinkCompaniaAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
     const { data: ev } = await admin.from('eventos').select('token_compania').eq('id', eventoId).maybeSingle()
@@ -703,7 +706,7 @@ export async function getEntradasPublicasAction(ventaId: string, token: string) 
 // edita las veces que haga falta.
 
 export async function getFichaTecnicaAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
     const { data: evento } = await admin.from('eventos')
@@ -726,7 +729,7 @@ export async function guardarFichaTecnicaAction(eventoId: string, ficha: Record<
 // Quién trabajó en la función y su cachet. Son los gastos que alimentan el Borderaux.
 
 export async function getEquipoAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error, equipo: [] as any[], totalEquipo: 0 }
     const admin = getAdminClient()
     const { data } = await admin.from('evento_equipo')
@@ -773,7 +776,7 @@ export async function eliminarMiembroEquipoAction(id: string) {
 // Pendiente (para el final): tratamiento del 10% de servicio.
 
 export async function getBorderauxAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
 
@@ -873,7 +876,7 @@ export async function eliminarGastoAction(id: string) {
 // Cupos sin cargo por función. El jefe de sala marca "presente" al ingresar.
 
 export async function getInvitadosAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error, invitados: [] as any[], totalInvitados: 0, presentes: 0 }
     const admin = getAdminClient()
     const { data } = await admin.from('evento_invitados')
@@ -929,7 +932,7 @@ export async function eliminarInvitadoAction(id: string) {
 // Ya tienen nombre + contacto + qué eligieron: sirve para recuperarlas.
 
 export async function getCarritosAbandonadosAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error, carritos: [] as any[] }
     const admin = getAdminClient()
 
@@ -983,7 +986,7 @@ function slugCiclo(nombre: string) {
 }
 
 export async function getCiclosEventoAction() {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error, ciclos: [] as any[] }
     const admin = getAdminClient()
     const { data } = await admin.from('evento_ciclos').select('id, nombre, slug, flyer_url, activo, created_at').order('created_at', { ascending: false })
@@ -1069,7 +1072,7 @@ export async function getCicloPublicoAction(slug: string) {
 // de entrada por nombre y validando cupo en el destino).
 
 export async function getFechasHermanasAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error, fechas: [] as any[] }
     const admin = getAdminClient()
     const { data: ev } = await admin.from('eventos').select('ciclo_id').eq('id', eventoId).maybeSingle()
@@ -1134,7 +1137,7 @@ async function puertaAutorizada(admin: any, eventoId: string, token: string) {
 }
 
 export async function getLinkPuertaAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
     const { data: ev } = await admin.from('eventos').select('token_puerta').eq('id', eventoId).maybeSingle()

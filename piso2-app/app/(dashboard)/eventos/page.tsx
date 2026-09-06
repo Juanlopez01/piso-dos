@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale, EyeOff, UserPlus, AlertTriangle, ShoppingCart, MessageCircle, CalendarPlus, Layers, Upload, Image as ImageIcon, Theater } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { useCash } from '@/context/CashContext'
 import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
@@ -43,6 +44,8 @@ const ESTADOS: Record<string, { label: string; cls: string }> = {
 const MEDIOS = ['efectivo', 'transferencia', 'mercadopago']
 
 export default function EventosPage() {
+    const { userRole } = useCash()
+    const soloLectura = userRole === 'curador'
     const [eventos, setEventos] = useState<EventoRow[]>([])
     const [loading, setLoading] = useState(true)
     const [sel, setSel] = useState<string | null>(null)
@@ -62,7 +65,7 @@ export default function EventosPage() {
             <Toaster position="top-center" richColors theme="dark" />
 
             {sel ? (
-                <Detalle eventoId={sel} onBack={() => { setSel(null); cargar() }} />
+                <Detalle eventoId={sel} soloLectura={soloLectura} onBack={() => { setSel(null); cargar() }} />
             ) : (
                 <>
                     <div className="flex items-end justify-between gap-3 mb-6">
@@ -74,7 +77,7 @@ export default function EventosPage() {
                         </div>
                         <div className="flex gap-2">
                             <button onClick={cargar} className="px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white"><RefreshCw size={16} /></button>
-                            <button onClick={() => setNuevo(true)} className="px-4 py-2.5 rounded-xl bg-[#D4E655] text-black font-bold text-xs uppercase tracking-wide flex items-center gap-2 hover:bg-white"><Plus size={16} /> Nuevo</button>
+                            {!soloLectura && <button onClick={() => setNuevo(true)} className="px-4 py-2.5 rounded-xl bg-[#D4E655] text-black font-bold text-xs uppercase tracking-wide flex items-center gap-2 hover:bg-white"><Plus size={16} /> Nuevo</button>}
                         </div>
                     </div>
 
@@ -180,7 +183,7 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
     )
 }
 
-function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void }) {
+function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLectura?: boolean; onBack: () => void }) {
     const [evento, setEvento] = useState<Evento | null>(null)
     const [entradas, setEntradas] = useState<Entrada[]>([])
     const [ventas, setVentas] = useState<Venta[]>([])
@@ -514,6 +517,12 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
         <div className="max-w-3xl mx-auto">
             <button onClick={onBack} className="text-gray-400 hover:text-white flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide mb-4"><ArrowLeft size={15} /> Volver</button>
 
+            {soloLectura && (
+                <div className="mb-4 rounded-xl bg-[#D4E655]/10 border border-[#D4E655]/30 p-3 text-[12px] text-[#D4E655] font-semibold">
+                    Modo solo lectura: podés ver todo, pero no editar.
+                </div>
+            )}
+
             <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
                     <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">{evento.nombre} {evento.cancelado && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 uppercase font-bold">Cancelada</span>}</h1>
@@ -522,7 +531,7 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                         {evento.lugar && <span className="flex items-center gap-1"><MapPin size={12} /> {evento.lugar}</span>}
                     </p>
                 </div>
-                <button onClick={borrarEvento} className="text-gray-600 hover:text-red-400 p-2"><Trash2 size={16} /></button>
+                {!soloLectura && <button onClick={borrarEvento} className="text-gray-600 hover:text-red-400 p-2"><Trash2 size={16} /></button>}
             </div>
 
             {evento.cancelado && (
@@ -533,11 +542,17 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
 
             {/* estado */}
             <div className="flex flex-wrap gap-2 mb-4">
-                {(['borrador', 'activo', 'finalizado'] as const).map(s => (
-                    <button key={s} onClick={() => setEstado(s)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-colors ${evento.estado === s ? ESTADOS[s].cls + ' ring-1 ring-white/20' : 'bg-white/5 text-gray-500 hover:text-white'}`}>{ESTADOS[s].label}</button>
-                ))}
-                {!evento.cancelado && (
-                    <button onClick={cancelarFuncion} className="ml-auto px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-colors flex items-center gap-1.5"><AlertTriangle size={13} /> Cancelar función</button>
+                {soloLectura ? (
+                    <span className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide ${ESTADOS[evento.estado]?.cls || 'bg-white/5 text-gray-300'}`}>{ESTADOS[evento.estado]?.label || evento.estado}</span>
+                ) : (
+                    <>
+                        {(['borrador', 'activo', 'finalizado'] as const).map(s => (
+                            <button key={s} onClick={() => setEstado(s)} className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-colors ${evento.estado === s ? ESTADOS[s].cls + ' ring-1 ring-white/20' : 'bg-white/5 text-gray-500 hover:text-white'}`}>{ESTADOS[s].label}</button>
+                        ))}
+                        {!evento.cancelado && (
+                            <button onClick={cancelarFuncion} className="ml-auto px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-colors flex items-center gap-1.5"><AlertTriangle size={13} /> Cancelar función</button>
+                        )}
+                    </>
                 )}
             </div>
 
@@ -545,7 +560,9 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
             <div className="flex flex-wrap items-center gap-2 mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
                 <Globe size={15} className={evento.venta_online ? 'text-[#D4E655]' : 'text-gray-500'} />
                 <span className="text-xs font-semibold text-gray-300">Venta online</span>
-                <button onClick={toggleOnline} className={`ml-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide transition-colors ${evento.venta_online ? 'bg-[#D4E655] text-black' : 'bg-white/10 text-gray-400'}`}>{evento.venta_online ? 'Activada' : 'Desactivada'}</button>
+                {soloLectura
+                    ? <span className={`ml-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${evento.venta_online ? 'bg-[#D4E655]/20 text-[#D4E655]' : 'bg-white/10 text-gray-400'}`}>{evento.venta_online ? 'Activada' : 'Desactivada'}</span>
+                    : <button onClick={toggleOnline} className={`ml-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide transition-colors ${evento.venta_online ? 'bg-[#D4E655] text-black' : 'bg-white/10 text-gray-400'}`}>{evento.venta_online ? 'Activada' : 'Desactivada'}</button>}
                 {evento.venta_online && (
                     <>
                         <button onClick={copiarLinkCompra} className="ml-auto flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide bg-white/5 hover:bg-white/10 text-gray-300 px-3 py-1.5 rounded-lg"><Copy size={12} /> Copiar link</button>
@@ -567,15 +584,19 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                         <div className="flex flex-wrap gap-2">
                             <button onClick={copiarLinkCiclo} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide bg-[#D4E655]/15 text-[#D4E655] px-3 py-1.5 rounded-lg"><Copy size={12} /> Copiar link del ciclo</button>
                             <a href={`/ciclo/${evento.ciclo?.slug}`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide bg-white/5 hover:bg-white/10 text-gray-300 px-3 py-1.5 rounded-lg"><Ticket size={12} /> Ver ciclo</a>
-                            <button onClick={() => asignarCiclo('')} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide bg-white/5 hover:bg-white/10 text-gray-400 px-3 py-1.5 rounded-lg"><X size={12} /> Quitar del ciclo</button>
+                            {!soloLectura && <button onClick={() => asignarCiclo('')} className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide bg-white/5 hover:bg-white/10 text-gray-400 px-3 py-1.5 rounded-lg"><X size={12} /> Quitar del ciclo</button>}
                         </div>
-                        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/5">
-                            <span className="text-[11px] text-gray-500">Duplicar a otra fecha:</span>
-                            <input value={fechaDup} onChange={e => setFechaDup(e.target.value)} type="datetime-local" className="inp w-52" />
-                            <button onClick={duplicarFecha} className="bg-[#D4E655] text-black px-3 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wide flex items-center gap-1"><CalendarPlus size={13} /> Duplicar función</button>
-                        </div>
-                        <p className="text-[10px] text-gray-600">La copia clona los tipos de entrada y queda en borrador para revisarla.</p>
+                        {!soloLectura && <>
+                            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/5">
+                                <span className="text-[11px] text-gray-500">Duplicar a otra fecha:</span>
+                                <input value={fechaDup} onChange={e => setFechaDup(e.target.value)} type="datetime-local" className="inp w-52" />
+                                <button onClick={duplicarFecha} className="bg-[#D4E655] text-black px-3 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wide flex items-center gap-1"><CalendarPlus size={13} /> Duplicar función</button>
+                            </div>
+                            <p className="text-[10px] text-gray-600">La copia clona los tipos de entrada y queda en borrador para revisarla.</p>
+                        </>}
                     </div>
+                ) : soloLectura ? (
+                    <p className="text-[11px] text-gray-500">No forma parte de un ciclo.</p>
                 ) : (
                     <div className="space-y-2">
                         <p className="text-[11px] text-gray-500">Si esta obra se repite en varias fechas, agrupalas en un ciclo: el público entra a un solo link y elige la función.</p>
@@ -597,10 +618,14 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
             </div>
 
             {/* flyer del evento */}
-            <div className="mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
-                <div className="flex items-center gap-2 mb-2"><ImageIcon size={15} className="text-gray-400" /><span className="text-xs font-semibold text-gray-300">Flyer del evento</span></div>
-                <FlyerUploader value={(evento as any).flyer_url || ''} onChange={cambiarFlyer} />
-            </div>
+            {(!soloLectura || (evento as any).flyer_url) && (
+                <div className="mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                    <div className="flex items-center gap-2 mb-2"><ImageIcon size={15} className="text-gray-400" /><span className="text-xs font-semibold text-gray-300">Flyer del evento</span></div>
+                    {soloLectura
+                        ? <img src={(evento as any).flyer_url} alt="" className="w-24 h-32 object-cover rounded-lg border border-white/10" />
+                        : <FlyerUploader value={(evento as any).flyer_url || ''} onChange={cambiarFlyer} />}
+                </div>
+            )}
 
             {/* obras del evento (programa) */}
             <div className="mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
@@ -611,12 +636,12 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                             <div key={o.id} className="flex items-center gap-2 bg-[#111] border border-white/10 rounded-lg px-3 py-2">
                                 {o.imagenes?.[0] && <img src={o.imagenes[0]} alt="" className="w-8 h-10 object-cover rounded shrink-0" />}
                                 <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{o.titulo}</p><p className="text-[10px] text-gray-500 truncate">{[o.compania, o.duracion_min && `${o.duracion_min} min`].filter(Boolean).join(' · ')}</p></div>
-                                <button onClick={() => quitarObra(o.id)} className="text-gray-600 hover:text-red-400 p-1"><X size={14} /></button>
+                                {!soloLectura && <button onClick={() => quitarObra(o.id)} className="text-gray-600 hover:text-red-400 p-1"><X size={14} /></button>}
                             </div>
                         ))}
                     </div>
-                ) : <p className="text-[11px] text-gray-500 mb-2">Sin obras vinculadas. Podés armar un programa con varias obras aprobadas.</p>}
-                {obrasDisp.length > 0 && (
+                ) : <p className="text-[11px] text-gray-500 mb-2">Sin obras vinculadas.{!soloLectura ? ' Podés armar un programa con varias obras aprobadas.' : ''}</p>}
+                {!soloLectura && obrasDisp.length > 0 && (
                     <select onChange={e => { if (e.target.value) { agregarObra(e.target.value); e.target.value = '' } }} defaultValue="" className="inp w-full">
                         <option value="">+ Agregar obra aprobada…</option>
                         {obrasDisp.map(o => <option key={o.id} value={o.id}>{o.titulo}{o.compania ? ` — ${o.compania}` : ''}</option>)}
@@ -625,10 +650,12 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
             </div>
 
             {/* check-in + reporte */}
-            <div className="grid grid-cols-2 gap-2 mb-5">
-                <Link href={`/eventos/${eventoId}/checkin`} className="flex items-center justify-center gap-2 bg-[#D4E655] text-black font-bold py-3 rounded-xl uppercase text-[11px] tracking-wide hover:bg-white transition-colors">
-                    <ScanLine size={15} /> Check-in
-                </Link>
+            <div className={`grid ${soloLectura ? 'grid-cols-1' : 'grid-cols-2'} gap-2 mb-5`}>
+                {!soloLectura && (
+                    <Link href={`/eventos/${eventoId}/checkin`} className="flex items-center justify-center gap-2 bg-[#D4E655] text-black font-bold py-3 rounded-xl uppercase text-[11px] tracking-wide hover:bg-white transition-colors">
+                        <ScanLine size={15} /> Check-in
+                    </Link>
+                )}
                 <button onClick={abrirReporte} className="flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-200 font-bold py-3 rounded-xl uppercase text-[11px] tracking-wide hover:border-white/30 transition-colors">
                     <BarChart3 size={15} /> Reporte
                 </button>
@@ -774,14 +801,14 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                                             <button onClick={() => copiarLinkPromo(e.codigo_promo!)} className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-purple-300/80 hover:text-purple-300"><Copy size={11} /> Copiar link con promo “{e.codigo_promo}”</button>
                                         )}
                                     </div>
-                                    <button onClick={() => { setEditEnt(e.id); setEditVals({ nombre: e.nombre, precio: String(e.precio), cupo: String(e.cupo), oculta: !!e.oculta, codigo_promo: e.codigo_promo || '' }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>
-                                    <button onClick={() => borrarEntrada(e.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>
+                                    {!soloLectura && <button onClick={() => { setEditEnt(e.id); setEditVals({ nombre: e.nombre, precio: String(e.precio), cupo: String(e.cupo), oculta: !!e.oculta, codigo_promo: e.codigo_promo || '' }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>}
+                                    {!soloLectura && <button onClick={() => borrarEntrada(e.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>}
                                 </div>
                             )}
                         </div>
                     ))}
                     {/* alta */}
-                    <div className="bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3 space-y-2">
+                    {!soloLectura && <div className="bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3 space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
                             <input value={nuevaEnt.nombre} onChange={e => setNuevaEnt(v => ({ ...v, nombre: e.target.value }))} placeholder="Tipo (General, VIP, 2x1…)" className="inp flex-1 min-w-[120px]" />
                             <input value={nuevaEnt.precio} onChange={e => setNuevaEnt(v => ({ ...v, precio: e.target.value }))} type="number" placeholder="Precio" className="inp w-24" />
@@ -793,12 +820,12 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                             {nuevaEnt.oculta && <input value={nuevaEnt.codigo_promo} onChange={e => setNuevaEnt(v => ({ ...v, codigo_promo: e.target.value }))} placeholder="Código de promo (ej: 2x1, AMIGOS)" className="inp flex-1 min-w-[140px]" />}
                         </div>
                         {nuevaEnt.oculta && <p className="text-[10px] text-gray-500">No aparece en la venta pública; solo con el link <span className="text-purple-300">?promo=código</span>.</p>}
-                    </div>
+                    </div>}
                 </div>
             </Seccion>
 
             {/* registrar venta */}
-            {entradas.length > 0 && (
+            {!soloLectura && entradas.length > 0 && (
                 <Seccion titulo="Registrar venta">
                     <div className="space-y-3">
                         <div className="space-y-2">
@@ -859,7 +886,7 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                                     </div>
                                     <div className="text-right shrink-0">
                                         <p className="font-black text-[#D4E655]">{pesos(v.total)}</p>
-                                        {v.estado === 'confirmada' && <div className="flex gap-2 justify-end">
+                                        {!soloLectura && v.estado === 'confirmada' && <div className="flex gap-2 justify-end">
                                             {fechasHermanas.length > 0 && <button onClick={() => setTraspasando(traspasando === v.id ? null : v.id)} className="text-[10px] text-gray-500 hover:text-blue-400 uppercase font-semibold">Traspasar</button>}
                                             <button onClick={() => reembolsar(v)} className="text-[10px] text-gray-500 hover:text-amber-400 uppercase font-semibold">Reembolsar</button>
                                         </div>}
@@ -896,7 +923,7 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                                     <div className="flex items-center gap-1 shrink-0">
                                         <button onClick={() => copiarMsgCarrito(c)} className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-[#D4E655]/15 text-[#D4E655] px-2.5 py-1.5 rounded-lg" title="Copiar mensaje para invitarlo a completar"><MessageCircle size={12} /> Mensaje</button>
                                         {c.contacto && <button onClick={() => { navigator.clipboard.writeText(c.contacto); toast.success('Contacto copiado') }} className="text-gray-400 hover:text-white p-1.5" title="Copiar contacto"><Copy size={13} /></button>}
-                                        <button onClick={() => descartarCarrito(c.id)} className="text-gray-600 hover:text-red-400 p-1.5" title="Descartar"><Trash2 size={13} /></button>
+                                        {!soloLectura && <button onClick={() => descartarCarrito(c.id)} className="text-gray-600 hover:text-red-400 p-1.5" title="Descartar"><Trash2 size={13} /></button>}
                                     </div>
                                 </div>
                             </div>
@@ -922,27 +949,30 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                                 </div>
                             ) : (
                                 <div className="flex items-center gap-3">
-                                    <button onClick={() => togglePresente(inv.id, !inv.presente)} className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border transition-colors ${inv.presente ? 'bg-[#D4E655] border-[#D4E655]' : 'border-white/25'}`} title={inv.presente ? 'Llegó' : 'Marcar llegada'}>
-                                        {inv.presente && <Check size={13} className="text-black" strokeWidth={3} />}
-                                    </button>
+                                    {soloLectura
+                                        ? <span className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border ${inv.presente ? 'bg-[#D4E655] border-[#D4E655]' : 'border-white/25'}`}>{inv.presente && <Check size={13} className="text-black" strokeWidth={3} />}</span>
+                                        : <button onClick={() => togglePresente(inv.id, !inv.presente)} className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border transition-colors ${inv.presente ? 'bg-[#D4E655] border-[#D4E655]' : 'border-white/25'}`} title={inv.presente ? 'Llegó' : 'Marcar llegada'}>
+                                            {inv.presente && <Check size={13} className="text-black" strokeWidth={3} />}
+                                        </button>}
                                     <div className="flex-1 min-w-0">
                                         <p className={`font-bold text-sm truncate ${inv.presente ? 'text-gray-100' : 'text-gray-300'}`}>{inv.nombre} {inv.cantidad > 1 && <span className="text-[10px] font-semibold text-gray-500">×{inv.cantidad}</span>}</p>
                                         {inv.contacto && <p className="text-[11px] text-gray-500 truncate">{inv.contacto}</p>}
                                     </div>
                                     {inv.presente && <span className="text-[10px] text-[#D4E655] uppercase font-bold tracking-wide">Llegó</span>}
-                                    <button onClick={() => { setEditInv(inv.id); setEditInvVals({ nombre: inv.nombre, contacto: inv.contacto || '', cantidad: String(inv.cantidad || 1) }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>
-                                    <button onClick={() => borrarInvitado(inv.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>
+                                    {!soloLectura && <button onClick={() => { setEditInv(inv.id); setEditInvVals({ nombre: inv.nombre, contacto: inv.contacto || '', cantidad: String(inv.cantidad || 1) }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>}
+                                    {!soloLectura && <button onClick={() => borrarInvitado(inv.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>}
                                 </div>
                             )}
                         </div>
                     ))}
+                    {invitados.length === 0 && soloLectura && <p className="text-[11px] text-gray-500">Sin invitados cargados.</p>}
                     {/* alta */}
-                    <div className="flex flex-wrap items-center gap-2 bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3">
+                    {!soloLectura && <div className="flex flex-wrap items-center gap-2 bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3">
                         <input value={nuevoInv.nombre} onChange={e => setNuevoInv(v => ({ ...v, nombre: e.target.value }))} placeholder="Nombre del invitado" className="inp flex-1 min-w-[120px]" />
                         <input value={nuevoInv.contacto} onChange={e => setNuevoInv(v => ({ ...v, contacto: e.target.value }))} placeholder="Contacto (opcional)" className="inp w-32" />
                         <input value={nuevoInv.cantidad} onChange={e => setNuevoInv(v => ({ ...v, cantidad: e.target.value }))} type="number" min={1} placeholder="Cant." className="inp w-16" />
                         <button onClick={agregarInvitado} className="bg-[#D4E655] text-black px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1"><Plus size={14} /> Agregar</button>
-                    </div>
+                    </div>}
                     {invitados.length > 0 && (
                         <div className="flex items-center justify-between pt-1 px-1">
                             <span className="text-[11px] text-gray-500 uppercase tracking-widest font-bold">Invitados</span>
@@ -972,19 +1002,20 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                                         <p className="font-bold text-sm truncate">{m.nombre} {m.rol && <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">· {m.rol}</span>}</p>
                                         <p className="text-[11px] text-gray-500">{pesos(Number(m.monto))}</p>
                                     </div>
-                                    <button onClick={() => { setEditMiembro(m.id); setEditMiembroVals({ nombre: m.nombre, rol: m.rol || '', monto: String(m.monto || '') }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>
-                                    <button onClick={() => borrarMiembro(m.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>
+                                    {!soloLectura && <button onClick={() => { setEditMiembro(m.id); setEditMiembroVals({ nombre: m.nombre, rol: m.rol || '', monto: String(m.monto || '') }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>}
+                                    {!soloLectura && <button onClick={() => borrarMiembro(m.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>}
                                 </div>
                             )}
                         </div>
                     ))}
+                    {equipo.length === 0 && soloLectura && <p className="text-[11px] text-gray-500">Sin equipo cargado.</p>}
                     {/* alta */}
-                    <div className="flex flex-wrap items-center gap-2 bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3">
+                    {!soloLectura && <div className="flex flex-wrap items-center gap-2 bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3">
                         <input value={nuevoMiembro.nombre} onChange={e => setNuevoMiembro(v => ({ ...v, nombre: e.target.value }))} placeholder="Nombre" className="inp flex-1 min-w-[110px]" />
                         <input value={nuevoMiembro.rol} onChange={e => setNuevoMiembro(v => ({ ...v, rol: e.target.value }))} placeholder="Rol (sonido, luces…)" className="inp w-36" />
                         <input value={nuevoMiembro.monto} onChange={e => setNuevoMiembro(v => ({ ...v, monto: e.target.value }))} type="number" placeholder="Cachet" className="inp w-24" />
                         <button onClick={agregarMiembro} className="bg-[#D4E655] text-black px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1"><Plus size={14} /> Agregar</button>
-                    </div>
+                    </div>}
                     {equipo.length > 0 && (
                         <div className="flex items-center justify-between pt-1 px-1">
                             <span className="text-[11px] text-gray-500 uppercase tracking-widest font-bold">Total equipo</span>
@@ -1019,9 +1050,11 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                     <div className="space-y-2 mb-3">
                         {/* equipo de función (auto) */}
                         <div className="flex items-center gap-3 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
-                            <button onClick={toggleEquipoBorderaux} className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border transition-colors ${borderaux.incluirEquipo ? 'bg-[#D4E655] border-[#D4E655]' : 'border-white/25'}`}>
-                                {borderaux.incluirEquipo && <Check size={13} className="text-black" strokeWidth={3} />}
-                            </button>
+                            {soloLectura
+                                ? <span className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border ${borderaux.incluirEquipo ? 'bg-[#D4E655] border-[#D4E655]' : 'border-white/25'}`}>{borderaux.incluirEquipo && <Check size={13} className="text-black" strokeWidth={3} />}</span>
+                                : <button onClick={toggleEquipoBorderaux} className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 border transition-colors ${borderaux.incluirEquipo ? 'bg-[#D4E655] border-[#D4E655]' : 'border-white/25'}`}>
+                                    {borderaux.incluirEquipo && <Check size={13} className="text-black" strokeWidth={3} />}
+                                </button>}
                             <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium text-gray-100">Equipo de función</p>
                                 <p className="text-[10px] text-gray-500">{borderaux.incluirEquipo ? 'Se descuenta del reparto' : 'No se descuenta'}</p>
@@ -1042,18 +1075,18 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                                     <div className="flex items-center gap-3">
                                         <p className="flex-1 min-w-0 text-sm font-medium text-gray-100 truncate">{g.concepto}</p>
                                         <p className="font-bold text-gray-200">{pesos(Number(g.monto))}</p>
-                                        <button onClick={() => { setEditGasto(g.id); setEditGastoVals({ concepto: g.concepto, monto: String(g.monto || '') }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>
-                                        <button onClick={() => borrarGasto(g.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>
+                                        {!soloLectura && <button onClick={() => { setEditGasto(g.id); setEditGastoVals({ concepto: g.concepto, monto: String(g.monto || '') }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>}
+                                        {!soloLectura && <button onClick={() => borrarGasto(g.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>}
                                     </div>
                                 )}
                             </div>
                         ))}
                         {/* alta gasto */}
-                        <div className="flex flex-wrap items-center gap-2 bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3">
+                        {!soloLectura && <div className="flex flex-wrap items-center gap-2 bg-[#0e0e10] border border-dashed border-white/15 rounded-xl p-3">
                             <input value={nuevoGasto.concepto} onChange={e => setNuevoGasto(v => ({ ...v, concepto: e.target.value }))} placeholder="Concepto (servicio, gasto…)" className="inp flex-1 min-w-[120px]" />
                             <input value={nuevoGasto.monto} onChange={e => setNuevoGasto(v => ({ ...v, monto: e.target.value }))} type="number" placeholder="Monto" className="inp w-24" />
                             <button onClick={agregarGasto} className="bg-[#D4E655] text-black px-3 py-2 rounded-lg font-bold text-xs flex items-center gap-1"><Plus size={14} /> Agregar</button>
-                        </div>
+                        </div>}
                         <div className="flex items-center justify-between pt-1 px-1">
                             <span className="text-[11px] text-gray-500 uppercase tracking-widest font-bold">Total deducido</span>
                             <span className="font-black text-white">{pesos(borderaux.deducido)}</span>
@@ -1063,7 +1096,9 @@ function Detalle({ eventoId, onBack }: { eventoId: string; onBack: () => void })
                     {/* reparto */}
                     <div className="flex items-center gap-2 mb-3">
                         <span className="text-[11px] text-gray-400 font-semibold">% para la compañía</span>
-                        <input value={pctInput} onChange={e => setPctInput(e.target.value)} onBlur={guardarPct} type="number" min={0} max={100} className="inp w-20 text-center" />
+                        {soloLectura
+                            ? <span className="inp w-20 text-center inline-block">{pctInput || borderaux.pct}%</span>
+                            : <input value={pctInput} onChange={e => setPctInput(e.target.value)} onBlur={guardarPct} type="number" min={0} max={100} className="inp w-20 text-center" />}
                         <span className="text-[11px] text-gray-600">Piso 2: {100 - (Number(pctInput) || 0)}%</span>
                     </div>
 
