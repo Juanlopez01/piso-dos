@@ -204,7 +204,7 @@ export async function catalogoVentasAction() {
     const admin = getAdminClient()
     const { data: productos } = await admin
         .from('productos')
-        .select('id, nombre, precio, categoria, comision_pct, permite_editar_precio, entrega_tipo')
+        .select('id, nombre, descripcion, precio, creditos, tipo_clase, categoria, comision_pct, comision_tipo, comision_monto, permite_editar_precio, entrega_tipo')
         .eq('activo', true)
         .eq('visible_vendedor', true) // Solo lo que el admin habilitó para vender
         .order('categoria', { ascending: true })

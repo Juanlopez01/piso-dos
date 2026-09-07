@@ -11,6 +11,7 @@ import { Loader2, Link2, Copy, Check, MessageCircle, Ban, Lock, Tag, Download, F
 
 type Producto = {
     id: string; nombre: string; precio: number; categoria: string
+    descripcion?: string | null; creditos?: number | null; tipo_clase?: string | null
     comision_tipo: 'porcentaje' | 'monto_fijo'; comision_pct: number; comision_monto: number
     permite_editar_precio: boolean; entrega_tipo: string
 }
@@ -68,6 +69,7 @@ export default function VenderPage() {
 
     const [cart, setCart] = useState<{ productoId: string; cantidad: number; precioUnitario: number | '' }[]>([])
     const [addSel, setAddSel] = useState('')
+    const [busquedaProd, setBusquedaProd] = useState('')
     const [buyer, setBuyer] = useState({ nombre: '', telefono: '', email: '', observaciones: '' })
     const [filtros, setFiltros] = useState({ vendedorId: '', estado: '', categoria: '', desde: '', hasta: '' })
     const [pendientes, setPendientes] = useState<Pendiente[]>([])
@@ -233,15 +235,50 @@ export default function VenderPage() {
             <form onSubmit={handleCrear} className="bg-[#09090b] border border-white/10 p-6 rounded-2xl space-y-4">
                 <h3 className="text-sm font-black text-white uppercase tracking-widest">Nueva Venta</h3>
 
-                {/* Agregar producto al carrito */}
+                {/* Catálogo: todo lo que el vendedor puede ofrecer (con su info) */}
                 <div>
-                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest block mb-1.5">Agregar producto</label>
-                    <select value={addSel} onChange={e => agregarAlCarrito(e.target.value)} className={inputCls}>
-                        <option value="">Elegí un producto…</option>
-                        {productos.filter(p => !cart.some(c => c.productoId === p.id)).map(p => (
-                            <option key={p.id} value={p.id}>{p.categoria} · {p.nombre} — ${p.precio.toLocaleString()}</option>
-                        ))}
-                    </select>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Catálogo — tocá para agregar</label>
+                        <span className="text-[10px] text-gray-600 font-bold">{productos.length} productos</span>
+                    </div>
+                    <div className="relative mb-3">
+                        <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                        <input value={busquedaProd} onChange={e => setBusquedaProd(e.target.value)} placeholder="Buscar por nombre o categoría…" className="w-full bg-[#111] border border-white/10 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white outline-none focus:border-[#D4E655]" />
+                    </div>
+                    {(() => {
+                        const q = busquedaProd.trim().toLowerCase()
+                        const filtrados = productos.filter(p => !q || p.nombre.toLowerCase().includes(q) || (p.categoria || '').toLowerCase().includes(q))
+                        if (!filtrados.length) return <p className="text-xs text-gray-500 py-3 text-center">No hay productos que coincidan.</p>
+                        const cats = Array.from(new Set(filtrados.map(p => p.categoria || 'Otros')))
+                        return (
+                            <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1 custom-scrollbar">
+                                {cats.map(cat => (
+                                    <div key={cat}>
+                                        <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1.5">{cat}</p>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            {filtrados.filter(p => (p.categoria || 'Otros') === cat).map(p => {
+                                                const enCart = cart.some(c => c.productoId === p.id)
+                                                return (
+                                                    <button key={p.id} type="button" onClick={() => !enCart && agregarAlCarrito(p.id)} disabled={enCart}
+                                                        className={`text-left rounded-xl border p-3 transition-colors ${enCart ? 'bg-[#D4E655]/10 border-[#D4E655]/30 cursor-default' : 'bg-[#111] border-white/10 hover:border-[#D4E655]/40'}`}>
+                                                        <div className="flex items-start justify-between gap-2">
+                                                            <p className="text-sm font-bold text-white leading-tight">{p.nombre}</p>
+                                                            {enCart ? <Check size={15} className="text-[#D4E655] shrink-0" /> : <span className="text-[#D4E655] text-lg leading-none shrink-0">+</span>}
+                                                        </div>
+                                                        <p className="text-[11px] text-[#D4E655] font-black mt-1">${p.precio.toLocaleString()}{p.permite_editar_precio && <span className="text-gray-500 font-normal"> (editable)</span>}</p>
+                                                        <p className="text-[10px] text-gray-500 mt-0.5">
+                                                            {[p.creditos ? `${p.creditos} ${p.creditos === 1 ? 'clase' : 'clases'}` : null, p.tipo_clase].filter(Boolean).join(' · ')}
+                                                        </p>
+                                                        {p.descripcion && <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{p.descripcion}</p>}
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )
+                    })()}
                 </div>
 
                 {/* Ítems del carrito */}
