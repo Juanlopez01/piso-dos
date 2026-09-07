@@ -238,7 +238,7 @@ async function requireAdmin() {
     if (!session?.user) return { ok: false as const, error: 'No autorizado' }
     const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
     if (perfil?.rol !== 'admin') return { ok: false as const, error: 'Solo un admin puede hacer esto.' }
-    return { ok: true as const }
+    return { ok: true as const, userId: session.user.id }
 }
 
 export async function editarHorarioTurnoAction(turnoId: string, tipo: 'apertura' | 'cierre', nuevaFechaISO: string) {
@@ -307,4 +307,89 @@ export async function autocerrarTurnosAction() {
     if (error) return { success: false, error: error.message, cerrados: 0 }
     revalidatePath('/liquidaciones')
     return { success: true, cerrados: Number(data) || 0 }
+}
+// ============================================================================
+// Reporte mensual de caja (por día · efectivo/transferencia · ingreso/egreso).
+// Se calcula solo de caja_movimientos; los overrides manuales por celda mandan.
+// Solo admin.
+// ============================================================================
+
+// Fecha en ART (UTC-3) para agrupar por día correctamente.
+function diaART(iso: string): number {
+    const d = new Date(new Date(iso).getTime() - 3 * 3600_000)
+    return d.getUTCDate()
+}
+
+export async function getReporteMensualCajaAction(anio: number, mes: number) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false as const, error: perm.error, dias: [] as any[], totales: null }
+    const admin = getAdminClient()
+
+    const desde = new Date(anio, mes - 1, 1).toISOString()
+    const hasta = new Date(anio, mes, 1).toISOString()
+    const { data: movs } = await admin.from('caja_movimientos')
+        .select('tipo, metodo_pago, monto, created_at').gte('created_at', desde).lt('created_at', hasta)
+
+    const nDias = new Date(anio, mes, 0).getDate()
+    // auto[dia] = { ie, it, ee, et } (ingreso/egreso × efectivo/transferencia)
+    const auto: Record<number, { ie: number; it: number; ee: number; et: number }> = {}
+    for (let d = 1; d <= nDias; d++) auto[d] = { ie: 0, it: 0, ee: 0, et: 0 }
+    for (const m of (movs || []) as any[]) {
+        const d = diaART(m.created_at)
+        if (!auto[d]) continue
+        const esEfvo = (m.metodo_pago || 'efectivo') === 'efectivo'
+        const monto = Number(m.monto || 0)
+        if (m.tipo === 'egreso') { if (esEfvo) auto[d].ee += monto; else auto[d].et += monto }
+        else { if (esEfvo) auto[d].ie += monto; else auto[d].it += monto }
+    }
+
+    const { data: ovs } = await admin.from('caja_reporte_override').select('dia, tipo, metodo, monto').eq('anio', anio).eq('mes', mes)
+    const ovMap: Record<string, number> = {}
+    for (const o of (ovs || []) as any[]) ovMap[`${o.dia}|${o.tipo}|${o.metodo}`] = Number(o.monto)
+
+    const val = (dia: number, tipo: string, metodo: string, autoVal: number) => {
+        const k = `${dia}|${tipo}|${metodo}`
+        return k in ovMap ? ovMap[k] : autoVal
+    }
+
+    const dias = []
+    const tot = { ie: 0, it: 0, ee: 0, et: 0 }
+    for (let d = 1; d <= nDias; d++) {
+        const a = auto[d]
+        const ie = val(d, 'ingreso', 'efectivo', a.ie)
+        const it = val(d, 'ingreso', 'transferencia', a.it)
+        const ee = val(d, 'egreso', 'efectivo', a.ee)
+        const et = val(d, 'egreso', 'transferencia', a.et)
+        tot.ie += ie; tot.it += it; tot.ee += ee; tot.et += et
+        dias.push({
+            dia: d, ie, it, ee, et,
+            neto: ie + it - ee - et,
+            auto: a,
+            editado: {
+                ie: `${d}|ingreso|efectivo` in ovMap, it: `${d}|ingreso|transferencia` in ovMap,
+                ee: `${d}|egreso|efectivo` in ovMap, et: `${d}|egreso|transferencia` in ovMap,
+            },
+        })
+    }
+    const totales = { ...tot, neto: tot.ie + tot.it - tot.ee - tot.et }
+    return { success: true as const, dias, totales }
+}
+
+// Guarda (o borra si monto es null) una corrección manual de una celda.
+export async function setOverrideCajaAction(anio: number, mes: number, dia: number, tipo: 'ingreso' | 'egreso', metodo: 'efectivo' | 'transferencia', monto: number | null) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+    if (monto === null || monto === undefined || (monto as any) === '') {
+        const { error } = await admin.from('caja_reporte_override').delete()
+            .eq('anio', anio).eq('mes', mes).eq('dia', dia).eq('tipo', tipo).eq('metodo', metodo)
+        if (error) return { success: false, error: error.message }
+        return { success: true }
+    }
+    const { error } = await admin.from('caja_reporte_override').upsert(
+        { anio, mes, dia, tipo, metodo, monto: Math.max(0, Number(monto) || 0), updated_at: new Date().toISOString(), updated_by: perm.userId },
+        { onConflict: 'anio,mes,dia,tipo,metodo' }
+    )
+    if (error) return { success: false, error: error.message }
+    return { success: true }
 }

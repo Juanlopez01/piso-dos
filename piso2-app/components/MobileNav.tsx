@@ -59,6 +59,7 @@ function MobileNavContent() {
             'Consultas',
             'Eventos',
             'Curaduría',
+            'Reporte Caja',
             'Liquidaciones',
             'Remarketing',
             'Caja',
