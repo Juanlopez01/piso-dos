@@ -88,27 +88,41 @@ const getInteresesSeguro = (intereses: string | string[] | null | undefined): st
     return []
 }
 
+// Trae TODAS las filas paginando de a 1000 (Supabase corta en 1000 por request).
+// Sin esto, con +1000 perfiles los últimos (alfabéticamente) no aparecían.
+const fetchAll = async (makeQuery: (from: number, to: number) => any): Promise<any[]> => {
+    const PAGE = 1000
+    let from = 0
+    const all: any[] = []
+    while (true) {
+        const { data, error } = await makeQuery(from, from + PAGE - 1)
+        if (error) throw error
+        all.push(...(data || []))
+        if (!data || data.length < PAGE) break
+        from += PAGE
+    }
+    return all
+}
+
 const fetcher = async (): Promise<{ usuarios: UsuarioDirectorio[], ritmos: Ritmo[], productos: Producto[], todasLasCompanias: CompaniaBasica[] }> => {
     const supabase = createClient()
 
     try {
         const [
-            { data: perfiles, error: errPerfiles },
+            perfiles,
+            pcData,
+            pasesData,
             { data: ritmos, error: errRitmos },
             { data: productos, error: errProductos },
-            { data: pcData, error: errPc },
-            { data: pasesData, error: errPases },
             { data: companiasMaestras, error: errCias }
         ] = await Promise.all([
-            supabase.from('profiles').select('*').order('nombre_completo', { ascending: true }),
+            fetchAll((f, t) => supabase.from('profiles').select('*').order('nombre_completo', { ascending: true }).range(f, t)),
+            fetchAll((f, t) => supabase.from('perfiles_companias').select('perfil_id, compania:companias(id, nombre)').range(f, t)),
+            fetchAll((f, t) => supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad').range(f, t)),
             supabase.from('ritmos').select('id, nombre').order('nombre', { ascending: true }),
             supabase.from('productos').select('id, nombre, precio, creditos, tipo_clase, pase_referencia').eq('activo', true),
-            supabase.from('perfiles_companias').select('perfil_id, compania:companias(id, nombre)'),
-            supabase.from('pases_exclusivos').select('usuario_id, pase_referencia, cantidad'),
             supabase.from('companias').select('id, nombre').order('nombre', { ascending: true })
         ])
-
-        if (errPerfiles) throw errPerfiles
 
         const usuariosProcesados: UsuarioDirectorio[] = (perfiles || []).map((u: any) => {
             const misCompanias = pcData?.filter((pc: any) => pc.perfil_id === u.id).map((pc: any) => pc.compania as unknown as CompaniaBasica) || []
