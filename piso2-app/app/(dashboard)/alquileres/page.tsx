@@ -160,8 +160,26 @@ export default function AlquileresPage() {
         hora_fin: '22:00',
         tipo_uso: 'ensayo',
         descuento: 0,
-        notas_recepcion: '' // 🚀 NUEVO CAMPO
+        notas_recepcion: '', // 🚀 NUEVO CAMPO
+        // Valor por hora para ESTA reserva (arranca del tarifario de la sala, editable).
+        precio_manana: 0,
+        precio_noche: 0,
+        precio_finde: 0,
     })
+
+    // Al elegir sala o actividad, precargamos el valor/hora desde el tarifario.
+    // El admin lo puede editar para esta reserva puntual.
+    useEffect(() => {
+        const sala = salas.find(s => s.id === form.sala_id)
+        if (!sala) return
+        const pref = form.tipo_uso === 'produccion' ? 'p_prod' : `p_${form.tipo_uso}`
+        setForm(f => ({
+            ...f,
+            precio_manana: Number(sala[`${pref}_manana`] || 0),
+            precio_noche: Number(sala[`${pref}_noche`] || 0),
+            precio_finde: Number(sala[`${pref}_finde`] || 0),
+        }))
+    }, [form.sala_id, form.tipo_uso, salas])
 
     const [priceBreakdown, setPriceBreakdown] = useState({
         manana: { horas: 0, precio: 0, subtotal: 0 },
@@ -181,10 +199,10 @@ export default function AlquileresPage() {
         const sala = salas.find(s => s.id === form.sala_id)
         if (!sala) return
 
-        const tipoPrefix = form.tipo_uso === 'produccion' ? 'p_prod' : `p_${form.tipo_uso}`
-        const pManana = Number(sala[`${tipoPrefix}_manana`] || 0)
-        const pNoche = Number(sala[`${tipoPrefix}_noche`] || 0)
-        const pFinde = Number(sala[`${tipoPrefix}_finde`] || 0)
+        // Usamos el valor/hora del form (precargado del tarifario, editable para esta reserva).
+        const pManana = Number(form.precio_manana || 0)
+        const pNoche = Number(form.precio_noche || 0)
+        const pFinde = Number(form.precio_finde || 0)
 
         const parseTime = (t: string) => { const [h, m] = t.split(':').map(Number); return h + m / 60 }
         const start = parseTime(form.hora_inicio)
@@ -223,7 +241,7 @@ export default function AlquileresPage() {
             total: subtotalCalculado - descuentoCalculado
         })
 
-    }, [form.sala_id, form.hora_inicio, form.hora_fin, form.tipo_uso, form.fechas, form.descuento, salas])
+    }, [form.sala_id, form.hora_inicio, form.hora_fin, form.tipo_uso, form.fechas, form.descuento, form.precio_manana, form.precio_noche, form.precio_finde, salas])
 
     const handleTarifaChange = (salaId: string, field: string, value: string) => {
         const numValue = value === '' ? 0 : Number(value)
@@ -299,7 +317,6 @@ export default function AlquileresPage() {
 
             const calculateDayCost = (date: Date) => {
                 if (!sala) return 0
-                const tipoPrefix = form.tipo_uso === 'produccion' ? 'p_prod' : `p_${form.tipo_uso}`
                 const parseTime = (t: string) => { const [h, m] = t.split(':').map(Number); return h + m / 60 }
                 const start = parseTime(form.hora_inicio)
                 const end = parseTime(form.hora_fin)
@@ -307,14 +324,14 @@ export default function AlquileresPage() {
 
                 let baseCost = 0
                 if (isSunday(date)) {
-                    baseCost = duration * Number(sala[`${tipoPrefix}_finde`] || 0)
+                    baseCost = duration * Number(form.precio_finde || 0)
                 } else {
                     const CORTE = 18.0
                     let hManana = 0, hNoche = 0
                     if (end <= CORTE) hManana = duration
                     else if (start >= CORTE) hNoche = duration
                     else { hManana = CORTE - start; hNoche = end - CORTE }
-                    baseCost = (hManana * Number(sala[`${tipoPrefix}_manana`] || 0)) + (hNoche * Number(sala[`${tipoPrefix}_noche`] || 0))
+                    baseCost = (hManana * Number(form.precio_manana || 0)) + (hNoche * Number(form.precio_noche || 0))
                 }
                 const multiplier = 1 - ((form.descuento || 0) / 100)
                 return baseCost * multiplier
@@ -538,7 +555,8 @@ export default function AlquileresPage() {
             hora_fin: base.hora_fin || '12:00',
             descuento: 0,
             fechas: [],
-            notas_recepcion: group.notas_recepcion || ''
+            notas_recepcion: group.notas_recepcion || '',
+            precio_manana: 0, precio_noche: 0, precio_finde: 0, // se precargan del tarifario al abrir
         })
         setIsModalOpen(true)
         toast.info('Elegí nuevas fechas')
@@ -938,6 +956,28 @@ export default function AlquileresPage() {
                                         placeholder="Ej: Ingresan equipos de filmación, sillas extras..."
                                     />
                                 </div>
+
+                                {form.sala_id && (
+                                    <div className="bg-[#111] p-3 rounded-xl border border-white/10 mt-2">
+                                        <label className="text-[10px] font-bold text-[#D4E655] uppercase flex items-center gap-1 mb-2"><Tag size={12} /> Valor por hora (para esta reserva)</label>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {[
+                                                { k: 'precio_manana', lbl: 'Matutino' },
+                                                { k: 'precio_noche', lbl: 'Nocturno' },
+                                                { k: 'precio_finde', lbl: 'Finde/Dom' },
+                                            ].map(({ k, lbl }) => (
+                                                <div key={k} className="space-y-1">
+                                                    <label className="text-[9px] font-bold text-gray-500 uppercase block">{lbl}</label>
+                                                    <div className="relative">
+                                                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs font-bold">$</span>
+                                                        <input type="number" min="0" value={(form as any)[k] || ''} onChange={e => setForm({ ...form, [k]: Number(e.target.value) })} className="w-full bg-black border border-white/10 rounded-lg py-2 pl-5 pr-2 text-white text-xs font-bold outline-none focus:border-[#D4E655]" />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <p className="text-[9px] text-gray-600 mt-1.5">Precargado del tarifario de la sala. Editalo si querés un valor distinto para esta reserva (no cambia el tarifario general).</p>
+                                    </div>
+                                )}
 
                                 <div className="bg-[#111] p-4 rounded-xl border border-white/10 mt-2 space-y-2 relative">
                                     {priceBreakdown.total > 0 && form.fechas.length > 0 && form.sala_id && (
