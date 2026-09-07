@@ -89,6 +89,20 @@ export async function getLibroAdminAction(anio: number, mes: number) {
         else { if (esEfvo) b.ef_ing += monto; else b.tr_ing += monto }
     }
 
+    // --- Overrides de caja (correcciones manuales de las líneas automáticas) ---
+    const { data: cajaOvs } = await admin.from('admin_caja_override')
+        .select('dia, sede_key, ef_ing, ef_egr, tr_ing, tr_egr').eq('anio', anio).eq('mes', mes)
+    const cajaOvMap = new Map<string, Buckets & { editado: true }>()
+    for (const o of (cajaOvs || []) as any[]) {
+        cajaOvMap.set(`${o.dia}|${o.sede_key}`, {
+            ef_ing: Number(o.ef_ing || 0), ef_egr: Number(o.ef_egr || 0),
+            tr_ing: Number(o.tr_ing || 0), tr_egr: Number(o.tr_egr || 0),
+            usd_ing: 0, usd_egr: 0, editado: true,
+        })
+        // Si el override es de un día/sede sin movimientos, igual tiene que figurar.
+        if (!cajaAgrup.has(`${o.dia}|${o.sede_key}`)) cajaAgrup.set(`${o.dia}|${o.sede_key}`, cero())
+    }
+
     // --- MOVIMIENTOS MANUALES del mes ---
     const { data: manMovs } = await admin.from('admin_movimientos')
         .select('id, fecha, concepto, tipo, metodo, monto, created_by, created_at')
@@ -109,6 +123,8 @@ export async function getLibroAdminAction(anio: number, mes: number) {
         id?: string; autor?: string; hora?: string
         // datos crudos (solo manuales) para poder editar
         fecha?: string; tipoMov?: string; metodoMov?: string; montoMov?: number
+        // solo líneas de caja: para poder corregirlas (override)
+        diaNum?: number; sedeKey?: string; editadoCaja?: boolean
     }
     const porDia = new Map<number, Entrada[]>()
     const push = (dia: number, e: Entrada) => {
@@ -116,12 +132,17 @@ export async function getLibroAdminAction(anio: number, mes: number) {
         porDia.get(dia)!.push(e)
     }
 
-    // Cajas automáticas
+    // Cajas (automáticas, o corregidas si hay override)
     for (const [key, b] of cajaAgrup) {
         const [diaStr, sedeId] = key.split('|')
         const dia = Number(diaStr)
         const nombre = sedeId === 'pozo' ? 'Administración (pozo)' : (sedeNombre.get(sedeId) || 'Caja')
-        push(dia, { key: `caja-${key}`, auto: true, concepto: `Caja ${nombre}`, ...b })
+        const ov = cajaOvMap.get(key)
+        const vals: Buckets = ov ? ov : b
+        push(dia, {
+            key: `caja-${key}`, auto: true, concepto: `Caja ${nombre}`,
+            diaNum: dia, sedeKey: sedeId, editadoCaja: !!ov, ...vals,
+        })
     }
     // Manuales
     for (const m of (manMovs || []) as any[]) {
@@ -224,6 +245,34 @@ export async function eliminarMovimientoAdminAction(id: string) {
     if (!perm.ok) return { success: false, error: perm.error }
     const admin = getAdminClient()
     const { error } = await admin.from('admin_movimientos').delete().eq('id', id)
+    if (error) return { success: false, error: error.message }
+    revalidatePath('/reporte-caja')
+    return { success: true }
+}
+
+// Corrige una línea de caja (override por día/sede). vals = null → vuelve al automático.
+export async function setCajaOverrideAction(
+    anio: number, mes: number, dia: number, sedeKey: string,
+    vals: { ef_ing: number; ef_egr: number; tr_ing: number; tr_egr: number } | null
+) {
+    const perm = await requireFinanzas()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+    if (!vals) {
+        const { error } = await admin.from('admin_caja_override').delete()
+            .eq('anio', anio).eq('mes', mes).eq('dia', dia).eq('sede_key', sedeKey)
+        if (error) return { success: false, error: error.message }
+        revalidatePath('/reporte-caja')
+        return { success: true }
+    }
+    const clean = {
+        ef_ing: Math.max(0, Number(vals.ef_ing) || 0), ef_egr: Math.max(0, Number(vals.ef_egr) || 0),
+        tr_ing: Math.max(0, Number(vals.tr_ing) || 0), tr_egr: Math.max(0, Number(vals.tr_egr) || 0),
+    }
+    const { error } = await admin.from('admin_caja_override').upsert(
+        { anio, mes, dia, sede_key: sedeKey, ...clean, updated_by: perm.userId, updated_at: new Date().toISOString() },
+        { onConflict: 'anio,mes,dia,sede_key' }
+    )
     if (error) return { success: false, error: error.message }
     revalidatePath('/reporte-caja')
     return { success: true }

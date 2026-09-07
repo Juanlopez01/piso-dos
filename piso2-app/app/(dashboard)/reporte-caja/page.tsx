@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useState, Fragment } from 'react'
-import { Loader2, RefreshCw, Download, Wallet, Plus, Trash2, Lock, Pencil, X } from 'lucide-react'
+import { Loader2, RefreshCw, Download, Wallet, Plus, Trash2, Lock, Pencil, X, Check, RotateCcw } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
-import { getLibroAdminAction, agregarMovimientoAdminAction, editarMovimientoAdminAction, eliminarMovimientoAdminAction } from '@/app/actions/libro-admin'
+import { getLibroAdminAction, agregarMovimientoAdminAction, editarMovimientoAdminAction, eliminarMovimientoAdminAction, setCajaOverrideAction } from '@/app/actions/libro-admin'
 
 const pesos = (n: number) => '$' + Math.round(Number(n || 0)).toLocaleString('es-AR')
 const usd = (n: number) => 'US$' + Math.round(Number(n || 0)).toLocaleString('es-AR')
@@ -14,6 +14,7 @@ const hoyDia = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 
 type Entrada = {
     key: string; auto: boolean; concepto: string; id?: string; autor?: string; hora?: string
     fecha?: string; tipoMov?: 'ingreso' | 'egreso'; metodoMov?: 'efectivo' | 'transferencia' | 'dolares'; montoMov?: number
+    diaNum?: number; sedeKey?: string; editadoCaja?: boolean
     ef_ing: number; ef_egr: number; tr_ing: number; tr_egr: number; usd_ing: number; usd_egr: number
 }
 type Dia = { dia: number; entries: Entrada[]; sub: any; saldoPesos: number; saldoDolares: number }
@@ -36,6 +37,31 @@ export default function LibroAdminPage() {
     const [nuevo, setNuevo] = useState<{ fecha: string; concepto: string; tipo: 'ingreso' | 'egreso'; metodo: 'efectivo' | 'transferencia' | 'dolares'; monto: string }>({
         fecha: hoyDia(), concepto: '', tipo: 'ingreso', metodo: 'efectivo', monto: ''
     })
+
+    // Edición de líneas de caja (override)
+    const [editCajaKey, setEditCajaKey] = useState<string | null>(null)
+    const [cajaVals, setCajaVals] = useState<{ ef_ing: string; ef_egr: string; tr_ing: string; tr_egr: string }>({ ef_ing: '', ef_egr: '', tr_ing: '', tr_egr: '' })
+    const [cajaSaving, setCajaSaving] = useState(false)
+
+    const editarCaja = (e: Entrada) => {
+        setEditCajaKey(e.key)
+        setCajaVals({ ef_ing: String(e.ef_ing || ''), ef_egr: String(e.ef_egr || ''), tr_ing: String(e.tr_ing || ''), tr_egr: String(e.tr_egr || '') })
+    }
+    const guardarCaja = async (e: Entrada) => {
+        setCajaSaving(true)
+        const r = await setCajaOverrideAction(anio, mes, e.diaNum!, e.sedeKey!, {
+            ef_ing: Number(cajaVals.ef_ing) || 0, ef_egr: Number(cajaVals.ef_egr) || 0,
+            tr_ing: Number(cajaVals.tr_ing) || 0, tr_egr: Number(cajaVals.tr_egr) || 0,
+        })
+        if (r.success) { toast.success('Caja corregida'); setEditCajaKey(null); cargar() } else toast.error(r.error || 'Error')
+        setCajaSaving(false)
+    }
+    const resetCaja = async (e: Entrada) => {
+        setCajaSaving(true)
+        const r = await setCajaOverrideAction(anio, mes, e.diaNum!, e.sedeKey!, null)
+        if (r.success) { toast.success('Volvió al automático'); setEditCajaKey(null); cargar() } else toast.error(r.error || 'Error')
+        setCajaSaving(false)
+    }
 
     const resetForm = () => { setEditId(null); setNuevo({ fecha: hoyDia(), concepto: '', tipo: 'ingreso', metodo: 'efectivo', monto: '' }) }
     const editar = (e: Entrada) => {
@@ -187,31 +213,55 @@ export default function LibroAdminPage() {
                                         <td className="py-1.5 pr-2 text-right text-[10px] text-gray-500 uppercase tracking-wider" colSpan={2}>{usd(d.saldoDolares)}</td>
                                         <td></td>
                                     </tr>
-                                    {d.entries.map(e => (
-                                        <tr key={e.key} className={`border-t border-white/5 hover:bg-white/[0.02] ${editId && e.id === editId ? 'bg-[#D4E655]/[0.06]' : ''}`}>
+                                    {d.entries.map(e => {
+                                        const editandoCaja = editCajaKey === e.key
+                                        const ci = 'w-20 bg-black border border-[#D4E655]/40 rounded py-1 px-1.5 text-xs text-right outline-none focus:border-[#D4E655]'
+                                        return (
+                                        <tr key={e.key} className={`border-t border-white/5 hover:bg-white/[0.02] ${(editId && e.id === editId) || editandoCaja ? 'bg-[#D4E655]/[0.06]' : ''}`}>
                                             <td className="p-2 pl-3">
                                                 <span className={e.auto ? 'text-gray-300' : 'text-white'}>{e.concepto}</span>
-                                                {e.auto && <span className="ml-2 text-[9px] uppercase tracking-wider text-[#D4E655]/60 border border-[#D4E655]/20 rounded px-1 py-0.5">auto</span>}
+                                                {e.auto && (e.editadoCaja
+                                                    ? <span className="ml-2 text-[9px] uppercase tracking-wider text-[#D4E655] border border-[#D4E655]/40 rounded px-1 py-0.5">editado</span>
+                                                    : <span className="ml-2 text-[9px] uppercase tracking-wider text-gray-500 border border-white/10 rounded px-1 py-0.5">auto</span>)}
                                             </td>
                                             <td className="p-2 text-[11px] text-gray-500">{e.auto ? 'Caja' : (<span>{e.autor}{e.hora ? <span className="text-gray-700"> · {e.hora}</span> : ''}</span>)}</td>
-                                            <td className="p-2 text-right font-bold">{cel(e.ef_ing)}</td>
-                                            <td className="p-2 text-right font-bold">{cel(e.ef_egr, true)}</td>
-                                            <td className="p-2 text-right font-bold">{cel(e.tr_ing)}</td>
-                                            <td className="p-2 text-right font-bold">{cel(e.tr_egr, true)}</td>
-                                            <td className="p-2 text-right font-bold">{cel(e.usd_ing)}</td>
-                                            <td className="p-2 text-right font-bold">{cel(e.usd_egr, true)}</td>
+                                            {editandoCaja ? (<>
+                                                <td className="p-1 text-right"><input type="number" min={0} value={cajaVals.ef_ing} onChange={ev => setCajaVals({ ...cajaVals, ef_ing: ev.target.value })} className={ci} placeholder="0" /></td>
+                                                <td className="p-1 text-right"><input type="number" min={0} value={cajaVals.ef_egr} onChange={ev => setCajaVals({ ...cajaVals, ef_egr: ev.target.value })} className={ci} placeholder="0" /></td>
+                                                <td className="p-1 text-right"><input type="number" min={0} value={cajaVals.tr_ing} onChange={ev => setCajaVals({ ...cajaVals, tr_ing: ev.target.value })} className={ci} placeholder="0" /></td>
+                                                <td className="p-1 text-right"><input type="number" min={0} value={cajaVals.tr_egr} onChange={ev => setCajaVals({ ...cajaVals, tr_egr: ev.target.value })} className={ci} placeholder="0" /></td>
+                                                <td className="p-2 text-right text-gray-700">·</td>
+                                                <td className="p-2 text-right text-gray-700">·</td>
+                                            </>) : (<>
+                                                <td className="p-2 text-right font-bold">{cel(e.ef_ing)}</td>
+                                                <td className="p-2 text-right font-bold">{cel(e.ef_egr, true)}</td>
+                                                <td className="p-2 text-right font-bold">{cel(e.tr_ing)}</td>
+                                                <td className="p-2 text-right font-bold">{cel(e.tr_egr, true)}</td>
+                                                <td className="p-2 text-right font-bold">{cel(e.usd_ing)}</td>
+                                                <td className="p-2 text-right font-bold">{cel(e.usd_egr, true)}</td>
+                                            </>)}
                                             <td className="p-1 text-center whitespace-nowrap">
-                                                {!e.auto && e.id && (
+                                                {e.auto ? (
+                                                    editandoCaja ? (
+                                                        <span className="inline-flex gap-1.5">
+                                                            <button onClick={() => guardarCaja(e)} disabled={cajaSaving} title="Guardar" className="text-emerald-400 hover:text-emerald-300 disabled:opacity-40">{cajaSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={14} />}</button>
+                                                            {e.editadoCaja && <button onClick={() => resetCaja(e)} disabled={cajaSaving} title="Volver al automático" className="text-gray-500 hover:text-[#D4E655] disabled:opacity-40"><RotateCcw size={13} /></button>}
+                                                            <button onClick={() => setEditCajaKey(null)} disabled={cajaSaving} title="Cancelar" className="text-gray-600 hover:text-white disabled:opacity-40"><X size={14} /></button>
+                                                        </span>
+                                                    ) : (
+                                                        <button onClick={() => editarCaja(e)} title="Corregir caja" className="text-gray-600 hover:text-[#D4E655]"><Pencil size={13} /></button>
+                                                    )
+                                                ) : (e.id && (
                                                     <span className="inline-flex gap-1.5">
                                                         <button onClick={() => editar(e)} title="Editar" className="text-gray-600 hover:text-[#D4E655]"><Pencil size={13} /></button>
                                                         <button onClick={() => eliminar(e.id!, e.concepto)} disabled={borrandoId === e.id} title="Borrar" className="text-gray-600 hover:text-red-400 disabled:opacity-40">
                                                             {borrandoId === e.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                                                         </button>
                                                     </span>
-                                                )}
+                                                ))}
                                             </td>
                                         </tr>
-                                    ))}
+                                    )})}
                                 </Fragment>
                             ))}
                         </tbody>
