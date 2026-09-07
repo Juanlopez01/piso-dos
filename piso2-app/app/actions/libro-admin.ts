@@ -107,6 +107,8 @@ export async function getLibroAdminAction(anio: number, mes: number) {
     type Entrada = Buckets & {
         key: string; auto: boolean; concepto: string
         id?: string; autor?: string; hora?: string
+        // datos crudos (solo manuales) para poder editar
+        fecha?: string; tipoMov?: string; metodoMov?: string; montoMov?: number
     }
     const porDia = new Map<number, Entrada[]>()
     const push = (dia: number, e: Entrada) => {
@@ -133,6 +135,7 @@ export async function getLibroAdminAction(anio: number, mes: number) {
             key: `man-${m.id}`, auto: false, id: m.id, concepto: m.concepto,
             autor: autorNombre.get(m.created_by) || '—',
             hora: new Date(new Date(m.created_at).getTime() - 3 * 3600_000).toISOString().slice(11, 16),
+            fecha: m.fecha, tipoMov: m.tipo, metodoMov: m.metodo, montoMov: monto,
             ...b,
         })
     }
@@ -186,6 +189,30 @@ export async function agregarMovimientoAdminAction(input: {
         fecha: input.fecha, concepto, tipo: input.tipo, metodo: input.metodo,
         monto, created_by: perm.userId,
     })
+    if (error) return { success: false, error: error.message }
+    revalidatePath('/reporte-caja')
+    return { success: true }
+}
+
+// Edita un movimiento manual (compartido: cualquiera de los dos puede).
+export async function editarMovimientoAdminAction(id: string, input: {
+    fecha: string; concepto: string; tipo: 'ingreso' | 'egreso'
+    metodo: 'efectivo' | 'transferencia' | 'dolares'; monto: number
+}) {
+    const perm = await requireFinanzas()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const concepto = (input.concepto || '').trim()
+    if (!concepto) return { success: false, error: 'Poné un concepto.' }
+    if (!input.fecha) return { success: false, error: 'Elegí una fecha.' }
+    const monto = Number(input.monto)
+    if (!monto || monto <= 0) return { success: false, error: 'El monto tiene que ser mayor a 0.' }
+    if (!['ingreso', 'egreso'].includes(input.tipo)) return { success: false, error: 'Tipo inválido.' }
+    if (!['efectivo', 'transferencia', 'dolares'].includes(input.metodo)) return { success: false, error: 'Método inválido.' }
+
+    const admin = getAdminClient()
+    const { error } = await admin.from('admin_movimientos').update({
+        fecha: input.fecha, concepto, tipo: input.tipo, metodo: input.metodo, monto,
+    }).eq('id', id)
     if (error) return { success: false, error: error.message }
     revalidatePath('/reporte-caja')
     return { success: true }

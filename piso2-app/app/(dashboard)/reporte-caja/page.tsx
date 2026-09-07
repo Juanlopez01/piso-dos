@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useState, Fragment } from 'react'
-import { Loader2, RefreshCw, Download, Wallet, Plus, Trash2, Lock } from 'lucide-react'
+import { Loader2, RefreshCw, Download, Wallet, Plus, Trash2, Lock, Pencil, X } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
-import { getLibroAdminAction, agregarMovimientoAdminAction, eliminarMovimientoAdminAction } from '@/app/actions/libro-admin'
+import { getLibroAdminAction, agregarMovimientoAdminAction, editarMovimientoAdminAction, eliminarMovimientoAdminAction } from '@/app/actions/libro-admin'
 
 const pesos = (n: number) => '$' + Math.round(Number(n || 0)).toLocaleString('es-AR')
 const usd = (n: number) => 'US$' + Math.round(Number(n || 0)).toLocaleString('es-AR')
@@ -13,6 +13,7 @@ const hoyDia = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 
 
 type Entrada = {
     key: string; auto: boolean; concepto: string; id?: string; autor?: string; hora?: string
+    fecha?: string; tipoMov?: 'ingreso' | 'egreso'; metodoMov?: 'efectivo' | 'transferencia' | 'dolares'; montoMov?: number
     ef_ing: number; ef_egr: number; tr_ing: number; tr_egr: number; usd_ing: number; usd_egr: number
 }
 type Dia = { dia: number; entries: Entrada[]; sub: any; saldoPesos: number; saldoDolares: number }
@@ -30,10 +31,18 @@ export default function LibroAdminPage() {
     const [loading, setLoading] = useState(true)
     const [guardando, setGuardando] = useState(false)
     const [borrandoId, setBorrandoId] = useState<string | null>(null)
+    const [editId, setEditId] = useState<string | null>(null)
 
     const [nuevo, setNuevo] = useState<{ fecha: string; concepto: string; tipo: 'ingreso' | 'egreso'; metodo: 'efectivo' | 'transferencia' | 'dolares'; monto: string }>({
         fecha: hoyDia(), concepto: '', tipo: 'ingreso', metodo: 'efectivo', monto: ''
     })
+
+    const resetForm = () => { setEditId(null); setNuevo({ fecha: hoyDia(), concepto: '', tipo: 'ingreso', metodo: 'efectivo', monto: '' }) }
+    const editar = (e: Entrada) => {
+        setEditId(e.id!)
+        setNuevo({ fecha: e.fecha || hoyDia(), concepto: e.concepto, tipo: e.tipoMov || 'ingreso', metodo: e.metodoMov || 'efectivo', monto: String(e.montoMov ?? '') })
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
 
     const [anio, mes] = mesSel.split('-').map(Number)
 
@@ -50,10 +59,11 @@ export default function LibroAdminPage() {
         if (!nuevo.concepto.trim()) return toast.error('Poné un concepto')
         if (!nuevo.monto || Number(nuevo.monto) <= 0) return toast.error('Poné un monto válido')
         setGuardando(true)
-        const r = await agregarMovimientoAdminAction({
-            fecha: nuevo.fecha, concepto: nuevo.concepto.trim(), tipo: nuevo.tipo, metodo: nuevo.metodo, monto: Number(nuevo.monto)
-        })
-        if (r.success) { toast.success('Cargado'); setNuevo(n => ({ ...n, concepto: '', monto: '' })); cargar() }
+        const payload = { fecha: nuevo.fecha, concepto: nuevo.concepto.trim(), tipo: nuevo.tipo, metodo: nuevo.metodo, monto: Number(nuevo.monto) }
+        const r = editId
+            ? await editarMovimientoAdminAction(editId, payload)
+            : await agregarMovimientoAdminAction(payload)
+        if (r.success) { toast.success(editId ? 'Guardado' : 'Cargado'); resetForm(); cargar() }
         else toast.error(r.error || 'Error')
         setGuardando(false)
     }
@@ -111,8 +121,8 @@ export default function LibroAdminPage() {
             </div>
 
             {/* Cargar movimiento manual */}
-            <div className="rounded-2xl border border-white/10 bg-[#0b0b0d] p-4 mb-5">
-                <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-3">Cargar ingreso / egreso a mano</p>
+            <div className={`rounded-2xl border p-4 mb-5 ${editId ? 'border-[#D4E655]/40 bg-[#D4E655]/[0.04]' : 'border-white/10 bg-[#0b0b0d]'}`}>
+                <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-3">{editId ? 'Editando movimiento' : 'Cargar ingreso / egreso a mano'}</p>
                 <div className="flex flex-wrap gap-2 items-center">
                     <input type="date" value={nuevo.fecha} onChange={e => setNuevo({ ...nuevo, fecha: e.target.value })} className="bg-black border border-white/10 rounded-lg py-2 px-2 text-xs outline-none focus:border-[#D4E655]" />
                     <input type="text" placeholder="Concepto (ej: Pago pinturas Sala 1)" value={nuevo.concepto} onChange={e => setNuevo({ ...nuevo, concepto: e.target.value })} className="flex-1 min-w-[180px] bg-black border border-white/10 rounded-lg py-2 px-3 text-xs outline-none focus:border-[#D4E655]" />
@@ -127,8 +137,13 @@ export default function LibroAdminPage() {
                     </select>
                     <input type="number" min={0} placeholder="Monto" value={nuevo.monto} onChange={e => setNuevo({ ...nuevo, monto: e.target.value })} className={iEf} />
                     <button onClick={agregar} disabled={guardando} className="px-4 py-2 rounded-lg bg-[#D4E655] text-black text-xs font-black uppercase tracking-wide hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
-                        {guardando ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Agregar
+                        {guardando ? <Loader2 size={14} className="animate-spin" /> : editId ? <Pencil size={14} /> : <Plus size={14} />} {editId ? 'Guardar' : 'Agregar'}
                     </button>
+                    {editId && (
+                        <button onClick={resetForm} disabled={guardando} className="px-3 py-2 rounded-lg bg-[#111] border border-white/10 text-gray-400 text-xs font-bold uppercase tracking-wide hover:text-white flex items-center gap-1.5">
+                            <X size={14} /> Cancelar
+                        </button>
+                    )}
                 </div>
                 <p className="text-[10px] text-gray-600 mt-2">Queda registrado quién lo cargó. Las cajas (Obelisco/Congreso) entran solas, no hace falta cargarlas.</p>
             </div>
@@ -148,7 +163,7 @@ export default function LibroAdminPage() {
                                 <th className="p-2 text-right text-red-400/70">Transf Egr</th>
                                 <th className="p-2 text-right text-emerald-400/70">US$ Ing</th>
                                 <th className="p-2 text-right text-red-400/70">US$ Egr</th>
-                                <th className="p-2 w-8"></th>
+                                <th className="p-2 w-14"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -173,7 +188,7 @@ export default function LibroAdminPage() {
                                         <td></td>
                                     </tr>
                                     {d.entries.map(e => (
-                                        <tr key={e.key} className="border-t border-white/5 hover:bg-white/[0.02]">
+                                        <tr key={e.key} className={`border-t border-white/5 hover:bg-white/[0.02] ${editId && e.id === editId ? 'bg-[#D4E655]/[0.06]' : ''}`}>
                                             <td className="p-2 pl-3">
                                                 <span className={e.auto ? 'text-gray-300' : 'text-white'}>{e.concepto}</span>
                                                 {e.auto && <span className="ml-2 text-[9px] uppercase tracking-wider text-[#D4E655]/60 border border-[#D4E655]/20 rounded px-1 py-0.5">auto</span>}
@@ -185,11 +200,14 @@ export default function LibroAdminPage() {
                                             <td className="p-2 text-right font-bold">{cel(e.tr_egr, true)}</td>
                                             <td className="p-2 text-right font-bold">{cel(e.usd_ing)}</td>
                                             <td className="p-2 text-right font-bold">{cel(e.usd_egr, true)}</td>
-                                            <td className="p-1 text-center">
+                                            <td className="p-1 text-center whitespace-nowrap">
                                                 {!e.auto && e.id && (
-                                                    <button onClick={() => eliminar(e.id!, e.concepto)} disabled={borrandoId === e.id} className="text-gray-600 hover:text-red-400 disabled:opacity-40">
-                                                        {borrandoId === e.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                                                    </button>
+                                                    <span className="inline-flex gap-1.5">
+                                                        <button onClick={() => editar(e)} title="Editar" className="text-gray-600 hover:text-[#D4E655]"><Pencil size={13} /></button>
+                                                        <button onClick={() => eliminar(e.id!, e.concepto)} disabled={borrandoId === e.id} title="Borrar" className="text-gray-600 hover:text-red-400 disabled:opacity-40">
+                                                            {borrandoId === e.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                                        </button>
+                                                    </span>
                                                 )}
                                             </td>
                                         </tr>
