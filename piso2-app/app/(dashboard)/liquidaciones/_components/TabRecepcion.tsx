@@ -1,7 +1,9 @@
 'use client'
 import { useState } from 'react'
-import { Clock, Loader2, CheckCircle2, Save, RotateCcw } from 'lucide-react'
+import { Clock, Loader2, CheckCircle2, Save, RotateCcw, CalendarClock, AlertTriangle } from 'lucide-react'
+import { toast } from 'sonner'
 import type { ModalPagoStaffState } from './_types'
+import { getTurnosRecepMesAction, editarHorarioTurnoAction, cerrarTurnoRecepAction } from '@/app/actions/caja'
 
 type ReporteRecepcion = {
     id: string
@@ -11,6 +13,7 @@ type ReporteRecepcion = {
     total_pagado: number
     horasCalculadas?: number
     ajustado?: boolean
+    abiertos?: number
 }
 
 type Props = {
@@ -22,10 +25,47 @@ type Props = {
     setModalPagoStaff: (v: ModalPagoStaffState) => void
     onGuardarHoras: (recepId: string, horas: number) => void
     onRevertirHoras: (recepId: string) => void
+    selectedMonth: string
+    onCambio: () => void
 }
 
-export default function TabRecepcion({ reporteRecepcion, valorHoraRecep, setValorHoraRecep, handleGuardarValorHora, guardandoValor, setModalPagoStaff, onGuardarHoras, onRevertirHoras }: Props) {
+// datetime-local <-> ISO (en hora local del navegador)
+const isoToLocal = (iso: string | null) => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    const off = d.getTimezoneOffset()
+    return new Date(d.getTime() - off * 60000).toISOString().slice(0, 16)
+}
+const localToIso = (local: string) => local ? new Date(local).toISOString() : ''
+const fmtHs = (n: number) => (Math.round(n * 100) / 100).toFixed(2)
+
+export default function TabRecepcion({ reporteRecepcion, valorHoraRecep, setValorHoraRecep, handleGuardarValorHora, guardandoValor, setModalPagoStaff, onGuardarHoras, onRevertirHoras, selectedMonth, onCambio }: Props) {
     const [horasEdit, setHorasEdit] = useState<Record<string, string>>({})
+
+    // Editor de turnos por recep
+    const [editRecep, setEditRecep] = useState<{ id: string; nombre: string } | null>(null)
+    const [turnos, setTurnos] = useState<any[]>([])
+    const [loadingT, setLoadingT] = useState(false)
+    const abrirEditor = async (recep: { id: string; nombre: string }) => {
+        setEditRecep(recep); setTurnos([]); setLoadingT(true)
+        const [yyyy, mm] = selectedMonth.split('-')
+        const r = await getTurnosRecepMesAction(Number(yyyy), Number(mm), recep.id)
+        if ((r as any).success) setTurnos((r as any).turnos); else toast.error((r as any).error || 'Error')
+        setLoadingT(false)
+    }
+    const recargarTurnos = async () => { if (editRecep) await abrirEditor(editRecep); onCambio() }
+    const editarHorario = async (turnoId: string, tipo: 'apertura' | 'cierre', local: string) => {
+        if (!local) return
+        const r = await editarHorarioTurnoAction(turnoId, tipo, localToIso(local))
+        if ((r as any).success) { toast.success('Horario actualizado'); recargarTurnos() } else toast.error((r as any).error || 'Error')
+    }
+    const cerrarTurno = async (turnoId: string, aperturaISO: string) => {
+        // Cierre por defecto: ahora (o apertura si ya pasó). El admin puede ajustar después.
+        const cierre = new Date().toISOString()
+        const r = await cerrarTurnoRecepAction(turnoId, cierre > aperturaISO ? cierre : aperturaISO)
+        if ((r as any).success) { toast.success('Turno cerrado'); recargarTurnos() } else toast.error((r as any).error || 'Error')
+    }
+
     return (
         <div className="animate-in fade-in space-y-6">
             <div className="bg-[#09090b] border border-white/10 p-6 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -34,7 +74,7 @@ export default function TabRecepcion({ reporteRecepcion, valorHoraRecep, setValo
                         <Clock className="text-[#D4E655]" />
                         Liquidación de Staff
                     </h3>
-                    <p className="text-xs text-gray-400 mt-1 font-medium">Horas calculadas según las aperturas y cierres de caja del mes.</p>
+                    <p className="text-xs text-gray-400 mt-1 font-medium">Horas según apertura/cierre de caja (incluye turnos abiertos, topeados a 12 hs). Editá los turnos para que coincidan con la realidad.</p>
                 </div>
                 <div className="bg-[#111] border border-white/5 p-2 rounded-xl flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest sm:pl-2">Valor por Hora:</label>
@@ -84,6 +124,16 @@ export default function TabRecepcion({ reporteRecepcion, valorHoraRecep, setValo
                                             <p className="text-[10px] text-gray-500 uppercase font-bold">{recep.cantidad_turnos} turnos · {calc.toFixed(2)} hs (auto)</p>
                                         </div>
                                     </div>
+
+                                    {(recep.abiertos ?? 0) > 0 && (
+                                        <div className="mb-3 rounded-lg bg-amber-500/10 border border-amber-500/30 p-2 text-[10px] text-amber-400 flex items-center gap-1.5 font-semibold">
+                                            <AlertTriangle size={13} /> {recep.abiertos} turno{recep.abiertos === 1 ? '' : 's'} sin cerrar (topeado a 12 hs). Revisalos.
+                                        </div>
+                                    )}
+
+                                    <button onClick={() => abrirEditor({ id: recep.id, nombre: recep.nombre })} className="w-full mb-4 flex items-center justify-center gap-2 bg-[#0e0e10] border border-white/10 text-gray-300 hover:text-white hover:border-white/30 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-colors">
+                                        <CalendarClock size={13} /> Ver / editar turnos del mes
+                                    </button>
 
                                     {/* HORAS A PAGAR — editable, sin ir turno por turno */}
                                     <div className="bg-black/30 border border-white/5 rounded-xl p-3 mb-4">
@@ -137,6 +187,52 @@ export default function TabRecepcion({ reporteRecepcion, valorHoraRecep, setValo
                     })
                 )}
             </div>
+
+            {/* Editor de turnos del mes (admin) */}
+            {editRecep && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setEditRecep(null)}>
+                    <div className="bg-[#09090b] border border-white/10 rounded-t-2xl md:rounded-2xl w-full max-w-2xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
+                            <div><p className="font-black uppercase tracking-tight flex items-center gap-2"><CalendarClock size={18} className="text-[#D4E655]" /> Turnos de {editRecep.nombre}</p><p className="text-[11px] text-gray-500">Editá apertura/cierre reales o cerrá los abiertos. Es lo que se paga.</p></div>
+                            <button onClick={() => setEditRecep(null)} className="p-2 bg-white/5 rounded-full text-gray-300 text-xs font-bold px-3">Cerrar</button>
+                        </div>
+                        <div className="p-4 overflow-y-auto space-y-2">
+                            {loadingT ? (
+                                <div className="py-10 flex justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
+                            ) : turnos.length === 0 ? (
+                                <p className="text-xs text-gray-500 text-center py-8">Sin turnos este mes.</p>
+                            ) : turnos.map(t => (
+                                <div key={t.id} className={`rounded-xl border p-3 ${t.abierto ? 'bg-amber-500/5 border-amber-500/30' : 'bg-[#0e0e10] border-white/10'}`}>
+                                    <div className="flex items-center justify-between gap-2 mb-2">
+                                        <span className="text-[11px] text-gray-400 font-semibold">{new Date(t.fecha_apertura).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit' })}{t.sede ? ` · ${t.sede}` : ''}</span>
+                                        <span className={`text-[11px] font-black ${t.abierto ? 'text-amber-400' : 'text-[#D4E655]'}`}>{fmtHs(t.horas)} hs {t.topeado && <span className="text-[9px] text-amber-400">(tope)</span>}</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <label className="text-[9px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Entrada</label>
+                                            <input type="datetime-local" defaultValue={isoToLocal(t.fecha_apertura)} onBlur={e => { if (e.target.value !== isoToLocal(t.fecha_apertura)) editarHorario(t.id, 'apertura', e.target.value) }} className="w-full bg-[#111] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-[#D4E655]" />
+                                        </div>
+                                        <div>
+                                            <label className="text-[9px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Salida</label>
+                                            {t.abierto ? (
+                                                <button onClick={() => cerrarTurno(t.id, t.fecha_apertura)} className="w-full bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded-lg px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide hover:bg-amber-500 hover:text-black transition-colors">Cerrar ahora</button>
+                                            ) : (
+                                                <input type="datetime-local" defaultValue={isoToLocal(t.fecha_cierre)} onBlur={e => { if (e.target.value && e.target.value !== isoToLocal(t.fecha_cierre)) editarHorario(t.id, 'cierre', e.target.value) }} className="w-full bg-[#111] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-[#D4E655]" />
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                            {turnos.length > 0 && (
+                                <div className="flex items-center justify-between pt-2 px-1 border-t border-white/5 mt-2">
+                                    <span className="text-[11px] text-gray-500 uppercase tracking-widest font-bold">Total del mes</span>
+                                    <span className="font-black text-[#D4E655]">{fmtHs(turnos.reduce((a, t) => a + t.horas, 0))} hs</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

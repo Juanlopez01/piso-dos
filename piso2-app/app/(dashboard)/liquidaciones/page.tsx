@@ -236,25 +236,32 @@ const fetchLiquidacionesGlobales = async ([key, mesKey]: [string, string]) => {
 
     const yearNum = Number(yyyy);
     const monthNum = Number(mm);
+    // Traemos TODOS los turnos del mes (también los abiertos). Un turno abierto o
+    // dejado abierto no debe perder ni inflar horas: se topea a MAX_HORAS_TURNO.
+    const MAX_HORAS_TURNO = 12
     const { data: turnosMes } = await supabase.from('caja_turnos')
         .select('usuario_id, fecha_apertura, fecha_cierre, usuario:profiles(nombre_completo)')
         .gte('fecha_apertura', new Date(yearNum, monthNum - 1, 1).toISOString())
         .lt('fecha_apertura', new Date(yearNum, monthNum, 1).toISOString())
-        .not('fecha_cierre', 'is', null)
 
-    const horasPorRecepcionista: Record<string, { id: string, nombre: string, horas: number, cantidad_turnos: number, total_pagado: number }> = {}
+    const horasPorRecepcionista: Record<string, { id: string, nombre: string, horas: number, cantidad_turnos: number, abiertos: number, total_pagado: number }> = {}
 
     if (turnosMes) {
         turnosMes.forEach((turno: any) => {
-            if (!turno.fecha_apertura || !turno.fecha_cierre) return;
-            const diffHoras = (new Date(turno.fecha_cierre).getTime() - new Date(turno.fecha_apertura).getTime()) / (1000 * 60 * 60);
+            if (!turno.fecha_apertura) return;
+            const abierto = !turno.fecha_cierre
+            const finMs = abierto ? Date.now() : new Date(turno.fecha_cierre).getTime()
+            let diffHoras = (finMs - new Date(turno.fecha_apertura).getTime()) / (1000 * 60 * 60);
+            if (diffHoras < 0) diffHoras = 0
+            if (diffHoras > MAX_HORAS_TURNO) diffHoras = MAX_HORAS_TURNO  // tope (abierto o cierre olvidado)
             const uid = turno.usuario_id;
             if (!horasPorRecepcionista[uid]) {
                 const nombre = Array.isArray(turno.usuario) ? turno.usuario[0]?.nombre_completo : turno.usuario?.nombre_completo;
-                horasPorRecepcionista[uid] = { id: uid, nombre: nombre || 'Staff Desconocido', horas: 0, cantidad_turnos: 0, total_pagado: pagosStaffPorId[uid] || 0 };
+                horasPorRecepcionista[uid] = { id: uid, nombre: nombre || 'Staff Desconocido', horas: 0, cantidad_turnos: 0, abiertos: 0, total_pagado: pagosStaffPorId[uid] || 0 };
             }
             horasPorRecepcionista[uid].horas += diffHoras;
             horasPorRecepcionista[uid].cantidad_turnos += 1;
+            if (abierto) horasPorRecepcionista[uid].abiertos += 1;
         })
     }
     // Ajustes manuales de horas (override del cálculo por turnos)
@@ -763,6 +770,8 @@ export default function AdminLiquidacionesPage() {
                         setModalPagoStaff={setModalPagoStaff}
                         onGuardarHoras={handleGuardarHorasRecep}
                         onRevertirHoras={handleRevertirHorasRecep}
+                        selectedMonth={selectedMonth}
+                        onCambio={mutate}
                     />
                 )}
                 {vistaActiva === 'grupos' && (

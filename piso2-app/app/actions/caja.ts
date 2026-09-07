@@ -231,21 +231,68 @@ export async function adminRetirarAction(monto: number, concepto: string) {
     }
 }
 
-export async function editarHorarioTurnoAction(turnoId: string, tipo: 'apertura' | 'cierre', nuevaFechaISO: string) {
-    const supabaseAdmin = getAdminClient()
+// Solo admin. Valida la sesión real (no el admin-client).
+async function requireAdmin() {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { ok: false as const, error: 'No autorizado' }
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (perfil?.rol !== 'admin') return { ok: false as const, error: 'Solo un admin puede hacer esto.' }
+    return { ok: true as const }
+}
 
+export async function editarHorarioTurnoAction(turnoId: string, tipo: 'apertura' | 'cierre', nuevaFechaISO: string) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const supabaseAdmin = getAdminClient()
     try {
         const campoActualizar = tipo === 'apertura' ? { fecha_apertura: nuevaFechaISO } : { fecha_cierre: nuevaFechaISO };
-
-        const { error } = await supabaseAdmin
-            .from('caja_turnos')
-            .update(campoActualizar)
-            .eq('id', turnoId)
-
+        const { error } = await supabaseAdmin.from('caja_turnos').update(campoActualizar).eq('id', turnoId)
         if (error) throw new Error(error.message)
-
+        revalidatePath('/liquidaciones')
         return { success: true }
     } catch (error: any) {
         return { success: false, error: error.message }
     }
+}
+
+// Turnos de una recep en un mes (para el editor de horas del admin). Incluye
+// abiertos, con horas topeadas a 12 (para que no inflen ni se pierdan).
+export async function getTurnosRecepMesAction(anio: number, mes: number, recepId: string) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false as const, error: perm.error, turnos: [] as any[] }
+    const admin = getAdminClient()
+    const desde = new Date(anio, mes - 1, 1).toISOString()
+    const hasta = new Date(anio, mes, 1).toISOString()
+    const { data } = await admin.from('caja_turnos')
+        .select('id, fecha_apertura, fecha_cierre, estado, sede:sedes(nombre)')
+        .eq('usuario_id', recepId).gte('fecha_apertura', desde).lt('fecha_apertura', hasta)
+        .order('fecha_apertura', { ascending: true })
+    const MAX = 12
+    const turnos = (data || []).map((t: any) => {
+        const abierto = !t.fecha_cierre
+        const fin = abierto ? Date.now() : new Date(t.fecha_cierre).getTime()
+        let horas = (fin - new Date(t.fecha_apertura).getTime()) / 3600000
+        if (horas < 0) horas = 0
+        const topeado = horas > MAX
+        if (topeado) horas = MAX
+        return {
+            id: t.id, fecha_apertura: t.fecha_apertura, fecha_cierre: t.fecha_cierre,
+            abierto, horas: Math.round(horas * 100) / 100, topeado,
+            sede: Array.isArray(t.sede) ? t.sede[0]?.nombre : t.sede?.nombre,
+        }
+    })
+    return { success: true as const, turnos }
+}
+
+// Cierra manualmente un turno (setea fecha_cierre + estado). Solo admin.
+export async function cerrarTurnoRecepAction(turnoId: string, fechaCierreISO: string) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('caja_turnos')
+        .update({ fecha_cierre: fechaCierreISO, estado: 'cerrada' }).eq('id', turnoId)
+    if (error) return { success: false, error: error.message }
+    revalidatePath('/liquidaciones')
+    return { success: true }
 }
