@@ -9,7 +9,7 @@ import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
     Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
-    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2, Library, Repeat
+    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2, Library, Repeat, Trash2
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { format } from 'date-fns'
@@ -25,7 +25,8 @@ import {
     cobrarCompaniaAction,
     ajustarCreditosAction,
     getSueltasAlumnoAction,
-    convertirSueltaAPackAction
+    convertirSueltaAPackAction,
+    eliminarUsuarioCompletoAction
 } from '@/app/actions/usuarios'
 
 type Ritmo = { id: string; nombre: string }
@@ -145,7 +146,7 @@ function UsuariosContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
 
-    const { userRole, isLoading: loadingContext } = useCash()
+    const { userRole, userId, isLoading: loadingContext } = useCash()
 
     const [roleFilter, setRoleFilter] = useState(searchParams.get('ver') || 'todos')
     const [interestFilter, setInterestFilter] = useState('')
@@ -252,6 +253,17 @@ function UsuariosContent() {
         if (response.success) { toast.success('Rol actualizado'); mutate() }
         else { toast.error(response.error) }
         setCambiandoRolId(null)
+    }
+
+    const [borrandoId, setBorrandoId] = useState<string | null>(null)
+    const eliminarUsuario = async (usuarioId: string, nombre: string) => {
+        if (userRole !== 'admin') return toast.error('Solo un admin puede eliminar usuarios')
+        if (!confirm(`¿Eliminar el usuario "${nombre}"?\n\nUsalo solo para duplicados/vacíos. No se puede deshacer.`)) return
+        setBorrandoId(usuarioId)
+        const response = await eliminarUsuarioCompletoAction(usuarioId)
+        if (response.success) { toast.success('Usuario eliminado'); mutate() }
+        else toast.error(response.error || 'No se pudo eliminar')
+        setBorrandoId(null)
     }
 
     const cambiarNivelLiga = async (usuarioId: string, nuevoNivel: number | null) => {
@@ -939,6 +951,17 @@ function UsuariosContent() {
                                                 </select>
                                                 {cambiandoLigaId === u.id && <div className="absolute top-0 right-2 h-full flex items-center"><Loader2 size={12} className="animate-spin text-[#D4E655]" /></div>}
                                             </div>
+                                        )}
+
+                                        {isAdmin && u.id !== userId && (
+                                            <button
+                                                onClick={() => eliminarUsuario(u.id, u.nombre_completo || u.email || 'usuario')}
+                                                disabled={borrandoId === u.id}
+                                                title="Eliminar usuario (duplicados/vacíos)"
+                                                className="shrink-0 w-9 flex items-center justify-center rounded-xl border border-red-500/20 bg-red-500/5 text-red-500/70 hover:bg-red-500 hover:text-white transition-colors disabled:opacity-40"
+                                            >
+                                                {borrandoId === u.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                            </button>
                                         )}
                                     </div>
                                 </div>

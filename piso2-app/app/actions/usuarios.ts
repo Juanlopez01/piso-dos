@@ -578,16 +578,36 @@ export async function crearAlumnoDesdeRecepcionAction(datos: { nombre: string, a
     }
 }
 
+// Borra un usuario por completo (para limpiar DUPLICADOS/vacíos). Solo admin.
+// Por seguridad NO borra usuarios con actividad (inscripciones, packs, caja o
+// compañías): esos conservan su historial; si de verdad es un duplicado sin uso,
+// no va a tener nada de eso.
 export async function eliminarUsuarioCompletoAction(usuarioId: string) {
-    const supabaseAdmin = getAdminClient(); // Usamos el admin client que ya configuramos antes
-
+    const supabase = await createClient()
     try {
-        const { data: { session } } = await supabaseAdmin.auth.getSession()
-        // Aquí podrías chequear si el que ejecuta es Admin nuevamente
+        // 1. Autorización: quien ejecuta debe ser ADMIN (sesión real, no el admin-client).
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) return { success: false, error: 'No autorizado' }
+        const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+        if (perfil?.rol !== 'admin') return { success: false, error: 'Solo un admin puede eliminar usuarios.' }
+        if (usuarioId === session.user.id) return { success: false, error: 'No podés eliminar tu propio usuario.' }
 
-        // 1. Borramos el usuario de Auth (esto borra por cascada el Profile si tenés configurado ON DELETE CASCADE)
+        const supabaseAdmin = getAdminClient()
+
+        // 2. Guarda de actividad: no borrar usuarios con historial.
+        const [ins, pk, tur, comp] = await Promise.all([
+            supabaseAdmin.from('inscripciones').select('id', { count: 'exact', head: true }).eq('user_id', usuarioId),
+            supabaseAdmin.from('alumno_packs').select('id', { count: 'exact', head: true }).eq('user_id', usuarioId),
+            supabaseAdmin.from('caja_turnos').select('id', { count: 'exact', head: true }).eq('usuario_id', usuarioId),
+            supabaseAdmin.from('perfiles_companias').select('perfil_id', { count: 'exact', head: true }).eq('perfil_id', usuarioId),
+        ])
+        const actividad = (ins.count || 0) + (pk.count || 0) + (tur.count || 0) + (comp.count || 0)
+        if (actividad > 0) {
+            return { success: false, error: 'Este usuario tiene actividad (inscripciones, packs, caja o compañías). No se borra para no perder historial. Si es un duplicado sin uso, no debería tener nada de eso.' }
+        }
+
+        // 3. Borramos de Auth (cascada al profile si hay ON DELETE CASCADE).
         const { error } = await supabaseAdmin.auth.admin.deleteUser(usuarioId)
-
         if (error) throw error
 
         revalidatePath('/usuarios')
