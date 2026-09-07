@@ -1,146 +1,224 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Loader2, RefreshCw, Download, Wallet, RotateCcw } from 'lucide-react'
+import { useEffect, useState, Fragment } from 'react'
+import { Loader2, RefreshCw, Download, Wallet, Plus, Trash2, Lock } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
-import { getReporteMensualCajaAction, setOverrideCajaAction } from '@/app/actions/caja'
+import { getLibroAdminAction, agregarMovimientoAdminAction, eliminarMovimientoAdminAction } from '@/app/actions/libro-admin'
 
-const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
+const pesos = (n: number) => '$' + Math.round(Number(n || 0)).toLocaleString('es-AR')
+const usd = (n: number) => 'US$' + Math.round(Number(n || 0)).toLocaleString('es-AR')
 const hoyMes = () => { const d = new Date(Date.now() - 3 * 3600_000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}` }
+const hoyDia = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10)
 
-type Dia = {
-    dia: number; ie: number; it: number; ee: number; et: number; neto: number
-    auto: { ie: number; it: number; ee: number; et: number }
-    editado: { ie: boolean; it: boolean; ee: boolean; et: boolean }
+type Entrada = {
+    key: string; auto: boolean; concepto: string; id?: string; autor?: string; hora?: string
+    ef_ing: number; ef_egr: number; tr_ing: number; tr_egr: number; usd_ing: number; usd_egr: number
 }
-type Celda = 'ie' | 'it' | 'ee' | 'et'
-const CELDA_MAP: Record<Celda, { tipo: 'ingreso' | 'egreso'; metodo: 'efectivo' | 'transferencia' }> = {
-    ie: { tipo: 'ingreso', metodo: 'efectivo' }, it: { tipo: 'ingreso', metodo: 'transferencia' },
-    ee: { tipo: 'egreso', metodo: 'efectivo' }, et: { tipo: 'egreso', metodo: 'transferencia' },
+type Dia = { dia: number; entries: Entrada[]; sub: any; saldoPesos: number; saldoDolares: number }
+type Libro = {
+    apertura: { pesos: number; dolares: number }
+    dias: Dia[]
+    totales: { ef_ing: number; ef_egr: number; tr_ing: number; tr_egr: number; usd_ing: number; usd_egr: number; netoPesos: number; netoDolares: number }
+    cierre: { pesos: number; dolares: number }
 }
 
-export default function ReporteCajaPage() {
-    const { userRole, isLoading } = useCash()
+export default function LibroAdminPage() {
+    const { hasAdminFinanzas, isLoading } = useCash()
     const [mesSel, setMesSel] = useState(hoyMes())
-    const [dias, setDias] = useState<Dia[]>([])
-    const [totales, setTotales] = useState<any>(null)
+    const [libro, setLibro] = useState<Libro | null>(null)
     const [loading, setLoading] = useState(true)
+    const [guardando, setGuardando] = useState(false)
+    const [borrandoId, setBorrandoId] = useState<string | null>(null)
+
+    const [nuevo, setNuevo] = useState<{ fecha: string; concepto: string; tipo: 'ingreso' | 'egreso'; metodo: 'efectivo' | 'transferencia' | 'dolares'; monto: string }>({
+        fecha: hoyDia(), concepto: '', tipo: 'ingreso', metodo: 'efectivo', monto: ''
+    })
 
     const [anio, mes] = mesSel.split('-').map(Number)
 
     const cargar = async () => {
         setLoading(true)
-        const r = await getReporteMensualCajaAction(anio, mes)
-        if (r.success) { setDias(r.dias as Dia[]); setTotales(r.totales) }
+        const r = await getLibroAdminAction(anio, mes)
+        if (r.success) setLibro(r as any)
         else toast.error((r as any).error || 'Error')
         setLoading(false)
     }
-    useEffect(() => { cargar() }, [mesSel])
+    useEffect(() => { if (!isLoading && hasAdminFinanzas) cargar() }, [mesSel, isLoading, hasAdminFinanzas])
 
-    const guardarCelda = async (dia: Dia, celda: Celda, valorStr: string) => {
-        const { tipo, metodo } = CELDA_MAP[celda]
-        const autoVal = dia.auto[celda]
-        const num = valorStr.trim() === '' ? null : Number(valorStr)
-        // Si coincide con el automático, borramos el override (vuelve a lo calculado).
-        const monto = (num === null || num === autoVal) ? null : num
-        const r = await setOverrideCajaAction(anio, mes, dia.dia, tipo, metodo, monto)
-        if (r.success) cargar(); else toast.error((r as any).error || 'Error')
+    const agregar = async () => {
+        if (!nuevo.concepto.trim()) return toast.error('Poné un concepto')
+        if (!nuevo.monto || Number(nuevo.monto) <= 0) return toast.error('Poné un monto válido')
+        setGuardando(true)
+        const r = await agregarMovimientoAdminAction({
+            fecha: nuevo.fecha, concepto: nuevo.concepto.trim(), tipo: nuevo.tipo, metodo: nuevo.metodo, monto: Number(nuevo.monto)
+        })
+        if (r.success) { toast.success('Cargado'); setNuevo(n => ({ ...n, concepto: '', monto: '' })); cargar() }
+        else toast.error(r.error || 'Error')
+        setGuardando(false)
+    }
+
+    const eliminar = async (id: string, concepto: string) => {
+        if (!confirm(`¿Borrar el movimiento "${concepto}"?`)) return
+        setBorrandoId(id)
+        const r = await eliminarMovimientoAdminAction(id)
+        if (r.success) { toast.success('Borrado'); cargar() } else toast.error(r.error || 'Error')
+        setBorrandoId(null)
     }
 
     const descargarCSV = () => {
-        const head = ['Día', 'Ingreso efectivo', 'Ingreso transferencia', 'Egreso efectivo', 'Egreso transferencia', 'Neto']
-        const rows = dias.map(d => [d.dia, d.ie, d.it, d.ee, d.et, d.neto])
-        rows.push(['TOTAL', totales.ie, totales.it, totales.ee, totales.et, totales.neto])
-        const csv = [head, ...rows].map(r => r.map(c => `"${String(c ?? '')}"`).join(',')).join('\r\n')
+        if (!libro) return
+        const head = ['Día', 'Concepto', 'Autor', 'Efvo Ing', 'Efvo Egr', 'Transf Ing', 'Transf Egr', 'US$ Ing', 'US$ Egr']
+        const rows: any[] = [['', 'SALDO MES ANTERIOR', '', libro.apertura.pesos, '', '', '', libro.apertura.dolares, '']]
+        for (const d of libro.dias) for (const e of d.entries) {
+            rows.push([d.dia, e.concepto, e.auto ? 'Auto (caja)' : (e.autor || ''), e.ef_ing || '', e.ef_egr || '', e.tr_ing || '', e.tr_egr || '', e.usd_ing || '', e.usd_egr || ''])
+        }
+        const t = libro.totales
+        rows.push(['', 'TOTALES DEL MES', '', t.ef_ing, t.ef_egr, t.tr_ing, t.tr_egr, t.usd_ing, t.usd_egr])
+        rows.push(['', 'SALDO FINAL', '', libro.cierre.pesos, '', '', '', libro.cierre.dolares, ''])
+        const csv = [head, ...rows].map((r: any[]) => r.map((c: any) => `"${String(c ?? '')}"`).join(',')).join('\r\n')
         const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
         const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url; a.download = `reporte-caja-${mesSel}.csv`; a.click()
+        const a = document.createElement('a'); a.href = url; a.download = `administracion-${mesSel}.csv`; a.click()
         URL.revokeObjectURL(url)
     }
 
-    if (!isLoading && userRole !== 'admin') return (
-        <div className="min-h-[50vh] flex items-center justify-center text-gray-500 text-sm">Solo para administradores.</div>
+    if (!isLoading && !hasAdminFinanzas) return (
+        <div className="min-h-[60vh] flex flex-col items-center justify-center text-gray-500 text-sm gap-3">
+            <Lock size={28} className="text-gray-600" />
+            <p>Sección privada de administración.</p>
+            <p className="text-xs text-gray-600">Pedile a un admin que te habilite el acceso.</p>
+        </div>
     )
 
-    const dc = 'w-full bg-black border border-white/10 rounded-lg py-1.5 px-2 text-xs font-bold outline-none focus:border-[#D4E655]'
+    const iEf = 'w-24 bg-black border border-white/10 rounded-lg py-2 px-2 text-xs outline-none focus:border-[#D4E655]'
+    const cel = (n: number, negativo = false) => n ? <span className={negativo ? 'text-red-300' : 'text-emerald-300'}>{n ? (negativo ? '-' : '') + Math.round(n).toLocaleString('es-AR') : ''}</span> : <span className="text-gray-700">·</span>
 
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-24">
             <Toaster position="top-center" richColors theme="dark" />
 
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-6">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-5">
                 <div>
-                    <h1 className="text-3xl font-black uppercase tracking-tighter flex items-center gap-2"><Wallet className="text-[#D4E655]" size={26} /> Reporte de Caja</h1>
-                    <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">Mensual · por día · editable</p>
+                    <h1 className="text-3xl font-black uppercase tracking-tighter flex items-center gap-2"><Wallet className="text-[#D4E655]" size={26} /> Administración</h1>
+                    <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">Libro compartido · privado</p>
                 </div>
                 <div className="flex gap-2">
                     <input type="month" value={mesSel} onChange={e => setMesSel(e.target.value)} className="bg-[#111] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-[#D4E655]" />
                     <button onClick={cargar} className="px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white"><RefreshCw size={16} /></button>
-                    <button onClick={descargarCSV} disabled={!dias.length} className="px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white disabled:opacity-40" title="Descargar CSV"><Download size={16} /></button>
+                    <button onClick={descargarCSV} disabled={!libro} className="px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white disabled:opacity-40" title="Descargar CSV"><Download size={16} /></button>
                 </div>
             </div>
 
-            <p className="text-[11px] text-gray-500 mb-4">Se calcula solo de los movimientos de caja del mes (se actualiza día a día). Tocá una celda para <b className="text-gray-300">corregir el valor a mano</b>: lo que cargues manda; borralo (vacío) para volver al automático. Las celdas corregidas quedan en <span className="text-[#D4E655]">verde</span>.</p>
+            {/* Cargar movimiento manual */}
+            <div className="rounded-2xl border border-white/10 bg-[#0b0b0d] p-4 mb-5">
+                <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-3">Cargar ingreso / egreso a mano</p>
+                <div className="flex flex-wrap gap-2 items-center">
+                    <input type="date" value={nuevo.fecha} onChange={e => setNuevo({ ...nuevo, fecha: e.target.value })} className="bg-black border border-white/10 rounded-lg py-2 px-2 text-xs outline-none focus:border-[#D4E655]" />
+                    <input type="text" placeholder="Concepto (ej: Pago pinturas Sala 1)" value={nuevo.concepto} onChange={e => setNuevo({ ...nuevo, concepto: e.target.value })} className="flex-1 min-w-[180px] bg-black border border-white/10 rounded-lg py-2 px-3 text-xs outline-none focus:border-[#D4E655]" />
+                    <select value={nuevo.tipo} onChange={e => setNuevo({ ...nuevo, tipo: e.target.value as any })} className="bg-black border border-white/10 rounded-lg py-2 px-2 text-xs outline-none focus:border-[#D4E655]">
+                        <option value="ingreso">Ingreso</option>
+                        <option value="egreso">Egreso</option>
+                    </select>
+                    <select value={nuevo.metodo} onChange={e => setNuevo({ ...nuevo, metodo: e.target.value as any })} className="bg-black border border-white/10 rounded-lg py-2 px-2 text-xs outline-none focus:border-[#D4E655]">
+                        <option value="efectivo">Efectivo</option>
+                        <option value="transferencia">Transferencia</option>
+                        <option value="dolares">Dólares</option>
+                    </select>
+                    <input type="number" min={0} placeholder="Monto" value={nuevo.monto} onChange={e => setNuevo({ ...nuevo, monto: e.target.value })} className={iEf} />
+                    <button onClick={agregar} disabled={guardando} className="px-4 py-2 rounded-lg bg-[#D4E655] text-black text-xs font-black uppercase tracking-wide hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
+                        {guardando ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Agregar
+                    </button>
+                </div>
+                <p className="text-[10px] text-gray-600 mt-2">Queda registrado quién lo cargó. Las cajas (Obelisco/Congreso) entran solas, no hace falta cargarlas.</p>
+            </div>
 
-            {loading || !totales ? (
+            {loading || !libro ? (
                 <div className="min-h-[40vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
             ) : (
                 <div className="overflow-x-auto rounded-2xl border border-white/10">
-                    <table className="w-full text-sm min-w-[640px]">
+                    <table className="w-full text-sm min-w-[820px]">
                         <thead>
                             <tr className="bg-[#111] text-[10px] uppercase tracking-widest text-gray-500 font-bold">
-                                <th className="p-3 text-left">Día</th>
-                                <th className="p-3 text-right text-emerald-400/80">Ing. Efectivo</th>
-                                <th className="p-3 text-right text-emerald-400/80">Ing. Transf.</th>
-                                <th className="p-3 text-right text-red-400/80">Egr. Efectivo</th>
-                                <th className="p-3 text-right text-red-400/80">Egr. Transf.</th>
-                                <th className="p-3 text-right">Neto</th>
+                                <th className="p-3 text-left">Concepto</th>
+                                <th className="p-3 text-left">Quién</th>
+                                <th className="p-2 text-right text-emerald-400/70">Efvo Ing</th>
+                                <th className="p-2 text-right text-red-400/70">Efvo Egr</th>
+                                <th className="p-2 text-right text-emerald-400/70">Transf Ing</th>
+                                <th className="p-2 text-right text-red-400/70">Transf Egr</th>
+                                <th className="p-2 text-right text-emerald-400/70">US$ Ing</th>
+                                <th className="p-2 text-right text-red-400/70">US$ Egr</th>
+                                <th className="p-2 w-8"></th>
                             </tr>
                         </thead>
                         <tbody>
-                            {dias.map(d => {
-                                const vacio = !d.ie && !d.it && !d.ee && !d.et
-                                return (
-                                    <tr key={d.dia} className={`border-t border-white/5 ${vacio ? 'opacity-50' : ''}`}>
-                                        <td className="p-2 pl-3 font-bold text-gray-400">{String(d.dia).padStart(2, '0')}</td>
-                                        {(['ie', 'it', 'ee', 'et'] as Celda[]).map(c => (
-                                            <td key={c} className="p-1.5">
-                                                <input
-                                                    type="number" min={0}
-                                                    defaultValue={d[c] || ''}
-                                                    key={`${d.dia}-${c}-${d[c]}`}
-                                                    onBlur={e => { if (Number(e.target.value || 0) !== d[c]) guardarCelda(d, c, e.target.value) }}
-                                                    className={`${dc} text-right ${d.editado[c] ? 'text-[#D4E655] border-[#D4E655]/40' : (c[0] === 'e' ? 'text-red-300' : 'text-emerald-300')}`}
-                                                    placeholder="0"
-                                                />
-                                            </td>
-                                        ))}
-                                        <td className={`p-2 pr-3 text-right font-black ${d.neto < 0 ? 'text-red-400' : 'text-white'}`}>{pesos(d.neto)}</td>
+                            {/* Saldo mes anterior */}
+                            <tr className="bg-[#0e0e10] border-t border-white/5">
+                                <td className="p-2 pl-3 font-bold text-gray-300 text-xs uppercase tracking-wide" colSpan={2}>Saldo mes anterior</td>
+                                <td className="p-2 text-right font-bold text-gray-300" colSpan={4}>{pesos(libro.apertura.pesos)}</td>
+                                <td className="p-2 text-right font-bold text-gray-300" colSpan={2}>{usd(libro.apertura.dolares)}</td>
+                                <td></td>
+                            </tr>
+
+                            {libro.dias.length === 0 && (
+                                <tr><td colSpan={9} className="p-10 text-center text-gray-600 text-xs">Sin movimientos este mes.</td></tr>
+                            )}
+
+                            {libro.dias.map(d => (
+                                <Fragment key={d.dia}>
+                                    <tr className="bg-[#141416] border-t border-white/10">
+                                        <td className="py-1.5 pl-3 text-[11px] font-black text-[#D4E655] uppercase tracking-widest" colSpan={2}>Día {String(d.dia).padStart(2, '0')}</td>
+                                        <td className="py-1.5 pr-2 text-right text-[10px] text-gray-500 uppercase tracking-wider" colSpan={4}>Saldo {pesos(d.saldoPesos)}</td>
+                                        <td className="py-1.5 pr-2 text-right text-[10px] text-gray-500 uppercase tracking-wider" colSpan={2}>{usd(d.saldoDolares)}</td>
+                                        <td></td>
                                     </tr>
-                                )
-                            })}
+                                    {d.entries.map(e => (
+                                        <tr key={e.key} className="border-t border-white/5 hover:bg-white/[0.02]">
+                                            <td className="p-2 pl-3">
+                                                <span className={e.auto ? 'text-gray-300' : 'text-white'}>{e.concepto}</span>
+                                                {e.auto && <span className="ml-2 text-[9px] uppercase tracking-wider text-[#D4E655]/60 border border-[#D4E655]/20 rounded px-1 py-0.5">auto</span>}
+                                            </td>
+                                            <td className="p-2 text-[11px] text-gray-500">{e.auto ? 'Caja' : (<span>{e.autor}{e.hora ? <span className="text-gray-700"> · {e.hora}</span> : ''}</span>)}</td>
+                                            <td className="p-2 text-right font-bold">{cel(e.ef_ing)}</td>
+                                            <td className="p-2 text-right font-bold">{cel(e.ef_egr, true)}</td>
+                                            <td className="p-2 text-right font-bold">{cel(e.tr_ing)}</td>
+                                            <td className="p-2 text-right font-bold">{cel(e.tr_egr, true)}</td>
+                                            <td className="p-2 text-right font-bold">{cel(e.usd_ing)}</td>
+                                            <td className="p-2 text-right font-bold">{cel(e.usd_egr, true)}</td>
+                                            <td className="p-1 text-center">
+                                                {!e.auto && e.id && (
+                                                    <button onClick={() => eliminar(e.id!, e.concepto)} disabled={borrandoId === e.id} className="text-gray-600 hover:text-red-400 disabled:opacity-40">
+                                                        {borrandoId === e.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </Fragment>
+                            ))}
                         </tbody>
                         <tfoot>
-                            <tr className="bg-[#0e0e10] border-t-2 border-white/10 font-black">
-                                <td className="p-3 text-left text-[10px] uppercase tracking-widest text-gray-400">Total</td>
-                                <td className="p-3 text-right text-emerald-400">{pesos(totales.ie)}</td>
-                                <td className="p-3 text-right text-emerald-400">{pesos(totales.it)}</td>
-                                <td className="p-3 text-right text-red-400">{pesos(totales.ee)}</td>
-                                <td className="p-3 text-right text-red-400">{pesos(totales.et)}</td>
-                                <td className={`p-3 text-right ${totales.neto < 0 ? 'text-red-400' : 'text-[#D4E655]'}`}>{pesos(totales.neto)}</td>
+                            <tr className="bg-[#0e0e10] border-t-2 border-white/10 font-black text-xs">
+                                <td className="p-3 text-left uppercase tracking-widest text-gray-400" colSpan={2}>Totales del mes</td>
+                                <td className="p-2 text-right text-emerald-400">{pesos(libro.totales.ef_ing)}</td>
+                                <td className="p-2 text-right text-red-400">{pesos(libro.totales.ef_egr)}</td>
+                                <td className="p-2 text-right text-emerald-400">{pesos(libro.totales.tr_ing)}</td>
+                                <td className="p-2 text-right text-red-400">{pesos(libro.totales.tr_egr)}</td>
+                                <td className="p-2 text-right text-emerald-400">{usd(libro.totales.usd_ing)}</td>
+                                <td className="p-2 text-right text-red-400">{usd(libro.totales.usd_egr)}</td>
+                                <td></td>
                             </tr>
                         </tfoot>
                     </table>
                 </div>
             )}
 
-            {!loading && totales && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5 max-w-3xl">
-                    <div className="rounded-2xl p-4 border bg-emerald-500/5 border-emerald-500/20"><p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Ingresos efectivo</p><p className="text-xl font-black text-emerald-400 mt-1">{pesos(totales.ie)}</p></div>
-                    <div className="rounded-2xl p-4 border bg-emerald-500/5 border-emerald-500/20"><p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Ingresos transf.</p><p className="text-xl font-black text-emerald-400 mt-1">{pesos(totales.it)}</p></div>
-                    <div className="rounded-2xl p-4 border bg-red-500/5 border-red-500/20"><p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Egresos</p><p className="text-xl font-black text-red-400 mt-1">{pesos(totales.ee + totales.et)}</p></div>
-                    <div className="rounded-2xl p-4 border bg-[#D4E655]/10 border-[#D4E655]/30"><p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Neto del mes</p><p className="text-xl font-black text-[#D4E655] mt-1">{pesos(totales.neto)}</p></div>
+            {!loading && libro && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5 max-w-4xl">
+                    <div className="rounded-2xl p-4 border bg-white/5 border-white/10"><p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Neto pesos (mes)</p><p className={`text-xl font-black mt-1 ${libro.totales.netoPesos < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{pesos(libro.totales.netoPesos)}</p></div>
+                    <div className="rounded-2xl p-4 border bg-white/5 border-white/10"><p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Neto dólares (mes)</p><p className={`text-xl font-black mt-1 ${libro.totales.netoDolares < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{usd(libro.totales.netoDolares)}</p></div>
+                    <div className="rounded-2xl p-4 border bg-[#D4E655]/10 border-[#D4E655]/30"><p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Saldo final pesos</p><p className={`text-xl font-black mt-1 ${libro.cierre.pesos < 0 ? 'text-red-400' : 'text-[#D4E655]'}`}>{pesos(libro.cierre.pesos)}</p></div>
+                    <div className="rounded-2xl p-4 border bg-[#D4E655]/10 border-[#D4E655]/30"><p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Saldo final dólares</p><p className={`text-xl font-black mt-1 ${libro.cierre.dolares < 0 ? 'text-red-400' : 'text-[#D4E655]'}`}>{usd(libro.cierre.dolares)}</p></div>
                 </div>
             )}
         </div>

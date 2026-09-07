@@ -15,6 +15,7 @@ type CashContextType = {
     nivelLiga: number | null
     hasLigaAccess: boolean
     hasCompaniaAccess: boolean
+    hasAdminFinanzas: boolean
     permisosCoordinador: string[]
     checkStatus: () => Promise<void>
     isLoading: boolean
@@ -23,7 +24,7 @@ type CashContextType = {
 const CashContext = createContext<CashContextType>({
     userId: null, isBoxOpen: false, currentTurnoId: null, currentSedeId: null,
     userRole: null, userName: null, nivelLiga: null,
-    hasLigaAccess: false, hasCompaniaAccess: false,
+    hasLigaAccess: false, hasCompaniaAccess: false, hasAdminFinanzas: false,
     permisosCoordinador: [], checkStatus: async () => { }, isLoading: true
 })
 
@@ -41,6 +42,7 @@ export function CashProvider({ children }: { children: ReactNode }) {
     const [nivelLiga, setNivelLiga] = useState<number | null>(null)
     const [hasLigaAccess, setHasLigaAccess] = useState(false)
     const [hasCompaniaAccess, setHasCompaniaAccess] = useState(false)
+    const [hasAdminFinanzas, setHasAdminFinanzas] = useState(false)
     const [permisosCoordinador, setPermisosCoordinador] = useState<string[]>([])
     const [isLoading, setIsLoading] = useState(true)
 
@@ -57,7 +59,7 @@ export function CashProvider({ children }: { children: ReactNode }) {
             const realizarConsulta = async () => {
                 const { data: profile } = await supabase
                     .from('profiles')
-                    .select('rol, nombre_completo, nivel_liga, permisos_grupos')
+                    .select('rol, nombre_completo, nivel_liga, permisos_grupos, admin_finanzas')
                     .eq('id', uid)
                     .single()
 
@@ -99,6 +101,7 @@ export function CashProvider({ children }: { children: ReactNode }) {
                 setNivelLiga(profile?.nivel_liga ?? null)
                 setHasLigaAccess(ligaAccess)
                 setHasCompaniaAccess(compAccess)
+                setHasAdminFinanzas(!!profile?.admin_finanzas)
                 setPermisosCoordinador(misPermisos)
 
                 if (rolReal === 'admin' || rolReal === 'recepcion' || rolReal === 'auxiliar') {
@@ -153,6 +156,7 @@ export function CashProvider({ children }: { children: ReactNode }) {
                 setCurrentSedeId(null)
                 setHasLigaAccess(false)
                 setHasCompaniaAccess(false)
+                setHasAdminFinanzas(false)
                 setPermisosCoordinador([])
                 lastCheckedUser.current = null
                 window.location.href = '/login'
@@ -175,9 +179,9 @@ export function CashProvider({ children }: { children: ReactNode }) {
     const contextValue = useMemo(() => ({
         userId, isBoxOpen, currentTurnoId, currentSedeId,
         userRole, userName, nivelLiga,
-        hasLigaAccess, hasCompaniaAccess, permisosCoordinador,
+        hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, permisosCoordinador,
         checkStatus, isLoading
-    }), [userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, permisosCoordinador, checkStatus, isLoading])
+    }), [userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, permisosCoordinador, checkStatus, isLoading])
 
     return <CashContext.Provider value={contextValue}>{children}</CashContext.Provider>
 }

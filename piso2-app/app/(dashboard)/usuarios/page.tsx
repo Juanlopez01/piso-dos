@@ -9,7 +9,7 @@ import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
     Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
-    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2, Library, Repeat, Trash2
+    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2, Library, Repeat, Trash2, DollarSign
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { format } from 'date-fns'
@@ -28,6 +28,7 @@ import {
     convertirSueltaAPackAction,
     eliminarUsuarioCompletoAction
 } from '@/app/actions/usuarios'
+import { toggleFinanzasAction } from '@/app/actions/libro-admin'
 
 type Ritmo = { id: string; nombre: string }
 type Producto = {
@@ -53,6 +54,7 @@ type RPCUsuario = {
     nombre_remplazo?: string | null
     contacto_remplazo?: string | null
     permisos_grupos?: string[]
+    admin_finanzas?: boolean
 }
 
 type RPCUsuariosData = {
@@ -264,6 +266,18 @@ function UsuariosContent() {
         if (response.success) { toast.success('Usuario eliminado'); mutate() }
         else toast.error(response.error || 'No se pudo eliminar')
         setBorrandoId(null)
+    }
+
+    const [finanzasId, setFinanzasId] = useState<string | null>(null)
+    const toggleFinanzas = async (usuarioId: string, actual: boolean, nombre: string) => {
+        if (userRole !== 'admin') return toast.error('Solo un admin puede dar este acceso')
+        const nuevo = !actual
+        if (nuevo && !confirm(`Dar acceso al LIBRO DE ADMINISTRACIÓN a "${nombre}"?\n\nVa a poder ver y cargar ingresos/egresos (info privada de caja).`)) return
+        setFinanzasId(usuarioId)
+        const response = await toggleFinanzasAction(usuarioId, nuevo)
+        if (response.success) { toast.success(nuevo ? 'Acceso a Administración dado' : 'Acceso a Administración quitado'); mutate() }
+        else toast.error(response.error || 'No se pudo')
+        setFinanzasId(null)
     }
 
     const cambiarNivelLiga = async (usuarioId: string, nuevoNivel: number | null) => {
@@ -951,6 +965,17 @@ function UsuariosContent() {
                                                 </select>
                                                 {cambiandoLigaId === u.id && <div className="absolute top-0 right-2 h-full flex items-center"><Loader2 size={12} className="animate-spin text-[#D4E655]" /></div>}
                                             </div>
+                                        )}
+
+                                        {isAdmin && (
+                                            <button
+                                                onClick={() => toggleFinanzas(u.id, !!u.admin_finanzas, u.nombre_completo || u.email || 'usuario')}
+                                                disabled={finanzasId === u.id}
+                                                title={u.admin_finanzas ? 'Quitar acceso a Administración (Libro)' : 'Dar acceso a Administración (Libro)'}
+                                                className={`shrink-0 w-9 flex items-center justify-center rounded-xl border transition-colors disabled:opacity-40 ${u.admin_finanzas ? 'border-[#D4E655]/40 bg-[#D4E655]/10 text-[#D4E655] hover:bg-[#D4E655] hover:text-black' : 'border-white/10 bg-[#111] text-gray-500 hover:border-[#D4E655]/40 hover:text-[#D4E655]'}`}
+                                            >
+                                                {finanzasId === u.id ? <Loader2 size={13} className="animate-spin" /> : <DollarSign size={13} />}
+                                            </button>
                                         )}
 
                                         {isAdmin && u.id !== userId && (

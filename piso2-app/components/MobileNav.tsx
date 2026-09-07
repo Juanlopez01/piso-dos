@@ -17,7 +17,7 @@ function MobileNavContent() {
     const [isLoggingOut, setIsLoggingOut] = useState(false)
 
     const [supabase] = useState(() => createClient())
-    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, isLoading, userId } = useCash()
+    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, isLoading, userId } = useCash()
 
     useEffect(() => {
         setIsOpen(false)
@@ -41,6 +41,8 @@ function MobileNavContent() {
         // Validación de permisos estricta
         if (item.name === 'La Liga' && !hasLigaAccess) return false;
         if (item.name === 'Grupos' && !hasCompaniaAccess && userRole !== 'profesor') return false;
+        // Libro de administración: SOLO usuarios con el flag (Nico/Santi), no por rol.
+        if (item.name === 'Administración') return hasAdminFinanzas;
 
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
@@ -59,7 +61,6 @@ function MobileNavContent() {
             'Consultas',
             'Eventos',
             'Curaduría',
-            'Reporte Caja',
             'Liquidaciones',
             'Remarketing',
             'Caja',

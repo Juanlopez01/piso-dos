@@ -18,7 +18,7 @@ function SidebarContent() {
     const [isLoggingOut, setIsLoggingOut] = useState(false)
     const [unreadNotifs, setUnreadNotifs] = useState(0)
 
-    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, isLoading, userId } = useCash()
+    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, isLoading, userId } = useCash()
 
     useEffect(() => {
         if (!isLoading && userId && userRole && userRole !== 'visitante') {
@@ -38,11 +38,13 @@ function SidebarContent() {
         // Validación de permisos estricta
         if (item.name === 'La Liga' && !hasLigaAccess) return false;
         if (item.name === 'Grupos' && !hasCompaniaAccess) return false;
+        // Libro de administración: SOLO usuarios con el flag (Nico/Santi), no por rol.
+        if (item.name === 'Administración') return hasAdminFinanzas;
 
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
         // Vistas base por rol
-        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Talents', 'Asistente', 'Consultas', 'Eventos', 'Curaduría', 'Caja', 'Reporte Caja', 'Liquidaciones', 'Remarketing', 'Ventas', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Talents', 'Asistente', 'Consultas', 'Eventos', 'Curaduría', 'Caja', 'Liquidaciones', 'Remarketing', 'Ventas', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         if (userRole === 'profesor') {
