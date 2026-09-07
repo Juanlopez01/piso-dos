@@ -296,3 +296,15 @@ export async function cerrarTurnoRecepAction(turnoId: string, fechaCierreISO: st
     revalidatePath('/liquidaciones')
     return { success: true }
 }
+
+// Fuerza el auto-cierre de turnos abandonados (>12h abiertos). Solo admin.
+// Mismo criterio que el cron; sirve para correrlo a mano cuando haga falta.
+export async function autocerrarTurnosAction() {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error, cerrados: 0 }
+    const admin = getAdminClient()
+    const { data, error } = await admin.rpc('autocerrar_turnos_caja')
+    if (error) return { success: false, error: error.message, cerrados: 0 }
+    revalidatePath('/liquidaciones')
+    return { success: true, cerrados: Number(data) || 0 }
+}

@@ -1,9 +1,9 @@
 'use client'
 import { useState } from 'react'
-import { Clock, Loader2, CheckCircle2, Save, RotateCcw, CalendarClock, AlertTriangle } from 'lucide-react'
+import { Clock, Loader2, CheckCircle2, Save, RotateCcw, CalendarClock, AlertTriangle, AlarmClockOff } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ModalPagoStaffState } from './_types'
-import { getTurnosRecepMesAction, editarHorarioTurnoAction, cerrarTurnoRecepAction } from '@/app/actions/caja'
+import { getTurnosRecepMesAction, editarHorarioTurnoAction, cerrarTurnoRecepAction, autocerrarTurnosAction } from '@/app/actions/caja'
 
 type ReporteRecepcion = {
     id: string
@@ -66,6 +66,16 @@ export default function TabRecepcion({ reporteRecepcion, valorHoraRecep, setValo
         if ((r as any).success) { toast.success('Turno cerrado'); recargarTurnos() } else toast.error((r as any).error || 'Error')
     }
 
+    const [autocerrando, setAutocerrando] = useState(false)
+    const autocerrar = async () => {
+        if (!confirm('Cerrar automáticamente los turnos abandonados (más de 12 hs abiertos)? Se cierran con 12 hs; después podés ajustar el horario real.')) return
+        setAutocerrando(true)
+        const r = await autocerrarTurnosAction()
+        if (r.success) { toast.success(r.cerrados ? `${r.cerrados} turno(s) cerrados` : 'No había turnos abandonados'); onCambio() }
+        else toast.error(r.error || 'Error')
+        setAutocerrando(false)
+    }
+
     return (
         <div className="animate-in fade-in space-y-6">
             <div className="bg-[#09090b] border border-white/10 p-6 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -75,6 +85,9 @@ export default function TabRecepcion({ reporteRecepcion, valorHoraRecep, setValo
                         Liquidación de Staff
                     </h3>
                     <p className="text-xs text-gray-400 mt-1 font-medium">Horas según apertura/cierre de caja (incluye turnos abiertos, topeados a 12 hs). Editá los turnos para que coincidan con la realidad.</p>
+                    <button onClick={autocerrar} disabled={autocerrando} className="mt-3 inline-flex items-center gap-2 bg-[#111] border border-white/10 text-gray-300 hover:text-white hover:border-white/30 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-colors disabled:opacity-50">
+                        {autocerrando ? <Loader2 size={13} className="animate-spin" /> : <AlarmClockOff size={13} />} Cerrar turnos abandonados
+                    </button>
                 </div>
                 <div className="bg-[#111] border border-white/5 p-2 rounded-xl flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest sm:pl-2">Valor por Hora:</label>
