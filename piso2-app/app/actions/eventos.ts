@@ -222,6 +222,7 @@ export async function registrarVentaAction(data: {
     evento_id: string
     comprador_nombre?: string
     comprador_contacto?: string
+    comprador_email?: string
     medio_pago?: string
     items: { entrada_id: string; cantidad: number }[]
 }) {
@@ -260,6 +261,7 @@ export async function registrarVentaAction(data: {
         evento_id: data.evento_id,
         comprador_nombre: data.comprador_nombre?.trim() || null,
         comprador_contacto: data.comprador_contacto?.trim() || null,
+        comprador_email: data.comprador_email?.trim() || null,
         medio_pago: data.medio_pago || 'efectivo',
         total: totalFinal,
         estado: 'confirmada', canal: 'mostrador', token,
@@ -285,6 +287,19 @@ export async function registrarVentaAction(data: {
         }
     }
     if (ticketsMostrador.length) await admin.from('evento_tickets').insert(ticketsMostrador)
+
+    // Si dejó email, le mandamos la entrada+QR por mail (si Resend está prendido).
+    const emailMostrador = data.comprador_email?.trim()
+    if (emailMostrador && emailMostrador.includes('@')) {
+        try {
+            const { data: evNom } = await admin.from('eventos').select('nombre').eq('id', data.evento_id).maybeSingle()
+            const { enviarMail, mailEntradaHTML } = await import('@/lib/mail')
+            await enviarMail({
+                to: emailMostrador, subject: `Tus entradas · ${evNom?.nombre || 'Evento'}`,
+                html: mailEntradaHTML({ comprador: data.comprador_nombre, evento: evNom?.nombre || 'Evento', ventaId: venta.id, token, cantidad: ticketsMostrador.length }),
+            })
+        } catch { /* mail best-effort */ }
+    }
 
     return { ok: true as const, id: venta.id, total: totalFinal, token }
 }
@@ -480,6 +495,7 @@ export async function crearOrdenEventoAction(payload: {
         evento_id: payload.evento_id,
         comprador_nombre: payload.comprador_nombre.trim(),
         comprador_contacto: payload.comprador_contacto?.trim() || payload.comprador_email.trim(),
+        comprador_email: payload.comprador_email.trim(),
         medio_pago: 'mercadopago', total: totalFinal, estado: 'pendiente', canal: 'online', token,
     }).select('id').single()
     if (error || !venta) return { ok: false as const, error: error?.message || 'No se pudo crear la orden.' }
@@ -1246,4 +1262,140 @@ export async function getCarteleraEscenaAction() {
         }
     }
     return { cards }
+}
+
+// ============================================================================
+// FASE RETENCIÓN: base de compradores + reseñas + mails
+// ============================================================================
+
+// Base de compradores: agrupa todas las ventas confirmadas (no reembolsadas)
+// por email (o contacto), con lo que gastó, cuántas entradas, y en qué eventos.
+export async function getCompradoresAction() {
+    const perm = await requireStaff(true)
+    if (!perm.ok) return { ok: false as const, error: perm.error, compradores: [] as any[] }
+    const admin = getAdminClient()
+
+    const { data: ventas } = await admin.from('evento_ventas')
+        .select('id, evento_id, comprador_nombre, comprador_email, comprador_contacto, total, created_at, reembolsada')
+        .eq('estado', 'confirmada')
+    const confirmadas = (ventas || []).filter((v: any) => v.reembolsada !== true)
+    const ventaIds = confirmadas.map((v: any) => v.id)
+
+    // Entradas por venta (suma de cantidades de items).
+    const entradasPorVenta: Record<string, number> = {}
+    if (ventaIds.length) {
+        const { data: items } = await admin.from('evento_venta_items').select('venta_id, cantidad').in('venta_id', ventaIds)
+        for (const it of (items || []) as any[]) entradasPorVenta[it.venta_id] = (entradasPorVenta[it.venta_id] || 0) + Number(it.cantidad || 0)
+    }
+    // Nombres de eventos.
+    const { data: evs } = await admin.from('eventos').select('id, nombre')
+    const evNombre: Record<string, string> = {}
+    for (const e of (evs || []) as any[]) evNombre[e.id] = e.nombre
+
+    const mapa = new Map<string, any>()
+    for (const v of confirmadas as any[]) {
+        const email = (v.comprador_email || ((v.comprador_contacto || '').includes('@') ? v.comprador_contacto : '') || '').trim().toLowerCase()
+        const key = email || `c:${(v.comprador_contacto || '').trim()}` || `n:${(v.comprador_nombre || '').trim()}` || `v:${v.id}`
+        if (!mapa.has(key)) mapa.set(key, {
+            nombre: v.comprador_nombre || 'Sin nombre', email: email || null,
+            contacto: v.comprador_contacto || null, compras: 0, entradas: 0, gastado: 0,
+            eventos: new Set<string>(), ultima: v.created_at,
+        })
+        const c = mapa.get(key)
+        c.compras += 1
+        c.entradas += entradasPorVenta[v.id] || 0
+        c.gastado += Number(v.total || 0)
+        if (evNombre[v.evento_id]) c.eventos.add(evNombre[v.evento_id])
+        if (new Date(v.created_at) > new Date(c.ultima)) c.ultima = v.created_at
+        if (!c.nombre || c.nombre === 'Sin nombre') c.nombre = v.comprador_nombre || c.nombre
+    }
+    const compradores = [...mapa.values()]
+        .map(c => ({ ...c, eventos: [...c.eventos] }))
+        .sort((a, b) => b.gastado - a.gastado)
+    return { ok: true as const, compradores }
+}
+
+// PÚBLICO: deja una reseña de una función (form anónimo, sin cuenta).
+export async function crearResenaAction(eventoId: string, data: { nombre?: string; rating: number; comentario?: string }) {
+    const admin = getAdminClient()
+    const rating = Math.round(Number(data.rating))
+    if (!eventoId) return { ok: false as const, error: 'Falta el evento.' }
+    if (!(rating >= 1 && rating <= 5)) return { ok: false as const, error: 'Elegí de 1 a 5 estrellas.' }
+    // Validar que el evento exista (evita spam a ids random).
+    const { data: ev } = await admin.from('eventos').select('id').eq('id', eventoId).maybeSingle()
+    if (!ev) return { ok: false as const, error: 'Función no encontrada.' }
+    const { error } = await admin.from('evento_resenas').insert({
+        evento_id: eventoId, nombre: (data.nombre || '').trim() || null,
+        rating, comentario: (data.comentario || '').trim() || null,
+    })
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+// Reseñas de un evento (staff): lista + promedio.
+export async function getResenasAction(eventoId: string) {
+    const perm = await requireStaff(true)
+    if (!perm.ok) return { ok: false as const, error: perm.error, resenas: [] as any[], promedio: 0, total: 0 }
+    const admin = getAdminClient()
+    const { data } = await admin.from('evento_resenas')
+        .select('id, nombre, rating, comentario, created_at').eq('evento_id', eventoId).order('created_at', { ascending: false })
+    const resenas = (data || []) as any[]
+    const total = resenas.length
+    const promedio = total ? Math.round((resenas.reduce((a, r) => a + Number(r.rating || 0), 0) / total) * 10) / 10 : 0
+    return { ok: true as const, resenas, promedio, total }
+}
+
+// Nombre público del evento (para el form de reseña, sin auth).
+export async function getEventoNombrePublicoAction(eventoId: string) {
+    const admin = getAdminClient()
+    const { data } = await admin.from('eventos').select('nombre, fecha, lugar').eq('id', eventoId).maybeSingle()
+    return { ok: !!data, nombre: data?.nombre || null, fecha: data?.fecha || null, lugar: data?.lugar || null }
+}
+
+// Manda la encuesta post-función por mail a los compradores (con email) del evento.
+export async function enviarEncuestaEventoAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const { mailEnabled, enviarMail, mailEncuestaHTML } = await import('@/lib/mail')
+    if (!mailEnabled()) return { ok: false as const, error: 'El envío de mails no está configurado (falta cargar RESEND_API_KEY + MAIL_FROM en Vercel).' }
+    const admin = getAdminClient()
+    const { data: ev } = await admin.from('eventos').select('nombre').eq('id', eventoId).maybeSingle()
+    if (!ev) return { ok: false as const, error: 'Evento no encontrado.' }
+    const { data: ventas } = await admin.from('evento_ventas')
+        .select('comprador_nombre, comprador_email, comprador_contacto, reembolsada, estado').eq('evento_id', eventoId).eq('estado', 'confirmada')
+    const vistos = new Set<string>()
+    const destinatarios: { email: string; nombre: string | null }[] = []
+    for (const v of (ventas || []) as any[]) {
+        if (v.reembolsada === true) continue
+        const email = (v.comprador_email || ((v.comprador_contacto || '').includes('@') ? v.comprador_contacto : '') || '').trim().toLowerCase()
+        if (!email || vistos.has(email)) continue
+        vistos.add(email)
+        destinatarios.push({ email, nombre: v.comprador_nombre || null })
+    }
+    if (!destinatarios.length) return { ok: false as const, error: 'No hay compradores con email en esta función.' }
+    let enviados = 0
+    for (const d of destinatarios.slice(0, 300)) {
+        const r = await enviarMail({ to: d.email, subject: `¿Cómo estuvo ${ev.nombre}? Dejanos tu reseña ⭐`, html: mailEncuestaHTML({ comprador: d.nombre, evento: ev.nombre, eventoId }) })
+        if (r.ok) enviados++
+    }
+    return { ok: true as const, enviados, total: destinatarios.length }
+}
+
+// Reenvía la entrada+QR por mail para una venta puntual (desde compradores/detalle).
+export async function reenviarEntradaAction(ventaId: string, emailOverride?: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const { mailEnabled, enviarMail, mailEntradaHTML } = await import('@/lib/mail')
+    if (!mailEnabled()) return { ok: false as const, error: 'El envío de mails no está configurado (falta RESEND_API_KEY + MAIL_FROM).' }
+    const admin = getAdminClient()
+    const { data: v } = await admin.from('evento_ventas')
+        .select('id, evento_id, comprador_nombre, comprador_email, comprador_contacto, token, estado').eq('id', ventaId).maybeSingle()
+    if (!v || v.estado !== 'confirmada') return { ok: false as const, error: 'Venta no confirmada.' }
+    const email = (emailOverride || v.comprador_email || ((v.comprador_contacto || '').includes('@') ? v.comprador_contacto : '') || '').trim()
+    if (!email.includes('@')) return { ok: false as const, error: 'Esta venta no tiene email.' }
+    const { count } = await admin.from('evento_tickets').select('*', { count: 'exact', head: true }).eq('venta_id', ventaId)
+    const { data: ev } = await admin.from('eventos').select('nombre').eq('id', v.evento_id).maybeSingle()
+    const r = await enviarMail({ to: email, subject: `Tus entradas · ${ev?.nombre || 'Evento'}`, html: mailEntradaHTML({ comprador: v.comprador_nombre, evento: ev?.nombre || 'Evento', ventaId: v.id, token: v.token, cantidad: count || 1 }) })
+    if (!r.ok) return { ok: false as const, error: r.error || 'No se pudo enviar.' }
+    return { ok: true as const }
 }

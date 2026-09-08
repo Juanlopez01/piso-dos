@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale, EyeOff, UserPlus, AlertTriangle, ShoppingCart, MessageCircle, CalendarPlus, Layers, Upload, Image as ImageIcon, Theater } from 'lucide-react'
+import { Loader2, Ticket, Plus, ArrowLeft, RefreshCw, Trash2, Pencil, Check, X, CalendarDays, MapPin, DollarSign, Users, Globe, Copy, ScanLine, BarChart3, Download, ClipboardList, HardHat, Scale, EyeOff, UserPlus, AlertTriangle, ShoppingCart, MessageCircle, CalendarPlus, Layers, Upload, Image as ImageIcon, Theater, Star, Mail } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
 import { createClient } from '@/utils/supabase/client'
@@ -20,6 +20,7 @@ import {
     getCarritosAbandonadosAction, descartarCarritoAction,
     getCiclosEventoAction, crearCicloEventoAction, asignarCicloAction, duplicarEventoAction,
     getLinkPuertaAction, getFechasHermanasAction, traspasarVentaAction,
+    getResenasAction, enviarEncuestaEventoAction,
 } from '@/app/actions/eventos'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
@@ -76,6 +77,7 @@ export default function EventosPage() {
                             <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">PISO2E · Ticketera</p>
                         </div>
                         <div className="flex gap-2">
+                            <Link href="/eventos/compradores" className="px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white flex items-center gap-2 text-xs font-bold uppercase tracking-wide" title="Base de compradores"><Users size={16} /><span className="hidden md:inline">Compradores</span></Link>
                             <button onClick={cargar} className="px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white"><RefreshCw size={16} /></button>
                             {!soloLectura && <button onClick={() => setNuevo(true)} className="px-4 py-2.5 rounded-xl bg-[#D4E655] text-black font-bold text-xs uppercase tracking-wide flex items-center gap-2 hover:bg-white"><Plus size={16} /> Nuevo</button>}
                         </div>
@@ -270,6 +272,26 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
         const r = await getReporteEventoAction(eventoId)
         if (r.ok) setReporte(r); else toast.error((r as any).error || 'Error')
     }
+
+    // --- reseñas / encuesta post-función ---
+    const [resenas, setResenas] = useState<{ resenas: any[]; promedio: number; total: number } | null>(null)
+    const [verResenas, setVerResenas] = useState(false)
+    const [enviandoEncuesta, setEnviandoEncuesta] = useState(false)
+    useEffect(() => {
+        getResenasAction(eventoId).then(r => { if (r.ok) setResenas({ resenas: r.resenas, promedio: r.promedio, total: r.total }) })
+    }, [eventoId])
+    const copiarLinkEncuesta = () => {
+        navigator.clipboard.writeText(`${window.location.origin}/resena/${eventoId}`)
+        toast.success('Link de encuesta copiado')
+    }
+    const enviarEncuesta = async () => {
+        if (!confirm('¿Enviar la encuesta por mail a todos los compradores con email de esta función?')) return
+        setEnviandoEncuesta(true)
+        const r = await enviarEncuestaEventoAction(eventoId)
+        setEnviandoEncuesta(false)
+        if (r.ok) toast.success(`Encuesta enviada a ${r.enviados} de ${r.total} comprador(es)`)
+        else toast.error((r as any).error || 'Error')
+    }
     const descargarCSV = () => {
         if (!reporte) return
         const head = ['Comprador', 'Contacto', 'Entradas', 'Detalle', 'Total', 'Canal', 'Medio', 'Ingresados', 'Fecha']
@@ -296,6 +318,7 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
     const [cant, setCant] = useState<Record<string, number>>({})
     const [comprador, setComprador] = useState('')
     const [contacto, setContacto] = useState('')
+    const [emailComprador, setEmailComprador] = useState('')
     const [medio, setMedio] = useState('efectivo')
     const [vendiendo, setVendiendo] = useState(false)
     const [ultimaVenta, setUltimaVenta] = useState<{ id: string; token: string } | null>(null)
@@ -306,8 +329,8 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
         const items = entradas.map(e => ({ entrada_id: e.id, cantidad: cant[e.id] || 0 })).filter(i => i.cantidad > 0)
         if (!items.length) return toast.error('Elegí al menos una entrada')
         setVendiendo(true)
-        const r = await registrarVentaAction({ evento_id: eventoId, comprador_nombre: comprador, comprador_contacto: contacto, medio_pago: medio, items })
-        if (r.ok) { toast.success(`Venta registrada · ${pesos(r.total)}`); setUltimaVenta({ id: r.id, token: (r as any).token }); setCant({}); setComprador(''); setContacto(''); cargar() }
+        const r = await registrarVentaAction({ evento_id: eventoId, comprador_nombre: comprador, comprador_contacto: contacto, comprador_email: emailComprador, medio_pago: medio, items })
+        if (r.ok) { toast.success(`Venta registrada · ${pesos(r.total)}` + (emailComprador.includes('@') ? ' · entrada enviada por mail' : '')); setUltimaVenta({ id: r.id, token: (r as any).token }); setCant({}); setComprador(''); setContacto(''); setEmailComprador(''); cargar() }
         else toast.error(r.error || 'Error')
         setVendiendo(false)
     }
@@ -672,9 +695,54 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
             </button>
 
             {/* link de puerta para gente externa */}
-            <button onClick={copiarLinkPuerta} className="w-full flex items-center justify-center gap-2 mb-5 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
+            <button onClick={copiarLinkPuerta} className="w-full flex items-center justify-center gap-2 mb-2 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
                 <ScanLine size={14} /> Copiar link de puerta (gente externa: leer QR + vender)
             </button>
+
+            {/* reseñas / encuesta post-función */}
+            <div className="mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                <div className="flex items-center justify-between mb-2">
+                    <p className="text-[11px] font-black uppercase tracking-wide text-gray-300 flex items-center gap-1.5"><Star size={13} className="text-[#D4E655]" /> Reseñas post-función</p>
+                    {resenas && resenas.total > 0 && (
+                        <button onClick={() => setVerResenas(true)} className="text-[11px] font-bold text-[#D4E655] flex items-center gap-1">
+                            <Star size={12} className="fill-[#D4E655] text-[#D4E655]" /> {resenas.promedio} · {resenas.total} reseña{resenas.total === 1 ? '' : 's'}
+                        </button>
+                    )}
+                    {resenas && resenas.total === 0 && <span className="text-[10px] text-gray-600 uppercase">Sin reseñas aún</span>}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <button onClick={copiarLinkEncuesta} className="flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-300 py-2.5 rounded-lg text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
+                        <Copy size={13} /> Copiar link de encuesta
+                    </button>
+                    {!soloLectura && (
+                        <button onClick={enviarEncuesta} disabled={enviandoEncuesta} className="flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-300 py-2.5 rounded-lg text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors disabled:opacity-50">
+                            {enviandoEncuesta ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />} Enviar encuesta por mail
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {verResenas && resenas && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setVerResenas(false)}>
+                    <div className="bg-[#09090b] border border-white/10 rounded-t-2xl md:rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-4 border-b border-white/10">
+                            <p className="font-black uppercase tracking-tight flex items-center gap-2"><Star size={16} className="text-[#D4E655] fill-[#D4E655]" /> {resenas.promedio} · {resenas.total} reseña{resenas.total === 1 ? '' : 's'}</p>
+                            <button onClick={() => setVerResenas(false)} className="p-2 bg-white/5 rounded-full text-gray-300"><X size={16} /></button>
+                        </div>
+                        <div className="overflow-y-auto p-4 space-y-3">
+                            {resenas.resenas.map((r: any) => (
+                                <div key={r.id} className="bg-[#111] border border-white/5 rounded-xl p-3">
+                                    <div className="flex items-center gap-1 mb-1">
+                                        {[1, 2, 3, 4, 5].map(n => <Star key={n} size={13} className={n <= r.rating ? 'text-[#D4E655] fill-[#D4E655]' : 'text-gray-700'} />)}
+                                        <span className="ml-2 text-xs text-gray-400 font-bold">{r.nombre || 'Anónimo'}</span>
+                                    </div>
+                                    {r.comentario && <p className="text-sm text-gray-300">{r.comentario}</p>}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {reporte && (
                 <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setReporte(null)}>
@@ -841,8 +909,9 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                             <input value={comprador} onChange={e => setComprador(e.target.value)} placeholder="Nombre del comprador" className="inp w-full" />
-                            <input value={contacto} onChange={e => setContacto(e.target.value)} placeholder="Tel / mail (opcional)" className="inp w-full" />
+                            <input value={contacto} onChange={e => setContacto(e.target.value)} placeholder="Tel (opcional)" className="inp w-full" />
                         </div>
+                        <input type="email" value={emailComprador} onChange={e => setEmailComprador(e.target.value)} placeholder="Email (opcional — le mandamos la entrada con QR)" className="inp w-full" />
                         <div className="flex items-center gap-2">
                             <select value={medio} onChange={e => setMedio(e.target.value)} className="inp flex-1 capitalize">
                                 {MEDIOS.map(m => <option key={m} value={m}>{m}</option>)}

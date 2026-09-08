@@ -94,7 +94,8 @@ export async function POST(request: Request) {
                 const ventaId = metadata.evento_venta_id;
                 const { data: ventaEv } = await supabase.from('evento_ventas')
                     .update({ estado: 'confirmada', mp_payment_id: paymentIdToProcess.toString() })
-                    .eq('id', ventaId).eq('estado', 'pendiente').select('id').maybeSingle();
+                    .eq('id', ventaId).eq('estado', 'pendiente')
+                    .select('id, token, comprador_nombre, comprador_email, comprador_contacto, evento_id').maybeSingle();
                 if (ventaEv) {
                     const { data: itemsEv } = await supabase.from('evento_venta_items').select('entrada_id, cantidad').eq('venta_id', ventaId);
                     const ticketsEv: any[] = [];
@@ -107,6 +108,18 @@ export async function POST(request: Request) {
                         }
                     }
                     if (ticketsEv.length) await supabase.from('evento_tickets').insert(ticketsEv);
+                    // Mail con la entrada + QR (si Resend está configurado; si no, no-op).
+                    try {
+                        const email = (ventaEv as any).comprador_email || ((ventaEv as any).comprador_contacto || '').includes('@') && (ventaEv as any).comprador_contacto;
+                        if (email && (ventaEv as any).token) {
+                            const { data: evNom } = await supabase.from('eventos').select('nombre').eq('id', (ventaEv as any).evento_id).maybeSingle();
+                            const { enviarMail, mailEntradaHTML } = await import('@/lib/mail');
+                            await enviarMail({
+                                to: email, subject: `Tus entradas · ${evNom?.nombre || 'Evento'}`,
+                                html: mailEntradaHTML({ comprador: (ventaEv as any).comprador_nombre, evento: evNom?.nombre || 'Evento', ventaId, token: (ventaEv as any).token, cantidad: ticketsEv.length }),
+                            });
+                        }
+                    } catch { /* mail best-effort */ }
                     try {
                         const { data: staffEv } = await supabase.from('profiles').select('id').in('rol', ['admin', 'recepcion']);
                         if (staffEv?.length) await supabase.from('notificaciones').insert(staffEv.map((s: any) => ({

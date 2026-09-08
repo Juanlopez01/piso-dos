@@ -53,6 +53,7 @@ export async function proxy(request: NextRequest) {
             request.nextUrl.pathname.startsWith('/convocatoria') || // Convocatoria de obras: form público para proponer (sin login)
             request.nextUrl.pathname.startsWith('/ciclo/') || // Ciclo de varias fechas: el público elige la función (sin login)
             request.nextUrl.pathname.startsWith('/puerta/') || // Puerta: personal externo lee QR + carga ventas por token (sin login)
+            request.nextUrl.pathname.startsWith('/resena/') || // Reseña/encuesta post-función: form público (sin login)
             request.nextUrl.pathname.startsWith('/cartelera') || // Cartelera pública de clases: se ve sin login; reservar pide login
             request.nextUrl.pathname.startsWith('/streaming') ||
             request.nextUrl.pathname.startsWith('/escena') || // Landing 2E + cartelera pública de obras
