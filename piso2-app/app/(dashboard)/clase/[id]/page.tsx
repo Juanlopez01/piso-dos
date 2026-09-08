@@ -33,7 +33,8 @@ import {
     editarValorInscripcionAction,
     getPacksConvertiblesAction,
     convertirAsistenteAPackAction,
-    saldarDeudaInscripcionAction
+    saldarDeudaInscripcionAction,
+    checkAlumnoPackActivoAction
 } from '@/app/actions/inscripciones'
 
 import { toggleMiembroCompaniaAction, getPlanesCompaniaAction, asignarPlanMiembroAction } from '@/app/actions/companias'
@@ -468,6 +469,20 @@ export default function ClaseDetallePage() {
             const saldoPendiente = (['suelta', 'pack'].includes(guestForm.tipo) && guestForm.esSena)
                 ? Math.max(0, sugerido - monto)
                 : 0;
+
+            // ⚠️ Anti-doble-cobro: si el alumno YA tiene pack activo (mismo tipo) o
+            // saldo pendiente en esta clase, avisamos para que la recep cobre el
+            // saldo con "Adeuda" en vez de venderle otro pack (caso Juana).
+            if (guestForm.tipo === 'pack' && alumnoIdFinal) {
+                const chk = await checkAlumnoPackActivoAction(alumnoIdFinal, clase.id, guestForm.packSeleccionadoId || null)
+                if (chk.success && (chk.packActivo || chk.saldoPendiente > 0)) {
+                    const partes: string[] = []
+                    if (chk.packActivo) partes.push(`ya tiene un pack ACTIVO con ${chk.packActivo.creditos} crédito(s) sin usar`)
+                    if (chk.saldoPendiente > 0) partes.push(`tiene un SALDO PENDIENTE de $${chk.saldoPendiente.toLocaleString('es-AR')} en esta clase`)
+                    const ok = confirm(`⚠️ OJO: este alumno ${partes.join(' y ')}.\n\nSi solo está pagando lo que debía, NO le vendas otro pack: cancelá y usá el botón "Adeuda" para cobrar el saldo.\n\n¿Igual querés venderle un pack NUEVO?`)
+                    if (!ok) { setProcessing(false); return }
+                }
+            }
 
             const rpcPayload = {
                 p_clase_id: clase.id,

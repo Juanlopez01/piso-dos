@@ -29,6 +29,44 @@ function calcVencimientoPack(fechaCompraISO: string, claseInicioISO: string): st
 function vencimientoTope(fechaCompraISO: string): string {
     return new Date(new Date(fechaCompraISO).getTime() + 60 * _DIA).toISOString()
 }
+// Chequeo previo a vender un pack: ¿el alumno YA tiene un pack activo de ese
+// tipo, o un saldo pendiente en esta clase? Sirve para avisarle a la recep que
+// quizás tiene que COBRAR EL SALDO ("Adeuda") en vez de venderle otro pack
+// (evita duplicados como el de Juana: seña + pack entero = doble cobro).
+export async function checkAlumnoPackActivoAction(userId: string, claseId: string, productoId: string | null) {
+    if (!userId) return { success: true as const, packActivo: null, saldoPendiente: 0 }
+    const admin = getAdminClient()
+
+    let prodTipo: string | null = null
+    if (productoId) {
+        const { data: prod } = await admin.from('productos').select('tipo_clase').eq('id', productoId).maybeSingle()
+        prodTipo = prod?.tipo_clase ?? null
+    }
+
+    // Packs activos con crédito (del mismo tipo si sabemos el producto).
+    let q = admin.from('alumno_packs')
+        .select('creditos_restantes, tipo_clase')
+        .eq('user_id', userId).eq('estado', 'activo').gt('creditos_restantes', 0)
+    if (prodTipo) q = q.eq('tipo_clase', prodTipo)
+    const { data: packs } = await q
+    const cantidadPacks = (packs || []).length
+    const creditos = (packs || []).reduce((a: number, p: any) => a + Number(p.creditos_restantes || 0), 0)
+
+    // Saldo pendiente en ESTA clase (seña sin terminar de pagar).
+    let saldoPendiente = 0
+    if (claseId) {
+        const { data: inscs } = await admin.from('inscripciones')
+            .select('saldo_pendiente').eq('user_id', userId).eq('clase_id', claseId).gt('saldo_pendiente', 0)
+        saldoPendiente = (inscs || []).reduce((a: number, i: any) => a + Number(i.saldo_pendiente || 0), 0)
+    }
+
+    return {
+        success: true as const,
+        packActivo: cantidadPacks > 0 ? { cantidadPacks, creditos } : null,
+        saldoPendiente,
+    }
+}
+
 // Arranca la vigencia de un pack en su primera clase usada (si aún no arrancó).
 async function iniciarVigenciaPack(admin: any, packId: string | null | undefined, claseInicioISO: string | null | undefined) {
     if (!packId || !claseInicioISO) return
