@@ -4,7 +4,13 @@ import { useEffect, useState, Fragment } from 'react'
 import { Loader2, RefreshCw, Download, Wallet, Plus, Trash2, Lock, Pencil, X, Check, RotateCcw } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
-import { getLibroAdminAction, agregarMovimientoAdminAction, editarMovimientoAdminAction, eliminarMovimientoAdminAction, setCajaOverrideAction } from '@/app/actions/libro-admin'
+import { getLibroAdminAction, agregarMovimientoAdminAction, editarMovimientoAdminAction, eliminarMovimientoAdminAction, setCajaOverrideAction, setSaldoInicialAction, getDetalleCajaDiaAction } from '@/app/actions/libro-admin'
+
+const DIAS_SEM = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
+const fechaLabel = (anio: number, mes: number, dia: number) => {
+    const d = new Date(anio, mes - 1, dia)
+    return `${DIAS_SEM[d.getDay()]} ${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}`
+}
 
 const pesos = (n: number) => '$' + Math.round(Number(n || 0)).toLocaleString('es-AR')
 const usd = (n: number) => 'US$' + Math.round(Number(n || 0)).toLocaleString('es-AR')
@@ -70,16 +76,43 @@ export default function LibroAdminPage() {
         window.scrollTo({ top: 0, behavior: 'smooth' })
     }
 
+    // Saldo inicial del mes (cierre mensual, a mano)
+    const [siPesos, setSiPesos] = useState('')
+    const [siDolares, setSiDolares] = useState('')
+    const [siSaving, setSiSaving] = useState(false)
+    // Detalle de una línea de caja (drill-down)
+    const [detalle, setDetalle] = useState<{ titulo: string; movs: any[] } | null>(null)
+    const [detalleLoading, setDetalleLoading] = useState(false)
+
     const [anio, mes] = mesSel.split('-').map(Number)
 
     const cargar = async () => {
         setLoading(true)
         const r = await getLibroAdminAction(anio, mes)
-        if (r.success) setLibro(r as any)
+        if (r.success) {
+            setLibro(r as any)
+            setSiPesos(String((r as any).apertura?.pesos || ''))
+            setSiDolares(String((r as any).apertura?.dolares || ''))
+        }
         else toast.error((r as any).error || 'Error')
         setLoading(false)
     }
     useEffect(() => { if (!isLoading && hasAdminFinanzas) cargar() }, [mesSel, isLoading, hasAdminFinanzas])
+
+    const guardarSaldoInicial = async () => {
+        setSiSaving(true)
+        const r = await setSaldoInicialAction(anio, mes, Number(siPesos) || 0, Number(siDolares) || 0)
+        if (r.success) { toast.success('Saldo inicial guardado'); cargar() } else toast.error(r.error || 'Error')
+        setSiSaving(false)
+    }
+    const abrirDetalle = async (e: Entrada) => {
+        setDetalle({ titulo: `${e.concepto} · ${fechaLabel(anio, mes, e.diaNum!)}`, movs: [] })
+        setDetalleLoading(true)
+        const r = await getDetalleCajaDiaAction(anio, mes, e.diaNum!, e.sedeKey!)
+        setDetalleLoading(false)
+        if (r.success) setDetalle({ titulo: `${e.concepto} · ${fechaLabel(anio, mes, e.diaNum!)}`, movs: r.movimientos })
+        else { toast.error((r as any).error || 'Error'); setDetalle(null) }
+    }
 
     const agregar = async () => {
         if (!nuevo.concepto.trim()) return toast.error('Poné un concepto')
@@ -105,7 +138,7 @@ export default function LibroAdminPage() {
     const descargarCSV = () => {
         if (!libro) return
         const head = ['Día', 'Concepto', 'Autor', 'Efvo Ing', 'Efvo Egr', 'Transf Ing', 'Transf Egr', 'US$ Ing', 'US$ Egr']
-        const rows: any[] = [['', 'SALDO MES ANTERIOR', '', libro.apertura.pesos, '', '', '', libro.apertura.dolares, '']]
+        const rows: any[] = [['', 'SALDO INICIAL DEL MES', '', libro.apertura.pesos, '', '', '', libro.apertura.dolares, '']]
         for (const d of libro.dias) for (const e of d.entries) {
             rows.push([d.dia, e.concepto, e.auto ? 'Auto (caja)' : (e.autor || ''), e.ef_ing || '', e.ef_egr || '', e.tr_ing || '', e.tr_egr || '', e.usd_ing || '', e.usd_egr || ''])
         }
@@ -193,12 +226,25 @@ export default function LibroAdminPage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {/* Saldo mes anterior */}
+                            {/* Saldo inicial del mes (cierre mensual, a mano) */}
                             <tr className="bg-[#0e0e10] border-t border-white/5">
-                                <td className="p-2 pl-3 font-bold text-gray-300 text-xs uppercase tracking-wide" colSpan={2}>Saldo mes anterior</td>
-                                <td className="p-2 text-right font-bold text-gray-300" colSpan={4}>{pesos(libro.apertura.pesos)}</td>
-                                <td className="p-2 text-right font-bold text-gray-300" colSpan={2}>{usd(libro.apertura.dolares)}</td>
-                                <td></td>
+                                <td className="p-2 pl-3 font-bold text-gray-300 text-xs uppercase tracking-wide" colSpan={2}>
+                                    Saldo inicial del mes
+                                    <span className="block text-[9px] text-gray-600 normal-case tracking-normal font-normal">lo que quedó del mes pasado (a mano)</span>
+                                </td>
+                                <td className="p-1.5 text-right" colSpan={4}>
+                                    <span className="text-[9px] text-gray-600 uppercase mr-1">$</span>
+                                    <input type="number" value={siPesos} onChange={e => setSiPesos(e.target.value)} placeholder="0" className="w-28 bg-black border border-white/15 rounded py-1 px-2 text-xs text-right outline-none focus:border-[#D4E655]" />
+                                </td>
+                                <td className="p-1.5 text-right" colSpan={2}>
+                                    <span className="text-[9px] text-gray-600 uppercase mr-1">US$</span>
+                                    <input type="number" value={siDolares} onChange={e => setSiDolares(e.target.value)} placeholder="0" className="w-24 bg-black border border-white/15 rounded py-1 px-2 text-xs text-right outline-none focus:border-[#D4E655]" />
+                                </td>
+                                <td className="p-1 text-center">
+                                    <button onClick={guardarSaldoInicial} disabled={siSaving} title="Guardar saldo inicial" className="text-emerald-400 hover:text-emerald-300 disabled:opacity-40">
+                                        {siSaving ? <Loader2 size={13} className="animate-spin" /> : <Check size={15} />}
+                                    </button>
+                                </td>
                             </tr>
 
                             {libro.dias.length === 0 && (
@@ -208,7 +254,7 @@ export default function LibroAdminPage() {
                             {libro.dias.map(d => (
                                 <Fragment key={d.dia}>
                                     <tr className="bg-[#141416] border-t border-white/10">
-                                        <td className="py-1.5 pl-3 text-[11px] font-black text-[#D4E655] uppercase tracking-widest" colSpan={2}>Día {String(d.dia).padStart(2, '0')}</td>
+                                        <td className="py-1.5 pl-3 text-[11px] font-black text-[#D4E655] uppercase tracking-widest" colSpan={2}>{fechaLabel(anio, mes, d.dia)}</td>
                                         <td className="py-1.5 pr-2 text-right text-[10px] text-gray-500 uppercase tracking-wider" colSpan={4}>Saldo {pesos(d.saldoPesos)}</td>
                                         <td className="py-1.5 pr-2 text-right text-[10px] text-gray-500 uppercase tracking-wider" colSpan={2}>{usd(d.saldoDolares)}</td>
                                         <td></td>
@@ -219,10 +265,12 @@ export default function LibroAdminPage() {
                                         return (
                                         <tr key={e.key} className={`border-t border-white/5 hover:bg-white/[0.02] ${(editId && e.id === editId) || editandoCaja ? 'bg-[#D4E655]/[0.06]' : ''}`}>
                                             <td className="p-2 pl-3">
-                                                <span className={e.auto ? 'text-gray-300' : 'text-white'}>{e.concepto}</span>
+                                                {e.auto
+                                                    ? <button onClick={() => abrirDetalle(e)} className="text-gray-300 hover:text-[#D4E655] underline decoration-dotted decoration-gray-600 underline-offset-2" title="Ver el detalle de estos movimientos">{e.concepto}</button>
+                                                    : <span className="text-white">{e.concepto}</span>}
                                                 {e.auto && (e.editadoCaja
                                                     ? <span className="ml-2 text-[9px] uppercase tracking-wider text-[#D4E655] border border-[#D4E655]/40 rounded px-1 py-0.5">editado</span>
-                                                    : <span className="ml-2 text-[9px] uppercase tracking-wider text-gray-500 border border-white/10 rounded px-1 py-0.5">auto</span>)}
+                                                    : <span className="ml-2 text-[9px] uppercase tracking-wider text-gray-500 border border-white/10 rounded px-1 py-0.5">ver</span>)}
                                             </td>
                                             <td className="p-2 text-[11px] text-gray-500">{e.auto ? 'Caja' : (<span>{e.autor}{e.hora ? <span className="text-gray-700"> · {e.hora}</span> : ''}</span>)}</td>
                                             {editandoCaja ? (<>
@@ -287,6 +335,43 @@ export default function LibroAdminPage() {
                     <div className="rounded-2xl p-4 border bg-white/5 border-white/10"><p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Neto dólares (mes)</p><p className={`text-xl font-black mt-1 ${libro.totales.netoDolares < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{usd(libro.totales.netoDolares)}</p></div>
                     <div className="rounded-2xl p-4 border bg-[#D4E655]/10 border-[#D4E655]/30"><p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Saldo final pesos</p><p className={`text-xl font-black mt-1 ${libro.cierre.pesos < 0 ? 'text-red-400' : 'text-[#D4E655]'}`}>{pesos(libro.cierre.pesos)}</p></div>
                     <div className="rounded-2xl p-4 border bg-[#D4E655]/10 border-[#D4E655]/30"><p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Saldo final dólares</p><p className={`text-xl font-black mt-1 ${libro.cierre.dolares < 0 ? 'text-red-400' : 'text-[#D4E655]'}`}>{usd(libro.cierre.dolares)}</p></div>
+                </div>
+            )}
+
+            {/* Detalle de una línea de caja (día + sede) */}
+            {detalle && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setDetalle(null)}>
+                    <div className="bg-[#09090b] border border-white/10 rounded-t-2xl md:rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-4 border-b border-white/10">
+                            <p className="font-black uppercase tracking-tight text-sm truncate pr-3">{detalle.titulo}</p>
+                            <button onClick={() => setDetalle(null)} className="p-2 bg-white/5 rounded-full text-gray-300 shrink-0"><X size={16} /></button>
+                        </div>
+                        <div className="overflow-y-auto p-3">
+                            {detalleLoading ? (
+                                <div className="py-10 flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
+                            ) : detalle.movs.length === 0 ? (
+                                <p className="py-8 text-center text-gray-600 text-xs">Sin movimientos.</p>
+                            ) : (
+                                <table className="w-full text-xs">
+                                    <thead><tr className="text-[9px] uppercase tracking-widest text-gray-500">
+                                        <th className="p-2 text-left">Concepto</th><th className="p-2 text-left">Quién</th><th className="p-2 text-right">Monto</th>
+                                    </tr></thead>
+                                    <tbody>
+                                        {detalle.movs.map((m: any, i: number) => (
+                                            <tr key={i} className="border-t border-white/5">
+                                                <td className="p-2">
+                                                    <span className={m.tipo === 'egreso' ? 'text-red-300' : 'text-emerald-300'}>{m.concepto}</span>
+                                                    <span className="block text-[9px] text-gray-600 uppercase">{m.tipo} · {m.metodo}</span>
+                                                </td>
+                                                <td className="p-2 text-gray-400">{m.usuario}<span className="block text-[9px] text-gray-600">{m.hora}</span></td>
+                                                <td className={`p-2 text-right font-bold ${m.tipo === 'egreso' ? 'text-red-400' : 'text-emerald-400'}`}>{m.tipo === 'egreso' ? '-' : ''}{pesos(m.monto)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

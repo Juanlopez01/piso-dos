@@ -53,21 +53,12 @@ export async function getLibroAdminAction(anio: number, mes: number) {
     const sedeNombre = new Map<string, string>()
     for (const s of (sedes || []) as any[]) sedeNombre.set(s.id, s.nombre)
 
-    // --- APERTURA (saldo mes anterior) ---
-    // Caja (siempre pesos): ingreso - egreso de todo lo anterior al mes.
-    const { data: cajaPrev } = await admin.from('caja_movimientos')
-        .select('tipo, monto').lt('created_at', desdeISO)
-    let aperturaPesos = 0
-    for (const m of (cajaPrev || []) as any[]) aperturaPesos += (m.tipo === 'egreso' ? -1 : 1) * Number(m.monto || 0)
-    // Movimientos manuales anteriores (pesos y dólares por separado).
-    const { data: manPrev } = await admin.from('admin_movimientos')
-        .select('tipo, metodo, monto').lt('fecha', desdeFecha)
-    let aperturaDolares = 0
-    for (const m of (manPrev || []) as any[]) {
-        const signo = m.tipo === 'egreso' ? -1 : 1
-        const monto = signo * Number(m.monto || 0)
-        if (m.metodo === 'dolares') aperturaDolares += monto; else aperturaPesos += monto
-    }
+    // --- SALDO INICIAL (cierre mensual): se carga A MANO por mes, NO se acumula
+    // solo. El saldo final del mes = este saldo inicial + los movimientos del mes.
+    const { data: si } = await admin.from('admin_saldo_inicial')
+        .select('pesos, dolares').eq('anio', anio).eq('mes', mes).maybeSingle()
+    const aperturaPesos = Number(si?.pesos || 0)
+    const aperturaDolares = Number(si?.dolares || 0)
 
     // --- CAJAS del mes (automático), agrupadas por día + sede ---
     const { data: cajaMovs } = await admin.from('caja_movimientos')
@@ -276,6 +267,58 @@ export async function setCajaOverrideAction(
     if (error) return { success: false, error: error.message }
     revalidatePath('/reporte-caja')
     return { success: true }
+}
+
+// Guarda el saldo inicial del mes (cierre mensual, carga a mano).
+export async function setSaldoInicialAction(anio: number, mes: number, pesos: number, dolares: number) {
+    const perm = await requireFinanzas()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('admin_saldo_inicial').upsert(
+        { anio, mes, pesos: Number(pesos) || 0, dolares: Number(dolares) || 0, updated_by: perm.userId, updated_at: new Date().toISOString() },
+        { onConflict: 'anio,mes' }
+    )
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+// Detalle de una línea de caja (día + sede): cada movimiento con concepto, método,
+// monto y QUIÉN lo hizo (dueño del turno). Para el "clickear y ver qué es".
+export async function getDetalleCajaDiaAction(anio: number, mes: number, dia: number, sedeKey: string) {
+    const perm = await requireFinanzas()
+    if (!perm.ok) return { success: false as const, error: perm.error, movimientos: [] as any[] }
+    const admin = getAdminClient()
+    // El día en ART (UTC-3) va de las 03:00 UTC de ese día a las 03:00 del siguiente.
+    const desde = new Date(Date.UTC(anio, mes - 1, dia, 3, 0, 0)).toISOString()
+    const hasta = new Date(Date.UTC(anio, mes - 1, dia + 1, 3, 0, 0)).toISOString()
+    const { data: movs } = await admin.from('caja_movimientos')
+        .select('tipo, metodo_pago, monto, concepto, created_at, turno:caja_turnos(sede_id, usuario_id)')
+        .gte('created_at', desde).lt('created_at', hasta).order('created_at', { ascending: true })
+
+    // Filtramos por sede y juntamos los usuario_id de los turnos.
+    const filtrados = (movs || []).filter((m: any) => {
+        const t = Array.isArray(m.turno) ? m.turno[0] : m.turno
+        return (t?.sede_id ?? 'pozo') === sedeKey
+    })
+    const userIds = [...new Set(filtrados.map((m: any) => {
+        const t = Array.isArray(m.turno) ? m.turno[0] : m.turno
+        return t?.usuario_id
+    }).filter(Boolean))]
+    const nombre = new Map<string, string>()
+    if (userIds.length) {
+        const { data: perfiles } = await admin.from('profiles').select('id, nombre_completo').in('id', userIds)
+        for (const p of (perfiles || []) as any[]) nombre.set(p.id, p.nombre_completo || 'Usuario')
+    }
+    const movimientos = filtrados.map((m: any) => {
+        const t = Array.isArray(m.turno) ? m.turno[0] : m.turno
+        return {
+            tipo: m.tipo, metodo: m.metodo_pago || 'efectivo', monto: Number(m.monto || 0),
+            concepto: m.concepto || '(sin concepto)',
+            usuario: t?.usuario_id ? (nombre.get(t.usuario_id) || 'Usuario') : 'Administración',
+            hora: new Date(new Date(m.created_at).getTime() - 3 * 3600_000).toISOString().slice(11, 16),
+        }
+    })
+    return { success: true as const, movimientos }
 }
 
 // Toggle del acceso al libro (solo un admin lo puede prender/apagar).
