@@ -137,6 +137,17 @@ async function capturarConsulta(body: any, pregunta: string, subId: string | nul
     }
 }
 
+// Hand-off: ¿el bot está en pausa para este contacto? (la recep respondió hace poco)
+async function estaPausado(subId: string | null): Promise<boolean> {
+    if (!subId) return false
+    try {
+        const admin = getAdminClient()
+        const { data } = await admin.from('asistente_pausa')
+            .select('pausado_hasta').eq('subscriber_id', subId).maybeSingle()
+        return !!(data?.pausado_hasta && new Date(data.pausado_hasta).getTime() > Date.now())
+    } catch { return false }
+}
+
 async function manejar(req: NextRequest, body: any) {
     if (!process.env.ASISTENTE_API_TOKEN) {
         return NextResponse.json({ ok: false, error: 'API no configurada (falta ASISTENTE_API_TOKEN).' }, { status: 500 })
@@ -148,6 +159,13 @@ async function manejar(req: NextRequest, body: any) {
     const subId = body?.subscriber_id?.toString() || body?.contacto_id?.toString() || null
     const canal = (body?.canal || 'instagram').toString()
     try {
+        // HAND-OFF: si la recep tomó la conversación (respondió hace poco), el bot
+        // NO contesta. Igual registramos el mensaje del usuario para que la recep
+        // lo vea en el hilo, y devolvemos respuesta vacía (ManyChat no envía nada).
+        if (await estaPausado(subId)) {
+            if (subId) await logInteraccion(subId, canal, pregunta, '')
+            return NextResponse.json({ ok: true, respuesta: '', derivar: false, pausado: true })
+        }
         // Contexto: turnos previos de este contacto (memoria de conversación).
         const historial = subId ? await getHistorial(subId) : []
         const { respuesta, derivar } = await responderAsistente(pregunta, historial)

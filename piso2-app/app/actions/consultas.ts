@@ -90,6 +90,26 @@ export async function responderConsultaAction(consultaId: string, texto: string)
         consulta_id: consultaId, de: 'recep', texto: texto.trim(), autor_id: perm.userId,
     })
     await admin.from('asistente_consultas').update({ updated_at: new Date().toISOString() }).eq('id', consultaId)
+
+    // 3. HAND-OFF: respondió un humano → pausamos el bot para ese contacto por un
+    //    rato (rolling), así no le pisa la conversación a la recep.
+    if (consulta.subscriber_id) {
+        const PAUSA_HORAS = 24
+        await admin.from('asistente_pausa').upsert({
+            subscriber_id: consulta.subscriber_id,
+            pausado_hasta: new Date(Date.now() + PAUSA_HORAS * 3600_000).toISOString(),
+            updated_at: new Date().toISOString(),
+        }, { onConflict: 'subscriber_id' })
+    }
+    return { ok: true }
+}
+
+// Reactiva el bot para un contacto (saca la pausa manualmente).
+export async function reactivarBotAction(subscriberId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false, error: perm.error }
+    const admin = getAdminClient()
+    await admin.from('asistente_pausa').delete().eq('subscriber_id', subscriberId)
     return { ok: true }
 }
 
