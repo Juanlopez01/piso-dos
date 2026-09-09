@@ -379,6 +379,14 @@ function esIntencionConcretar(q: string): boolean {
         || /(cancelar|reprogramar|pedir factura|quiero factura|necesito factura|hacer(me)? (la )?factura|dar de baja)/.test(q)
 }
 
+// Alquiler con intención de un horario/día puntual o reserva → derivamos SIEMPRE,
+// porque NO tenemos la disponibilidad real (hay alquileres fijos fuera del sistema).
+function esAlquilerConDisponibilidad(q: string): boolean {
+    const esAlquiler = /(alquil|reserv)/.test(q) || (/\bsala\b/.test(q) && !/clase/.test(q))
+    if (!esAlquiler) return false
+    return /(libre|disponib|ocupad|reserv|turno|horario|\d{1,2}\s*(:|hs|hrs|horas)|lunes|martes|miercoles|jueves|viernes|sabado|domingo|hoy|manana|finde|fin de semana)/.test(q)
+}
+
 // Red de seguridad: la IA a veces redacta una derivación pero NO llama a la
 // herramienta (queda derivar=false). Si la RESPUESTA suena a derivación, forzamos.
 function pareceDerivacion(respuesta: string): boolean {
@@ -417,17 +425,16 @@ async function textoRuteado(pregunta: string): Promise<string | null> {
         return 'Para tu primera clase vení con *ropa cómoda*. ¿Te muestro las clases o los precios?'
     }
 
-    // Alquiler de salas
+    // Alquiler de salas.
+    // OJO: NO informamos disponibilidad de horarios. Hay alquileres fijos que NO
+    // están cargados en el sistema, así que lo calculado sería incorrecto. Damos
+    // SOLO las tarifas; la disponibilidad/reserva la coordina el equipo (derivamos).
     const esAlquiler = /(alquil|reserv)/.test(q) || (/\bsala\b/.test(q) && !/clase/.test(q))
     if (esAlquiler) {
-        const esDisp = /(libre|disponib|ocupad|reserv|horario)/.test(q)
         const mSala = q.match(/sala\s*(\d+|blanca|negra|completa)/)
         const salaTexto = mSala ? mSala[0] : (/pasillo/.test(q) ? 'pasillo' : '')
-        const off = parsearDiaOffset(q)
-        if (salaTexto && (off !== null || esDisp)) return disponibilidadAlquiler({ salaTexto, addDays: off ?? 0 })
         const base = await tarifasAlquiler({ salaTexto: salaTexto || undefined })
-        if (off !== null && !salaTexto) return base + '\n\n¿De qué sala? Decime la sala (ej: "Sala 1") y te paso los horarios libres de ese día.'
-        return base
+        return base + '\n\nLa *disponibilidad* de cada horario y la reserva las coordina el equipo (te confirman por acá). Decime qué día y horario te interesa y lo dejo pasado 🙌'
     }
 
     // "Programa": Compañías/Grupos o la Formación de La Liga (lee la BDD).
@@ -503,8 +510,7 @@ const IA_TOOLS = [
     { type: 'function', function: { name: 'grupos', description: 'Info de las Compañías/Grupos (elencos que entrenan y producen juntos): cuota mensual. Usar para "grupos", "compañías", o "el programa" cuando se refiere a los grupos. NO es lo mismo que formaciones/cursos.', parameters: { type: 'object', properties: {} } } },
     { type: 'function', function: { name: 'la_liga', description: 'Info de La Liga: programa de formación por niveles, con su cuota mensual vigente. Usar para "La Liga" o "la formación de la liga".', parameters: { type: 'object', properties: {} } } },
     { type: 'function', function: { name: 'precios', description: 'Precios de clases sueltas y packs. Usar para "cuánto sale/vale", valores, abonos, packs.', parameters: { type: 'object', properties: { termino: { type: 'string', description: 'Opcional: filtro como "suelta", "x4", "ballroom".' } } } } },
-    { type: 'function', function: { name: 'alquiler_tarifas', description: 'Tarifas de alquiler de salas (por hora: mañana/noche/finde).', parameters: { type: 'object', properties: { sala: { type: 'string', description: 'Opcional: nombre de sala (ej "sala 1", "blanca", "negra").' } } } } },
-    { type: 'function', function: { name: 'alquiler_disponibilidad', description: 'Horarios LIBRES de una sala en un día puntual, con su tarifa. Requiere la sala; el día por defecto es hoy.', parameters: { type: 'object', properties: { sala: { type: 'string', description: 'Nombre de sala (ej "sala 1", "blanca").' }, dia: { type: 'string', description: '"hoy", "manana", día de la semana o fecha "30/08".' } }, required: ['sala'] } } },
+    { type: 'function', function: { name: 'alquiler_tarifas', description: 'Tarifas de alquiler de salas (por hora: mañana/noche/finde). Da SOLO precios, NO disponibilidad de horarios.', parameters: { type: 'object', properties: { sala: { type: 'string', description: 'Opcional: nombre de sala (ej "sala 1", "blanca", "negra").' } } } } },
     { type: 'function', function: { name: 'ubicacion', description: 'Direcciones de las sedes.', parameters: { type: 'object', properties: {} } } },
     { type: 'function', function: { name: 'derivar_a_recepcion', description: 'Derivar a una persona del equipo. Usar PROACTIVAMENTE (la persona no va a pedirlo) cuando: quiere CONCRETAR algo, no solo informarse (anotarse/reservar en firme, sacar un lugar, pagar, señar, coordinar un horario o fecha puntual, cancelar/cambiar, pedir factura, temas de su cuenta o pago); hay un reclamo, queja o problema; es un caso personal o que requiere criterio humano (lesiones, recomendaciones a medida, convenios, eventos, prensa, edades/casos no cubiertos por los datos); o cualquier consulta que las herramientas no puedan responder con certeza. Ante la duda, derivar.', parameters: { type: 'object', properties: { motivo: { type: 'string', description: 'Breve motivo de la derivación.' } } } } },
 ]
@@ -534,10 +540,6 @@ async function ejecutarToolIA(name: string, args: any): Promise<string> {
         if (name === 'la_liga') return await laLiga()
         if (name === 'precios') return await preciosPacks({ q: norm(args?.termino || '') })
         if (name === 'alquiler_tarifas') return await tarifasAlquiler({ salaTexto: args?.sala || undefined })
-        if (name === 'alquiler_disponibilidad') {
-            const off = parsearDiaOffset(norm(args?.dia || ''))
-            return await disponibilidadAlquiler({ salaTexto: args?.sala || '', addDays: off ?? 0 })
-        }
         if (name === 'ubicacion') return await ubicacion()
         if (name === 'derivar_a_recepcion') return 'DERIVAR'
         return 'Herramienta desconocida.'
@@ -555,8 +557,9 @@ ESCRITURA INFORMAL: la gente escribe rápido, con faltas de ortografía, sin til
 Respondé con datos REALES obtenidos SOLO con las herramientas. Nunca inventes horarios, precios, profes ni direcciones.
 
 QUÉ RESOLVÉS VOS (respondé directo con las herramientas):
-- Información: qué clases/horarios/profes hay, precios y packs, tarifas de alquiler, horarios libres de una sala, formaciones, direcciones, medios de pago, cómo funciona la web.
-- Mapeo: clases/horarios/profes → "clases"; cuánto sale/valores → "precios"; alquiler → "alquiler_tarifas", o "alquiler_disponibilidad" si dan una sala y un día; direcciones → "ubicacion"; cursos → "formaciones". Podés encadenar herramientas si hay varias partes.
+- Información: qué clases/horarios/profes hay, precios y packs, tarifas de alquiler, formaciones, direcciones, medios de pago, cómo funciona la web.
+- Mapeo: clases/horarios/profes → "clases"; cuánto sale/valores → "precios"; alquiler → "alquiler_tarifas" (SOLO precios); direcciones → "ubicacion"; cursos → "formaciones". Podés encadenar herramientas si hay varias partes.
+- ALQUILER DE SALAS: podés dar las TARIFAS (precio por hora). Pero NUNCA afirmes que un horario está libre u ocupado ni confirmes disponibilidad: hay alquileres fijos que NO están en el sistema, así que no tenés la disponibilidad real. Si preguntan por un día/horario, si está libre, o quieren reservar → dales la tarifa si corresponde y DERIVÁ ("derivar_a_recepcion"): la disponibilidad y la reserva las confirma el equipo.
 - IMPORTANTE con "clases": NO asumas "hoy". Si el usuario pregunta por un profe o un estilo, o "qué días/cuándo da clase X", llamá a "clases" SIN "dia" (o dia="semana") para ver toda la semana. Solo poné "dia" si el usuario nombra un día puntual. Si la herramienta dice que no encontró a ese profe/estilo, no muestres otras clases como si nada: contale que no lo encontraste y ofrecé derivar.
 
 CUÁNDO DERIVÁS (usá "derivar_a_recepcion" — la persona no lo va a pedir, detectalo vos):
@@ -567,7 +570,7 @@ CUÁNDO DERIVÁS (usá "derivar_a_recepcion" — la persona no lo va a pedir, de
 
 "PROGRAMA" (¡ojo, es ambiguo!): cuando alguien pregunta por "el programa", "los grupos", "las compañías" o "la liga / la formación de La Liga", NO se refiere a las "formaciones/cursos" comunes ni a los "precios" de clases. Puede ser: (a) las Compañías/Grupos → usá la herramienta "grupos"; o (b) La Liga (formación por niveles) → usá "la_liga". Si dice "programa" a secas y no queda claro, preguntá a cuál se refiere. El ingreso a grupos/La Liga lo coordina el equipo: después de dar la info, si se quiere sumar, derivá con "derivar_a_recepcion". Nunca respondas a "programa/grupos/compañías/liga" con la info de cursos ni con los packs de clases.
 
-Para dudas de SOLO información (qué clases hay, precios, horarios libres, direcciones, formaciones) respondé vos directo, sin derivar.
+Para dudas de SOLO información (qué clases hay, precios, tarifas de alquiler, direcciones, formaciones) respondé vos directo, sin derivar. La DISPONIBILIDAD de salas NO es info que des vos: siempre la confirma el equipo (derivá).
 
 CÓMO DERIVAR (sin romper el tono humano): respondé lo que puedas al toque y ofrecé seguir; pedile un teléfono o mail y un horario, y decile que en un rato le confirman. Ej: "Buenísimo, eso lo dejo coordinado con el equipo y te escribimos en un rato 🙌 ¿me pasás un teléfono o mail por las dudas?".
 
@@ -633,8 +636,9 @@ export async function responderAsistente(pregunta: string, historial: { de: stri
     const q = norm(pregunta || '')
     // Pedido explícito de humano → derivar sí o sí (no depende de la IA).
     if (esPedidoHumano(q)) return { respuesta: derivarMsg(), derivar: true }
-    // Intención de concretar → forzamos derivar aunque la IA no lo marque.
-    const forzarDerivar = esIntencionConcretar(q)
+    // Intención de concretar, o alquiler con día/horario → forzamos derivar
+    // (la disponibilidad de salas la confirma el equipo, no el bot).
+    const forzarDerivar = esIntencionConcretar(q) || esAlquilerConDisponibilidad(q)
     const ia = await responderConIA(pregunta, historial)
     if (ia) return { respuesta: ia.respuesta, derivar: ia.derivar || forzarDerivar || pareceDerivacion(ia.respuesta) }
     const reglas = await responderPorReglas(pregunta)
