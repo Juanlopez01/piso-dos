@@ -57,6 +57,15 @@ const fmtHora = (iso: string) => new Date(iso).toLocaleTimeString('es-AR', { hou
 const nombreDe = (rel: any) => Array.isArray(rel) ? rel[0]?.nombre : rel?.nombre
 const nombreCompletoDe = (rel: any) => Array.isArray(rel) ? rel[0]?.nombre_completo : rel?.nombre_completo
 const profeDe = (c: any) => (nombreCompletoDe(c.profesor) || '').trim()
+
+// Clases/eventos con manejo MANUAL (precio o inscripción especial, ej. earlybird):
+// el bot NO responde sobre ellas y deriva al equipo, y NO aparecen en agenda/precios.
+// Para sumar otra, agregá su nombre o profe acá (minúsculas, sin tildes).
+const CLASES_MANUALES = ['adrian manzano', 'manzano']
+function esClaseManual(texto: string): boolean {
+    const t = norm(texto || '')
+    return CLASES_MANUALES.some(k => t.includes(k))
+}
 const salaSedeDe = (c: any) => {
     const sala = nombreDe(c.sala); const sede = nombreDe((Array.isArray(c.sala) ? c.sala[0] : c.sala)?.sede)
     return [sala, sede].filter(Boolean).join(', ')
@@ -118,6 +127,8 @@ export async function clasesAgenda(opts: { cuando?: 'hoy' | 'manana' | 'semana';
         .order('inicio')
 
     let clases = (data || []) as any[]
+    // Ocultamos las clases de manejo manual (el bot no las lista ni cotiza).
+    clases = clases.filter(c => !esClaseManual(`${c.nombre || ''} ${profeDe(c)}`))
     const cuandoTxt = diaEsp ? etiquetaDia(opts.addDays!) : cuando === 'hoy' ? 'hoy' : cuando === 'manana' ? 'mañana' : 'esta semana'
 
     // Aplica un filtro (ritmo o profesor) sobre las clases. Devuelve la etiqueta
@@ -247,6 +258,8 @@ export async function preciosPacks(opts: { q?: string } = {}): Promise<string> {
         .eq('activo', true).eq('visible_tienda', true).order('precio', { ascending: true })
 
     let prods = (data || []) as any[]
+    // Sacamos productos de clases con manejo manual (no cotizamos su earlybird).
+    prods = prods.filter(p => !esClaseManual(`${p.nombre || ''} ${p.categoria || ''}`))
     const q = norm(opts.q || '')
     // filtro por término relevante (suelta, pack, x4, ballroom, nombre de producto...)
     const term = /(suelta|x\s?4|x\s?8|x\s?12|ballroom|seminario|intensivo|especial|regular|nueva generacion)/.exec(q)?.[0]
@@ -634,6 +647,14 @@ async function responderConIA(pregunta: string, historial: { de: string; texto: 
 // por reglas. Devuelve `derivar` para que ManyChat/la API avisen a recepción.
 export async function responderAsistente(pregunta: string, historial: { de: string; texto: string }[] = []): Promise<{ respuesta: string; derivar: boolean }> {
     const q = norm(pregunta || '')
+    // Clase con manejo manual (ej. earlybird de Adrián Manzano): el bot NO
+    // responde ni cotiza; deriva directo al equipo. Va PRIMERO (corta todo).
+    if (esClaseManual(q)) {
+        const msg = enHorarioAtencion()
+            ? '¡Hola! Esa clase la estamos coordinando nosotras directamente 🙌 Contanos qué necesitás y en un ratito te respondemos con toda la info. ¿Nos dejás un teléfono o mail?'
+            : `¡Hola! Esa clase la coordinamos nosotras directamente 🙌 Ahora estamos fuera del horario de atención (${HORARIO_TXT}), así que te respondemos apenas abramos. Dejanos tu consulta y un teléfono o mail. ¡Gracias!`
+        return { respuesta: msg, derivar: true }
+    }
     // Pedido explícito de humano → derivar sí o sí (no depende de la IA).
     if (esPedidoHumano(q)) return { respuesta: derivarMsg(), derivar: true }
     // Intención de concretar, o alquiler con día/horario → forzamos derivar
