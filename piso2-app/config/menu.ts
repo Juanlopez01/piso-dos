@@ -1,4 +1,4 @@
-import { Home, Calendar as CalendarIcon, Users, Settings, Package, ShoppingBag, MapPin, Bell, UserCircle, GraduationCap, UsersRound, Search, ShoppingBagIcon, BookOpen, Wallet, FileSpreadsheet, Megaphone, Sparkles, Link2, Bot, MessageCircle, Ticket, Theater } from 'lucide-react'
+import { Home, Calendar as CalendarIcon, Users, Settings, Package, ShoppingBag, MapPin, Bell, UserCircle, GraduationCap, UsersRound, Search, ShoppingBagIcon, BookOpen, Wallet, FileSpreadsheet, Megaphone, Sparkles, Link2, Bot, MessageCircle, Ticket, Theater, ClipboardList } from 'lucide-react'
 
 export const menuItems = [
     // --- TOP: LOS 4 BOTONES DE ALUMNOS Y PROFES (Para el menú del celu) ---
@@ -43,6 +43,7 @@ export const menuItems = [
     { name: 'Talents', href: '/talents', icon: Sparkles, roles: ['admin'] },
     { name: 'Asistente', href: '/asistente-test', icon: Bot, roles: ['admin'] },
     { name: 'Consultas', href: '/consultas', icon: MessageCircle, roles: ['admin', 'recepcion'] },
+    { name: 'Resumen Clases', href: '/resumen-clases', icon: ClipboardList, roles: ['admin', 'recepcion'] },
     { name: 'Eventos', href: '/eventos', icon: Ticket, roles: ['admin', 'recepcion', 'curador'] },
     { name: 'Curaduría', href: '/curaduria', icon: Theater, roles: ['admin', 'recepcion', 'curador'] },
     { name: 'Sumate a Talent', href: '/talent/postular', icon: Sparkles, roles: ['alumno', 'profesor', 'coordinador'] },
