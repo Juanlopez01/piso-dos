@@ -10,6 +10,18 @@ const pesos = (n: number) => '$' + Math.round(Number(n || 0)).toLocaleString('es
 const hoyMes = () => { const d = new Date(Date.now() - 3 * 3600_000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}` }
 const soloNums = (t: string) => (t || '').replace(/[^\d]/g, '')
 
+const MESES_NOM = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+// Opciones de mes: de 2 meses adelante hasta 15 atrás (para clases futuras y el histórico).
+const opcionesMes = (): { value: string; label: string }[] => {
+    const hoy = new Date(Date.now() - 3 * 3600_000)
+    const out: { value: string; label: string }[] = []
+    for (let i = -2; i <= 15; i++) {
+        const d = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - i, 1))
+        out.push({ value: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`, label: `${MESES_NOM[d.getUTCMonth()]} ${d.getUTCFullYear()}` })
+    }
+    return out
+}
+
 type Sesion = { id: string; inicio: string; label: string }
 type Grupo = { key: string; nombre: string; profe: string; sesiones: Sesion[]; nSesiones: number; nInscripciones: number }
 type Alumno = { key: string; userId: string | null; nombre: string; telefono: string | null; email: string | null; medio: string; pago: number; asistencias: number; celdas: Record<string, string> }
@@ -72,7 +84,9 @@ export default function ResumenClasesPage() {
                     <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">Alumnos, asistencias y recaudado del mes</p>
                 </div>
                 <div className="flex gap-2">
-                    <input type="month" value={mesSel} onChange={e => setMesSel(e.target.value)} className="bg-[#111] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-[#D4E655]" />
+                    <select value={mesSel} onChange={e => setMesSel(e.target.value)} className="bg-[#111] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-[#D4E655] capitalize">
+                        {opcionesMes().map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
                     <button onClick={descargarCSV} disabled={!alumnos.length} className="px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white disabled:opacity-40" title="Descargar CSV"><Download size={16} /></button>
                 </div>
             </div>
