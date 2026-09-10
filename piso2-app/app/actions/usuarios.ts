@@ -61,6 +61,66 @@ export async function cambiarRolAction(usuarioId: string, nuevoRol: string) {
     }
 }
 
+// Solo admin. Resetea el acceso de un usuario: corrige el email (si se pasa) y/o
+// setea una contraseña nueva a mano. Usa la MISMA cuenta (no crea otra), así el
+// profe/alumno conserva sus clases, packs, etc.
+export async function resetearAccesoAction(usuarioId: string, opts: { nuevoEmail?: string; nuevaPassword?: string }) {
+    const supabase = await createClient()
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+        const { data: actor } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+        if (actor?.rol !== 'admin') throw new Error('Solo un admin puede resetear el acceso')
+
+        const admin = getAdminClient()
+        const patch: any = {}
+        const email = (opts.nuevoEmail || '').trim().toLowerCase()
+        const pass = (opts.nuevaPassword || '').trim()
+        if (email) {
+            if (!email.includes('@')) throw new Error('El email no es válido')
+            patch.email = email
+            patch.email_confirm = true // lo confirmamos para que pueda entrar ya
+        }
+        if (pass) {
+            if (pass.length < 6) throw new Error('La contraseña tiene que tener al menos 6 caracteres')
+            patch.password = pass
+        }
+        if (!Object.keys(patch).length) throw new Error('No indicaste ningún cambio')
+
+        const { error } = await admin.auth.admin.updateUserById(usuarioId, patch)
+        if (error) throw new Error(error.message)
+        if (patch.email) await admin.from('profiles').update({ email: patch.email }).eq('id', usuarioId)
+        revalidatePath('/usuarios')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
+// Solo admin. Genera un link de recuperación para que el usuario ponga su propia
+// clave (sirve aunque el mail no le llegue: se lo pasás vos por WhatsApp).
+export async function generarLinkRecuperacionAction(usuarioId: string) {
+    const supabase = await createClient()
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+        const { data: actor } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+        if (actor?.rol !== 'admin') throw new Error('Solo un admin puede hacer esto')
+
+        const admin = getAdminClient()
+        const { data: u } = await admin.from('profiles').select('email').eq('id', usuarioId).single()
+        if (!u?.email) throw new Error('El usuario no tiene email cargado (corregilo primero).')
+        const site = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.piso2multiespacio.com'
+        const { data, error } = await admin.auth.admin.generateLink({
+            type: 'recovery', email: u.email, options: { redirectTo: `${site}/act-password` },
+        })
+        if (error) throw new Error(error.message)
+        return { success: true, link: (data as any)?.properties?.action_link || null, email: u.email }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
 export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | null) {
     const supabase = await createClient()
     try {

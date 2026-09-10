@@ -26,7 +26,9 @@ import {
     ajustarCreditosAction,
     getSueltasAlumnoAction,
     convertirSueltaAPackAction,
-    eliminarUsuarioCompletoAction
+    eliminarUsuarioCompletoAction,
+    resetearAccesoAction,
+    generarLinkRecuperacionAction
 } from '@/app/actions/usuarios'
 import { toggleFinanzasAction } from '@/app/actions/libro-admin'
 
@@ -292,6 +294,36 @@ function UsuariosContent() {
         if (response.success) { toast.success(nuevo ? 'Acceso a Administración dado' : 'Acceso a Administración quitado'); mutate() }
         else toast.error(response.error || 'No se pudo')
         setFinanzasId(null)
+    }
+
+    const [reseteandoId, setReseteandoId] = useState<string | null>(null)
+    const resetearAcceso = async (u: any) => {
+        if (userRole !== 'admin') return toast.error('Solo un admin puede resetear el acceso')
+        const nombre = u.nombre_completo || u.email || 'usuario'
+        const emailActual = u.email || ''
+        const nuevoEmail = prompt(`Email de ${nombre}\n\nCorregilo si está mal (o dejalo igual). Con este mail va a entrar y recuperar la clave:`, emailActual)
+        if (nuevoEmail === null) return // canceló
+        const cambioEmail = nuevoEmail.trim() && nuevoEmail.trim().toLowerCase() !== emailActual.toLowerCase()
+
+        const conLink = confirm(`¿Cómo querés resetear la clave de ${nombre}?\n\nACEPTAR: generar un LINK para que ponga su propia clave (se lo pasás por WhatsApp).\nCANCELAR: ponerle vos una contraseña TEMPORAL.`)
+        setReseteandoId(u.id)
+        try {
+            if (conLink) {
+                if (cambioEmail) {
+                    const re = await resetearAccesoAction(u.id, { nuevoEmail: nuevoEmail.trim() })
+                    if (!re.success) { toast.error(re.error || 'No se pudo corregir el email'); return }
+                }
+                const r = await generarLinkRecuperacionAction(u.id)
+                if (r.success && r.link) { toast.success('Link generado'); prompt('Pasale ESTE link al profe (sirve para que ponga su clave):', r.link) }
+                else toast.error(r.error || 'No se pudo generar el link')
+            } else {
+                const pass = prompt('Contraseña temporal (mínimo 6 caracteres). El profe la cambia después en Mi Perfil:')
+                if (!pass) return
+                const r = await resetearAccesoAction(u.id, { nuevoEmail: cambioEmail ? nuevoEmail.trim() : undefined, nuevaPassword: pass })
+                if (r.success) { alert(`✅ Listo.\n\nEmail: ${cambioEmail ? nuevoEmail.trim() : emailActual}\nContraseña temporal: ${pass}\n\nPasásela al profe y que la cambie en Mi Perfil.`); mutate() }
+                else toast.error(r.error || 'No se pudo resetear')
+            }
+        } finally { setReseteandoId(null) }
     }
 
     const cambiarNivelLiga = async (usuarioId: string, nuevoNivel: number | null) => {
@@ -979,6 +1011,17 @@ function UsuariosContent() {
                                                 </select>
                                                 {cambiandoLigaId === u.id && <div className="absolute top-0 right-2 h-full flex items-center"><Loader2 size={12} className="animate-spin text-[#D4E655]" /></div>}
                                             </div>
+                                        )}
+
+                                        {isAdmin && (
+                                            <button
+                                                onClick={() => resetearAcceso(u)}
+                                                disabled={reseteandoId === u.id}
+                                                title="Resetear acceso (corregir email / cambiar contraseña)"
+                                                className="shrink-0 w-9 flex items-center justify-center rounded-xl border border-blue-500/20 bg-blue-500/5 text-blue-400/80 hover:bg-blue-500 hover:text-white transition-colors disabled:opacity-40"
+                                            >
+                                                {reseteandoId === u.id ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
+                                            </button>
                                         )}
 
                                         {isAdmin && (
