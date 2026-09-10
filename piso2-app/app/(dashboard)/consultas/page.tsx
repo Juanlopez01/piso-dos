@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search } from 'lucide-react'
+import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
     getConsultasAction, responderConsultaAction, marcarResueltaAction,
     getAsistenteStatsAction, getContactosAction, getConversacionContactoAction,
+    getConocimientoAction, guardarConocimientoAction, toggleConocimientoAction, eliminarConocimientoAction,
 } from '@/app/actions/consultas'
 
 // Estilo por canal (para separar visualmente IG / WhatsApp con el mismo formato).
@@ -34,7 +35,8 @@ type Stats = {
 type Contacto = { subscriber_id: string; canal: string; nombre: string | null; usuario: string | null; derivada: boolean; mensajes: number; ultimo: string; ultimoAt: string }
 
 const hora = (iso: string) => new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-type Tab = 'resumen' | 'bandeja' | 'contactos'
+type Tab = 'resumen' | 'bandeja' | 'contactos' | 'conocimiento'
+type Conocimiento = { id: string; tipo: 'info' | 'no_responder'; texto: string; activo: boolean; created_at: string }
 
 export default function ConsultasPage() {
     const [tab, setTab] = useState<Tab>('bandeja')
@@ -61,6 +63,13 @@ export default function ConsultasPage() {
     const [contactoOpen, setContactoOpen] = useState<Contacto | null>(null)
     const [conv, setConv] = useState<Msg[]>([])
     const [loadingConv, setLoadingConv] = useState(false)
+
+    // Base de conocimiento del bot
+    const [conoc, setConoc] = useState<Conocimiento[]>([])
+    const [loadingConoc, setLoadingConoc] = useState(false)
+    const [nuevoTipo, setNuevoTipo] = useState<'info' | 'no_responder'>('info')
+    const [nuevoTexto, setNuevoTexto] = useState('')
+    const [guardandoConoc, setGuardandoConoc] = useState(false)
 
     const pendientesCount = consultas.filter(c => c.estado === 'pendiente').length
 
@@ -96,9 +105,33 @@ export default function ConsultasPage() {
     }
     useEffect(() => { cargar() }, [soloPend])
 
+    const cargarConoc = async () => {
+        setLoadingConoc(true)
+        const r = await getConocimientoAction()
+        if (r.ok) setConoc(r.items as Conocimiento[]); else toast.error(r.error || 'Error')
+        setLoadingConoc(false)
+    }
+    const agregarConoc = async () => {
+        if (!nuevoTexto.trim()) return toast.error('Escribí el texto')
+        setGuardandoConoc(true)
+        const r = await guardarConocimientoAction({ tipo: nuevoTipo, texto: nuevoTexto.trim() })
+        if (r.ok) { toast.success('Guardado'); setNuevoTexto(''); cargarConoc() } else toast.error(r.error || 'Error')
+        setGuardandoConoc(false)
+    }
+    const toggleConoc = async (c: Conocimiento) => {
+        const r = await toggleConocimientoAction(c.id, !c.activo)
+        if (r.ok) cargarConoc(); else toast.error(r.error || 'Error')
+    }
+    const borrarConoc = async (c: Conocimiento) => {
+        if (!confirm('¿Borrar esta entrada?')) return
+        const r = await eliminarConocimientoAction(c.id)
+        if (r.ok) cargarConoc(); else toast.error(r.error || 'Error')
+    }
+
     useEffect(() => {
         if (tab === 'resumen' && !stats) { void cargarStats() }
         if (tab === 'contactos' && contactos.length === 0) { void cargarContactos() }
+        if (tab === 'conocimiento' && conoc.length === 0) { void cargarConoc() }
     }, [tab])
 
     const cargarStats = async () => {
@@ -162,6 +195,7 @@ export default function ConsultasPage() {
                 <TabBtn id="resumen" icon={BarChart3} label="Resumen" />
                 <TabBtn id="bandeja" icon={Inbox} label="Bandeja" badge={pendientesCount} />
                 <TabBtn id="contactos" icon={Users} label="Contactos" />
+                <TabBtn id="conocimiento" icon={BookOpen} label="Info del bot" />
             </div>
 
             {/* ================= RESUMEN ================= */}
@@ -389,6 +423,54 @@ export default function ConsultasPage() {
                                     </button>
                                 )
                             })}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {tab === 'conocimiento' && (
+                <div>
+                    <p className="text-[11px] text-gray-500 mb-4 max-w-2xl">
+                        Acá le cargás al bot <b className="text-gray-300">info que todavía no está en el sistema</b> (la usa para responder) y <b className="text-gray-300">temas de los que NO tiene que hablar</b> (cuando alguien pregunta por eso, no contesta y deriva a ustedes). Los cambios impactan al toque.
+                    </p>
+
+                    {/* Alta */}
+                    <div className="rounded-2xl border border-white/10 bg-[#0b0b0d] p-4 mb-5">
+                        <div className="flex bg-[#111] rounded-xl border border-white/10 p-1 mb-3 max-w-md">
+                            <button onClick={() => setNuevoTipo('info')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${nuevoTipo === 'info' ? 'bg-[#D4E655] text-black' : 'text-gray-400'}`}>ℹ️ Info que el bot debe saber</button>
+                            <button onClick={() => setNuevoTipo('no_responder')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${nuevoTipo === 'no_responder' ? 'bg-orange-500 text-white' : 'text-gray-400'}`}>🚫 Tema que NO debe contestar</button>
+                        </div>
+                        <textarea
+                            value={nuevoTexto} onChange={e => setNuevoTexto(e.target.value)} rows={3}
+                            placeholder={nuevoTipo === 'info'
+                                ? 'Ej: "El seminario de contemporáneo del 20/9 arranca 18hs, cuesta $15.000, se paga en recepción."'
+                                : 'Ej: "clase de adrian manzano" · "precios de verano" — poné palabras clave del tema; si el mensaje las menciona, el bot no responde y deriva.'}
+                            className="w-full bg-black border border-white/10 rounded-xl py-2.5 px-3 text-sm outline-none focus:border-[#D4E655] resize-y"
+                        />
+                        <div className="flex justify-end mt-2">
+                            <button onClick={agregarConoc} disabled={guardandoConoc} className="px-4 py-2 rounded-lg bg-[#D4E655] text-black text-xs font-black uppercase tracking-wide hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
+                                {guardandoConoc ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Agregar
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Lista */}
+                    {loadingConoc ? (
+                        <div className="min-h-[20vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
+                    ) : conoc.length === 0 ? (
+                        <div className="py-12 text-center text-gray-600 text-xs border-2 border-dashed border-white/10 rounded-2xl">Todavía no cargaste nada. Sumá la primera arriba.</div>
+                    ) : (
+                        <div className="space-y-2">
+                            {conoc.map(c => (
+                                <div key={c.id} className={`bg-[#09090b] border rounded-2xl p-4 flex items-start gap-3 ${c.activo ? 'border-white/10' : 'border-white/5 opacity-50'}`}>
+                                    <span className={`text-[8px] px-2 py-1 rounded-full uppercase font-black shrink-0 ${c.tipo === 'info' ? 'bg-[#D4E655]/15 text-[#D4E655]' : 'bg-orange-500/15 text-orange-400'}`}>{c.tipo === 'info' ? 'Info' : 'No responde'}</span>
+                                    <p className="flex-1 text-sm text-gray-200 whitespace-pre-wrap">{c.texto}</p>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <button onClick={() => toggleConoc(c)} title={c.activo ? 'Desactivar' : 'Activar'} className={`p-1.5 rounded-lg ${c.activo ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-gray-500 hover:bg-white/5'}`}><Power size={14} /></button>
+                                        <button onClick={() => borrarConoc(c)} title="Borrar" className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10"><Trash2 size={14} /></button>
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </div>

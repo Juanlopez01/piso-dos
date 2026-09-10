@@ -66,6 +66,30 @@ function esClaseManual(texto: string): boolean {
     const t = norm(texto || '')
     return CLASES_MANUALES.some(k => t.includes(k))
 }
+
+// Base de conocimiento cargada por el equipo desde /consultas:
+//  - info: datos/contexto que el bot DEBE saber (se inyectan al prompt de la IA).
+//  - noResponder: temas de los que el bot NO habla (deriva al equipo).
+async function getConocimiento(): Promise<{ info: string[]; noResponder: string[] }> {
+    try {
+        const admin = getAdminClient()
+        const { data } = await admin.from('asistente_conocimiento').select('tipo, texto').eq('activo', true)
+        const info: string[] = [], noResponder: string[] = []
+        for (const r of (data || []) as any[]) {
+            if (!r.texto) continue
+            if (r.tipo === 'no_responder') noResponder.push(r.texto); else info.push(r.texto)
+        }
+        return { info, noResponder }
+    } catch { return { info: [], noResponder: [] } }
+}
+
+// Mensaje cuando el tema es de manejo manual (clase especial o tema bloqueado):
+// el bot no responde nada de info y deriva al equipo, sin romper el tono.
+function mensajeManual(): string {
+    return enHorarioAtencion()
+        ? '¡Hola! Eso lo estamos coordinando nosotras directamente 🙌 Contanos qué necesitás y en un ratito te respondemos con toda la info. ¿Nos dejás un teléfono o mail?'
+        : `¡Hola! Eso lo coordinamos nosotras directamente 🙌 Ahora estamos fuera del horario de atención (${HORARIO_TXT}), así que te respondemos apenas abramos. Dejanos tu consulta y un teléfono o mail. ¡Gracias!`
+}
 const salaSedeDe = (c: any) => {
     const sala = nombreDe(c.sala); const sede = nombreDe((Array.isArray(c.sala) ? c.sala[0] : c.sala)?.sede)
     return [sala, sede].filter(Boolean).join(', ')
@@ -559,9 +583,12 @@ async function ejecutarToolIA(name: string, args: any): Promise<string> {
     } catch { return 'No pude obtener ese dato en este momento.' }
 }
 
-function systemIA(): string {
+function systemIA(infoExtra: string[] = []): string {
     const fechaTxt = new Date(Date.now() - 3 * 3600_000).toLocaleDateString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: TZ })
-    return `Sos la atención por chat (Instagram/WhatsApp) de Piso 2, un estudio de danza en CABA con dos sedes (Congreso y Obelisco). Hoy es ${fechaTxt}.
+    const extra = infoExtra.length
+        ? `\n\nINFO EXTRA cargada por el equipo (es FUENTE DE VERDAD, más importante que el resto; si preguntan por esto, respondé con esto y NO derives por "no saberlo"):\n- ${infoExtra.join('\n- ')}`
+        : ''
+    return `Sos la atención por chat (Instagram/WhatsApp) de Piso 2, un estudio de danza en CABA con dos sedes (Congreso y Obelisco). Hoy es ${fechaTxt}.${extra}
 
 La persona que escribe cree que habla con alguien del estudio (NO sabe que sos un asistente). Mantené ese tono humano, cálido y argentino (de "vos"). Nunca digas que sos un bot/asistente ni "te derivo con una persona": cuando haga falta que siga alguien del equipo, se hace con naturalidad y sin cortar la charla (una persona real del equipo continúa el mismo chat).
 
@@ -602,11 +629,11 @@ ESTILO: respuestas breves y claras, listas para un chat. Emojis con moderación.
 
 // Devuelve null si no hay key o la IA falla → el llamador cae a reglas.
 // `historial` = turnos previos de ESTE contacto (para conversación con contexto).
-async function responderConIA(pregunta: string, historial: { de: string; texto: string }[] = []): Promise<{ respuesta: string; derivar: boolean } | null> {
+async function responderConIA(pregunta: string, historial: { de: string; texto: string }[] = [], infoExtra: string[] = []): Promise<{ respuesta: string; derivar: boolean } | null> {
     const key = process.env.OPENAI_API_KEY
     if (!key || !pregunta?.trim()) return null
     try {
-        const messages: any[] = [{ role: 'system', content: systemIA() }]
+        const messages: any[] = [{ role: 'system', content: systemIA(infoExtra) }]
         for (const h of historial.slice(-8)) {
             const t = (h?.texto || '').trim()
             if (t) messages.push({ role: h.de === 'bot' ? 'assistant' : 'user', content: t })
@@ -647,20 +674,19 @@ async function responderConIA(pregunta: string, historial: { de: string; texto: 
 // por reglas. Devuelve `derivar` para que ManyChat/la API avisen a recepción.
 export async function responderAsistente(pregunta: string, historial: { de: string; texto: string }[] = []): Promise<{ respuesta: string; derivar: boolean }> {
     const q = norm(pregunta || '')
-    // Clase con manejo manual (ej. earlybird de Adrián Manzano): el bot NO
-    // responde ni cotiza; deriva directo al equipo. Va PRIMERO (corta todo).
-    if (esClaseManual(q)) {
-        const msg = enHorarioAtencion()
-            ? '¡Hola! Esa clase la estamos coordinando nosotras directamente 🙌 Contanos qué necesitás y en un ratito te respondemos con toda la info. ¿Nos dejás un teléfono o mail?'
-            : `¡Hola! Esa clase la coordinamos nosotras directamente 🙌 Ahora estamos fuera del horario de atención (${HORARIO_TXT}), así que te respondemos apenas abramos. Dejanos tu consulta y un teléfono o mail. ¡Gracias!`
-        return { respuesta: msg, derivar: true }
-    }
+    // Base de conocimiento del equipo (info a inyectar + temas bloqueados).
+    const cono = await getConocimiento()
+    // Tema de manejo manual: clase especial hardcodeada (ej. Adrián Manzano) o
+    // un tema que el equipo cargó como "no_responder". El bot NO responde ni
+    // cotiza; deriva directo. Va PRIMERO (corta todo).
+    const bloqueado = esClaseManual(q) || cono.noResponder.some(k => k && q.includes(norm(k)))
+    if (bloqueado) return { respuesta: mensajeManual(), derivar: true }
     // Pedido explícito de humano → derivar sí o sí (no depende de la IA).
     if (esPedidoHumano(q)) return { respuesta: derivarMsg(), derivar: true }
     // Intención de concretar, o alquiler con día/horario → forzamos derivar
     // (la disponibilidad de salas la confirma el equipo, no el bot).
     const forzarDerivar = esIntencionConcretar(q) || esAlquilerConDisponibilidad(q)
-    const ia = await responderConIA(pregunta, historial)
+    const ia = await responderConIA(pregunta, historial, cono.info)
     if (ia) return { respuesta: ia.respuesta, derivar: ia.derivar || forzarDerivar || pareceDerivacion(ia.respuesta) }
     const reglas = await responderPorReglas(pregunta)
     return { respuesta: reglas.respuesta, derivar: reglas.derivar || forzarDerivar }

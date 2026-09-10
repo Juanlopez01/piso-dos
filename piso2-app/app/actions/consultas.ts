@@ -231,3 +231,52 @@ export async function getConversacionContactoAction(subscriberId: string) {
         .order('created_at', { ascending: true }).limit(300)
     return { ok: true as const, mensajes: (data || []) as any[] }
 }
+
+// ============================================================================
+// BASE DE CONOCIMIENTO DEL ASISTENTE (la carga el equipo desde /consultas)
+//  - 'info'         → dato/contexto que el bot debe saber (se inyecta a la IA)
+//  - 'no_responder' → tema del que el bot NO habla (deriva al equipo)
+// ============================================================================
+export async function getConocimientoAction() {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, items: [] as any[] }
+    const admin = getAdminClient()
+    const { data } = await admin.from('asistente_conocimiento')
+        .select('id, tipo, texto, activo, created_at').order('created_at', { ascending: false })
+    return { ok: true as const, items: (data || []) as any[] }
+}
+
+export async function guardarConocimientoAction(input: { id?: string; tipo: 'info' | 'no_responder'; texto: string }) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const texto = (input.texto || '').trim()
+    if (!texto) return { ok: false as const, error: 'Escribí el texto.' }
+    if (!['info', 'no_responder'].includes(input.tipo)) return { ok: false as const, error: 'Tipo inválido.' }
+    const admin = getAdminClient()
+    if (input.id) {
+        const { error } = await admin.from('asistente_conocimiento').update({ tipo: input.tipo, texto }).eq('id', input.id)
+        if (error) return { ok: false as const, error: error.message }
+    } else {
+        const { error } = await admin.from('asistente_conocimiento').insert({ tipo: input.tipo, texto, created_by: perm.userId })
+        if (error) return { ok: false as const, error: error.message }
+    }
+    return { ok: true as const }
+}
+
+export async function toggleConocimientoAction(id: string, activo: boolean) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('asistente_conocimiento').update({ activo }).eq('id', id)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+export async function eliminarConocimientoAction(id: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('asistente_conocimiento').delete().eq('id', id)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
