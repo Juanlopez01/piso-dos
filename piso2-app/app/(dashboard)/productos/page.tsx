@@ -22,6 +22,7 @@ type Producto = {
     nombre: string
     precio: number
     creditos: number
+    cupo?: number | null
     activo: boolean
     tipo_clase: 'regular' | 'seminario' | 'especial' | 'exclusivo'
     pase_referencia?: string
@@ -157,6 +158,7 @@ export default function TiendaConfigPage() {
     const [formNombre, setFormNombre] = useState('')
     const [formPrecio, setFormPrecio] = useState('')
     const [formCreditos, setFormCreditos] = useState('1')
+    const [formCupo, setFormCupo] = useState('')
     const [formTipo, setFormTipo] = useState<'regular' | 'especial' | 'exclusivo'>('regular')
     const [formPaseReferencia, setFormPaseReferencia] = useState('')
     // Config Ventas Externas
@@ -184,6 +186,7 @@ export default function TiendaConfigPage() {
             setFormNombre(prod.nombre)
             setFormPrecio(prod.precio.toString())
             setFormCreditos(prod.creditos.toString())
+            setFormCupo(prod.cupo != null ? String(prod.cupo) : '')
             setFormTipo(prod.tipo_clase === 'seminario' ? 'especial' : prod.tipo_clase || 'regular')
             setFormPaseReferencia(prod.pase_referencia || '')
             setFormCategoria(prod.categoria || 'Clases Regulares')
@@ -200,6 +203,7 @@ export default function TiendaConfigPage() {
             setFormNombre('')
             setFormPrecio('')
             setFormCreditos('1')
+            setFormCupo('')
             setFormTipo('regular')
             setFormPaseReferencia('')
             setFormCategoria('Clases Regulares')
@@ -246,6 +250,7 @@ export default function TiendaConfigPage() {
             nombre: formNombre,
             precio: Number(formPrecio),
             creditos: Number(formCreditos),
+            cupo: formCupo.trim() === '' ? null : Math.max(0, Number(formCupo) || 0),
             tipo_clase: formTipo === 'especial' ? 'seminario' : formTipo,
             pase_referencia: formTipo === 'exclusivo' ? formPaseReferencia : null,
             // Config Ventas Externas
@@ -631,6 +636,13 @@ export default function TiendaConfigPage() {
                                     </label>
                                     <input required type="number" placeholder="1" value={formCreditos} onChange={e => setFormCreditos(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors" />
                                 </div>
+                            </div>
+
+                            {/* Cupo (opcional) — frena la venta por la Tienda al llegar al tope */}
+                            <div className="space-y-2">
+                                <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Cupo (opcional)</label>
+                                <input type="number" min={0} placeholder="Sin límite" value={formCupo} onChange={e => setFormCupo(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors" />
+                                <p className="text-[9px] text-gray-500 italic pl-1">Si lo completás, la Tienda deja de venderlo al llegar a ese número (para inscripciones por cuenta propia). Vacío = sin límite. La recep igual puede cargar a mano.</p>
                             </div>
 
                             {/* ── CONFIG VENTAS EXTERNAS ─────────────────────── */}

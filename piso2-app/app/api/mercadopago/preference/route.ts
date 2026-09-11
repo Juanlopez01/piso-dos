@@ -180,11 +180,20 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: "Falta producto a comprar" }, { status: 400 })
             }
 
-            const { data: pack, error } = await supabase.from('productos').select('nombre, precio, creditos, tipo_clase').eq('id', productoId).single()
+            const { data: pack, error } = await supabase.from('productos').select('nombre, precio, creditos, tipo_clase, cupo').eq('id', productoId).single()
 
             if (error || !pack) {
                 console.error("❌ MP Preference: Producto no existe en DB:", error?.message)
                 return NextResponse.json({ error: "El producto no existe o fue eliminado" }, { status: 400 })
+            }
+
+            // 🚦 CUPO: si el producto tiene tope, la compra por cuenta propia (Tienda)
+            // se corta al llegar. (La carga a mano de la recep no pasa por acá.)
+            if (pack.cupo != null) {
+                const { count } = await supabase.from('alumno_packs').select('*', { count: 'exact', head: true }).eq('producto_id', productoId)
+                if ((count || 0) >= pack.cupo) {
+                    return NextResponse.json({ error: "Cupo completo: esta clase ya no tiene lugares disponibles." }, { status: 400 })
+                }
             }
 
             tituloFinal = pack.nombre

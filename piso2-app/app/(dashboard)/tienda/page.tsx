@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
+import { getCuposTiendaAction } from '@/app/actions/tienda'
 
 // --- TIPOS ---
 type Producto = {
@@ -17,6 +18,7 @@ type Producto = {
     nombre: string
     precio: number
     creditos: number
+    cupo?: number | null
     tipo_clase: 'regular' | 'seminario' | 'especial' | 'exclusivo'
     descripcion?: string
     pase_referencia?: string
@@ -92,6 +94,11 @@ function TiendaContent() {
     // MP States
     const [generandoPago, setGenerandoPago] = useState(false)
 
+    // Cupos (productos con tope): { id: {cupo, vendidos, agotado} }
+    const [cupos, setCupos] = useState<Record<string, { cupo: number; vendidos: number; agotado: boolean }>>({})
+    useEffect(() => { getCuposTiendaAction().then(setCupos).catch(() => { }) }, [data])
+    const agotadoDe = (p: Producto) => !!cupos[p.id]?.agotado
+
     useEffect(() => {
         const pagoStatus = searchParams.get('pago')
 
@@ -112,6 +119,10 @@ function TiendaContent() {
     const openCheckout = (producto: Producto) => {
         if (!userId) {
             toast.error("Debes iniciar sesión para comprar")
+            return
+        }
+        if (agotadoDe(producto)) {
+            toast.error("Cupo completo: esta clase ya no tiene lugares disponibles.")
             return
         }
         setSelectedPack(producto)
@@ -254,8 +265,8 @@ function TiendaContent() {
                                     <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-orange-500" /> Pase Directo</div>
                                     <p className="text-xs text-gray-500 leading-relaxed italic">{p.descripcion || 'Pase válido únicamente para la clase vinculada. No combinable con otras clases.'}</p>
                                 </div>
-                                <button onClick={() => openCheckout(p)} className="w-full bg-orange-600 hover:bg-orange-500 text-white rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all shadow-md">
-                                    Comprar Pase
+                                <button onClick={() => openCheckout(p)} disabled={agotadoDe(p)} className="w-full bg-orange-600 hover:bg-orange-500 text-white rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-gray-700">
+                                    {agotadoDe(p) ? 'Cupo completo' : 'Comprar Pase'}
                                 </button>
                             </div>
                         ))}
@@ -283,8 +294,8 @@ function TiendaContent() {
                                     <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-orange-500" /> {p.creditos} Clases Disponibles</div>
                                     <div className="flex items-center gap-2 text-xs text-gray-500 font-bold uppercase tracking-widest"><Info size={14} /> ${Math.round(p.precio / p.creditos).toLocaleString()} por clase</div>
                                 </div>
-                                <button onClick={() => openCheckout(p)} className="w-full bg-orange-500 hover:bg-orange-400 text-white rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all shadow-md">
-                                    Comprar Ahora
+                                <button onClick={() => openCheckout(p)} disabled={agotadoDe(p)} className="w-full bg-orange-500 hover:bg-orange-400 text-white rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-gray-700">
+                                    {agotadoDe(p) ? 'Cupo completo' : 'Comprar Ahora'}
                                 </button>
                             </div>
                         ))}
@@ -309,8 +320,8 @@ function TiendaContent() {
                                     <div className="flex items-center gap-2 text-sm text-gray-300 font-medium"><Check size={16} className="text-purple-400" /> {p.creditos} Créditos Especiales</div>
                                     <p className="text-xs text-gray-500 leading-relaxed italic">{p.descripcion || 'Válido para Workshops, Intensivos y masterclass.'}</p>
                                 </div>
-                                <button onClick={() => openCheckout(p)} className="w-full bg-white hover:bg-purple-200 text-black rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all shadow-md">
-                                    Comprar Ahora
+                                <button onClick={() => openCheckout(p)} disabled={agotadoDe(p)} className="w-full bg-white hover:bg-purple-200 text-black rounded-2xl py-4 font-black uppercase text-xs tracking-widest transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-white">
+                                    {agotadoDe(p) ? 'Cupo completo' : 'Comprar Ahora'}
                                 </button>
                             </div>
                         ))}

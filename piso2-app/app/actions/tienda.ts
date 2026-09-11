@@ -2,7 +2,31 @@
 'use server'
 
 import { createClient } from '@/utils/supabase/server-helper'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
+
+const getAdminClient = () => createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+)
+
+// Cupos de los productos con tope (para marcar "completo" en la Tienda). Devuelve
+// { productoId: { cupo, vendidos, agotado } }. Cualquier usuario logueado puede leerlo.
+export async function getCuposTiendaAction(): Promise<Record<string, { cupo: number; vendidos: number; agotado: boolean }>> {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return {}
+    const admin = getAdminClient()
+    const { data: prods } = await admin.from('productos').select('id, cupo').not('cupo', 'is', null).eq('activo', true)
+    const out: Record<string, { cupo: number; vendidos: number; agotado: boolean }> = {}
+    for (const p of (prods || []) as any[]) {
+        const { count } = await admin.from('alumno_packs').select('*', { count: 'exact', head: true }).eq('producto_id', p.id)
+        const vendidos = count || 0
+        out[p.id] = { cupo: p.cupo, vendidos, agotado: vendidos >= p.cupo }
+    }
+    return out
+}
 
 // --- ACCIONES PARA PRODUCTOS ---
 
