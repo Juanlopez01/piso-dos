@@ -5,7 +5,8 @@ import Image from 'next/image'
 import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { ArrowLeft, Search, Music, User, MapPin, Clock, ArrowRight, Loader2, Image as ImageIcon, Lock } from 'lucide-react'
+import { ArrowLeft, Search, Music, User, MapPin, Clock, ArrowRight, Loader2, Image as ImageIcon, Lock, X, Share2, Calendar } from 'lucide-react'
+import { toast, Toaster } from 'sonner'
 import { getClasesPublicasAction, type ClasePublicaGrupo } from '@/app/actions/cartelera'
 
 const norm = (s: string) => s ? s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim() : ''
@@ -42,10 +43,27 @@ export default function CarteleraPublicaPage() {
     const [loading, setLoading] = useState(true)
     const [texto, setTexto] = useState('')
     const [tipo, setTipo] = useState('Todos')
+    const [sel, setSel] = useState<ClasePublicaGrupo | null>(null)
 
     useEffect(() => {
         getClasesPublicasAction().then(d => { setGrupos(d); setLoading(false) }).catch(() => setLoading(false))
     }, [])
+
+    // Link compartido ?c=nombre&p=profe → abre la clase directamente.
+    useEffect(() => {
+        if (!grupos.length) return
+        const sp = new URLSearchParams(window.location.search)
+        const c = sp.get('c'); if (!c) return
+        const p = sp.get('p') || ''
+        const match = grupos.find(g => norm(g.nombre) === norm(c) && (!p || norm(g.profesor).includes(norm(p)))) || grupos.find(g => norm(g.nombre) === norm(c))
+        if (match) setSel(match)
+    }, [grupos])
+
+    const compartir = (g: ClasePublicaGrupo) => {
+        const url = `${window.location.origin}/cartelera?c=${encodeURIComponent(g.nombre)}&p=${encodeURIComponent(g.profesor)}`
+        if (typeof navigator !== 'undefined' && (navigator as any).share) (navigator as any).share({ title: g.nombre, text: `Clase en Piso 2: ${g.nombre} con ${g.profesor}`, url }).catch(() => { })
+        else navigator.clipboard.writeText(url).then(() => toast.success('Link copiado')).catch(() => { })
+    }
 
     const filtrados = useMemo(() => grupos.filter(g => {
         const okTexto = g.nombre.toLowerCase().includes(texto.toLowerCase()) || g.profesor.toLowerCase().includes(texto.toLowerCase())
@@ -123,14 +141,15 @@ export default function CarteleraPublicaPage() {
                                         const st = estilo(g.tipo_clase)
                                         const prox = g.instancias[0]
                                         return (
-                                            <Link key={g.key_grupo} href="/login" className={`group relative w-full aspect-[4/5] bg-[#1a1a1c] rounded-3xl overflow-hidden shadow-xl border-2 flex flex-col justify-between transition-all hover:scale-[1.02] ${st.border}`}>
+                                            <div key={g.key_grupo} onClick={() => setSel(g)} className={`group relative w-full aspect-[4/5] bg-[#1a1a1c] rounded-3xl overflow-hidden shadow-xl border-2 flex flex-col justify-between transition-all hover:scale-[1.02] cursor-pointer ${st.border}`}>
                                                 <div className="absolute inset-0 z-0">
                                                     {g.imagen_url
                                                         ? <Image src={g.imagen_url} alt={g.nombre} fill sizes="(max-width:768px) 100vw, 25vw" className="object-cover group-hover:scale-110 transition-transform duration-700" />
                                                         : <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-white/20"><ImageIcon size={56} /><span className="text-[10px] font-black uppercase">Sin flyer</span></div>}
                                                 </div>
                                                 <div className="absolute top-0 inset-x-0 h-24 bg-gradient-to-b from-black/80 to-transparent z-10" />
-                                                <div className="relative z-20 p-4 flex justify-end">
+                                                <div className="relative z-20 p-4 flex justify-end items-center gap-2">
+                                                    <button onClick={e => { e.stopPropagation(); compartir(g) }} title="Compartir clase" className="backdrop-blur-md bg-white/90 text-black rounded-full p-1.5 shadow-lg hover:bg-[#D4E655] transition-colors"><Share2 size={12} /></button>
                                                     <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-full backdrop-blur-md shadow-lg ${st.chip}`}>{norm(g.tipo_clase).includes('compa') ? 'Grupo' : g.tipo_clase}</span>
                                                 </div>
                                                 <div className="relative z-20 mt-auto bg-black/60 backdrop-blur-md border-t border-white/10 p-5 flex flex-col gap-3">
@@ -149,10 +168,10 @@ export default function CarteleraPublicaPage() {
                                                         <span className="flex items-center gap-1.5 bg-white/10 px-2 py-1.5 rounded-md text-[10px] font-black uppercase"><Clock size={12} className={st.icon} /> {format(new Date(prox.inicio), 'HH:mm')}</span>
                                                     </div>
                                                     <div className="w-full mt-1 py-3 rounded-xl flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest bg-white/10 group-hover:bg-[#D4E655] group-hover:text-black transition-all">
-                                                        <Lock size={13} /> Iniciá sesión para reservar <ArrowRight size={14} />
+                                                        Ver clase y horarios <ArrowRight size={14} />
                                                     </div>
                                                 </div>
-                                            </Link>
+                                            </div>
                                         )
                                     })}
                                 </div>
@@ -162,6 +181,43 @@ export default function CarteleraPublicaPage() {
                 )}
             </div>
 
+            {/* Detalle de la clase (abrible por link compartido) */}
+            {sel && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4" onClick={() => setSel(null)}>
+                    <div className="bg-[#09090b] border border-white/10 w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                        {sel.imagen_url && (
+                            <div className="relative w-full h-44 shrink-0">
+                                <Image src={sel.imagen_url} alt={sel.nombre} fill sizes="512px" className="object-cover" />
+                                <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] to-transparent" />
+                            </div>
+                        )}
+                        <div className="p-5 border-b border-white/10 flex justify-between items-start gap-3 shrink-0">
+                            <div className="min-w-0">
+                                <h3 className="text-2xl font-black uppercase leading-tight">{sel.nombre}</h3>
+                                <p className="text-sm font-bold text-gray-400 mt-1 flex items-center gap-1.5"><User size={14} className="text-[#D4E655]" /> {sel.profesor}</p>
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                                <button onClick={() => compartir(sel)} title="Compartir" className="flex items-center gap-1.5 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-black bg-[#D4E655] rounded-full hover:bg-white transition-colors"><Share2 size={14} /> Compartir</button>
+                                <button onClick={() => setSel(null)} className="p-2 text-gray-400 hover:text-white bg-white/5 rounded-full"><X size={18} /></button>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+                            <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Próximas fechas</p>
+                            {sel.instancias.map((inst, i) => (
+                                <div key={i} className="bg-[#111] border border-white/5 rounded-2xl p-4">
+                                    <div className="flex items-center gap-2 mb-1"><Calendar size={14} className="text-[#D4E655]" /><span className="font-bold capitalize text-sm">{format(new Date(inst.inicio), "EEEE d 'de' MMMM", { locale: es })}</span></div>
+                                    <div className="flex items-center gap-4 text-[11px] text-gray-400 pl-5"><span><Clock size={12} className="inline mr-1" />{format(new Date(inst.inicio), 'HH:mm')}</span><span><MapPin size={12} className="inline mr-1" />{inst.sala} · {inst.sede}</span></div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="p-4 border-t border-white/10 shrink-0">
+                            <Link href="/login" className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest bg-[#D4E655] text-black hover:bg-white transition-all"><Lock size={14} /> Iniciá sesión para reservar tu lugar</Link>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <Toaster position="top-center" richColors theme="dark" />
             <style dangerouslySetInnerHTML={{ __html: `.no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}` }} />
         </div>
     )

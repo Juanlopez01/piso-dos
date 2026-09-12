@@ -9,7 +9,7 @@ import { es } from 'date-fns/locale'
 import {
     Search, Music, Calendar, Clock, MapPin,
     User, Ticket, Star, Loader2, CheckCircle2, AlertCircle, Image as ImageIcon,
-    X, ArrowRight, ShieldCheck, Lock, MessageCircle
+    X, ArrowRight, ShieldCheck, Lock, MessageCircle, Share2
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
@@ -188,6 +188,16 @@ export default function ExplorarClasesPage() {
         return { esPrivada, apto, mensaje };
     }
 
+    // Link público (cartelera) de una clase, para que el estudio o el profe la promocionen.
+    const compartirClase = (grupo: ClaseAgrupada) => {
+        const url = `${window.location.origin}/cartelera?c=${encodeURIComponent(grupo.nombre)}&p=${encodeURIComponent(grupo.profesor.nombre_completo)}`
+        if (navigator.share) {
+            navigator.share({ title: grupo.nombre, text: `Mirá esta clase en Piso 2: ${grupo.nombre} con ${grupo.profesor.nombre_completo}`, url }).catch(() => { })
+        } else {
+            navigator.clipboard.writeText(url).then(() => toast.success('Link de la clase copiado — pegalo donde quieras')).catch(() => toast.error('No se pudo copiar'))
+        }
+    }
+
     const handleInscribirse = async (instancia: ClaseInstancia, grupo: ClaseAgrupada) => {
         if (!perfil) {
             toast.error("Debes iniciar sesión para anotarte.")
@@ -352,7 +362,7 @@ export default function ExplorarClasesPage() {
                                     const estadoPrivado = getEstadoPrivado(grupo);
 
                                     return (
-                                        <div key={grupo.key_grupo} className={`group relative w-full aspect-[4/5] sm:h-[450px] bg-[#1a1a1c] rounded-3xl overflow-hidden shadow-xl border-2 flex flex-col justify-between transition-all ${estilos.border}`}>
+                                        <div key={grupo.key_grupo} onClick={() => setSelectedGrupo(grupo)} className={`group relative w-full aspect-[4/5] sm:h-[450px] bg-[#1a1a1c] rounded-3xl overflow-hidden shadow-xl border-2 flex flex-col justify-between transition-all cursor-pointer hover:border-white/30 ${estilos.border}`}>
                                             <div className="absolute inset-0 z-0">
                                                 {grupo.imagen_url ? (
                                                     <Image src={grupo.imagen_url} alt={grupo.nombre} fill sizes="(max-width: 768px) 100vw, 33vw" className="object-cover group-hover:scale-110 transition-transform duration-700 ease-out" />
@@ -369,9 +379,12 @@ export default function ExplorarClasesPage() {
                                                         <Lock size={10} /> No combinable
                                                     </span>
                                                 ) : <div></div>}
-                                                <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-full backdrop-blur-md shadow-lg ${estilos.bg}`}>
-                                                    {grupo.tipo_clase.toLowerCase().includes('compa') ? 'Grupo' : grupo.tipo_clase}
-                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                    <button onClick={e => { e.stopPropagation(); compartirClase(grupo) }} title="Compartir clase" className="backdrop-blur-md bg-white/90 text-black rounded-full p-1.5 shadow-lg hover:bg-[#D4E655] transition-colors"><Share2 size={12} /></button>
+                                                    <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-full backdrop-blur-md shadow-lg ${estilos.bg}`}>
+                                                        {grupo.tipo_clase.toLowerCase().includes('compa') ? 'Grupo' : grupo.tipo_clase}
+                                                    </span>
+                                                </div>
                                             </div>
 
                                             <div className="relative z-20 mt-auto bg-black/60 backdrop-blur-md border-t border-white/10 p-5 flex flex-col gap-3">
@@ -420,7 +433,10 @@ export default function ExplorarClasesPage() {
                                 <h3 className="text-2xl font-black text-white uppercase leading-tight">{selectedGrupo.nombre}</h3>
                                 <p className="text-sm font-bold text-gray-400 mt-1">Prof: {selectedGrupo.profesor.nombre_completo}</p>
                             </div>
-                            <button onClick={() => setSelectedGrupo(null)} className="p-2 text-gray-400 hover:text-white bg-white/5 rounded-full"><X size={20} /></button>
+                            <div className="flex items-center gap-2 shrink-0">
+                                <button onClick={() => compartirClase(selectedGrupo)} title="Compartir esta clase" className="flex items-center gap-1.5 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-black bg-[#D4E655] rounded-full hover:bg-white transition-colors"><Share2 size={14} /> Compartir</button>
+                                <button onClick={() => setSelectedGrupo(null)} className="p-2 text-gray-400 hover:text-white bg-white/5 rounded-full"><X size={20} /></button>
+                            </div>
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar bg-[#050505]">

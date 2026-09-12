@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Theater, RefreshCw, Copy, Check, X, Trash2, Play, Inbox, Ticket, Plus, Megaphone, Power, Upload, Maximize2, Image as ImageIcon } from 'lucide-react'
+import { Loader2, Theater, RefreshCw, Copy, Check, X, Trash2, Play, Inbox, Ticket, Plus, Megaphone, Power, Upload, Maximize2, Image as ImageIcon, MessageCircle } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
@@ -23,6 +23,7 @@ type Propuesta = {
 type Ciclo = { id: string; titulo: string; descripcion: string | null; slug: string; activa: boolean; fecha_limite: string | null; abierta: boolean }
 
 const hora = (iso: string) => new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+const waLink = (tel: string) => `https://wa.me/${(tel || '').replace(/[^\d]/g, '')}`
 
 export default function CuraduriaPage() {
     const [props, setProps] = useState<Propuesta[]>([])
@@ -219,7 +220,10 @@ export default function CuraduriaPage() {
                                     <p className="text-[11px] text-gray-400 mt-1">
                                         {[p.director && `Dir: ${p.director}`, p.compania, p.participantes != null && `${p.participantes} integrantes`, p.duracion_min != null && `${p.duracion_min} min`].filter(Boolean).join(' · ')}
                                     </p>
-                                    <p className="text-[11px] text-gray-500 mt-0.5">{[p.email, p.telefono, p.instagram].filter(Boolean).join(' · ')}</p>
+                                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                        <p className="text-[11px] text-gray-500">{[p.email, p.telefono, p.instagram].filter(Boolean).join(' · ')}</p>
+                                        {p.telefono && <a href={waLink(p.telefono)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 rounded-full px-2 py-0.5 hover:bg-emerald-500 hover:text-white transition-colors"><MessageCircle size={11} /> WhatsApp</a>}
+                                    </div>
                                     {p.descripcion && <p className="text-sm text-gray-400 mt-2 whitespace-pre-line line-clamp-4">{p.descripcion}</p>}
                                     <button onClick={() => setVerProp(p)} className="mt-1.5 text-[11px] font-bold text-[#D4E655] hover:underline flex items-center gap-1"><Maximize2 size={11} /> Ver completa</button>
                                     {(p.imagenes?.length > 1 || p.videos?.length > 0) && (
@@ -266,6 +270,7 @@ export default function CuraduriaPage() {
                                 <h3 className="font-black text-lg truncate">{verProp.titulo}</h3>
                                 <p className="text-[11px] text-gray-400 mt-0.5">{[verProp.tipo_obra, verProp.director && `Dir: ${verProp.director}`, verProp.compania, verProp.participantes != null && `${verProp.participantes} integrantes`, verProp.duracion_min != null && `${verProp.duracion_min} min`].filter(Boolean).join(' · ')}</p>
                                 <p className="text-[11px] text-gray-500 mt-0.5">{[verProp.email, verProp.telefono, verProp.instagram].filter(Boolean).join(' · ')}</p>
+                                {verProp.telefono && <a href={waLink(verProp.telefono)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 mt-2 text-[11px] font-bold uppercase tracking-wide bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 rounded-lg px-3 py-1.5 hover:bg-emerald-500 hover:text-white transition-colors"><MessageCircle size={13} /> Contactar por WhatsApp</a>}
                             </div>
                             <button onClick={() => setVerProp(null)} className="p-2 bg-white/5 rounded-full text-gray-300 shrink-0"><X size={16} /></button>
                         </div>
