@@ -487,8 +487,8 @@ export default function ExplorarClasesPage() {
                                             ) : estaLleno ? (
                                                 <div className="w-full sm:w-32 py-3 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase"><AlertCircle size={14} /> Lleno</div>
                                             ) : !tieneSaldo ? (
-                                                <Link href="/tienda" className="w-full sm:w-36 py-3 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase bg-white/5 text-white border border-white/10 hover:bg-white hover:text-black transition-all">
-                                                    {esExclusivaModal ? 'Comprar Pase' : 'Sin Saldo'}
+                                                <Link href="/tienda" className="w-full sm:w-40 py-3 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase bg-[#D4E655] text-black hover:bg-white transition-all shadow-sm">
+                                                    <Ticket size={14} /> {esExclusivaModal ? 'Comprar Pase' : 'Comprar Créditos'}
                                                 </Link>
                                             ) : (
                                                 <button onClick={() => handleInscribirse(inst, selectedGrupo)} disabled={procesandoId === inst.id} className={`w-full sm:w-36 py-3 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-black uppercase transition-all shadow-sm ${estilos.btn} disabled:opacity-50`}>
