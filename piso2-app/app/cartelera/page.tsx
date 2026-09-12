@@ -186,10 +186,7 @@ export default function CarteleraPublicaPage() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4" onClick={() => setSel(null)}>
                     <div className="bg-[#09090b] border border-white/10 w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
                         {sel.imagen_url && (
-                            <div className="relative w-full h-44 shrink-0">
-                                <Image src={sel.imagen_url} alt={sel.nombre} fill sizes="512px" className="object-cover" />
-                                <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] to-transparent" />
-                            </div>
+                            <img src={sel.imagen_url} alt={sel.nombre} className="w-full max-h-[50vh] object-contain bg-black shrink-0" />
                         )}
                         <div className="p-5 border-b border-white/10 flex justify-between items-start gap-3 shrink-0">
                             <div className="min-w-0">
