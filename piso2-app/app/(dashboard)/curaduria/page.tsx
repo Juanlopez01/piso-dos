@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Theater, RefreshCw, Copy, Check, X, Trash2, Play, Inbox, Ticket, Plus, Megaphone, Power, Upload } from 'lucide-react'
+import { Loader2, Theater, RefreshCw, Copy, Check, X, Trash2, Play, Inbox, Ticket, Plus, Megaphone, Power, Upload, Maximize2, Image as ImageIcon } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
+import Lightbox, { type MediaItem, esVideoArchivo } from '@/components/Lightbox'
 import {
     getPropuestasObraAction, curarPropuestaAction, eliminarPropuestaAction,
     getConvocatoriasAction, crearConvocatoriaAction, toggleConvocatoriaActivaAction, eliminarConvocatoriaAction,
@@ -33,6 +34,18 @@ export default function CuraduriaPage() {
     const [panelCiclos, setPanelCiclos] = useState(false)
     const [nuevoCiclo, setNuevoCiclo] = useState({ titulo: '', descripcion: '', fecha_limite: '', flyer_url: '' })
     const [supabase] = useState(() => createClient())
+    // Detalle de una propuesta (texto completo) + visor de fotos/videos
+    const [verProp, setVerProp] = useState<Propuesta | null>(null)
+    const [lb, setLb] = useState<{ items: MediaItem[]; index: number } | null>(null)
+    const mediaDe = (p: Propuesta): MediaItem[] => [
+        ...(p.imagenes || []).map(u => ({ tipo: 'img' as const, url: u })),
+        ...(p.videos || []).filter(esVideoArchivo).map(u => ({ tipo: 'video' as const, url: u })),
+    ]
+    const abrirMedia = (p: Propuesta, url: string) => {
+        const items = mediaDe(p)
+        const i = items.findIndex(m => m.url === url)
+        if (i >= 0) setLb({ items, index: i })
+    }
     const [subiendoFlyer, setSubiendoFlyer] = useState(false)
     const subirFlyer = async (file: File | null) => {
         if (!file) return
@@ -194,7 +207,7 @@ export default function CuraduriaPage() {
                     {lista.map(p => (
                         <div key={p.id} className="bg-[#09090b] border border-white/10 rounded-2xl p-4">
                             <div className="flex items-start gap-4">
-                                {p.imagenes?.[0] && <img src={p.imagenes[0]} alt="" className="w-20 h-24 object-cover rounded-lg shrink-0" />}
+                                {p.imagenes?.[0] && <img onClick={() => abrirMedia(p, p.imagenes[0])} src={p.imagenes[0]} alt="" className="w-20 h-24 object-cover rounded-lg shrink-0 cursor-pointer hover:opacity-80 transition-opacity" title="Ampliar" />}
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 flex-wrap">
                                         <h3 className="font-bold truncate">{p.titulo}</h3>
@@ -208,10 +221,13 @@ export default function CuraduriaPage() {
                                     </p>
                                     <p className="text-[11px] text-gray-500 mt-0.5">{[p.email, p.telefono, p.instagram].filter(Boolean).join(' · ')}</p>
                                     {p.descripcion && <p className="text-sm text-gray-400 mt-2 whitespace-pre-line line-clamp-4">{p.descripcion}</p>}
+                                    <button onClick={() => setVerProp(p)} className="mt-1.5 text-[11px] font-bold text-[#D4E655] hover:underline flex items-center gap-1"><Maximize2 size={11} /> Ver completa</button>
                                     {(p.imagenes?.length > 1 || p.videos?.length > 0) && (
                                         <div className="flex flex-wrap gap-1.5 mt-2">
-                                            {p.imagenes.slice(1).map((u, i) => <img key={i} src={u} alt="" className="w-10 h-12 object-cover rounded" />)}
-                                            {p.videos.map((v, i) => <a key={i} href={v} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide border border-white/15 rounded px-2 py-1 text-gray-300 hover:border-white/40"><Play size={11} /> Video {p.videos.length > 1 ? i + 1 : ''}</a>)}
+                                            {p.imagenes.slice(1).map((u, i) => <img key={i} onClick={() => abrirMedia(p, u)} src={u} alt="" className="w-10 h-12 object-cover rounded cursor-pointer hover:opacity-80" title="Ampliar" />)}
+                                            {p.videos.map((v, i) => esVideoArchivo(v)
+                                                ? <button key={i} onClick={() => abrirMedia(p, v)} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide border border-white/15 rounded px-2 py-1 text-gray-300 hover:border-[#D4E655]/50 hover:text-[#D4E655]"><Play size={11} /> Video {p.videos.length > 1 ? i + 1 : ''}</button>
+                                                : <a key={i} href={v} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide border border-white/15 rounded px-2 py-1 text-gray-300 hover:border-white/40"><Play size={11} /> Video {p.videos.length > 1 ? i + 1 : ''}</a>)}
                                         </div>
                                     )}
                                     {p.nota_curaduria && <p className="text-[11px] text-amber-400/80 mt-2">Nota: {p.nota_curaduria}</p>}
@@ -240,6 +256,45 @@ export default function CuraduriaPage() {
                     ))}
                 </div>
             )}
+
+            {/* Modal: propuesta completa */}
+            {verProp && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setVerProp(null)}>
+                    <div className="bg-[#0b0b0d] border border-white/10 rounded-t-2xl md:rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-start justify-between p-4 border-b border-white/10 shrink-0">
+                            <div className="min-w-0">
+                                <h3 className="font-black text-lg truncate">{verProp.titulo}</h3>
+                                <p className="text-[11px] text-gray-400 mt-0.5">{[verProp.tipo_obra, verProp.director && `Dir: ${verProp.director}`, verProp.compania, verProp.participantes != null && `${verProp.participantes} integrantes`, verProp.duracion_min != null && `${verProp.duracion_min} min`].filter(Boolean).join(' · ')}</p>
+                                <p className="text-[11px] text-gray-500 mt-0.5">{[verProp.email, verProp.telefono, verProp.instagram].filter(Boolean).join(' · ')}</p>
+                            </div>
+                            <button onClick={() => setVerProp(null)} className="p-2 bg-white/5 rounded-full text-gray-300 shrink-0"><X size={16} /></button>
+                        </div>
+                        <div className="overflow-y-auto p-4 space-y-4">
+                            {verProp.descripcion && <p className="text-sm text-gray-200 whitespace-pre-line leading-relaxed">{verProp.descripcion}</p>}
+                            {verProp.imagenes?.length > 0 && (
+                                <div>
+                                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2 flex items-center gap-1.5"><ImageIcon size={12} /> Fotos</p>
+                                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                                        {verProp.imagenes.map((u, i) => <img key={i} onClick={() => abrirMedia(verProp, u)} src={u} alt="" className="w-full aspect-[3/4] object-cover rounded-lg cursor-pointer hover:opacity-80 transition-opacity" title="Ampliar" />)}
+                                    </div>
+                                </div>
+                            )}
+                            {verProp.videos?.length > 0 && (
+                                <div>
+                                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2 flex items-center gap-1.5"><Play size={12} /> Videos</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {verProp.videos.map((v, i) => esVideoArchivo(v)
+                                            ? <button key={i} onClick={() => abrirMedia(verProp, v)} className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide border border-white/15 rounded-lg px-3 py-2 text-gray-200 hover:border-[#D4E655]/50 hover:text-[#D4E655]"><Play size={13} /> Video {verProp.videos.length > 1 ? i + 1 : ''}</button>
+                                            : <a key={i} href={v} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide border border-white/15 rounded-lg px-3 py-2 text-gray-200 hover:border-white/40"><Play size={13} /> Abrir video {verProp.videos.length > 1 ? i + 1 : ''}</a>)}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {lb && <Lightbox items={lb.items} index={lb.index} onIndex={i => setLb(v => v ? { ...v, index: i } : v)} onClose={() => setLb(null)} />}
         </div>
     )
 }

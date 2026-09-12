@@ -19,6 +19,7 @@ import {
 import { toast, Toaster } from 'sonner'
 import { Loader2, Plus, X, Pencil, Trash2, Star, Eye, EyeOff, Upload, ArrowLeftToLine, Sparkles, Lock, Inbox, Check, PauseCircle, Play, Search, Link2, MapPin, CalendarDays, Copy, ExternalLink, Users, Share2, MessageCircle, Globe, FileSignature } from 'lucide-react'
 import { Playfair_Display } from 'next/font/google'
+import Lightbox, { type MediaItem, esVideoArchivo } from '@/components/Lightbox'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['500', '600', '700'] })
 
@@ -101,6 +102,14 @@ export default function TalentsAdminPage() {
     // Postulaciones (gente que quiere ser talento)
     const [postulaciones, setPostulaciones] = useState<any[]>([])
     const [postSel, setPostSel] = useState<any | null>(null)
+    const [lb, setLb] = useState<{ items: MediaItem[]; index: number } | null>(null)
+    const abrirLbPost = (p: any, url: string) => {
+        const fotos: string[] = (p.fotos && p.fotos.length) ? p.fotos : (p.foto_url ? [p.foto_url] : [])
+        const vids: string[] = ((p.videos && p.videos.length) ? p.videos : (p.video_url ? [p.video_url] : [])).filter(esVideoArchivo)
+        const items: MediaItem[] = [...fotos.map(u => ({ tipo: 'img' as const, url: u })), ...vids.map(u => ({ tipo: 'video' as const, url: u }))]
+        const i = items.findIndex(m => m.url === url)
+        if (i >= 0) setLb({ items, index: i })
+    }
     const [procesandoPost, setProcesandoPost] = useState(false)
     const cargarPostulaciones = () => { listPostulacionesAction().then(d => setPostulaciones(d)).catch(() => { }) }
     const pendientesCount = postulaciones.filter(p => p.estado === 'pendiente').length
@@ -1064,10 +1073,10 @@ export default function TalentsAdminPage() {
                                 const fotos: string[] = (postSel.fotos && postSel.fotos.length) ? postSel.fotos : (postSel.foto_url ? [postSel.foto_url] : [])
                                 if (!fotos.length) return <div className="w-full h-56 md:h-full flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin foto</div>
                                 return (<>
-                                    <img src={fotos[0]} alt={postSel.nombre} className="w-full h-56 md:flex-1 object-cover" />
+                                    <img onClick={() => abrirLbPost(postSel, fotos[0])} src={fotos[0]} alt={postSel.nombre} className="w-full h-56 md:flex-1 object-cover cursor-pointer hover:opacity-90 transition-opacity" title="Ampliar" />
                                     {fotos.length > 1 && (
                                         <div className="flex gap-1 p-1 bg-neutral-200">
-                                            {fotos.slice(1).map((u, i) => <img key={i} src={u} alt="" className="flex-1 h-16 object-cover" />)}
+                                            {fotos.slice(1).map((u, i) => <img key={i} onClick={() => abrirLbPost(postSel, u)} src={u} alt="" className="flex-1 h-16 object-cover cursor-pointer hover:opacity-80" title="Ampliar" />)}
                                         </div>
                                     )}
                                 </>)
@@ -1099,11 +1108,13 @@ export default function TalentsAdminPage() {
                                 if (!videos.length) return null
                                 return (
                                     <div className="flex flex-wrap gap-2 mb-6">
-                                        {videos.map((v, i) => (
-                                            <a key={i} href={v} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.15em] uppercase border border-neutral-300 px-4 py-2 hover:border-black transition-colors">
+                                        {videos.map((v, i) => esVideoArchivo(v)
+                                            ? <button key={i} onClick={() => abrirLbPost(postSel, v)} className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.15em] uppercase border border-neutral-300 px-4 py-2 hover:border-black transition-colors">
                                                 <Play size={13} /> Video {videos.length > 1 ? i + 1 : ''}
-                                            </a>
-                                        ))}
+                                            </button>
+                                            : <a key={i} href={v} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.15em] uppercase border border-neutral-300 px-4 py-2 hover:border-black transition-colors">
+                                                <Play size={13} /> Abrir video {videos.length > 1 ? i + 1 : ''}
+                                            </a>)}
                                     </div>
                                 )
                             })()}
@@ -1125,6 +1136,8 @@ export default function TalentsAdminPage() {
                     </div>
                 </div>
             )}
+
+            {lb && <Lightbox items={lb.items} index={lb.index} onIndex={i => setLb(v => v ? { ...v, index: i } : v)} onClose={() => setLb(null)} />}
 
             {/* MODAL MARCA */}
             {modalMarca && (
