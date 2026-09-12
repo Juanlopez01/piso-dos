@@ -7,6 +7,7 @@ import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { ArrowLeft, Search, Music, User, MapPin, Clock, ArrowRight, Loader2, Image as ImageIcon, Lock, X, Share2, Calendar } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { createClient } from '@/utils/supabase/client'
 import { getClasesPublicasAction, type ClasePublicaGrupo } from '@/app/actions/cartelera'
 
 const norm = (s: string) => s ? s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim() : ''
@@ -44,9 +45,11 @@ export default function CarteleraPublicaPage() {
     const [texto, setTexto] = useState('')
     const [tipo, setTipo] = useState('Todos')
     const [sel, setSel] = useState<ClasePublicaGrupo | null>(null)
+    const [logueado, setLogueado] = useState(false)
 
     useEffect(() => {
         getClasesPublicasAction().then(d => { setGrupos(d); setLoading(false) }).catch(() => setLoading(false))
+        createClient().auth.getSession().then(({ data }) => setLogueado(!!data.session?.user)).catch(() => { })
     }, [])
 
     // Link compartido ?c=nombre&p=profe → abre la clase directamente.
@@ -85,8 +88,8 @@ export default function CarteleraPublicaPage() {
                     <Link href="/" className="text-[10px] font-bold tracking-[0.2em] uppercase text-gray-400 hover:text-white flex items-center gap-1.5">
                         <ArrowLeft size={14} /> Piso 2
                     </Link>
-                    <Link href="/login" className="px-6 py-2 rounded-full border border-[#D4E655]/50 text-[#D4E655] text-[10px] font-bold tracking-[0.2em] uppercase hover:bg-[#D4E655] hover:text-black transition-all">
-                        Ingresar
+                    <Link href={logueado ? '/explorar' : '/login'} className="px-6 py-2 rounded-full border border-[#D4E655]/50 text-[#D4E655] text-[10px] font-bold tracking-[0.2em] uppercase hover:bg-[#D4E655] hover:text-black transition-all">
+                        {logueado ? 'Ir a la app' : 'Ingresar'}
                     </Link>
                 </div>
             </div>
@@ -208,7 +211,9 @@ export default function CarteleraPublicaPage() {
                             ))}
                         </div>
                         <div className="p-4 border-t border-white/10 shrink-0">
-                            <Link href="/login" className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest bg-[#D4E655] text-black hover:bg-white transition-all"><Lock size={14} /> Iniciá sesión para reservar tu lugar</Link>
+                            {logueado
+                                ? <Link href="/explorar" className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest bg-[#D4E655] text-black hover:bg-white transition-all"><ArrowRight size={14} /> Reservá tu lugar en la app</Link>
+                                : <Link href="/login" className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-widest bg-[#D4E655] text-black hover:bg-white transition-all"><Lock size={14} /> Iniciá sesión para reservar tu lugar</Link>}
                         </div>
                     </div>
                 </div>
