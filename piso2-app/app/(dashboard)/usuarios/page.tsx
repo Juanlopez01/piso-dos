@@ -9,7 +9,7 @@ import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
     Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
-    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2, Library, Repeat, Trash2, DollarSign
+    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2, Library, Repeat, Trash2, DollarSign, Theater
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { format } from 'date-fns'
@@ -28,7 +28,8 @@ import {
     convertirSueltaAPackAction,
     eliminarUsuarioCompletoAction,
     resetearAccesoAction,
-    generarLinkRecuperacionAction
+    generarLinkRecuperacionAction,
+    toggleCuraduriaAction
 } from '@/app/actions/usuarios'
 import { toggleFinanzasAction } from '@/app/actions/libro-admin'
 
@@ -57,6 +58,7 @@ type RPCUsuario = {
     contacto_remplazo?: string | null
     permisos_grupos?: string[]
     admin_finanzas?: boolean
+    acceso_curaduria?: boolean
 }
 
 type RPCUsuariosData = {
@@ -324,6 +326,17 @@ function UsuariosContent() {
                 else toast.error(r.error || 'No se pudo resetear')
             }
         } finally { setReseteandoId(null) }
+    }
+
+    const [curaduriaId, setCuraduriaId] = useState<string | null>(null)
+    const toggleCuraduria = async (u: any) => {
+        if (userRole !== 'admin') return toast.error('Solo un admin puede dar este acceso')
+        const nuevo = !u.acceso_curaduria
+        setCuraduriaId(u.id)
+        const response = await toggleCuraduriaAction(u.id, nuevo)
+        if (response.success) { toast.success(nuevo ? 'Acceso a Curaduría dado' : 'Acceso a Curaduría quitado'); mutate() }
+        else toast.error(response.error || 'No se pudo')
+        setCuraduriaId(null)
     }
 
     const cambiarNivelLiga = async (usuarioId: string, nuevoNivel: number | null) => {
@@ -1021,6 +1034,17 @@ function UsuariosContent() {
                                                 className="shrink-0 w-9 flex items-center justify-center rounded-xl border border-blue-500/20 bg-blue-500/5 text-blue-400/80 hover:bg-blue-500 hover:text-white transition-colors disabled:opacity-40"
                                             >
                                                 {reseteandoId === u.id ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
+                                            </button>
+                                        )}
+
+                                        {isAdmin && (
+                                            <button
+                                                onClick={() => toggleCuraduria(u)}
+                                                disabled={curaduriaId === u.id}
+                                                title={u.acceso_curaduria ? 'Quitar acceso a Curaduría' : 'Dar acceso a Curaduría (+ Eventos)'}
+                                                className={`shrink-0 w-9 flex items-center justify-center rounded-xl border transition-colors disabled:opacity-40 ${u.acceso_curaduria ? 'border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500 hover:text-white' : 'border-white/10 bg-[#111] text-gray-500 hover:border-purple-500/40 hover:text-purple-300'}`}
+                                            >
+                                                {curaduriaId === u.id ? <Loader2 size={13} className="animate-spin" /> : <Theater size={13} />}
                                             </button>
                                         )}
 

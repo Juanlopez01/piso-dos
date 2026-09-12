@@ -18,7 +18,7 @@ function SidebarContent() {
     const [isLoggingOut, setIsLoggingOut] = useState(false)
     const [unreadNotifs, setUnreadNotifs] = useState(0)
 
-    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, isLoading, userId } = useCash()
+    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, hasAccesoCuraduria, isLoading, userId } = useCash()
 
     useEffect(() => {
         if (!isLoading && userId && userRole && userRole !== 'visitante') {
@@ -40,6 +40,8 @@ function SidebarContent() {
         if (item.name === 'Grupos' && !hasCompaniaAccess) return false;
         // Libro de administración: SOLO usuarios con el flag (Nico/Santi), no por rol.
         if (item.name === 'Administración') return hasAdminFinanzas;
+        // Permiso aditivo de curaduría: da Curaduría + Eventos a cualquier rol (ej. un profe).
+        if ((item.name === 'Curaduría' || item.name === 'Eventos') && hasAccesoCuraduria) return true;
 
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 

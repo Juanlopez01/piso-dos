@@ -22,9 +22,11 @@ async function requireStaff(soloLectura = false) {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return { ok: false as const, error: 'No autorizado' }
-    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    const { data: perfil } = await supabase.from('profiles').select('rol, acceso_curaduria').eq('id', session.user.id).single()
     const rolesOk = soloLectura ? [...ROLES_STAFF, 'curador'] : ROLES_STAFF
-    if (!perfil || !rolesOk.includes(perfil.rol)) return { ok: false as const, error: 'Sin permisos' }
+    // El flag acceso_curaduria da lectura de Eventos (igual que un curador), no escritura.
+    const ok = perfil && (rolesOk.includes(perfil.rol) || (soloLectura && perfil.acceso_curaduria))
+    if (!ok) return { ok: false as const, error: 'Sin permisos' }
     return { ok: true as const, userId: session.user.id }
 }
 

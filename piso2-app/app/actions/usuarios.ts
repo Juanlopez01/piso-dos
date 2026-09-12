@@ -121,6 +121,24 @@ export async function generarLinkRecuperacionAction(usuarioId: string) {
     }
 }
 
+// Permiso aditivo de Curaduría (Curaduría + Eventos lectura) sin cambiar el rol. Solo admin.
+export async function toggleCuraduriaAction(usuarioId: string, valor: boolean) {
+    const supabase = await createClient()
+    try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) throw new Error('No autorizado')
+        const { data: actor } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+        if (actor?.rol !== 'admin') throw new Error('Solo un admin puede dar este acceso')
+        const admin = getAdminClient()
+        const { error } = await admin.from('profiles').update({ acceso_curaduria: valor }).eq('id', usuarioId)
+        if (error) throw new Error(error.message)
+        revalidatePath('/usuarios')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
 export async function cambiarLigaAction(usuarioId: string, nuevoNivel: number | null) {
     const supabase = await createClient()
     try {
