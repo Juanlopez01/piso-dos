@@ -49,7 +49,7 @@ export default function CarteleraPublicaPage() {
 
     useEffect(() => {
         getClasesPublicasAction().then(d => { setGrupos(d); setLoading(false) }).catch(() => setLoading(false))
-        createClient().auth.getSession().then(({ data }) => setLogueado(!!data.session?.user)).catch(() => { })
+        createClient().auth.getSession().then((res: any) => setLogueado(!!res?.data?.session?.user)).catch(() => { })
     }, [])
 
     // Link compartido ?c=nombre&p=profe → abre la clase directamente.
