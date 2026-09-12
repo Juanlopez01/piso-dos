@@ -62,10 +62,18 @@ export default function CarteleraPublicaPage() {
         if (match) setSel(match)
     }, [grupos])
 
-    const compartir = (g: ClasePublicaGrupo) => {
+    const compartir = async (g: ClasePublicaGrupo) => {
         const url = `${window.location.origin}/cartelera?c=${encodeURIComponent(g.nombre)}&p=${encodeURIComponent(g.profesor)}`
-        if (typeof navigator !== 'undefined' && (navigator as any).share) (navigator as any).share({ title: g.nombre, text: `Clase en Piso 2: ${g.nombre} con ${g.profesor}`, url }).catch(() => { })
-        else navigator.clipboard.writeText(url).then(() => toast.success('Link copiado')).catch(() => { })
+        try {
+            await navigator.clipboard.writeText(url)
+            toast.success('Link copiado — pegalo donde quieras')
+        } catch {
+            try {
+                const ta = document.createElement('textarea'); ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0'
+                document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta)
+                toast.success('Link copiado')
+            } catch { window.prompt('Copiá el link:', url) }
+        }
     }
 
     const filtrados = useMemo(() => grupos.filter(g => {

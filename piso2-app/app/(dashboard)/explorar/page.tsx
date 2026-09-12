@@ -189,12 +189,18 @@ export default function ExplorarClasesPage() {
     }
 
     // Link público (cartelera) de una clase, para que el estudio o el profe la promocionen.
-    const compartirClase = (grupo: ClaseAgrupada) => {
+    // Siempre copia al portapapeles (con fallback), sin el "compartir" nativo.
+    const compartirClase = async (grupo: ClaseAgrupada) => {
         const url = `${window.location.origin}/cartelera?c=${encodeURIComponent(grupo.nombre)}&p=${encodeURIComponent(grupo.profesor.nombre_completo)}`
-        if (navigator.share) {
-            navigator.share({ title: grupo.nombre, text: `Mirá esta clase en Piso 2: ${grupo.nombre} con ${grupo.profesor.nombre_completo}`, url }).catch(() => { })
-        } else {
-            navigator.clipboard.writeText(url).then(() => toast.success('Link de la clase copiado — pegalo donde quieras')).catch(() => toast.error('No se pudo copiar'))
+        try {
+            await navigator.clipboard.writeText(url)
+            toast.success('Link de la clase copiado — pegalo donde quieras')
+        } catch {
+            try {
+                const ta = document.createElement('textarea'); ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0'
+                document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta)
+                toast.success('Link de la clase copiado')
+            } catch { window.prompt('Copiá el link:', url) }
         }
     }
 
