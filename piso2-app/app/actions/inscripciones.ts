@@ -655,7 +655,18 @@ export async function agregarPagoInscripcionAction(inscripcionId: string, monto:
         if (!turno) throw new Error("No tenés una caja abierta. Abrí tu caja en Finanzas para cobrar la deuda.")
 
         // 1. EL PAGO ENTRA COMPLETO A LA CAJA
-        const nombreAlumno = insc.nombre_invitado || 'Alumno con cuenta'
+        // Nombre real: si es alumno con cuenta, lo buscamos en su perfil (antes
+        // caía siempre al genérico "Alumno con cuenta" y no se sabía quién pagó).
+        let nombreAlumno = insc.nombre_invitado || ''
+        if (!nombreAlumno && insc.user_id) {
+            const { data: perfil } = await supabaseAdmin
+                .from('profiles')
+                .select('nombre, apellido')
+                .eq('id', insc.user_id)
+                .single()
+            nombreAlumno = [perfil?.nombre, perfil?.apellido].filter(Boolean).join(' ').trim()
+        }
+        if (!nombreAlumno) nombreAlumno = 'Alumno con cuenta'
         const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
             turno_id: turno.id,
             tipo: 'ingreso',
