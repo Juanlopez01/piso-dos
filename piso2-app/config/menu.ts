@@ -1,4 +1,4 @@
-import { Home, Calendar as CalendarIcon, Users, Settings, Package, ShoppingBag, MapPin, Bell, UserCircle, GraduationCap, UsersRound, Search, ShoppingBagIcon, BookOpen, Wallet, FileSpreadsheet, Megaphone, Sparkles, Link2, Bot, MessageCircle, Ticket, Theater, ClipboardList } from 'lucide-react'
+import { Home, Calendar as CalendarIcon, Users, Settings, Package, ShoppingBag, MapPin, Bell, UserCircle, GraduationCap, UsersRound, Search, ShoppingBagIcon, BookOpen, Wallet, FileSpreadsheet, Megaphone, Sparkles, Link2, MessageCircle, Ticket, Theater, ClipboardList } from 'lucide-react'
 
 export const menuItems = [
     // --- TOP: LOS 4 BOTONES DE ALUMNOS Y PROFES (Para el menú del celu) ---
@@ -15,7 +15,7 @@ export const menuItems = [
     // Profe 4
     { name: 'Notificaciones', href: '/notificaciones', icon: Bell, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'auxiliar', 'vendedor'] },
     // Vendedor 1: su única herramienta
-    { name: 'Ventas', href: '/vender', icon: Link2, roles: ['admin', 'vendedor'] },
+    { name: 'Ventas', href: '/vender', icon: Link2, roles: ['vendedor'] },
 
     // --- RESTO DEL MENÚ (Para Admin, Recepción y vistas generales) ---
     { name: 'Inicio', href: '/', icon: Home, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'visitante', 'auxiliar', 'vendedor'] },
@@ -41,7 +41,6 @@ export const menuItems = [
     { name: 'Sedes', href: '/sedes', icon: MapPin, roles: ['admin'] },
     { name: 'Grupos', href: '/companias', icon: UsersRound, roles: ['admin', 'coordinador', 'profesor', 'alumno'] },
     { name: 'Talents', href: '/talents', icon: Sparkles, roles: ['admin'] },
-    { name: 'Asistente', href: '/asistente-test', icon: Bot, roles: ['admin'] },
     { name: 'Consultas', href: '/consultas', icon: MessageCircle, roles: ['admin', 'recepcion'] },
     { name: 'Resumen Clases', href: '/resumen-clases', icon: ClipboardList, roles: ['admin', 'recepcion'] },
     { name: 'Eventos', href: '/eventos', icon: Ticket, roles: ['admin', 'recepcion', 'curador'] },
