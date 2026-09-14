@@ -682,6 +682,7 @@ export async function agregarPagoInscripcionAction(inscripcionId: string, monto:
         // monto_abonado / cantidad (NO se le suma la fracción sobre el nominal,
         // que era el bug: 12.500 + 6.250 = 18.750 en vez de 45.000/4 = 11.250).
         let nuevoValorCredito = Number(insc.valor_credito) + Number(monto); // default: clase suelta acumula
+        let packMultiId: string | null = null; // pack de +1 clase: propagamos a todas sus inscripciones
 
         if (insc.pack_usado_id) {
             const { data: packAfectado } = await supabaseAdmin
@@ -698,15 +699,21 @@ export async function agregarPagoInscripcionAction(inscripcionId: string, monto:
                 await supabaseAdmin.from('alumno_packs').update({ monto_abonado: nuevoMonto }).eq('id', packAfectado.id);
 
                 // El valor por clase queda en línea con lo cobrado del pack
-                nuevoValorCredito = nuevoMonto / divisor;
+                nuevoValorCredito = Math.round(nuevoMonto / divisor);
+                packMultiId = packAfectado.id;
             }
         }
 
-        // 3. ACTUALIZAMOS LA INSCRIPCIÓN
-        const { error: errUpd } = await supabaseAdmin.from('inscripciones').update({
-            valor_credito: nuevoValorCredito,
-            saldo_pendiente: liquidarDeuda ? 0 : 1
-        }).eq('id', inscripcionId)
+        // 3. ACTUALIZAMOS LA(S) INSCRIPCIÓN(ES)
+        // La deuda es del PACK, no de una clase suelta: al cobrarla, todas las
+        // clases de ese pack quedan con el mismo valor por clase y el mismo
+        // estado de saldo. (Antes solo se actualizaba la inscripción clickeada,
+        // por eso quedaban clases con valor viejo y "adeuda" pegado.)
+        const updInsc = { valor_credito: nuevoValorCredito, saldo_pendiente: liquidarDeuda ? 0 : 1 };
+        const upd = packMultiId
+            ? supabaseAdmin.from('inscripciones').update(updInsc).eq('pack_usado_id', packMultiId)
+            : supabaseAdmin.from('inscripciones').update(updInsc).eq('id', inscripcionId);
+        const { error: errUpd } = await upd;
 
         if (errUpd) throw new Error('Error al actualizar la inscripción')
 
