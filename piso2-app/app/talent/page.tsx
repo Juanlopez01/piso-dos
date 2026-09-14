@@ -1,10 +1,20 @@
-'use client'
-
+import type { Metadata } from 'next'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
 import { Instagram, Mail, Loader2, ArrowLeft, MapPin, CalendarDays, ArrowRight, Play } from 'lucide-react'
 import { Playfair_Display, Montserrat } from 'next/font/google'
 import { getTalentosPublicosAction, getMarcasPublicasAction, getBusquedasActivasAction, getShowsPublicosAction, getObrasActivasAction, type TalentoPublico, type MarcaPublica, type BusquedaPublica, type ShowPublico, type ObraPublica } from '@/app/actions/talent'
+
+export const dynamic = 'force-dynamic'
+
+export const metadata: Metadata = {
+    title: 'Piso 2 Talent · Vitrina de talentos',
+    description: 'Bailarines, artistas y compañías de Piso 2 Talent. Conectamos talentos de primer nivel con marcas, obras y producciones.',
+    openGraph: {
+        title: 'Piso 2 Talent',
+        description: 'Vitrina de talentos de Piso 2 Multiespacio.',
+        type: 'website',
+    },
+}
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['400', '500', '600', '700'] })
 const sans = Montserrat({ subsets: ['latin'], weight: ['300', '400', '500', '600'] })
@@ -30,19 +40,16 @@ function toEmbed(url: string | null): string | null {
 // Archivo de video subido (se reproduce con <video>)
 const esVideoFile = (url: string | null) => !!url && /\.(mp4|webm|mov|m4v|ogg)(\?|$)/i.test(url)
 
-export default function TalentHome() {
-    const [talentos, setTalentos] = useState<TalentoPublico[]>([])
-    const [marcas, setMarcas] = useState<MarcaPublica[]>([])
-    const [busquedas, setBusquedas] = useState<BusquedaPublica[]>([])
-    const [shows, setShows] = useState<ShowPublico[]>([])
-    const [obras, setObras] = useState<ObraPublica[]>([])
-    const [loading, setLoading] = useState(true)
-
-    useEffect(() => {
-        Promise.all([getTalentosPublicosAction(), getMarcasPublicasAction(), getBusquedasActivasAction(), getShowsPublicosAction(), getObrasActivasAction()])
-            .then(([t, m, b, s, o]) => { setTalentos(t); setMarcas(m); setBusquedas(b); setShows(s); setObras(o); setLoading(false) })
-            .catch(() => setLoading(false))
-    }, [])
+export default async function TalentHome() {
+    // Server Component: datos traídos en el servidor, cero JS al cliente (SEO + velocidad).
+    const [talentos, marcas, busquedas, shows, obras] = await Promise.all([
+        getTalentosPublicosAction().catch(() => [] as TalentoPublico[]),
+        getMarcasPublicasAction().catch(() => [] as MarcaPublica[]),
+        getBusquedasActivasAction().catch(() => [] as BusquedaPublica[]),
+        getShowsPublicosAction().catch(() => [] as ShowPublico[]),
+        getObrasActivasAction().catch(() => [] as ObraPublica[]),
+    ])
+    const loading = false
 
     // Fila hero = los 5 marcados "Destacado" (por Orden). Si no hay ninguno aún, muestra los primeros.
     const destacados = talentos.filter(t => t.destacado)
