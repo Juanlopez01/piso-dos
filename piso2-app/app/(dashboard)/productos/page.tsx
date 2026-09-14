@@ -36,6 +36,7 @@ type Producto = {
     comision_monto?: number
     entrega_tipo?: 'creditos' | 'cuota_liga' | 'cuota_compania' | 'ninguna'
     compania_id?: string | null
+    clase_id?: string | null
 }
 
 // Categorías sugeridas para el módulo de ventas (spec punto 8)
@@ -67,10 +68,14 @@ type ClaseExclusiva = {
 
 type CompaniaOpt = { id: string; nombre: string }
 
+// Clase concreta de la agenda, para vincular una clase especial a su producto.
+type ClaseVinculable = { id: string; label: string }
+
 type TiendaConfigData = {
     productos: Producto[]
     cupones: Cupon[]
     clasesExclusivas: ClaseExclusiva[]
+    clasesVinculables: ClaseVinculable[]
     companias: CompaniaOpt[]
 }
 
@@ -121,10 +126,27 @@ const fetcherTiendaConfig = async (): Promise<TiendaConfigData> => {
         })
     }
 
+    // 🚀 CLASES VINCULABLES: próximas clases de la agenda para atar una clase
+    //    especial a su producto (auto-inscribir al comprar el pack).
+    const { data: dataVinc } = await supabase
+        .from('clases')
+        .select(`id, nombre, inicio, profesor:profiles!clases_profesor_id_fkey(nombre_completo)`)
+        .gte('inicio', hoy)
+        .neq('estado', 'cancelada')
+        .order('inicio', { ascending: true })
+        .limit(200)
+
+    const clasesVinculables: ClaseVinculable[] = (dataVinc || []).map((c: any) => {
+        const profe = Array.isArray(c.profesor) ? c.profesor[0]?.nombre_completo : c.profesor?.nombre_completo
+        const fecha = c.inicio ? new Date(c.inicio).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }) : ''
+        return { id: c.id, label: `${fecha} · ${c.nombre}${profe ? ` (${profe})` : ''}` }
+    })
+
     return {
         productos: (dataProds as Producto[]) || [],
         cupones: (dataCupones as Cupon[]) || [],
         clasesExclusivas: Array.from(mapExclusivas.values()),
+        clasesVinculables,
         companias: (dataCompanias as CompaniaOpt[]) || []
     }
 }
@@ -141,6 +163,7 @@ export default function TiendaConfigPage() {
     const productos = data?.productos || []
     const cupones = data?.cupones || []
     const clasesExclusivas = data?.clasesExclusivas || []
+    const clasesVinculables = data?.clasesVinculables || []
     const companias = data?.companias || []
 
     // Agrupamos los productos para mostrarlos ordenados
@@ -161,6 +184,7 @@ export default function TiendaConfigPage() {
     const [formCupo, setFormCupo] = useState('')
     const [formTipo, setFormTipo] = useState<'regular' | 'especial' | 'exclusivo'>('regular')
     const [formPaseReferencia, setFormPaseReferencia] = useState('')
+    const [formClaseId, setFormClaseId] = useState('')
     // Config Ventas Externas
     const [formCategoria, setFormCategoria] = useState('Clases Regulares')
     const [formVisibleTienda, setFormVisibleTienda] = useState(true)
@@ -189,6 +213,7 @@ export default function TiendaConfigPage() {
             setFormCupo(prod.cupo != null ? String(prod.cupo) : '')
             setFormTipo(prod.tipo_clase === 'seminario' ? 'especial' : prod.tipo_clase || 'regular')
             setFormPaseReferencia(prod.pase_referencia || '')
+            setFormClaseId(prod.clase_id || '')
             setFormCategoria(prod.categoria || 'Clases Regulares')
             setFormVisibleTienda(prod.visible_tienda ?? true)
             setFormVisibleVendedor(prod.visible_vendedor ?? false)
@@ -206,6 +231,7 @@ export default function TiendaConfigPage() {
             setFormCupo('')
             setFormTipo('regular')
             setFormPaseReferencia('')
+            setFormClaseId('')
             setFormCategoria('Clases Regulares')
             setFormVisibleTienda(true)
             setFormVisibleVendedor(false)
@@ -253,6 +279,8 @@ export default function TiendaConfigPage() {
             cupo: formCupo.trim() === '' ? null : Math.max(0, Number(formCupo) || 0),
             tipo_clase: formTipo === 'especial' ? 'seminario' : formTipo,
             pase_referencia: formTipo === 'exclusivo' ? formPaseReferencia : null,
+            // Vínculo clase especial → clase de la agenda (auto-inscribir al comprar)
+            clase_id: formTipo === 'especial' ? (formClaseId || null) : null,
             // Config Ventas Externas
             categoria: formCategoria,
             visible_tienda: formVisibleTienda,
@@ -617,6 +645,27 @@ export default function TiendaConfigPage() {
                                         ))}
                                     </select>
                                     {clasesExclusivas.length === 0 && <p className="text-[9px] text-gray-500 italic mt-1 pl-1">No hay clases con candado programadas en la agenda.</p>}
+                                </div>
+                            )}
+
+                            {formTipo === 'especial' && (
+                                <div className="space-y-2 mt-4 p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl animate-in fade-in">
+                                    <label className="text-[10px] uppercase font-bold text-purple-300 tracking-widest pl-1 flex items-center gap-1">
+                                        <Star size={12} /> Clase vinculada (auto-inscribir)
+                                    </label>
+                                    <select
+                                        value={formClaseId}
+                                        onChange={e => setFormClaseId(e.target.value)}
+                                        className="w-full bg-black border border-purple-500/30 rounded-2xl p-4 text-white text-xs font-bold outline-none focus:border-purple-500 transition-colors"
+                                    >
+                                        <option value="">Sin vínculo (solo acredita créditos)</option>
+                                        {clasesVinculables.map(c => (
+                                            <option key={c.id} value={c.id}>{c.label}</option>
+                                        ))}
+                                    </select>
+                                    <p className="text-[9px] text-gray-500 italic mt-1 pl-1">
+                                        Si elegís una clase, al comprar el pack se inscribe automáticamente a esa clase (y a su serie del mes) siempre que los créditos coincidan con la cantidad de clases.
+                                    </p>
                                 </div>
                             )}
 

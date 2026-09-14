@@ -5,6 +5,7 @@ import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { v4 as uuidv4 } from 'uuid'
 import { revalidatePath } from 'next/cache'
+import { autoInscribirEspecial } from '@/app/actions/_auto-inscribir-especial'
 
 // 🚀 CLIENTE DIOS: Para operaciones que requieren bypass de RLS
 const getAdminClient = () => {
@@ -321,19 +322,20 @@ export async function asignarPackAction(
 
         // 🚀 4. EL ESTÁNDAR DE ORO: Registro en alumno_packs (FIFO Ready)
         const ahora = new Date();
-        const { error: errPack } = await supabaseAdmin.from('alumno_packs').insert({
+        const { data: packManual, error: errPack } = await supabaseAdmin.from('alumno_packs').insert({
             user_id: usuarioId,
             producto_id: productoIdLimpio,
             tipo_clase: tipoClase,
             cantidad_inicial: creditos,
             creditos_restantes: creditos,
             monto_abonado: monto,
+            precio_total: monto, // total pactado = lo cargado (para valor por clase del auto-inscribir)
             metodo_pago: metodoPago, // 🎯 ACÁ BLINDAMOS EL FUTURO
             fecha_compra: ahora.toISOString(),
             // Carga manual: tope 60 días. La vigencia real (30d) arranca en la 1ª clase que use.
             fecha_vencimiento: new Date(ahora.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString(),
             estado: 'activo'
-        });
+        }).select('id').single();
 
         if (errPack) throw new Error(`Fallo crítico al guardar el pack: ${errPack.message}`);
 
@@ -353,6 +355,16 @@ export async function asignarPackAction(
 
             if (errProf) throw new Error(`Error al sumar los créditos al perfil: ${errProf.message}`);
         }
+
+        // Clase especial vinculada: auto-inscribir a la(s) clase(s) del mes si el
+        // producto tiene clase_id y los créditos coinciden. Best-effort.
+        await autoInscribirEspecial(supabaseAdmin, {
+            userId: usuarioId,
+            productoId: productoIdLimpio,
+            packId: packManual?.id || null,
+            montoAbonado: monto,
+            metodoPago: metodoPago,
+        });
 
         revalidatePath('/usuarios')
         return { success: true }

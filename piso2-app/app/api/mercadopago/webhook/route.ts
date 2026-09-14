@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { autoInscribirEspecial } from '@/app/actions/_auto-inscribir-especial';
 
 const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -329,7 +330,7 @@ export async function POST(request: Request) {
                 const fechaVencimiento = new Date(ahora.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString();
 
                 // 1. Guardar info del pack (¡AHORA PARA TODOS LOS TIPOS DE PACKS!)
-                const { error: errPack } = await supabase.from('alumno_packs').insert({
+                const { data: packCreado, error: errPack } = await supabase.from('alumno_packs').insert({
                     user_id: userIdFinal,
                     producto_id: productoIdLimpio,
                     tipo_clase: tipoClaseSeguro,
@@ -342,7 +343,7 @@ export async function POST(request: Request) {
                     metodo_pago: 'mercadopago',
                     fecha_compra: ahora.toISOString(),
                     fecha_vencimiento: fechaVencimiento
-                });
+                }).select('id').single();
 
                 // 🚀 FRENO DE EMERGENCIA
                 if (errPack) {
@@ -375,6 +376,17 @@ export async function POST(request: Request) {
                 if (cupon_id) {
                     await supabase.from('cupones_usados').insert({ cupon_id: cupon_id, user_id: userIdFinal });
                 }
+
+                // 4. Clase especial vinculada: auto-inscribir a la(s) clase(s) del mes
+                //    si el producto tiene clase_id y los créditos coinciden. Best-effort.
+                await autoInscribirEspecial(supabase, {
+                    userId: userIdFinal,
+                    productoId: productoIdLimpio,
+                    packId: packCreado?.id || null,
+                    montoAbonado,
+                    metodoPago: 'mercadopago',
+                });
+
                 console.log("🌟 [WEBHOOK] Pack de créditos entregado y guardado con éxito.");
             }
         }
