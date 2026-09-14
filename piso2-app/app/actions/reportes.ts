@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { requireStaff } from '@/utils/auth-guard'
 
 const getAdminClient = () => {
     return createAdminClient(
@@ -11,6 +12,11 @@ const getAdminClient = () => {
 }
 
 export async function generarReporteMensualAction(mes: number, anio: number, companiasSeleccionadas: string[]) {
+    // Reporte financiero: solo staff (admin/recepción). Sin esto, cualquier
+    // usuario logueado podía disparar el reporte completo vía la server action.
+    const guard = await requireStaff()
+    if (!guard.ok) return { success: false, error: guard.error }
+
     const supabase = getAdminClient()
 
     try {
