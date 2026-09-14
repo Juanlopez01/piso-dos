@@ -23,36 +23,7 @@ import Lightbox, { type MediaItem, esVideoArchivo } from '@/components/Lightbox'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['500', '600', '700'] })
 
-type Talento = {
-    id: string
-    nombre: string
-    categoria: 'mujeres' | 'varones' | 'obras'
-    disciplina: string | null
-    bio: string | null
-    fotos: string[]
-    video_url: string | null
-    videos: string[] | null
-    destacado: boolean
-    activo: boolean
-    orden: number
-}
-
-const CATS = [
-    { key: 'mujeres', label: 'Mujeres' },
-    { key: 'varones', label: 'Varones' },
-    { key: 'obras', label: 'Obras / Compañías' },
-] as const
-
-const DISCIPLINAS = ['Bailarín/a', 'Acróbata', 'Modelo', 'Cantante', 'Músico/a', 'Influencer', 'Actor/Actriz']
-
-const formVacio = () => ({
-    id: undefined as string | undefined,
-    nombre: '', categoria: 'mujeres' as 'mujeres' | 'varones' | 'obras',
-    disciplina: '', bio: '', fotos: [] as string[], videos: ['', '', ''] as string[],
-    destacado: false, activo: true, orden: 0
-})
-
-const inputCls = "w-full bg-white border border-neutral-300 rounded-lg px-4 py-3 text-sm text-neutral-900 outline-none focus:border-black transition-colors mt-1"
+import { CATS, DISCIPLINAS, formVacio, inputCls, type Talento } from './constants'
 
 export default function TalentsAdminPage() {
     const [supabase] = useState(() => createClient())
