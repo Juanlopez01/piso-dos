@@ -467,21 +467,31 @@ function UsuariosContent() {
 
             const { data: packsPagos } = await supabase
                 .from('alumno_packs')
-                .select('id, monto_abonado, created_at, tipo_clase')
+                .select('id, monto_abonado, precio_total, created_at, tipo_clase, producto:productos(nombre)')
                 .eq('user_id', user.id)
                 .order('created_at', { ascending: false })
                 .limit(15)
 
             if (packsPagos) {
-                const mapeadosPacks = packsPagos.map((p: any) => ({
-                    id: `pack-${p.id}`,
-                    concepto: p.tipo_clase === 'exclusivo' ? 'Pase Exclusivo' : `Pack de Clases (${p.tipo_clase})`,
-                    monto: p.monto_abonado,
-                    metodo_pago: 'Sistema',
-                    created_at: p.created_at,
-                    tipo: 'ingreso',
-                    source: 'pack'
-                }))
+                const mapeadosPacks = packsPagos.map((p: any) => {
+                    const abonado = Number(p.monto_abonado) || 0
+                    const total = Number(p.precio_total ?? p.monto_abonado) || 0
+                    const deuda = Math.max(0, total - abonado)
+                    const nombreProd = Array.isArray(p.producto) ? p.producto[0]?.nombre : p.producto?.nombre
+                    return {
+                        id: `pack-${p.id}`,
+                        concepto: nombreProd || (p.tipo_clase === 'exclusivo' ? 'Pase Exclusivo' : `Pack de Clases (${p.tipo_clase})`),
+                        monto: p.monto_abonado,
+                        metodo_pago: 'Sistema',
+                        created_at: p.created_at,
+                        tipo: 'ingreso',
+                        source: 'pack',
+                        // Estado de pago del pack, para ver si saldó el adeuda de un vistazo.
+                        total_pack: total,
+                        deuda_pack: deuda,
+                        saldado: deuda <= 0
+                    }
+                })
                 todosLosPagos = [...todosLosPagos, ...mapeadosPacks];
             }
 
@@ -1218,6 +1228,13 @@ function UsuariosContent() {
                                                                     <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded ${mov.metodo_pago?.toLowerCase() === 'efectivo' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'}`}>
                                                                         {mov.metodo_pago}
                                                                     </span>
+                                                                    {mov.source === 'pack' && (
+                                                                        mov.saldado ? (
+                                                                            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-[#D4E655]/15 text-[#D4E655]">Saldado</span>
+                                                                        ) : (
+                                                                            <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">Debe ${Number(mov.deuda_pack).toLocaleString()}</span>
+                                                                        )
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         </div>
