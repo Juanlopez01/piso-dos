@@ -71,6 +71,114 @@ export async function getConsultasAction(soloPendientes = true) {
     return { ok: true, consultas: conHilo }
 }
 
+// ============================================================================
+// FICHA DEL ALUMNO EN EL CHAT — matchear el contacto con un perfil y mostrar
+// créditos / deudas / packs / próximas clases al lado de la conversación.
+// ============================================================================
+
+// Busca perfiles por nombre, email o teléfono (para vincular a mano).
+export async function buscarPerfilesAction(q: string): Promise<{ ok: boolean; perfiles: any[] }> {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false, perfiles: [] }
+    const term = (q || '').trim()
+    if (term.length < 2) return { ok: true, perfiles: [] }
+    const admin = getAdminClient()
+    const soloDigitos = term.replace(/\D/g, '')
+    let query = admin.from('profiles').select('id, nombre_completo, email, telefono').limit(8)
+    if (soloDigitos.length >= 6) {
+        query = query.ilike('telefono', `%${soloDigitos.slice(-8)}%`)
+    } else {
+        query = query.or(`nombre_completo.ilike.%${term}%,email.ilike.%${term}%`)
+    }
+    const { data } = await query
+    return { ok: true, perfiles: data || [] }
+}
+
+// Devuelve el perfil vinculado a un contacto (si ya se vinculó antes).
+export async function getVinculoContactoAction(subscriberId: string): Promise<{ ok: boolean; perfilId: string | null }> {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false, perfilId: null }
+    if (!subscriberId) return { ok: true, perfilId: null }
+    const admin = getAdminClient()
+    const { data } = await admin.from('asistente_contacto_perfil').select('perfil_id').eq('subscriber_id', subscriberId).maybeSingle()
+    return { ok: true, perfilId: data?.perfil_id || null }
+}
+
+export async function vincularContactoAction(subscriberId: string, canal: string, perfilId: string): Promise<{ ok: boolean; error?: string }> {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false, error: perm.error }
+    if (!subscriberId || !perfilId) return { ok: false, error: 'Faltan datos.' }
+    const admin = getAdminClient()
+    const { error } = await admin.from('asistente_contacto_perfil').upsert({
+        subscriber_id: subscriberId, canal, perfil_id: perfilId, vinculado_por: perm.userId, created_at: new Date().toISOString(),
+    }, { onConflict: 'subscriber_id' })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
+}
+
+export async function desvincularContactoAction(subscriberId: string): Promise<{ ok: boolean }> {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false }
+    const admin = getAdminClient()
+    await admin.from('asistente_contacto_perfil').delete().eq('subscriber_id', subscriberId)
+    return { ok: true }
+}
+
+// Ficha resumida del alumno: créditos, packs (con deuda), próximas clases.
+export async function getFichaAlumnoAction(perfilId: string): Promise<{ ok: boolean; ficha?: any; error?: string }> {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false, error: perm.error }
+    if (!perfilId) return { ok: false, error: 'Falta el alumno.' }
+    const admin = getAdminClient()
+
+    const { data: p } = await admin.from('profiles')
+        .select('id, nombre_completo, email, telefono, creditos_regulares, creditos_especiales')
+        .eq('id', perfilId).maybeSingle()
+    if (!p) return { ok: false, error: 'Perfil no encontrado.' }
+
+    const [{ data: pases }, { data: packs }, { data: insc }] = await Promise.all([
+        admin.from('pases_exclusivos').select('pase_referencia, cantidad').eq('usuario_id', perfilId).gt('cantidad', 0),
+        admin.from('alumno_packs').select('id, tipo_clase, creditos_restantes, cantidad_inicial, precio_total, monto_abonado, estado, fecha_compra, producto:productos(nombre)').eq('user_id', perfilId).order('fecha_compra', { ascending: false }).limit(12),
+        admin.from('inscripciones').select('clase_id, clase:clases(nombre, inicio, cancelada)').eq('user_id', perfilId).limit(200),
+    ])
+
+    const ahora = Date.now()
+    const packsResumen = (packs || [])
+        .map((pk: any) => {
+            const total = Number(pk.precio_total ?? pk.monto_abonado) || 0
+            const deuda = Math.max(0, total - (Number(pk.monto_abonado) || 0))
+            const nombre = Array.isArray(pk.producto) ? pk.producto[0]?.nombre : pk.producto?.nombre
+            return { nombre: nombre || `Pack ${pk.tipo_clase}`, restantes: pk.creditos_restantes, inicial: pk.cantidad_inicial, deuda, estado: pk.estado }
+        })
+        .filter((pk: any) => pk.restantes > 0 || pk.deuda > 0)
+    const deudaTotal = packsResumen.reduce((s: number, pk: any) => s + pk.deuda, 0)
+
+    const proximas = (insc || [])
+        .map((i: any) => (Array.isArray(i.clase) ? i.clase[0] : i.clase))
+        .filter((c: any) => c && !c.cancelada && new Date(c.inicio).getTime() >= ahora)
+        .sort((a: any, b: any) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime())
+        .slice(0, 6)
+        .map((c: any) => ({ nombre: c.nombre, inicio: c.inicio }))
+
+    return {
+        ok: true,
+        ficha: {
+            id: p.id,
+            nombre: p.nombre_completo,
+            email: p.email,
+            telefono: p.telefono,
+            creditos: {
+                regulares: p.creditos_regulares || 0,
+                especiales: p.creditos_especiales || 0,
+                pases: (pases || []).map((x: any) => ({ referencia: x.pase_referencia, cantidad: x.cantidad })),
+            },
+            packs: packsResumen,
+            deudaTotal,
+            proximas,
+        },
+    }
+}
+
 // Conteo liviano de consultas pendientes (para el contador del menú, polleado).
 export async function getConsultasPendientesCountAction(): Promise<{ ok: boolean; count: number }> {
     const perm = await requireStaff()

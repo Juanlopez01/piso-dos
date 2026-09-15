@@ -8,6 +8,7 @@ import {
     getAsistenteStatsAction, getContactosAction, getConversacionContactoAction,
     getConocimientoAction, guardarConocimientoAction, toggleConocimientoAction, eliminarConocimientoAction,
 } from '@/app/actions/consultas'
+import FichaAlumno from './FichaAlumno'
 
 // Estilo por canal (para separar visualmente IG / WhatsApp con el mismo formato).
 type CanalId = 'instagram' | 'whatsapp'
@@ -395,6 +396,9 @@ export default function ConsultasPage() {
 
                                         {isOpen && (
                                             <div className="px-4 pb-4 border-t border-white/5">
+                                                <div className="pt-3">
+                                                    <FichaAlumno subscriberId={c.subscriber_id} canal={c.canal} contactoNombre={c.contacto_nombre} />
+                                                </div>
                                                 <div className="space-y-2 py-3">
                                                     {c.mensajes.map((m, i) => {
                                                         const mine = m.de === 'recep'
