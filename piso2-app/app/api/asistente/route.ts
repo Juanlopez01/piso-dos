@@ -39,11 +39,14 @@ function extraerPregunta(body: any, req: NextRequest): string {
 async function getHistorial(subId: string): Promise<{ de: string; texto: string; created_at: string }[]> {
     try {
         const admin = getAdminClient()
-        const desde = new Date(Date.now() - 3 * 3600_000).toISOString() // últimas 3hs
+        // Ventana amplia para que el bot NO pierda el contexto de la charla:
+        // últimos 7 días y hasta 30 mensajes (antes eran 3hs / 12, se olvidaba
+        // apenas la conversación se estiraba o el contacto volvía más tarde).
+        const desde = new Date(Date.now() - 7 * 24 * 3600_000).toISOString()
         const { data } = await admin.from('asistente_historial')
             .select('de, texto, created_at')
             .eq('subscriber_id', subId).gte('created_at', desde)
-            .order('created_at', { ascending: false }).limit(12)
+            .order('created_at', { ascending: false }).limit(30)
         return (data || []).reverse()
     } catch { return [] }
 }

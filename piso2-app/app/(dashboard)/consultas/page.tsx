@@ -80,6 +80,9 @@ export default function ConsultasPage() {
     const [sugiriendo, setSugiriendo] = useState<string | null>(null) // id de consulta sugiriendo
     const [subiendoImg, setSubiendoImg] = useState(false)
     const [supabaseBrowser] = useState(() => createClient())
+    const [histOpen, setHistOpen] = useState<string | null>(null) // consulta con historial completo abierto
+    const [histMsgs, setHistMsgs] = useState<Msg[]>([])
+    const [cargandoHist, setCargandoHist] = useState(false)
 
     const pendientesCount = consultas.filter(c => c.estado === 'pendiente').length
 
@@ -245,6 +248,14 @@ export default function ConsultasPage() {
         if (r.ok && r.texto) setRespuesta(r.texto)
         else toast.error(r.error || 'No se pudo generar la sugerencia')
         setSugiriendo(null)
+    }
+    const verHistorialCompleto = async (c: Consulta) => {
+        if (histOpen === c.id) { setHistOpen(null); return }
+        if (!c.subscriber_id) { toast.error('Este contacto no tiene historial guardado.'); return }
+        setCargandoHist(true); setHistOpen(c.id); setHistMsgs([])
+        const r = await getConversacionContactoAction(c.subscriber_id)
+        if (r.ok) setHistMsgs(r.mensajes as Msg[]); else { toast.error(r.error || 'No se pudo cargar el historial'); setHistOpen(null) }
+        setCargandoHist(false)
     }
     const enviarImagen = async (c: Consulta, file: File) => {
         if (!file) return
@@ -412,6 +423,8 @@ export default function ConsultasPage() {
                                 const isOpen = abierta === c.id
                                 const nombre = c.contacto_nombre || c.contacto_usuario || 'Contacto'
                                 const ci = canalInfo(c.canal)
+                                const verHist = histOpen === c.id
+                                const msgs = verHist ? histMsgs : c.mensajes
                                 return (
                                     <div key={c.id} className={`bg-[#09090b] border rounded-2xl overflow-hidden transition-colors ${isOpen ? 'border-[#D4E655]/40' : 'border-white/10'}`}>
                                         <button onClick={() => { setAbierta(isOpen ? null : c.id); setRespuesta('') }} className="w-full text-left p-4 flex items-start gap-3">
@@ -435,8 +448,15 @@ export default function ConsultasPage() {
                                                 <div className="pt-3">
                                                     <FichaAlumno subscriberId={c.subscriber_id} canal={c.canal} contactoNombre={c.contacto_nombre} />
                                                 </div>
-                                                <div className="space-y-2 py-3">
-                                                    {c.mensajes.map((m, i) => {
+                                                <div className="flex items-center justify-between py-2">
+                                                    <button onClick={() => verHistorialCompleto(c)} className="text-[10px] font-bold uppercase tracking-wide text-gray-400 hover:text-[#D4E655] flex items-center gap-1.5">
+                                                        <Clock size={12} /> {verHist ? 'Ver solo esta consulta' : 'Ver charla completa'}
+                                                        {cargandoHist && verHist && <Loader2 size={11} className="animate-spin" />}
+                                                    </button>
+                                                    {verHist && <span className="text-[9px] text-gray-600 uppercase">{histMsgs.length} mensajes</span>}
+                                                </div>
+                                                <div className="space-y-2 pb-3">
+                                                    {msgs.map((m, i) => {
                                                         const mine = m.de === 'recep'
                                                         return (
                                                             <div key={i} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
@@ -453,7 +473,8 @@ export default function ConsultasPage() {
                                                             </div>
                                                         )
                                                     })}
-                                                    {c.mensajes.length === 0 && <p className="text-xs text-gray-500">{c.consulta}</p>}
+                                                    {!verHist && msgs.length === 0 && <p className="text-xs text-gray-500">{c.consulta}</p>}
+                                                    {verHist && !cargandoHist && msgs.length === 0 && <p className="text-xs text-gray-500">Sin historial previo con este contacto.</p>}
                                                 </div>
 
                                                 <div className="flex flex-wrap gap-1.5 mb-2">

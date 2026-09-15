@@ -409,10 +409,13 @@ export async function getConversacionContactoAction(subscriberId: string) {
     if (!perm.ok) return { ok: false as const, error: perm.error, mensajes: [] as any[] }
     if (!subscriberId) return { ok: false as const, error: 'Falta el contacto', mensajes: [] as any[] }
     const admin = getAdminClient()
+    // Traemos los 300 MÁS RECIENTES (desc + limit) y los devolvemos en orden
+    // cronológico. Antes traía los 300 más viejos → en contactos muy charlatanes
+    // se perdían los mensajes recientes.
     const { data } = await admin.from('asistente_historial')
         .select('de, texto, created_at').eq('subscriber_id', subscriberId)
-        .order('created_at', { ascending: true }).limit(300)
-    return { ok: true as const, mensajes: (data || []) as any[] }
+        .order('created_at', { ascending: false }).limit(300)
+    return { ok: true as const, mensajes: ((data || []) as any[]).reverse() }
 }
 
 // ============================================================================
