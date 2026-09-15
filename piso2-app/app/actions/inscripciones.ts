@@ -68,14 +68,33 @@ export async function checkAlumnoPackActivoAction(userId: string, claseId: strin
     }
 }
 
-// Arranca la vigencia de un pack en su primera clase usada (si aún no arrancó).
+// Arranca (o corrige) la vigencia de un pack en su PRIMERA clase usada.
+// Toma siempre la clase más antigua entre: la que se está reservando ahora, la
+// que ya estaba registrada, y cualquier clase ya inscripta con este pack. Así,
+// conversiones (suelta→pack) o reservas fuera de orden no corren el vencimiento.
 async function iniciarVigenciaPack(admin: any, packId: string | null | undefined, claseInicioISO: string | null | undefined) {
-    if (!packId || !claseInicioISO) return
+    if (!packId) return
     const { data: pk } = await admin.from('alumno_packs').select('fecha_compra, fecha_primera_asistencia').eq('id', packId).maybeSingle()
-    if (!pk || pk.fecha_primera_asistencia) return // ya arrancó
+    if (!pk) return
+
+    const candidatos: number[] = []
+    if (claseInicioISO) candidatos.push(new Date(claseInicioISO).getTime())
+    if (pk.fecha_primera_asistencia) candidatos.push(new Date(pk.fecha_primera_asistencia).getTime())
+    const { data: insc } = await admin.from('inscripciones').select('clase:clases(inicio)').eq('pack_usado_id', packId)
+    for (const i of (insc || []) as any[]) {
+        const c = Array.isArray(i.clase) ? i.clase[0] : i.clase
+        if (c?.inicio) candidatos.push(new Date(c.inicio).getTime())
+    }
+    if (!candidatos.length) return
+
+    const minMs = Math.min(...candidatos)
+    // Ya está en el mínimo → nada que hacer.
+    if (pk.fecha_primera_asistencia && new Date(pk.fecha_primera_asistencia).getTime() === minMs) return
+
+    const primera = new Date(minMs).toISOString()
     await admin.from('alumno_packs').update({
-        fecha_primera_asistencia: claseInicioISO,
-        fecha_vencimiento: calcVencimientoPack(pk.fecha_compra || new Date().toISOString(), claseInicioISO),
+        fecha_primera_asistencia: primera,
+        fecha_vencimiento: calcVencimientoPack(pk.fecha_compra || new Date().toISOString(), primera),
     }).eq('id', packId)
 }
 

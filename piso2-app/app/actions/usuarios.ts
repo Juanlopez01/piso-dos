@@ -442,6 +442,23 @@ export async function convertirSueltaAPackAction(packId: string, nuevoProductoId
         }).eq('id', packId)
         if (errPack) throw new Error('Error al actualizar el pack')
 
+        // Recalcular vigencia desde la clase MÁS ANTIGUA del pack (30 días desde
+        // la 1ª clase, tope compra+60). Al convertir una suelta ya usada, la
+        // vigencia debe contar desde esa primera clase, no desde la conversión.
+        {
+            const { data: inscP } = await supabaseAdmin.from('inscripciones').select('clase:clases(inicio)').eq('pack_usado_id', packId)
+            const inicios = (inscP || []).map((i: any) => (Array.isArray(i.clase) ? i.clase[0] : i.clase)?.inicio).filter(Boolean).map((s: string) => new Date(s).getTime())
+            if (inicios.length) {
+                const DIA = 864e5
+                const primera = Math.min(...inicios)
+                const compraMs = new Date(packActual.fecha_compra || new Date().toISOString()).getTime()
+                const vto = new Date(Math.min(compraMs + 60 * DIA, primera + 30 * DIA)).toISOString()
+                await supabaseAdmin.from('alumno_packs').update({
+                    fecha_primera_asistencia: new Date(primera).toISOString(), fecha_vencimiento: vto,
+                }).eq('id', packId)
+            }
+        }
+
         // Sumamos los créditos extra al alumno (mismo canal que una compra normal)
         if (nuevoProd.tipo_clase === 'exclusivo') {
             const { error } = await supabaseAdmin.rpc('cargar_pase_exclusivo_manual', {
