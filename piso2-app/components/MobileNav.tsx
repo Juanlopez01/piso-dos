@@ -7,6 +7,7 @@ import { Menu, X, LogOut, UserCircle, Shield, Radio, LogIn, UsersRound, Zap, Key
 import { createClient } from '@/utils/supabase/client'
 import { menuItems } from '@/config/menu'
 import { useCash } from '@/context/CashContext'
+import { getConsultasPendientesCountAction } from '@/app/actions/consultas'
 import { toast } from 'sonner'
 
 function MobileNavContent() {
@@ -14,6 +15,7 @@ function MobileNavContent() {
     const pathname = usePathname()
     const searchParams = useSearchParams()
     const [unreadNotifs, setUnreadNotifs] = useState(0)
+    const [consultasPend, setConsultasPend] = useState(0)
     const [isLoggingOut, setIsLoggingOut] = useState(false)
 
     const [supabase] = useState(() => createClient())
@@ -36,6 +38,19 @@ function MobileNavContent() {
             fetchNotifs()
         }
     }, [pathname, isLoading, userId, userRole, supabase])
+
+    // Consultas pendientes (poll cada 20s), solo staff.
+    useEffect(() => {
+        if (isLoading || (userRole !== 'admin' && userRole !== 'recepcion')) return
+        let vivo = true
+        const traer = async () => {
+            const r = await getConsultasPendientesCountAction()
+            if (vivo && r.ok) setConsultasPend(r.count)
+        }
+        traer()
+        const id = setInterval(traer, 20000)
+        return () => { vivo = false; clearInterval(id) }
+    }, [isLoading, userRole, pathname])
 
     const visibleItems = menuItems.filter(item => {
         // Validación de permisos estricta
@@ -186,6 +201,11 @@ function MobileNavContent() {
                                     {item.name === 'Notificaciones' && unreadNotifs > 0 && (
                                         <span className={`ml-auto w-6 h-6 flex items-center justify-center rounded-full text-[10px] font-black ${isActive ? 'bg-black text-[#D4E655]' : 'bg-[#D4E655] text-black'}`}>
                                             {unreadNotifs}
+                                        </span>
+                                    )}
+                                    {item.name === 'Consultas' && consultasPend > 0 && (
+                                        <span className={`ml-auto min-w-6 h-6 px-1.5 flex items-center justify-center rounded-full text-[10px] font-black ${isActive ? 'bg-black text-[#D4E655]' : 'bg-red-500 text-white'}`}>
+                                            {consultasPend}
                                         </span>
                                     )}
                                 </Link>

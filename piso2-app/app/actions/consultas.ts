@@ -71,6 +71,17 @@ export async function getConsultasAction(soloPendientes = true) {
     return { ok: true, consultas: conHilo }
 }
 
+// Conteo liviano de consultas pendientes (para el contador del menú, polleado).
+export async function getConsultasPendientesCountAction(): Promise<{ ok: boolean; count: number }> {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false, count: 0 }
+    const admin = getAdminClient()
+    const { count } = await admin.from('asistente_consultas')
+        .select('id', { count: 'exact', head: true })
+        .eq('estado', 'pendiente')
+    return { ok: true, count: count || 0 }
+}
+
 export async function responderConsultaAction(consultaId: string, texto: string) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false, error: perm.error }

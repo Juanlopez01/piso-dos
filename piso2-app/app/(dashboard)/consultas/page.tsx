@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
@@ -96,14 +96,67 @@ export default function ConsultasPage() {
         return true
     })
 
-    const cargar = async () => {
-        setLoading(true)
-        const r = await getConsultasAction(soloPend)
-        if (r.ok) setConsultas(r.consultas as Consulta[])
-        else toast.error(r.error || 'Error al cargar')
-        setLoading(false)
+    // --- Aviso en tiempo real (polling liviano) ---------------------------------
+    // Detecta mensajes nuevos de contactos comparando el timestamp más reciente;
+    // al llegar uno nuevo suena un beep + notificación del navegador. Así recep no
+    // tiene que estar refrescando a mano.
+    const ultimoUsuarioRef = useRef<string>('')
+    const primeraCargaRef = useRef<boolean>(true)
+
+    const beep = () => {
+        try {
+            const AC = (window.AudioContext || (window as any).webkitAudioContext)
+            if (!AC) return
+            const ctx = new AC()
+            const o = ctx.createOscillator(); const g = ctx.createGain()
+            o.connect(g); g.connect(ctx.destination)
+            o.type = 'sine'; o.frequency.value = 880
+            g.gain.setValueAtTime(0.0001, ctx.currentTime)
+            g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02)
+            g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35)
+            o.start(); o.stop(ctx.currentTime + 0.36)
+            setTimeout(() => { try { ctx.close() } catch { } }, 600)
+        } catch { }
     }
-    useEffect(() => { cargar() }, [soloPend])
+    const notificar = (texto: string) => {
+        try {
+            if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+                new Notification('Nueva consulta · Piso 2', { body: texto.slice(0, 120) })
+            }
+        } catch { }
+    }
+    const detectarNuevos = (arr: Consulta[]) => {
+        let maxAt = ''
+        let ultimoTexto = ''
+        for (const c of arr) for (const m of c.mensajes) {
+            if (m.de === 'usuario' && m.created_at > maxAt) { maxAt = m.created_at; ultimoTexto = m.texto }
+        }
+        if (primeraCargaRef.current) { ultimoUsuarioRef.current = maxAt; primeraCargaRef.current = false; return }
+        if (maxAt && maxAt > ultimoUsuarioRef.current) {
+            ultimoUsuarioRef.current = maxAt
+            beep(); notificar(ultimoTexto || 'Tenés un mensaje nuevo de un contacto')
+        }
+    }
+
+    const cargar = async (silencioso = false) => {
+        if (!silencioso) setLoading(true)
+        const r = await getConsultasAction(soloPend)
+        if (r.ok) { setConsultas(r.consultas as Consulta[]); detectarNuevos(r.consultas as Consulta[]) }
+        else if (!silencioso) toast.error(r.error || 'Error al cargar')
+        if (!silencioso) setLoading(false)
+    }
+    useEffect(() => { primeraCargaRef.current = true; cargar() }, [soloPend])
+
+    // Pide permiso de notificaciones una vez.
+    useEffect(() => {
+        try { if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission() } catch { }
+    }, [])
+
+    // Refresco automático cada 12s (sin spinner) para ver mensajes nuevos solos.
+    useEffect(() => {
+        const id = setInterval(() => { void cargar(true) }, 12000)
+        return () => clearInterval(id)
+    }, [soloPend])
 
     const cargarConoc = async () => {
         setLoadingConoc(true)
@@ -304,7 +357,7 @@ export default function ConsultasPage() {
                             <button onClick={() => setSoloPend(v => !v)} className={`shrink-0 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide border transition-colors ${soloPend ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-300 border-white/10'}`}>
                                 {soloPend ? 'Pendientes' : 'Todas'}
                             </button>
-                            <button onClick={cargar} className="shrink-0 px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white"><RefreshCw size={16} /></button>
+                            <button onClick={() => cargar()} className="shrink-0 px-3 py-2.5 rounded-xl bg-[#111] border border-white/10 text-gray-300 hover:text-white"><RefreshCw size={16} /></button>
                         </div>
                         <CanalFiltro value={canal} onChange={setCanal} counts={contarPorCanal(consultas)} />
                     </div>
