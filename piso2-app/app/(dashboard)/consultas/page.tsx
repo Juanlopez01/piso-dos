@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power } from 'lucide-react'
+import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power, Sparkles, Zap } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
     getConsultasAction, responderConsultaAction, marcarResueltaAction,
     getAsistenteStatsAction, getContactosAction, getConversacionContactoAction,
     getConocimientoAction, guardarConocimientoAction, toggleConocimientoAction, eliminarConocimientoAction,
+    sugerirRespuestaAction,
 } from '@/app/actions/consultas'
 import FichaAlumno from './FichaAlumno'
 
@@ -37,7 +38,7 @@ type Contacto = { subscriber_id: string; canal: string; nombre: string | null; u
 
 const hora = (iso: string) => new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 type Tab = 'resumen' | 'bandeja' | 'contactos' | 'conocimiento'
-type Conocimiento = { id: string; tipo: 'info' | 'no_responder'; texto: string; activo: boolean; created_at: string }
+type Conocimiento = { id: string; tipo: 'info' | 'no_responder' | 'respuesta'; texto: string; activo: boolean; created_at: string }
 
 export default function ConsultasPage() {
     const [tab, setTab] = useState<Tab>('bandeja')
@@ -68,9 +69,10 @@ export default function ConsultasPage() {
     // Base de conocimiento del bot
     const [conoc, setConoc] = useState<Conocimiento[]>([])
     const [loadingConoc, setLoadingConoc] = useState(false)
-    const [nuevoTipo, setNuevoTipo] = useState<'info' | 'no_responder'>('info')
+    const [nuevoTipo, setNuevoTipo] = useState<'info' | 'no_responder' | 'respuesta'>('info')
     const [nuevoTexto, setNuevoTexto] = useState('')
     const [guardandoConoc, setGuardandoConoc] = useState(false)
+    const [sugiriendo, setSugiriendo] = useState<string | null>(null) // id de consulta sugiriendo
 
     const pendientesCount = consultas.filter(c => c.estado === 'pendiente').length
 
@@ -225,6 +227,17 @@ export default function ConsultasPage() {
         const r = await marcarResueltaAction(c.id, true)
         if (r.ok) { toast.success('Marcada como resuelta'); setConsultas(cs => soloPend ? cs.filter(x => x.id !== c.id) : cs.map(x => x.id === c.id ? { ...x, estado: 'resuelta' } : x)) }
         else toast.error(r.error || 'Error')
+    }
+
+    // Respuestas rápidas (plantillas activas) + borrador IA.
+    const respuestasRapidas = conoc.filter(k => k.tipo === 'respuesta' && k.activo)
+    useEffect(() => { void cargarConoc() }, [])   // precarga para tener las plantillas en la bandeja
+    const sugerir = async (c: Consulta) => {
+        setSugiriendo(c.id)
+        const r = await sugerirRespuestaAction(c.id)
+        if (r.ok && r.texto) setRespuesta(r.texto)
+        else toast.error(r.error || 'No se pudo generar la sugerencia')
+        setSugiriendo(null)
     }
 
     const TabBtn = ({ id, icon: Icon, label, badge }: { id: Tab; icon: any; label: string; badge?: number }) => (
@@ -414,6 +427,18 @@ export default function ConsultasPage() {
                                                     {c.mensajes.length === 0 && <p className="text-xs text-gray-500">{c.consulta}</p>}
                                                 </div>
 
+                                                <div className="flex flex-wrap gap-1.5 mb-2">
+                                                    <button onClick={() => sugerir(c)} disabled={sugiriendo === c.id}
+                                                        className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide px-2.5 py-1.5 rounded-lg bg-blue-500/15 text-blue-300 border border-blue-500/20 hover:bg-blue-500/25 transition-colors disabled:opacity-50">
+                                                        {sugiriendo === c.id ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Sugerir (IA)
+                                                    </button>
+                                                    {respuestasRapidas.map(r => (
+                                                        <button key={r.id} onClick={() => setRespuesta(r.texto)} title={r.texto}
+                                                            className="flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/20 hover:bg-[#D4E655]/20 transition-colors max-w-[180px]">
+                                                            <Zap size={11} className="shrink-0" /> <span className="truncate">{r.texto}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
                                                 <div className="flex gap-2 items-end">
                                                     <textarea value={respuesta} onChange={e => setRespuesta(e.target.value)} rows={1} placeholder={`Responder a ${nombre}…`} className="flex-1 bg-[#111] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-[#D4E655] resize-none" />
                                                     <button onClick={() => responder(c)} disabled={enviando || !respuesta.trim()} className="bg-[#D4E655] text-black w-11 h-11 rounded-xl flex items-center justify-center hover:bg-white transition-colors disabled:opacity-40 shrink-0">
@@ -493,15 +518,18 @@ export default function ConsultasPage() {
 
                     {/* Alta */}
                     <div className="rounded-2xl border border-white/10 bg-[#0b0b0d] p-4 mb-5">
-                        <div className="flex bg-[#111] rounded-xl border border-white/10 p-1 mb-3 max-w-md">
+                        <div className="flex bg-[#111] rounded-xl border border-white/10 p-1 mb-3 max-w-2xl">
                             <button onClick={() => setNuevoTipo('info')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${nuevoTipo === 'info' ? 'bg-[#D4E655] text-black' : 'text-gray-400'}`}>ℹ️ Info que el bot debe saber</button>
                             <button onClick={() => setNuevoTipo('no_responder')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${nuevoTipo === 'no_responder' ? 'bg-orange-500 text-white' : 'text-gray-400'}`}>🚫 Tema que NO debe contestar</button>
+                            <button onClick={() => setNuevoTipo('respuesta')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${nuevoTipo === 'respuesta' ? 'bg-blue-500 text-white' : 'text-gray-400'}`}>⚡ Respuesta rápida</button>
                         </div>
                         <textarea
                             value={nuevoTexto} onChange={e => setNuevoTexto(e.target.value)} rows={3}
                             placeholder={nuevoTipo === 'info'
                                 ? 'Ej: "El seminario de contemporáneo del 20/9 arranca 18hs, cuesta $15.000, se paga en recepción."'
-                                : 'Ej: "clase de adrian manzano" · "precios de verano" — poné palabras clave del tema; si el mensaje las menciona, el bot no responde y deriva.'}
+                                : nuevoTipo === 'respuesta'
+                                    ? 'Ej: "¡Hola! Las clases de la semana son lunes y miércoles 19hs. Te esperamos 🙌" — texto listo para enviar de un clic desde la bandeja.'
+                                    : 'Ej: "clase de adrian manzano" · "precios de verano" — poné palabras clave del tema; si el mensaje las menciona, el bot no responde y deriva.'}
                             className="w-full bg-black border border-white/10 rounded-xl py-2.5 px-3 text-sm outline-none focus:border-[#D4E655] resize-y"
                         />
                         <div className="flex justify-end mt-2">
@@ -520,7 +548,7 @@ export default function ConsultasPage() {
                         <div className="space-y-2">
                             {conoc.map(c => (
                                 <div key={c.id} className={`bg-[#09090b] border rounded-2xl p-4 flex items-start gap-3 ${c.activo ? 'border-white/10' : 'border-white/5 opacity-50'}`}>
-                                    <span className={`text-[8px] px-2 py-1 rounded-full uppercase font-black shrink-0 ${c.tipo === 'info' ? 'bg-[#D4E655]/15 text-[#D4E655]' : 'bg-orange-500/15 text-orange-400'}`}>{c.tipo === 'info' ? 'Info' : 'No responde'}</span>
+                                    <span className={`text-[8px] px-2 py-1 rounded-full uppercase font-black shrink-0 ${c.tipo === 'info' ? 'bg-[#D4E655]/15 text-[#D4E655]' : c.tipo === 'respuesta' ? 'bg-blue-500/15 text-blue-300' : 'bg-orange-500/15 text-orange-400'}`}>{c.tipo === 'info' ? 'Info' : c.tipo === 'respuesta' ? 'Respuesta' : 'No responde'}</span>
                                     <p className="flex-1 text-sm text-gray-200 whitespace-pre-wrap">{c.texto}</p>
                                     <div className="flex items-center gap-1 shrink-0">
                                         <button onClick={() => toggleConoc(c)} title={c.activo ? 'Desactivar' : 'Activar'} className={`p-1.5 rounded-lg ${c.activo ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-gray-500 hover:bg-white/5'}`}><Power size={14} /></button>

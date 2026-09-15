@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { responderAsistente } from '@/app/actions/_asistente-core'
 
 const getAdminClient = () => createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -176,6 +177,35 @@ export async function getFichaAlumnoAction(perfilId: string): Promise<{ ok: bool
             deudaTotal,
             proximas,
         },
+    }
+}
+
+// Borrador sugerido por la IA: usa el mismo cerebro del bot sobre la
+// conversación para dejar escrita una respuesta que recep edita y envía.
+export async function sugerirRespuestaAction(consultaId: string): Promise<{ ok: boolean; texto?: string; error?: string }> {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false, error: perm.error }
+    const admin = getAdminClient()
+    const { data: msgs } = await admin.from('asistente_consulta_mensajes')
+        .select('de, texto, created_at').eq('consulta_id', consultaId).order('created_at')
+    const historial = (msgs || []).map((m: any) => ({ de: m.de as string, texto: m.texto as string }))
+
+    // La pregunta = último mensaje del usuario; si no hay, la consulta original.
+    const ultimoUsuario = [...(msgs || [])].reverse().find((m: any) => m.de === 'usuario')
+    let pregunta = ultimoUsuario?.texto || ''
+    if (!pregunta) {
+        const { data: c } = await admin.from('asistente_consultas').select('consulta').eq('id', consultaId).maybeSingle()
+        pregunta = c?.consulta || ''
+    }
+    if (!pregunta) return { ok: false, error: 'No hay una pregunta para sugerir una respuesta.' }
+
+    // Historial sin el último mensaje (que es la pregunta actual).
+    const hist = historial.slice(0, Math.max(0, historial.length - 1))
+    try {
+        const r = await responderAsistente(pregunta, hist)
+        return { ok: true, texto: r.respuesta }
+    } catch (e: any) {
+        return { ok: false, error: e?.message || 'No se pudo generar la sugerencia.' }
     }
 }
 
@@ -365,12 +395,12 @@ export async function getConocimientoAction() {
     return { ok: true as const, items: (data || []) as any[] }
 }
 
-export async function guardarConocimientoAction(input: { id?: string; tipo: 'info' | 'no_responder'; texto: string }) {
+export async function guardarConocimientoAction(input: { id?: string; tipo: 'info' | 'no_responder' | 'respuesta'; texto: string }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const texto = (input.texto || '').trim()
     if (!texto) return { ok: false as const, error: 'Escribí el texto.' }
-    if (!['info', 'no_responder'].includes(input.tipo)) return { ok: false as const, error: 'Tipo inválido.' }
+    if (!['info', 'no_responder', 'respuesta'].includes(input.tipo)) return { ok: false as const, error: 'Tipo inválido.' }
     const admin = getAdminClient()
     if (input.id) {
         const { error } = await admin.from('asistente_conocimiento').update({ tipo: input.tipo, texto }).eq('id', input.id)
