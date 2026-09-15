@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { autoInscribirEspecial } from '@/app/actions/_auto-inscribir-especial';
+import { sincronizarCreditosDePacks } from '@/app/actions/_creditos';
 
 const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -272,6 +273,8 @@ export async function POST(request: Request) {
                             }
                             // 'ninguna' → no se entrega nada, solo queda registrada la venta.
                         }
+                        // Reconciliar el contador del perfil con los packs (fuente de verdad).
+                        await sincronizarCreditosDePacks(supabase, userIdFinal);
                         console.log(`🔗 [WEBHOOK] Ítems de la venta ${metadata.venta_id} entregados.`);
                     } catch (e: any) {
                         console.error('❌ [WEBHOOK] Error entregando ítems de la venta:', e?.message);
@@ -386,6 +389,9 @@ export async function POST(request: Request) {
                     montoAbonado,
                     metodoPago: 'mercadopago',
                 });
+
+                // 5. Reconciliar el contador del perfil con los packs (fuente de verdad).
+                await sincronizarCreditosDePacks(supabase, userIdFinal);
 
                 console.log("🌟 [WEBHOOK] Pack de créditos entregado y guardado con éxito.");
             }

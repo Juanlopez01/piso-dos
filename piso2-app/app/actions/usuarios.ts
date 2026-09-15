@@ -6,6 +6,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { v4 as uuidv4 } from 'uuid'
 import { revalidatePath } from 'next/cache'
 import { autoInscribirEspecial } from '@/app/actions/_auto-inscribir-especial'
+import { sincronizarCreditosDePacks } from '@/app/actions/_creditos'
 
 // 🚀 CLIENTE DIOS: Para operaciones que requieren bypass de RLS
 const getAdminClient = () => {
@@ -366,6 +367,8 @@ export async function asignarPackAction(
             metodoPago: metodoPago,
         });
 
+        // Reconciliar el contador del perfil con los packs (fuente de verdad).
+        await sincronizarCreditosDePacks(supabaseAdmin, usuarioId)
         revalidatePath('/usuarios')
         return { success: true }
     } catch (error: any) {
@@ -453,6 +456,8 @@ export async function convertirSueltaAPackAction(packId: string, nuevoProductoId
             if (error) throw new Error('Error al sumar los créditos al perfil')
         }
 
+        // Reconciliar el contador del perfil con los packs (fuente de verdad).
+        await sincronizarCreditosDePacks(supabaseAdmin, usuarioId)
         revalidatePath('/usuarios')
         return { success: true }
     } catch (error: any) {

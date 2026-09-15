@@ -4,6 +4,7 @@ import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
 import { crearAlumnoDesdeRecepcionAction } from './usuarios'
+import { sincronizarCreditosDePacks } from './_creditos'
 
 // 🚀 CLIENTE DIOS: Bypassea los escudos de seguridad (RLS)
 const getAdminClient = () => {
@@ -239,6 +240,8 @@ export async function eliminarInscripcionAction(inscripcionId: string) {
         }
     }
 
+    // Reconciliar el contador del perfil con los packs (fuente de verdad).
+    await sincronizarCreditosDePacks(supabaseAdmin, inscripcion?.user_id)
     return { success: true }
 }
 
@@ -620,6 +623,8 @@ export async function procesarInscripcionAction(payload: any) {
             } catch (errBatch) { console.error("Error silencioso en Auto-Batch:", errBatch); }
         }
 
+        // Reconciliar el contador del perfil con los packs (fuente de verdad).
+        await sincronizarCreditosDePacks(supabaseAdmin, payload.p_user_id)
         return { success: true }
 
     } catch (error: any) {
@@ -871,6 +876,8 @@ export async function convertirAsistenteAPackAction(payload: {
             await admin.from('profiles').update({ [campo]: (Number((perfil as any)?.[campo]) || 0) + delta }).eq('id', userId)
         }
 
+        // Reconciliar el contador del perfil con los packs (fuente de verdad).
+        await sincronizarCreditosDePacks(admin, userId)
         revalidatePath(`/clase/${insc.clase_id}`)
         revalidatePath('/usuarios')
         return { success: true }

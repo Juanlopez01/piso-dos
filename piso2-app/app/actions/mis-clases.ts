@@ -3,6 +3,7 @@
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
+import { sincronizarCreditosDePacks } from './_creditos'
 
 // 🚀 CLIENTE DIOS: Bypassea los escudos de seguridad (RLS)
 // Necesitamos usar esto porque el alumno al cancelar modifica tablas que quizás 
@@ -134,6 +135,8 @@ export async function cancelarReservaAction(inscripcionId: string, claseTipo: st
             }
         }
 
+        // Reconciliar el contador del perfil con los packs (fuente de verdad).
+        await sincronizarCreditosDePacks(supabaseAdmin, userId)
         revalidatePath('/mis-clases')
         return { success: true }
 

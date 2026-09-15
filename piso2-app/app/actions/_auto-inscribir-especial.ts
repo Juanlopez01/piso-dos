@@ -10,6 +10,8 @@
 // (service-role) ya creado por el llamador.
 // ============================================================================
 
+import { sincronizarCreditosDePacks } from './_creditos'
+
 type AdminClient = any
 
 export async function autoInscribirEspecial(
@@ -88,16 +90,12 @@ export async function autoInscribirEspecial(
         const { error: errInsc } = await admin.from('inscripciones').insert(filas)
         if (errInsc) { console.error('autoInscribirEspecial insert:', errInsc.message); return null }
 
-        // Consumir los créditos usados (evita créditos fantasma en el perfil):
-        // el pack queda agotado y se descuenta del contador del perfil solo lo
-        // efectivamente inscripto.
+        // Consumir los créditos usados: el pack queda agotado y el contador del
+        // perfil se reconcilia con los packs (fuente de verdad).
         if (packId) {
             await admin.from('alumno_packs').update({ creditos_restantes: 0, estado: 'agotado' }).eq('id', packId)
         }
-        const campo = String(prod.tipo_clase) === 'regular' ? 'creditos_regulares' : 'creditos_especiales'
-        const { data: perfil } = await admin.from('profiles').select(campo).eq('id', userId).single()
-        const actual = Number((perfil as any)?.[campo]) || 0
-        await admin.from('profiles').update({ [campo]: Math.max(0, actual - aInscribir.length) }).eq('id', userId)
+        await sincronizarCreditosDePacks(admin, userId)
 
         return { inscritas: aInscribir.length }
     } catch (e) {

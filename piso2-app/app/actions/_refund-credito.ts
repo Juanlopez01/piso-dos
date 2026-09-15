@@ -9,6 +9,7 @@
 // Ojo: este archivo NO lleva 'use server' a propósito — no es una server
 // action, es una utilidad interna que recibe el cliente admin por parámetro.
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { sincronizarCreditosDePacks } from './_creditos'
 
 export const MODALIDADES_CON_CREDITO = ['Crédito', 'Pack', 'Pase Exclusivo', 'Pase Exclusivo (Pack)']
 
@@ -109,4 +110,7 @@ export async function devolverCreditoDeInscripcion(admin: SupabaseClient, insc: 
             }
         }
     }
+
+    // Reconciliar el contador del perfil con los packs (fuente de verdad).
+    await sincronizarCreditosDePacks(admin, insc.user_id)
 }

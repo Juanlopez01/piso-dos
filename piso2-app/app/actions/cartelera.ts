@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { sincronizarCreditosDePacks } from './_creditos'
 
 // 🚀 CLIENTE DIOS: Bypassea los escudos de seguridad (RLS) para poder descontar packs
 const getAdminClient = () => {
@@ -169,6 +170,8 @@ export async function inscribirAlumnoAction(claseId: string, tipoClase: string, 
 
         if (errInsc) throw new Error(errInsc.message);
 
+        // Reconciliar el contador del perfil con los packs (fuente de verdad).
+        await sincronizarCreditosDePacks(supabaseAdmin, uid)
         return { success: true, message: '¡Te has inscripto correctamente!' };
 
     } catch (error: any) {
