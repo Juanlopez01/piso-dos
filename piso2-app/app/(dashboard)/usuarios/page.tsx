@@ -342,9 +342,9 @@ function UsuariosContent() {
 
             const { data: packsPagos } = await supabase
                 .from('alumno_packs')
-                .select('id, monto_abonado, precio_total, created_at, tipo_clase, producto:productos(nombre)')
+                .select('id, monto_abonado, precio_total, fecha_compra, tipo_clase, producto:productos(nombre)')
                 .eq('user_id', user.id)
-                .order('created_at', { ascending: false })
+                .order('fecha_compra', { ascending: false })
                 .limit(15)
 
             if (packsPagos) {
@@ -358,7 +358,7 @@ function UsuariosContent() {
                         concepto: nombreProd || (p.tipo_clase === 'exclusivo' ? 'Pase Exclusivo' : `Pack de Clases (${p.tipo_clase})`),
                         monto: p.monto_abonado,
                         metodo_pago: 'Sistema',
-                        created_at: p.created_at,
+                        created_at: p.fecha_compra,
                         tipo: 'ingreso',
                         source: 'pack',
                         // Estado de pago del pack, para ver si saldó el adeuda de un vistazo.
