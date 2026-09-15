@@ -22,12 +22,15 @@ async function requireStaff() {
 
 // Envía un mensaje al contacto vía la API de ManyChat (llega a su DM de IG/WhatsApp).
 // Requiere env MANYCHAT_API_KEY. Devuelve { ok, error }.
-async function enviarPorManyChat(subscriberId: string, texto: string, canal = 'instagram'): Promise<{ ok: boolean; error?: string }> {
+async function enviarPorManyChat(subscriberId: string, texto: string, canal = 'instagram', imagenUrl?: string): Promise<{ ok: boolean; error?: string }> {
     const key = process.env.MANYCHAT_API_KEY
     if (!key) return { ok: false, error: 'Falta configurar MANYCHAT_API_KEY.' }
     if (!subscriberId) return { ok: false, error: 'La consulta no tiene ID de contacto (respondé desde ManyChat).' }
     try {
         const tipo = canal === 'whatsapp' ? 'whatsapp' : 'instagram'
+        const mensajes = imagenUrl
+            ? [{ type: 'image', url: imagenUrl }]
+            : [{ type: 'text', text: texto }]
         const resp = await fetch('https://api.manychat.com/fb/sending/sendContent', {
             method: 'POST',
             headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -35,7 +38,7 @@ async function enviarPorManyChat(subscriberId: string, texto: string, canal = 'i
                 // Sin message_tag (HUMAN_AGENT no está soportado): envío estándar,
                 // válido dentro de las 24hs del último mensaje de la persona.
                 subscriber_id: /^\d+$/.test(subscriberId) ? Number(subscriberId) : subscriberId,
-                data: { version: 'v2', content: { type: tipo, messages: [{ type: 'text', text: texto }] } },
+                data: { version: 'v2', content: { type: tipo, messages: mensajes } },
             }),
         })
         const json: any = await resp.json().catch(() => ({}))
@@ -247,6 +250,37 @@ export async function responderConsultaAction(consultaId: string, texto: string)
         await admin.from('asistente_pausa').upsert({
             subscriber_id: consulta.subscriber_id,
             pausado_hasta: new Date(Date.now() + PAUSA_HORAS * 3600_000).toISOString(),
+            updated_at: new Date().toISOString(),
+        }, { onConflict: 'subscriber_id' })
+    }
+    return { ok: true }
+}
+
+// Envía una IMAGEN al contacto (ya subida a Storage; recibimos la URL pública).
+export async function responderImagenAction(consultaId: string, imagenUrl: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false, error: perm.error }
+    if (!imagenUrl) return { ok: false, error: 'Falta la imagen.' }
+
+    const admin = getAdminClient()
+    const { data: consulta } = await admin.from('asistente_consultas')
+        .select('id, subscriber_id, canal').eq('id', consultaId).single()
+    if (!consulta) return { ok: false, error: 'Consulta no encontrada.' }
+
+    const envio = await enviarPorManyChat(consulta.subscriber_id, '', consulta.canal, imagenUrl)
+    if (!envio.ok) return { ok: false, error: envio.error }
+
+    // Guardamos el mensaje (el texto es la URL; el panel la muestra como imagen).
+    await admin.from('asistente_consulta_mensajes').insert({
+        consulta_id: consultaId, de: 'recep', texto: imagenUrl, autor_id: perm.userId,
+    })
+    await admin.from('asistente_consultas').update({ updated_at: new Date().toISOString() }).eq('id', consultaId)
+
+    // Mismo hand-off que al responder texto: pausamos el bot 24hs.
+    if (consulta.subscriber_id) {
+        await admin.from('asistente_pausa').upsert({
+            subscriber_id: consulta.subscriber_id,
+            pausado_hasta: new Date(Date.now() + 24 * 3600_000).toISOString(),
             updated_at: new Date().toISOString(),
         }, { onConflict: 'subscriber_id' })
     }

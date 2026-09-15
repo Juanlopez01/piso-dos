@@ -1,15 +1,20 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power, Sparkles, Zap } from 'lucide-react'
+import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power, Sparkles, Zap, Image as ImageIcon } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
+import { createClient } from '@/utils/supabase/client'
+import { optimizeImage } from '@/utils/optimizeImage'
 import {
     getConsultasAction, responderConsultaAction, marcarResueltaAction,
     getAsistenteStatsAction, getContactosAction, getConversacionContactoAction,
     getConocimientoAction, guardarConocimientoAction, toggleConocimientoAction, eliminarConocimientoAction,
-    sugerirRespuestaAction,
+    sugerirRespuestaAction, responderImagenAction,
 } from '@/app/actions/consultas'
 import FichaAlumno from './FichaAlumno'
+
+// ¿el texto del mensaje es una imagen (URL)? → se muestra como <img> en el hilo.
+const esImagenUrl = (t: string) => /^https?:\/\//.test(t || '') && (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(t) || t.includes('/storage/v1/object'))
 
 // Estilo por canal (para separar visualmente IG / WhatsApp con el mismo formato).
 type CanalId = 'instagram' | 'whatsapp'
@@ -73,6 +78,8 @@ export default function ConsultasPage() {
     const [nuevoTexto, setNuevoTexto] = useState('')
     const [guardandoConoc, setGuardandoConoc] = useState(false)
     const [sugiriendo, setSugiriendo] = useState<string | null>(null) // id de consulta sugiriendo
+    const [subiendoImg, setSubiendoImg] = useState(false)
+    const [supabaseBrowser] = useState(() => createClient())
 
     const pendientesCount = consultas.filter(c => c.estado === 'pendiente').length
 
@@ -238,6 +245,22 @@ export default function ConsultasPage() {
         if (r.ok && r.texto) setRespuesta(r.texto)
         else toast.error(r.error || 'No se pudo generar la sugerencia')
         setSugiriendo(null)
+    }
+    const enviarImagen = async (c: Consulta, file: File) => {
+        if (!file) return
+        setSubiendoImg(true)
+        try {
+            const opt = await optimizeImage(file, { maxDim: 1600, quality: 0.85 })
+            const path = `consultas/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`
+            const { error } = await supabaseBrowser.storage.from('talent').upload(path, opt)
+            if (error) throw new Error(error.message)
+            const url = supabaseBrowser.storage.from('talent').getPublicUrl(path).data.publicUrl
+            const r = await responderImagenAction(c.id, url)
+            if (!r.ok) throw new Error(r.error || 'No se pudo enviar')
+            toast.success('Imagen enviada')
+            setConsultas(cs => cs.map(x => x.id === c.id ? { ...x, mensajes: [...x.mensajes, { de: 'recep', texto: url, created_at: new Date().toISOString() }] } : x))
+        } catch (e: any) { toast.error(e.message || 'Error al enviar la imagen') }
+        setSubiendoImg(false)
     }
 
     const TabBtn = ({ id, icon: Icon, label, badge }: { id: Tab; icon: any; label: string; badge?: number }) => (
@@ -420,7 +443,13 @@ export default function ConsultasPage() {
                                                                 <span className="text-[9px] text-gray-500 uppercase tracking-wide mb-0.5 px-1">
                                                                     {mine ? 'Vos' : m.de === 'bot' ? '🤖 Asistente' : nombre}
                                                                 </span>
-                                                                <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap ${mine ? 'bg-[#D4E655] text-black rounded-tr-sm' : m.de === 'bot' ? 'bg-[#12203a] text-blue-100 rounded-tl-sm border border-blue-500/20' : 'bg-[#161616] text-gray-200 rounded-tl-sm'}`}>{m.texto}</div>
+                                                                {esImagenUrl(m.texto) ? (
+                                                                    <a href={m.texto} target="_blank" rel="noreferrer" className="block">
+                                                                        <img src={m.texto} alt="imagen" className="max-w-[180px] max-h-[220px] rounded-2xl border border-white/10 object-cover" />
+                                                                    </a>
+                                                                ) : (
+                                                                    <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap ${mine ? 'bg-[#D4E655] text-black rounded-tr-sm' : m.de === 'bot' ? 'bg-[#12203a] text-blue-100 rounded-tl-sm border border-blue-500/20' : 'bg-[#161616] text-gray-200 rounded-tl-sm'}`}>{m.texto}</div>
+                                                                )}
                                                             </div>
                                                         )
                                                     })}
@@ -441,6 +470,10 @@ export default function ConsultasPage() {
                                                 </div>
                                                 <div className="flex gap-2 items-end">
                                                     <textarea value={respuesta} onChange={e => setRespuesta(e.target.value)} rows={1} placeholder={`Responder a ${nombre}…`} className="flex-1 bg-[#111] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-[#D4E655] resize-none" />
+                                                    <label title="Enviar imagen" className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border border-white/10 transition-colors ${subiendoImg ? 'opacity-50' : 'cursor-pointer text-gray-300 bg-[#111] hover:text-white hover:border-white/30'}`}>
+                                                        {subiendoImg ? <Loader2 size={17} className="animate-spin" /> : <ImageIcon size={17} />}
+                                                        <input type="file" accept="image/*" hidden disabled={subiendoImg} onChange={e => { const f = e.target.files?.[0]; if (f) enviarImagen(c, f); e.currentTarget.value = '' }} />
+                                                    </label>
                                                     <button onClick={() => responder(c)} disabled={enviando || !respuesta.trim()} className="bg-[#D4E655] text-black w-11 h-11 rounded-xl flex items-center justify-center hover:bg-white transition-colors disabled:opacity-40 shrink-0">
                                                         {enviando ? <Loader2 size={17} className="animate-spin" /> : <Send size={17} />}
                                                     </button>
