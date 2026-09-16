@@ -867,94 +867,104 @@ function UsuariosContent() {
                                         </div>
                                     )}
 
-                                    <div className="flex gap-2 w-full flex-wrap">
-                                        <button onClick={() => openDetailModal(u)} className={`flex-1 py-2.5 rounded-xl border text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-2 ${u.staff_observations ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20' : 'bg-[#111] text-gray-400 border-white/5 hover:border-white/20 hover:text-white'}`}>
-                                            <IdCard size={14} /> Ficha Completa
-                                        </button>
+                                    {/* Acción principal: ficha completa, ancho completo */}
+                                    <button onClick={() => openDetailModal(u)} className={`w-full py-2.5 rounded-xl border text-[10px] font-black uppercase transition-colors flex items-center justify-center gap-2 ${u.staff_observations ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/20' : 'bg-[#111] text-gray-400 border-white/5 hover:border-white/20 hover:text-white'}`}>
+                                        <IdCard size={14} /> Ficha Completa
+                                    </button>
 
-                                        {/* Admin cambia cualquier rol. Recepción cambia todos MENOS admin (no toca admins). */}
-                                        {(isAdmin || (isRecep && u.rol !== 'admin')) && (
-                                            <div className="relative flex-1">
-                                                <select
-                                                    disabled={cambiandoRolId === u.id || (isRecep && ['admin', 'recepcion', 'auxiliar'].includes(u.rol))}
-                                                    value={u.rol || ''}
-                                                    onChange={(e) => cambiarRol(u.id, e.target.value)}
-                                                    className={`w-full h-full py-2.5 px-1 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoRolId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : 'bg-[#111] text-gray-300 border-white/5 hover:border-white/20 hover:text-white'}`}
-                                                >
-                                                    {/* Recep solo asigna: alumno, profe, coordinador, vendedor. El resto es admin-only. */}
-                                                    <option value="admin" disabled={!isAdmin}>Admin</option>
-                                                    <option value="recepcion" disabled={!isAdmin}>Recep.</option>
-                                                    <option value="auxiliar" disabled={!isAdmin}>Auxiliar</option>
-                                                    <option value="curador" disabled={!isAdmin}>Curador</option>
-                                                    <option value="coordinador">Coordinador</option>
-                                                    <option value="vendedor">Vendedor</option>
-                                                    <option value="profesor">Profe</option>
-                                                    <option value="alumno">Alumno</option>
-                                                </select>
-                                                {cambiandoRolId === u.id && <div className="absolute top-0 right-2 h-full flex items-center"><Loader2 size={12} className="animate-spin text-[#D4E655]" /></div>}
+                                    {/* Selects de rol / liga: en su propia grilla para que se lean completos */}
+                                    {(() => {
+                                        const puedeCambiarRol = isAdmin || (isRecep && u.rol !== 'admin')
+                                        const esAlumno = u.rol === 'alumno'
+                                        if (!puedeCambiarRol && !esAlumno) return null
+                                        return (
+                                            <div className={`grid gap-2 ${puedeCambiarRol && esAlumno ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                                {/* Admin cambia cualquier rol. Recepción cambia todos MENOS admin. */}
+                                                {puedeCambiarRol && (
+                                                    <div className="relative">
+                                                        <select
+                                                            disabled={cambiandoRolId === u.id || (isRecep && ['admin', 'recepcion', 'auxiliar'].includes(u.rol))}
+                                                            value={u.rol || ''}
+                                                            onChange={(e) => cambiarRol(u.id, e.target.value)}
+                                                            className={`w-full py-2.5 pl-3 pr-6 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none truncate ${cambiandoRolId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : 'bg-[#111] text-gray-300 border-white/5 hover:border-white/20 hover:text-white'}`}
+                                                        >
+                                                            {/* Recep solo asigna: alumno, profe, coordinador, vendedor. El resto es admin-only. */}
+                                                            <option value="admin" disabled={!isAdmin}>Admin</option>
+                                                            <option value="recepcion" disabled={!isAdmin}>Recep.</option>
+                                                            <option value="auxiliar" disabled={!isAdmin}>Auxiliar</option>
+                                                            <option value="curador" disabled={!isAdmin}>Curador</option>
+                                                            <option value="coordinador">Coordinador</option>
+                                                            <option value="vendedor">Vendedor</option>
+                                                            <option value="profesor">Profe</option>
+                                                            <option value="alumno">Alumno</option>
+                                                        </select>
+                                                        <ChevronDown size={12} className="absolute top-1/2 right-2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                                                        {cambiandoRolId === u.id && <div className="absolute top-0 right-6 h-full flex items-center"><Loader2 size={12} className="animate-spin text-[#D4E655]" /></div>}
+                                                    </div>
+                                                )}
+
+                                                {esAlumno && (
+                                                    <div className="relative">
+                                                        <select
+                                                            disabled={cambiandoLigaId === u.id}
+                                                            value={(u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') ? u.nivel_liga : ''}
+                                                            onChange={(e) => cambiarNivelLiga(u.id, e.target.value ? Number(e.target.value) : null)}
+                                                            className={`w-full py-2.5 pl-3 pr-6 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none truncate ${cambiandoLigaId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : (u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/30 hover:border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/5 hover:border-white/20 hover:text-white'}`}
+                                                        >
+                                                            <option value="">Sin Liga</option>
+                                                            <option value="1">Liga Nvl 1</option>
+                                                            <option value="2">Liga Nvl 2</option>
+                                                        </select>
+                                                        <ChevronDown size={12} className="absolute top-1/2 right-2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+                                                        {cambiandoLigaId === u.id && <div className="absolute top-0 right-6 h-full flex items-center"><Loader2 size={12} className="animate-spin text-[#D4E655]" /></div>}
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
+                                        )
+                                    })()}
 
-                                        {u.rol === 'alumno' && (
-                                            <div className="relative flex-1">
-                                                <select
-                                                    disabled={cambiandoLigaId === u.id}
-                                                    value={(u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') ? u.nivel_liga : ''}
-                                                    onChange={(e) => cambiarNivelLiga(u.id, e.target.value ? Number(e.target.value) : null)}
-                                                    className={`w-full h-full py-2.5 px-1 rounded-xl text-[10px] font-black uppercase transition-colors border cursor-pointer outline-none appearance-none text-center ${cambiandoLigaId === u.id ? 'bg-[#111] text-gray-600 border-white/5' : (u.nivel_liga === 1 || u.nivel_liga === 2 || u.nivel_liga === '1' || u.nivel_liga === '2') ? 'bg-[#D4E655]/10 text-[#D4E655] border-[#D4E655]/30 hover:border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/5 hover:border-white/20 hover:text-white'}`}
-                                                >
-                                                    <option value="">Sin Liga</option>
-                                                    <option value="1">Liga Nvl 1</option>
-                                                    <option value="2">Liga Nvl 2</option>
-                                                </select>
-                                                {cambiandoLigaId === u.id && <div className="absolute top-0 right-2 h-full flex items-center"><Loader2 size={12} className="animate-spin text-[#D4E655]" /></div>}
-                                            </div>
-                                        )}
-
-                                        {isAdmin && (
+                                    {/* Herramientas de admin: fila de íconos pareja */}
+                                    {isAdmin && (
+                                        <div className="flex gap-2">
                                             <button
                                                 onClick={() => resetearAcceso(u)}
                                                 disabled={reseteandoId === u.id}
                                                 title="Resetear acceso (corregir email / cambiar contraseña)"
-                                                className="shrink-0 w-9 flex items-center justify-center rounded-xl border border-blue-500/20 bg-blue-500/5 text-blue-400/80 hover:bg-blue-500 hover:text-white transition-colors disabled:opacity-40"
+                                                className="flex-1 py-2.5 flex items-center justify-center rounded-xl border border-blue-500/20 bg-blue-500/5 text-blue-400/80 hover:bg-blue-500 hover:text-white transition-colors disabled:opacity-40"
                                             >
-                                                {reseteandoId === u.id ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
+                                                {reseteandoId === u.id ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
                                             </button>
-                                        )}
 
-                                        {isAdmin && (
                                             <button
                                                 onClick={() => toggleCuraduria(u)}
                                                 disabled={curaduriaId === u.id}
                                                 title={u.acceso_curaduria ? 'Quitar acceso a Curaduría' : 'Dar acceso a Curaduría (+ Eventos)'}
-                                                className={`shrink-0 w-9 flex items-center justify-center rounded-xl border transition-colors disabled:opacity-40 ${u.acceso_curaduria ? 'border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500 hover:text-white' : 'border-white/10 bg-[#111] text-gray-500 hover:border-purple-500/40 hover:text-purple-300'}`}
+                                                className={`flex-1 py-2.5 flex items-center justify-center rounded-xl border transition-colors disabled:opacity-40 ${u.acceso_curaduria ? 'border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500 hover:text-white' : 'border-white/10 bg-[#111] text-gray-500 hover:border-purple-500/40 hover:text-purple-300'}`}
                                             >
-                                                {curaduriaId === u.id ? <Loader2 size={13} className="animate-spin" /> : <Theater size={13} />}
+                                                {curaduriaId === u.id ? <Loader2 size={14} className="animate-spin" /> : <Theater size={14} />}
                                             </button>
-                                        )}
 
-                                        {isAdmin && (
                                             <button
                                                 onClick={() => toggleFinanzas(u.id, !!u.admin_finanzas, u.nombre_completo || u.email || 'usuario')}
                                                 disabled={finanzasId === u.id}
                                                 title={u.admin_finanzas ? 'Quitar acceso a Administración (Libro)' : 'Dar acceso a Administración (Libro)'}
-                                                className={`shrink-0 w-9 flex items-center justify-center rounded-xl border transition-colors disabled:opacity-40 ${u.admin_finanzas ? 'border-[#D4E655]/40 bg-[#D4E655]/10 text-[#D4E655] hover:bg-[#D4E655] hover:text-black' : 'border-white/10 bg-[#111] text-gray-500 hover:border-[#D4E655]/40 hover:text-[#D4E655]'}`}
+                                                className={`flex-1 py-2.5 flex items-center justify-center rounded-xl border transition-colors disabled:opacity-40 ${u.admin_finanzas ? 'border-[#D4E655]/40 bg-[#D4E655]/10 text-[#D4E655] hover:bg-[#D4E655] hover:text-black' : 'border-white/10 bg-[#111] text-gray-500 hover:border-[#D4E655]/40 hover:text-[#D4E655]'}`}
                                             >
-                                                {finanzasId === u.id ? <Loader2 size={13} className="animate-spin" /> : <DollarSign size={13} />}
+                                                {finanzasId === u.id ? <Loader2 size={14} className="animate-spin" /> : <DollarSign size={14} />}
                                             </button>
-                                        )}
 
-                                        {isAdmin && u.id !== userId && (
-                                            <button
-                                                onClick={() => eliminarUsuario(u.id, u.nombre_completo || u.email || 'usuario')}
-                                                disabled={borrandoId === u.id}
-                                                title="Eliminar usuario (duplicados/vacíos)"
-                                                className="shrink-0 w-9 flex items-center justify-center rounded-xl border border-red-500/20 bg-red-500/5 text-red-500/70 hover:bg-red-500 hover:text-white transition-colors disabled:opacity-40"
-                                            >
-                                                {borrandoId === u.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                                            </button>
-                                        )}
-                                    </div>
+                                            {u.id !== userId && (
+                                                <button
+                                                    onClick={() => eliminarUsuario(u.id, u.nombre_completo || u.email || 'usuario')}
+                                                    disabled={borrandoId === u.id}
+                                                    title="Eliminar usuario (duplicados/vacíos)"
+                                                    className="flex-1 py-2.5 flex items-center justify-center rounded-xl border border-red-500/20 bg-red-500/5 text-red-500/70 hover:bg-red-500 hover:text-white transition-colors disabled:opacity-40"
+                                                >
+                                                    {borrandoId === u.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
