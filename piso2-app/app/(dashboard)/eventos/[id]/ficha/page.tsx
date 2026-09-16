@@ -1,18 +1,21 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Loader2, ArrowLeft, Save, Music, Sun, MonitorPlay, Boxes, CalendarClock, FileSignature, Check } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { useCash } from '@/context/CashContext'
 import { getFichaTecnicaAction, guardarFichaTecnicaAction } from '@/app/actions/eventos'
+import { getFichaObraAction, guardarFichaObraAction } from '@/app/actions/convocatoria'
 
 type Ficha = Record<string, any>
 
 export default function FichaTecnicaPage() {
     const params = useParams()
     const eventoId = params.id as string
+    const searchParams = useSearchParams()
+    const obraId = searchParams.get('obra')
     const { userRole } = useCash()
     const soloLectura = userRole === 'curador'
     const [loading, setLoading] = useState(true)
@@ -25,7 +28,8 @@ export default function FichaTecnicaPage() {
 
     useEffect(() => {
         (async () => {
-            const r = await getFichaTecnicaAction(eventoId)
+            setLoading(true)
+            const r = obraId ? await getFichaObraAction(obraId) : await getFichaTecnicaAction(eventoId)
             if (r.ok) {
                 setNombre(r.nombre)
                 const { _updated_at, ...rest } = (r.ficha || {}) as any
@@ -34,11 +38,11 @@ export default function FichaTecnicaPage() {
             } else toast.error((r as any).error || 'No se pudo cargar la ficha')
             setLoading(false)
         })()
-    }, [eventoId])
+    }, [eventoId, obraId])
 
     const guardar = async () => {
         setSaving(true)
-        const r = await guardarFichaTecnicaAction(eventoId, f)
+        const r = obraId ? await guardarFichaObraAction(obraId, f) : await guardarFichaTecnicaAction(eventoId, f)
         if (r.ok) { toast.success('Ficha guardada'); setUpdatedAt(new Date().toISOString()) }
         else toast.error((r as any).error || 'No se pudo guardar')
         setSaving(false)

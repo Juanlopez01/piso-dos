@@ -181,7 +181,7 @@ export async function eliminarEventoAction(eventoId: string) {
 
 // ---- Tipos de entrada -------------------------------------------------------
 
-export async function guardarEntradaAction(data: { id?: string; evento_id: string; nombre: string; precio: number; cupo: number; orden?: number; oculta?: boolean; codigo_promo?: string }) {
+export async function guardarEntradaAction(data: { id?: string; evento_id: string; nombre: string; precio: number; cupo: number; orden?: number; oculta?: boolean; codigo_promo?: string; obra_id?: string | null }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     if (!data.nombre?.trim()) return { ok: false as const, error: 'Poné un nombre a la entrada.' }
@@ -196,6 +196,8 @@ export async function guardarEntradaAction(data: { id?: string; evento_id: strin
         oculta,
         // Solo las ocultas usan código de promo; para las visibles lo limpiamos.
         codigo_promo: oculta ? (data.codigo_promo?.trim() || null) : null,
+        // A qué obra pertenece esta entrada (para liquidar por compañía). NULL = general.
+        obra_id: data.obra_id || null,
     }
     if (data.id) {
         const { error } = await admin.from('evento_entradas').update(row).eq('id', data.id)
@@ -812,9 +814,19 @@ export async function getBorderauxAction(eventoId: string) {
     // por encima. Robusto también para ventas viejas sin servicio (servicio = 0).
     const ventaIds = (ventas || []).map((v: any) => v.id)
     let baseEntradas = 0
+    // Base y unidades vendidas POR entrada (para poder liquidar por obra).
+    const basePorEntrada: Record<string, number> = {}
+    const vendidasPorEntradaId: Record<string, number> = {}
     if (ventaIds.length) {
-        const { data: items } = await admin.from('evento_venta_items').select('cantidad, precio_unit').in('venta_id', ventaIds)
-        baseEntradas = (items || []).reduce((a: number, it: any) => a + Number(it.cantidad || 0) * Number(it.precio_unit || 0), 0)
+        const { data: items } = await admin.from('evento_venta_items').select('entrada_id, cantidad, precio_unit').in('venta_id', ventaIds)
+        for (const it of (items || []) as any[]) {
+            const sub = Number(it.cantidad || 0) * Number(it.precio_unit || 0)
+            baseEntradas += sub
+            if (it.entrada_id) {
+                basePorEntrada[it.entrada_id] = (basePorEntrada[it.entrada_id] || 0) + sub
+                vendidasPorEntradaId[it.entrada_id] = (vendidasPorEntradaId[it.entrada_id] || 0) + Number(it.cantidad || 0)
+            }
+        }
     }
     const servicio = Math.max(0, ingresos - baseEntradas)
 
@@ -835,6 +847,33 @@ export async function getBorderauxAction(eventoId: string) {
     // El 10% de servicio va entero a Piso 2, aparte del reparto.
     const piso2 = piso2Reparto + servicio
 
+    // ---- Liquidación POR OBRA (programa con varias compañías) ----------------
+    // A cada compañía se le paga: base de SUS entradas × su %. Los gastos internos
+    // (equipo/gastos que paga Piso 2) NO se reparten: quedan en la admin general y
+    // los absorbe Piso 2. La base sin obra asignada también va a Piso 2.
+    const { data: obrasEv } = await admin.from('obra_propuestas')
+        .select('id, titulo, compania, reparto_pct').eq('evento_id', eventoId).eq('estado', 'aceptada')
+    const { data: entradasEv } = await admin.from('evento_entradas').select('id, obra_id').eq('evento_id', eventoId)
+    const obraDeEntrada: Record<string, string | null> = {}
+    for (const e of (entradasEv || []) as any[]) obraDeEntrada[e.id] = e.obra_id || null
+
+    const porObra = (obrasEv || []).map((o: any) => {
+        const idsDeObra = (entradasEv || []).filter((e: any) => e.obra_id === o.id).map((e: any) => e.id)
+        const base = idsDeObra.reduce((a: number, id: string) => a + (basePorEntrada[id] || 0), 0)
+        const vendidas = idsDeObra.reduce((a: number, id: string) => a + (vendidasPorEntradaId[id] || 0), 0)
+        const pctObra = (o.reparto_pct === null || o.reparto_pct === undefined) ? pct : Number(o.reparto_pct)
+        const aPagar = Math.round(base * pctObra) / 100
+        return { obraId: o.id, titulo: o.titulo, compania: o.compania || null, pct: pctObra, vendidas, base, aPagar }
+    })
+    // Base de entradas sin obra asignada (van enteras a Piso 2).
+    let baseSinObra = 0, vendidasSinObra = 0
+    for (const [entId, b] of Object.entries(basePorEntrada)) {
+        if (!obraDeEntrada[entId]) { baseSinObra += b; vendidasSinObra += (vendidasPorEntradaId[entId] || 0) }
+    }
+    const companiasTotal = porObra.reduce((a, o) => a + o.aPagar, 0)
+    // Piso 2 cuando hay obras: lo que no se llevan las compañías + servicio − gastos internos.
+    const piso2ConObras = (baseEntradas - companiasTotal) + servicio - deducido
+
     return {
         ok: true as const,
         nombre: ev.nombre,
@@ -843,6 +882,11 @@ export async function getBorderauxAction(eventoId: string) {
         totalEquipo, incluirEquipo,
         gastos: (gastos || []) as any[], totalGastos,
         deducido, neto, pct, compania, piso2Reparto, piso2,
+        // Programa multi-obra
+        tieneObras: porObra.length > 0,
+        porObra,
+        sinObra: (baseSinObra > 0 || vendidasSinObra > 0) ? { base: baseSinObra, vendidas: vendidasSinObra } : null,
+        companiasTotal, piso2ConObras,
     }
 }
 

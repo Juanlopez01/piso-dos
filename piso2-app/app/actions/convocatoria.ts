@@ -258,3 +258,39 @@ export async function eliminarPropuestaAction(id: string) {
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
 }
+
+// ---- Ficha técnica y reparto POR OBRA ----
+// Cuando un evento tiene varias obras (programa), cada una lleva su propia ficha
+// técnica y su propio % de reparto. Se guardan en la misma propuesta de la obra.
+
+export async function getFichaObraAction(propuestaId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { data } = await admin.from('obra_propuestas')
+        .select('titulo, compania, ficha_tecnica, reparto_pct').eq('id', propuestaId).maybeSingle()
+    if (!data) return { ok: false as const, error: 'Obra no encontrada' }
+    return { ok: true as const, nombre: data.titulo, compania: (data as any).compania || null, ficha: (data as any).ficha_tecnica || {}, repartoPct: (data as any).reparto_pct ?? null }
+}
+
+export async function guardarFichaObraAction(propuestaId: string, ficha: Record<string, any>) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    if (perm.rol === 'curador') return { ok: false as const, error: 'Modo solo lectura' }
+    const admin = getAdminClient()
+    const payload = { ...(ficha || {}), _updated_at: new Date().toISOString(), _updated_by: perm.userId }
+    const { error } = await admin.from('obra_propuestas').update({ ficha_tecnica: payload }).eq('id', propuestaId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+// % de reparto propio de una obra (null = usa el % general del evento).
+export async function setRepartoPctObraAction(propuestaId: string, pct: number | null) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const p = (pct === null || pct === undefined || (pct as any) === '') ? null : Math.max(0, Math.min(100, Number(pct)))
+    const { error } = await admin.from('obra_propuestas').update({ reparto_pct: p }).eq('id', propuestaId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}

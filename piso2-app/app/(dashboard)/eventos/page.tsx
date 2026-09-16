@@ -9,7 +9,7 @@ import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 import {
-    getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction,
+    getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction, setRepartoPctObraAction,
 } from '@/app/actions/convocatoria'
 import {
     getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
@@ -24,7 +24,7 @@ import {
 } from '@/app/actions/eventos'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
-type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number; oculta?: boolean; codigo_promo?: string | null }
+type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number; oculta?: boolean; codigo_promo?: string | null; obra_id?: string | null }
 type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; canal?: string | null; reembolsada?: boolean; created_at: string; items: { nombre: string; cantidad: number; precio_unit: number }[] }
 type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean; cancelado?: boolean; ciclo_id?: string | null; ciclo?: { nombre: string; slug: string } | null }
 
@@ -226,19 +226,19 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
     useEffect(() => { cargar(); cargarEquipo(); cargarInvitados() }, [eventoId])
 
     // --- entradas (alta/edición inline) ---
-    const [nuevaEnt, setNuevaEnt] = useState({ nombre: '', precio: '', cupo: '', oculta: false, codigo_promo: '' })
+    const [nuevaEnt, setNuevaEnt] = useState({ nombre: '', precio: '', cupo: '', oculta: false, codigo_promo: '', obra_id: '' })
     const [editEnt, setEditEnt] = useState<string | null>(null)
-    const [editVals, setEditVals] = useState({ nombre: '', precio: '', cupo: '', oculta: false, codigo_promo: '' })
+    const [editVals, setEditVals] = useState({ nombre: '', precio: '', cupo: '', oculta: false, codigo_promo: '', obra_id: '' })
 
-    const agregarEntrada = async () => {
+const agregarEntrada = async () => {
         if (!nuevaEnt.nombre.trim()) return toast.error('Nombre de la entrada')
         if (nuevaEnt.oculta && !nuevaEnt.codigo_promo.trim()) return toast.error('Ponele un código de promo a la entrada oculta')
-        const r = await guardarEntradaAction({ evento_id: eventoId, nombre: nuevaEnt.nombre, precio: Number(nuevaEnt.precio), cupo: Number(nuevaEnt.cupo), orden: entradas.length, oculta: nuevaEnt.oculta, codigo_promo: nuevaEnt.codigo_promo })
-        if (r.ok) { setNuevaEnt({ nombre: '', precio: '', cupo: '', oculta: false, codigo_promo: '' }); cargar() } else toast.error(r.error || 'Error')
+        const r = await guardarEntradaAction({ evento_id: eventoId, nombre: nuevaEnt.nombre, precio: Number(nuevaEnt.precio), cupo: Number(nuevaEnt.cupo), orden: entradas.length, oculta: nuevaEnt.oculta, codigo_promo: nuevaEnt.codigo_promo, obra_id: nuevaEnt.obra_id || null })
+        if (r.ok) { setNuevaEnt({ nombre: '', precio: '', cupo: '', oculta: false, codigo_promo: '', obra_id: '' }); cargar() } else toast.error(r.error || 'Error')
     }
     const guardarEdit = async (id: string) => {
         if (editVals.oculta && !editVals.codigo_promo.trim()) return toast.error('Ponele un código de promo a la entrada oculta')
-        const r = await guardarEntradaAction({ id, evento_id: eventoId, nombre: editVals.nombre, precio: Number(editVals.precio), cupo: Number(editVals.cupo), oculta: editVals.oculta, codigo_promo: editVals.codigo_promo })
+        const r = await guardarEntradaAction({ id, evento_id: eventoId, nombre: editVals.nombre, precio: Number(editVals.precio), cupo: Number(editVals.cupo), oculta: editVals.oculta, codigo_promo: editVals.codigo_promo, obra_id: editVals.obra_id || null })
         if (r.ok) { setEditEnt(null); cargar() } else toast.error(r.error || 'Error')
     }
     const copiarLinkPromo = (codigo: string) => {
@@ -466,6 +466,12 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
         const r = await toggleIncluirEquipoAction(eventoId, !(borderaux?.incluirEquipo))
         if (r.ok) cargarBorderaux(); else toast.error(r.error || 'Error')
     }
+    // % de reparto propio de una obra (vacío = usa el % general del evento).
+    const guardarPctObra = async (obraId: string, valor: string) => {
+        const pct = valor.trim() === '' ? null : Math.max(0, Math.min(100, Number(valor) || 0))
+        const r = await setRepartoPctObraAction(obraId, pct)
+        if (r.ok) cargarBorderaux(); else toast.error((r as any).error || 'Error')
+    }
     const agregarGasto = async () => {
         if (!nuevoGasto.concepto.trim()) return toast.error('Concepto del gasto')
         const r = await guardarGastoAction({ evento_id: eventoId, concepto: nuevoGasto.concepto, monto: Number(nuevoGasto.monto) })
@@ -659,6 +665,7 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
                             <div key={o.id} className="flex items-center gap-2 bg-[#111] border border-white/10 rounded-lg px-3 py-2">
                                 {o.imagenes?.[0] && <img src={o.imagenes[0]} alt="" className="w-8 h-10 object-cover rounded shrink-0" />}
                                 <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{o.titulo}</p><p className="text-[10px] text-gray-500 truncate">{[o.compania, o.duracion_min && `${o.duracion_min} min`].filter(Boolean).join(' · ')}</p></div>
+                                <Link href={`/eventos/${eventoId}/ficha?obra=${o.id}`} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-1.5 rounded-lg shrink-0" title="Ficha técnica de esta obra"><ClipboardList size={12} /> Ficha</Link>
                                 {!soloLectura && <button onClick={() => quitarObra(o.id)} className="text-gray-600 hover:text-red-400 p-1"><X size={14} /></button>}
                             </div>
                         ))}
@@ -859,17 +866,29 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
                                         <button type="button" onClick={() => setEditVals(v => ({ ...v, oculta: !v.oculta }))} className={`flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${editVals.oculta ? 'bg-purple-500/15 border-purple-400/40 text-purple-300' : 'bg-white/5 border-white/10 text-gray-400'}`}><EyeOff size={13} /> Oculta (promo)</button>
                                         {editVals.oculta && <input value={editVals.codigo_promo} onChange={ev => setEditVals(v => ({ ...v, codigo_promo: ev.target.value }))} placeholder="Código de promo" className="inp flex-1 min-w-[120px]" />}
                                     </div>
+                                    {obras.length > 0 && (
+                                        <div className="flex items-center gap-2">
+                                            <Theater size={13} className="text-gray-500 shrink-0" />
+                                            <select value={editVals.obra_id} onChange={ev => setEditVals(v => ({ ...v, obra_id: ev.target.value }))} className="inp flex-1">
+                                                <option value="">Sin obra (general de la función)</option>
+                                                {obras.map(o => <option key={o.id} value={o.id}>{o.titulo}{o.compania ? ` — ${o.compania}` : ''}</option>)}
+                                            </select>
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="flex items-center gap-3">
                                     <div className="flex-1 min-w-0">
                                         <p className="font-bold text-sm truncate flex items-center gap-1.5">{e.nombre} {e.oculta && <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 uppercase font-bold"><EyeOff size={10} /> Oculta</span>}</p>
                                         <p className="text-[11px] text-gray-500">{pesos(e.precio)} · {e.vendidas}/{e.cupo} vendidas · <span className={e.disponible > 0 ? 'text-[#D4E655]' : 'text-red-400'}>{e.disponible} libres</span></p>
+                                        {e.obra_id && obras.length > 0 && (
+                                            <p className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-gray-400"><Theater size={11} className="text-gray-500" /> {obras.find(o => o.id === e.obra_id)?.titulo || 'Obra'}</p>
+                                        )}
                                         {e.oculta && e.codigo_promo && (
                                             <button onClick={() => copiarLinkPromo(e.codigo_promo!)} className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-purple-300/80 hover:text-purple-300"><Copy size={11} /> Copiar link con promo “{e.codigo_promo}”</button>
                                         )}
                                     </div>
-                                    {!soloLectura && <button onClick={() => { setEditEnt(e.id); setEditVals({ nombre: e.nombre, precio: String(e.precio), cupo: String(e.cupo), oculta: !!e.oculta, codigo_promo: e.codigo_promo || '' }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>}
+                                    {!soloLectura && <button onClick={() => { setEditEnt(e.id); setEditVals({ nombre: e.nombre, precio: String(e.precio), cupo: String(e.cupo), oculta: !!e.oculta, codigo_promo: e.codigo_promo || '', obra_id: e.obra_id || '' }) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>}
                                     {!soloLectura && <button onClick={() => borrarEntrada(e.id)} className="text-gray-600 hover:text-red-400 p-1.5"><Trash2 size={14} /></button>}
                                 </div>
                             )}
@@ -887,6 +906,16 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
                             <button type="button" onClick={() => setNuevaEnt(v => ({ ...v, oculta: !v.oculta }))} className={`flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${nuevaEnt.oculta ? 'bg-purple-500/15 border-purple-400/40 text-purple-300' : 'bg-white/5 border-white/10 text-gray-400'}`}><EyeOff size={13} /> Oculta (promo)</button>
                             {nuevaEnt.oculta && <input value={nuevaEnt.codigo_promo} onChange={e => setNuevaEnt(v => ({ ...v, codigo_promo: e.target.value }))} placeholder="Código de promo (ej: 2x1, AMIGOS)" className="inp flex-1 min-w-[140px]" />}
                         </div>
+                        {obras.length > 0 && (
+                            <div className="flex items-center gap-2">
+                                <Theater size={13} className="text-gray-500 shrink-0" />
+                                <select value={nuevaEnt.obra_id} onChange={e => setNuevaEnt(v => ({ ...v, obra_id: e.target.value }))} className="inp flex-1">
+                                    <option value="">Sin obra (general de la función)</option>
+                                    {obras.map(o => <option key={o.id} value={o.id}>{o.titulo}{o.compania ? ` — ${o.compania}` : ''}</option>)}
+                                </select>
+                            </div>
+                        )}
+                        {obras.length > 0 && <p className="text-[10px] text-gray-500">Asigná la entrada a una obra para que su venta liquide a esa compañía.</p>}
                         {nuevaEnt.oculta && <p className="text-[10px] text-gray-500">No aparece en la venta pública; solo con el link <span className="text-purple-300">?promo=código</span>.</p>}
                     </div>}
                 </div>
@@ -1162,7 +1191,8 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
                         </div>
                     </div>
 
-                    {/* reparto */}
+                    {/* reparto — evento de UNA sola obra (o sin obras vinculadas) */}
+                    {!borderaux.tieneObras && (<>
                     <div className="flex items-center gap-2 mb-3">
                         <span className="text-[11px] text-gray-400 font-semibold">% para la compañía</span>
                         {soloLectura
@@ -1189,6 +1219,50 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
                             </div>
                         </div>
                     </div>
+                    </>)}
+
+                    {/* Liquidación POR OBRA — programa con varias compañías */}
+                    {borderaux.tieneObras && (
+                        <div className="space-y-2 mb-3">
+                            <p className="text-[11px] text-gray-400 font-semibold flex items-center gap-1.5"><Theater size={13} className="text-[#D4E655]" /> A pagar a cada compañía (ventas de su obra × su %)</p>
+                            {borderaux.porObra.map((o: any) => (
+                                <div key={o.obraId} className="rounded-xl bg-[#0e0e10] border border-white/10 p-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-bold truncate">{o.titulo}</p>
+                                            <p className="text-[10px] text-gray-500">{o.compania ? `${o.compania} · ` : ''}{o.vendidas} vendidas · base {pesos(o.base)}</p>
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                            <p className="text-lg font-black text-[#D4E655]">{pesos(o.aPagar)}</p>
+                                            <div className="flex items-center gap-1 justify-end mt-0.5">
+                                                <span className="text-[9px] text-gray-500 uppercase tracking-widest">%</span>
+                                                {soloLectura
+                                                    ? <span className="text-[10px] text-gray-400">{o.pct}%</span>
+                                                    : <input defaultValue={String(o.pct)} onBlur={e => guardarPctObra(o.obraId, e.target.value)} type="number" min={0} max={100} className="inp w-16 text-center !py-1 text-[11px]" title="% de esta compañía" />}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                            {borderaux.sinObra && (
+                                <div className="rounded-xl bg-[#0e0e10] border border-dashed border-white/15 p-3 flex items-center justify-between">
+                                    <div><p className="text-sm font-medium text-gray-300">Entradas sin obra (generales)</p><p className="text-[10px] text-gray-500">{borderaux.sinObra.vendidas} vendidas · base {pesos(borderaux.sinObra.base)} · va a Piso 2</p></div>
+                                </div>
+                            )}
+                            <div className="rounded-xl bg-[#D4E655]/10 border border-[#D4E655]/30 p-4 grid grid-cols-2 gap-3">
+                                <div className="rounded-lg bg-black/30 p-3">
+                                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Total compañías</p>
+                                    <p className="text-lg font-black text-[#D4E655]">{pesos(borderaux.companiasTotal)}</p>
+                                </div>
+                                <div className="rounded-lg bg-black/30 p-3">
+                                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Piso 2 (neto)</p>
+                                    <p className={`text-lg font-black ${borderaux.piso2ConObras < 0 ? 'text-red-400' : 'text-white'}`}>{pesos(borderaux.piso2ConObras)}</p>
+                                    <p className="text-[9px] text-gray-500 mt-0.5">resto entradas + {pesos(borderaux.servicio)} servicio − {pesos(borderaux.deducido)} gastos</p>
+                                </div>
+                            </div>
+                            <p className="text-[10px] text-gray-500">Los gastos internos (equipo/gastos que paga Piso 2) son generales de la función y los absorbe Piso 2 — no se reparten por obra.</p>
+                        </div>
+                    )}
 
                     <button onClick={descargarBorderaux} className="w-full flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-200 font-bold py-2.5 rounded-xl uppercase text-[11px] tracking-wide hover:border-white/30 transition-colors">
                         <Download size={14} /> Descargar borderaux (CSV)
