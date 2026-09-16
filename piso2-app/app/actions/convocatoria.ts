@@ -200,9 +200,19 @@ export async function getObrasDeEventoAction(eventoId: string) {
     if (!perm.ok) return { ok: false as const, error: perm.error, obras: [] as any[] }
     const admin = getAdminClient()
     const { data } = await admin.from('obra_propuestas')
-        .select('id, titulo, director, compania, duracion_min, imagenes')
+        .select('id, titulo, director, compania, duracion_min, descripcion, imagenes, flyer_url')
         .eq('evento_id', eventoId).eq('estado', 'aceptada').order('created_at')
     return { ok: true as const, obras: (data || []) as any[] }
+}
+
+// Flyer propio de una obra (se muestra en el "Programa" del evento público).
+export async function setFlyerObraAction(propuestaId: string, url: string | null) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('obra_propuestas').update({ flyer_url: url || null }).eq('id', propuestaId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
 }
 
 // Obras aceptadas que se pueden sumar (no están ya en este evento).

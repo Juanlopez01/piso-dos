@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { crearOrdenEventoAction } from '@/app/actions/eventos'
 import { toast, Toaster } from 'sonner'
-import { Loader2, CalendarDays, MapPin, Minus, Plus, Ticket } from 'lucide-react'
+import { Loader2, CalendarDays, MapPin, Minus, Plus, Ticket, Theater } from 'lucide-react'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 
 export type Entrada = { id: string; nombre: string; precio: number; disponible: number }
-export type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; flyer_url?: string | null; entradas: Entrada[] }
+export type ObraPrograma = { id: string; titulo: string; compania: string | null; director: string | null; duracion_min: number | null; descripcion: string | null; imagen: string | null }
+export type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; flyer_url?: string | null; entradas: Entrada[]; obras?: ObraPrograma[] }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' }) : null
@@ -70,6 +71,29 @@ export default function EventoClient({ ev }: { ev: Evento }) {
                     {ev.lugar && <span className="flex items-center gap-1.5"><MapPin size={14} /> {ev.lugar}</span>}
                 </div>
                 {ev.descripcion && <p className="text-sm text-neutral-600 leading-relaxed mt-4 whitespace-pre-line">{ev.descripcion}</p>}
+
+                {/* Programa: obras de la función */}
+                {ev.obras && ev.obras.length > 0 && (
+                    <div className="mt-7">
+                        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.25em] text-neutral-400 mb-3">
+                            <Theater size={13} /> {ev.obras.length > 1 ? `El programa · ${ev.obras.length} obras` : 'La obra'}
+                        </div>
+                        <div className="space-y-3">
+                            {ev.obras.map(o => (
+                                <div key={o.id} className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
+                                    {o.imagen && <img src={o.imagen} alt={o.titulo} className="w-full aspect-[16/10] object-cover" />}
+                                    <div className="p-4">
+                                        <p className="font-black text-base leading-tight">{o.titulo}</p>
+                                        <p className="text-xs text-neutral-500 mt-1">
+                                            {[o.compania, o.director && `Dir: ${o.director}`, o.duracion_min && `${o.duracion_min} min`].filter(Boolean).join(' · ')}
+                                        </p>
+                                        {o.descripcion && <p className="text-[13px] text-neutral-600 leading-relaxed mt-2 whitespace-pre-line line-clamp-6">{o.descripcion}</p>}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {/* Entradas */}
                 <div className="mt-6 space-y-2.5">

@@ -451,9 +451,19 @@ export async function getEventoPublicoAction(eventoId: string, promo?: string) {
             id: e.id, nombre: e.nombre, precio: Number(e.precio),
             disponible: Math.max(0, (e.cupo || 0) - (vendidas[e.id] || 0)),
         }))
+    // Programa: obras vinculadas a la función (para lucir cada compañía en público).
+    const { data: obrasProg } = await admin.from('obra_propuestas')
+        .select('id, titulo, compania, director, duracion_min, descripcion, imagenes, flyer_url')
+        .eq('evento_id', eventoId).eq('estado', 'aceptada').order('created_at')
+    const obras = (obrasProg || []).map((o: any) => ({
+        id: o.id, titulo: o.titulo, compania: o.compania || null, director: o.director || null,
+        duracion_min: o.duracion_min || null, descripcion: o.descripcion || null,
+        imagen: o.flyer_url || (o.imagenes || [])[0] || null,
+    }))
+
     return {
         id: evento.id, nombre: evento.nombre, descripcion: evento.descripcion,
-        fecha: evento.fecha, lugar: evento.lugar, flyer_url: evento.flyer_url, entradas: entradasDisp,
+        fecha: evento.fecha, lugar: evento.lugar, flyer_url: evento.flyer_url, entradas: entradasDisp, obras,
     }
 }
 

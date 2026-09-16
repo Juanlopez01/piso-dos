@@ -9,7 +9,7 @@ import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 import {
-    getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction, setRepartoPctObraAction,
+    getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction, setRepartoPctObraAction, setFlyerObraAction,
 } from '@/app/actions/convocatoria'
 import {
     getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
@@ -121,7 +121,7 @@ export default function EventosPage() {
 }
 
 // Subida de flyer reusable → devuelve la URL pública (bucket talent, carpeta eventos/).
-function FlyerUploader({ value, onChange }: { value: string; onChange: (url: string) => void }) {
+function FlyerUploader({ value, onChange, label }: { value: string; onChange: (url: string) => void; label?: string }) {
     const [supabase] = useState(() => createClient())
     const [subiendo, setSubiendo] = useState(false)
     const subir = async (file: File | null) => {
@@ -142,7 +142,7 @@ function FlyerUploader({ value, onChange }: { value: string; onChange: (url: str
             {value
                 ? <div className="relative w-16 h-20 rounded-lg overflow-hidden border border-white/10 shrink-0"><img src={value} alt="" className="w-full h-full object-cover" /><button type="button" onClick={() => onChange('')} className="absolute top-0.5 right-0.5 bg-black/70 text-white rounded-full p-0.5"><X size={11} /></button></div>
                 : <label className="w-16 h-20 border border-dashed border-white/20 rounded-lg flex items-center justify-center cursor-pointer hover:border-white/40 text-gray-500 shrink-0">{subiendo ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}<input type="file" accept="image/*" className="hidden" onChange={e => subir(e.target.files?.[0] || null)} /></label>}
-            <span className="text-[11px] text-gray-500">{value ? 'Flyer cargado' : 'Subí el flyer del evento (opcional)'}</span>
+            <span className="text-[11px] text-gray-500">{value ? 'Flyer cargado' : (label || 'Subí el flyer del evento (opcional)')}</span>
         </div>
     )
 }
@@ -401,6 +401,10 @@ const agregarEntrada = async () => {
     }
     const quitarObra = async (propuestaId: string) => {
         const r = await desvincularObraAction(propuestaId)
+        if (r.ok) cargarObras(); else toast.error((r as any).error || 'Error')
+    }
+    const cambiarFlyerObra = async (propuestaId: string, url: string) => {
+        const r = await setFlyerObraAction(propuestaId, url || null)
         if (r.ok) cargarObras(); else toast.error((r as any).error || 'Error')
     }
 
@@ -676,11 +680,14 @@ const agregarEntrada = async () => {
                 {obras.length > 0 ? (
                     <div className="space-y-1.5 mb-2">
                         {obras.map(o => (
-                            <div key={o.id} className="flex items-center gap-2 bg-[#111] border border-white/10 rounded-lg px-3 py-2">
-                                {o.imagenes?.[0] && <img src={o.imagenes[0]} alt="" className="w-8 h-10 object-cover rounded shrink-0" />}
-                                <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{o.titulo}</p><p className="text-[10px] text-gray-500 truncate">{[o.compania, o.duracion_min && `${o.duracion_min} min`].filter(Boolean).join(' · ')}</p></div>
-                                <Link href={`/eventos/${eventoId}/ficha?obra=${o.id}`} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-1.5 rounded-lg shrink-0" title="Ficha técnica de esta obra"><ClipboardList size={12} /> Ficha</Link>
-                                {!soloLectura && <button onClick={() => quitarObra(o.id)} className="text-gray-600 hover:text-red-400 p-1"><X size={14} /></button>}
+                            <div key={o.id} className="bg-[#111] border border-white/10 rounded-lg px-3 py-2 space-y-2">
+                                <div className="flex items-center gap-2">
+                                    {(o.flyer_url || o.imagenes?.[0]) && <img src={o.flyer_url || o.imagenes[0]} alt="" className="w-8 h-10 object-cover rounded shrink-0" />}
+                                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{o.titulo}</p><p className="text-[10px] text-gray-500 truncate">{[o.compania, o.duracion_min && `${o.duracion_min} min`].filter(Boolean).join(' · ')}</p></div>
+                                    <Link href={`/eventos/${eventoId}/ficha?obra=${o.id}`} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-1.5 rounded-lg shrink-0" title="Ficha técnica de esta obra"><ClipboardList size={12} /> Ficha</Link>
+                                    {!soloLectura && <button onClick={() => quitarObra(o.id)} className="text-gray-600 hover:text-red-400 p-1"><X size={14} /></button>}
+                                </div>
+                                {!soloLectura && <FlyerUploader value={o.flyer_url || ''} onChange={url => cambiarFlyerObra(o.id, url)} label="Subí el flyer de esta obra (si no, se usa su foto)" />}
                             </div>
                         ))}
                     </div>
