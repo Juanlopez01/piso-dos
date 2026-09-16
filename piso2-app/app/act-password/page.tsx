@@ -1,15 +1,41 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Lock, Loader2, CheckCircle2, Eye, EyeOff } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 // 🚀 IMPORTAMOS LOS TIPOS EXACTOS DE SUPABASE
-import { AuthChangeEvent, Session } from '@supabase/supabase-js'
+import { AuthChangeEvent, Session, createClient as createSbClient } from '@supabase/supabase-js'
+
+// ⚠️ CLIENTE AISLADO DE RECUPERACIÓN — NO usar el cliente normal de la app.
+//
+// Bug que arregla: si alguien abría este link en un navegador donde YA había
+// una sesión abierta (otra pestaña), el flujo de reset y esa sesión peleaban por
+// la MISMA ranura de almacenamiento (cookies/localStorage compartidos entre
+// pestañas) y el cambio de contraseña terminaba impactando la cuenta equivocada
+// (incluso las dos a la vez).
+//
+// Solución: un cliente propio, EFÍMERO y EN MEMORIA (persistSession: false +
+// storageKey único). Nunca lee ni pisa la sesión logueada del navegador. La
+// sesión de recuperación vive solo en esta pestaña, en memoria, y muere al salir.
+function crearClienteRecuperacion() {
+    return createSbClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+            auth: {
+                persistSession: false,       // en memoria: no toca cookies/localStorage de la app
+                autoRefreshToken: false,
+                detectSessionInUrl: true,    // procesa el token del link a su propia sesión
+                storageKey: `piso2-recovery-${Math.random().toString(36).slice(2)}`,
+            },
+        }
+    )
+}
 
 export default function ActualizarPasswordPage() {
-    const supabase = createClient()
+    // Se crea UNA sola vez, ya en el navegador (nunca en SSR).
+    const [supabase] = useState(() => crearClienteRecuperacion())
     const router = useRouter()
 
     const [password, setPassword] = useState('')

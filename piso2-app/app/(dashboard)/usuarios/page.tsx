@@ -191,7 +191,7 @@ function UsuariosContent() {
                     if (!re.success) { toast.error(re.error || 'No se pudo corregir el email'); return }
                 }
                 const r = await generarLinkRecuperacionAction(u.id)
-                if (r.success && r.link) { toast.success('Link generado'); prompt('Pasale ESTE link al profe (sirve para que ponga su clave):', r.link) }
+                if (r.success && r.link) { toast.success('Link generado'); prompt('Pasale ESTE link al profe. IMPORTANTE: que lo abra en SU celular/navegador, o en una ventana de incógnito — nunca en un navegador donde ya hay otra cuenta abierta:', r.link) }
                 else toast.error(r.error || 'No se pudo generar el link')
             } else {
                 const pass = prompt('Contraseña temporal (mínimo 6 caracteres). El profe la cambia después en Mi Perfil:')
