@@ -500,11 +500,25 @@ const agregarEntrada = async () => {
             ...borderaux.gastos.map((g: any) => [g.concepto, Number(g.monto)]),
             ['Total deducido', borderaux.deducido],
             [],
-            ['Neto a repartir', borderaux.neto],
-            [`Compañía (${borderaux.pct}%)`, borderaux.compania],
-            [`Piso 2 reparto (${100 - borderaux.pct}%)`, borderaux.piso2Reparto],
-            [`Servicio (${SERVICIO_PCT}%)`, borderaux.servicio],
-            ['Piso 2 total (reparto + servicio)', borderaux.piso2],
+            ...(borderaux.tieneObras
+                ? [
+                    ['LIQUIDACIÓN POR OBRA'],
+                    ['Obra', 'Compañía', '%', 'Vendidas', 'Base', 'A pagar'],
+                    ...borderaux.porObra.map((o: any) => [o.titulo, o.compania || '', o.pct, o.vendidas, o.base, o.aPagar]),
+                    ...(borderaux.sinObra ? [['Entradas sin obra (→ Piso 2)', '', '', borderaux.sinObra.vendidas, borderaux.sinObra.base, 0]] : []),
+                    [],
+                    ['Total a pagar compañías', borderaux.companiasTotal],
+                    [`Servicio (${SERVICIO_PCT}%) → Piso 2`, borderaux.servicio],
+                    ['Gastos internos (generales, los absorbe Piso 2)', borderaux.deducido],
+                    ['Piso 2 (neto)', borderaux.piso2ConObras],
+                ]
+                : [
+                    ['Neto a repartir', borderaux.neto],
+                    [`Compañía (${borderaux.pct}%)`, borderaux.compania],
+                    [`Piso 2 reparto (${100 - borderaux.pct}%)`, borderaux.piso2Reparto],
+                    [`Servicio (${SERVICIO_PCT}%)`, borderaux.servicio],
+                    ['Piso 2 total (reparto + servicio)', borderaux.piso2],
+                ]),
         ]
         const csv = lin.map((r: any[]) => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n')
         const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
