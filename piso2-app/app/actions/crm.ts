@@ -10,6 +10,7 @@
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { calcAlerta } from '@/lib/crm'
+import { clasificarChatCrm } from '@/lib/crm-ia'
 
 const getAdminClient = () => createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -44,6 +45,7 @@ export type CrmLead = {
     ultimoAt: string | null
     mensajes: number
     derivada: boolean
+    autoClasificado: boolean
     alerta: 'ok' | 'seguir' | 'urgente'
     diasSinContacto: number
 }
@@ -125,6 +127,7 @@ export async function getCrmLeadsAction(dias = 120) {
             ultimoAt,
             mensajes: b.mensajes || 0,
             derivada: !!i.derivada,
+            autoClasificado: !!o.clasificado_auto,
             alerta: a.nivel,
             diasSinContacto: a.dias,
         }
@@ -146,7 +149,8 @@ export async function guardarLeadAction(subscriberId: string, patch: {
     if (!perm.ok) return { ok: false as const, error: perm.error }
     if (!subscriberId) return { ok: false as const, error: 'Falta el contacto' }
     const admin = getAdminClient()
-    const row: any = { subscriber_id: subscriberId, updated_at: new Date().toISOString() }
+    // Recep edita a mano → el lead pasa a ser "suyo": el bot ya no pisa producto/etapa.
+    const row: any = { subscriber_id: subscriberId, clasificado_auto: false, updated_at: new Date().toISOString() }
     for (const [k, v] of Object.entries(patch)) if (v !== undefined) row[k] = v
     const { error } = await admin.from('crm_leads').upsert(row, { onConflict: 'subscriber_id' })
     if (error) return { ok: false as const, error: error.message }
@@ -165,7 +169,7 @@ export async function finalizarConsultaCrmAction(consultaId: string, subscriberI
         }).eq('id', consultaId)
     }
     if (subscriberId) {
-        const row: any = { subscriber_id: subscriberId, ultimo_contacto: new Date().toISOString(), updated_at: new Date().toISOString() }
+        const row: any = { subscriber_id: subscriberId, clasificado_auto: false, ultimo_contacto: new Date().toISOString(), updated_at: new Date().toISOString() }
         for (const [k, v] of Object.entries(patch || {})) if (v !== undefined) row[k] = v
         const { error } = await admin.from('crm_leads').upsert(row, { onConflict: 'subscriber_id' })
         if (error) return { ok: false as const, error: error.message }
@@ -180,51 +184,6 @@ export async function resumirChatCrmAction(subscriberId: string) {
     if (!perm.ok) return { ok: false as const, error: perm.error }
     if (!subscriberId) return { ok: false as const, error: 'Falta el contacto' }
     const admin = getAdminClient()
-    const { data } = await admin.from('asistente_historial')
-        .select('de, texto, created_at').eq('subscriber_id', subscriberId)
-        .order('created_at', { ascending: false }).limit(40)
-    const msgs = ((data || []) as any[]).reverse().filter(m => (m.texto || '').trim())
-
-    const fallback = () => {
-        const delUsuario = msgs.filter(m => m.de === 'usuario').map(m => m.texto)
-        return delUsuario.slice(-6).join(' · ').slice(0, 400)
-    }
-
-    const key = process.env.OPENAI_API_KEY
-    if (!key || !msgs.length) {
-        return { ok: true as const, resumen: fallback(), producto: '', estilo: '', profe: '' }
-    }
-    try {
-        const conversacion = msgs.map(m => `${m.de === 'usuario' ? 'Cliente' : (m.de === 'recep' ? 'Recepción' : 'Bot')}: ${m.texto}`).join('\n').slice(0, 6000)
-        const sys = `Sos analista de un CRM de un estudio de danza (Piso 2). Te paso una conversación de Instagram/WhatsApp entre un prospecto y el estudio. Devolvé SOLO un JSON con:
-- "resumen": 1 a 3 frases, en español rioplatense, con lo importante para recepción (qué pidió, qué se le pasó, qué quedó pendiente).
-- "producto": el interés principal, ELEGÍ UNO de: "Clases regulares", "Alquiler salas", "Clase especial", "Clases NG", "La Liga", "IA", "Compañías / Grupos", "Formaciones", "Otro". Si no está claro, "".
-- "estilo": estilo/ritmo de danza mencionado (ej "Jazz", "Contemporáneo", "Heels"), o "".
-- "profe": nombre del profe mencionado, o "".
-No inventes datos que no estén en la charla. Devolvé solo el JSON.`
-        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-                temperature: 0.2,
-                response_format: { type: 'json_object' },
-                messages: [{ role: 'system', content: sys }, { role: 'user', content: conversacion }],
-            }),
-        })
-        if (!resp.ok) return { ok: true as const, resumen: fallback(), producto: '', estilo: '', profe: '' }
-        const json: any = await resp.json().catch(() => null)
-        const raw = json?.choices?.[0]?.message?.content || '{}'
-        let parsed: any = {}
-        try { parsed = JSON.parse(raw) } catch { parsed = {} }
-        return {
-            ok: true as const,
-            resumen: (parsed.resumen || fallback() || '').toString().slice(0, 500),
-            producto: (parsed.producto || '').toString(),
-            estilo: (parsed.estilo || '').toString(),
-            profe: (parsed.profe || '').toString(),
-        }
-    } catch {
-        return { ok: true as const, resumen: fallback(), producto: '', estilo: '', profe: '' }
-    }
+    const c = await clasificarChatCrm(admin, subscriberId)
+    return { ok: true as const, ...c }
 }

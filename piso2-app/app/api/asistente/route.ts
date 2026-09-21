@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { responderAsistente } from '@/app/actions/_asistente-core'
+import { clasificarChatCrm } from '@/lib/crm-ia'
 
 // ============================================================================
 // API pública del Asistente — la consume ManyChat (nodo "Acción externa").
@@ -140,6 +141,49 @@ async function capturarConsulta(body: any, pregunta: string, subId: string | nul
     }
 }
 
+// El bot atendió una charla SIN derivar a un humano → no se crea consulta, así que
+// el lead nunca pasaría por el "cartelito" de recep. Acá lo mantenemos vivo en el
+// CRM y, si todavía no tiene producto cargado, lo clasificamos con IA
+// (producto/estilo/profe). Throttle de 6hs para no llamar a la IA en cada mensaje,
+// y NO pisa lo que recep haya cargado a mano. Corre en after() (post-respuesta).
+async function clasificarLeadBot(subId: string, canal: string, body: any) {
+    try {
+        const admin = getAdminClient()
+        const { data: lead } = await admin.from('crm_leads')
+            .select('etapa, producto, clasificado_auto, auto_resumen_at')
+            .eq('subscriber_id', subId).maybeSingle()
+
+        const ahora = new Date().toISOString()
+        const base: any = { subscriber_id: subId, canal, ultimo_contacto: ahora, updated_at: ahora }
+        const nombre = limpioODefault(body?.contacto_nombre)
+        const usuario = limpioODefault(body?.contacto_usuario)
+        if (nombre) base.nombre = nombre
+        if (usuario) base.instagram = usuario
+
+        // Recep ya cargó el producto a mano → intocable. Si no, respetar el throttle.
+        const yaCargadoAMano = !!(lead?.producto && !lead?.clasificado_auto)
+        const throttleVencido = !lead?.auto_resumen_at ||
+            (Date.now() - new Date(lead.auto_resumen_at).getTime() > 6 * 3600_000)
+
+        if (!yaCargadoAMano && throttleVencido) {
+            const c = await clasificarChatCrm(admin, subId)
+            base.auto_resumen_at = ahora
+            if (c.producto || c.estilo || c.profe) {
+                if (c.producto) base.producto = c.producto
+                if (c.estilo) base.estilo = c.estilo
+                if (c.profe) base.profe = c.profe
+                base.clasificado_auto = true
+                // El bot ya lo contactó: si seguía en 'nuevo', pasa a 'contactado'.
+                if (!lead?.etapa || lead.etapa === 'nuevo') base.etapa = 'contactado'
+            }
+        }
+
+        await admin.from('crm_leads').upsert(base, { onConflict: 'subscriber_id' })
+    } catch (e: any) {
+        console.error('[asistente] no se pudo clasificar el lead del bot:', e?.message)
+    }
+}
+
 // Hand-off: ¿el bot está en pausa para este contacto? (la recep respondió hace poco)
 async function estaPausado(subId: string | null): Promise<boolean> {
     if (!subId) return false
@@ -175,6 +219,9 @@ async function manejar(req: NextRequest, body: any) {
         // Registrar este turno (para el próximo contexto y el hilo de recep).
         if (subId) await logInteraccion(subId, canal, pregunta, respuesta)
         if (derivar) await capturarConsulta(body, pregunta, subId, canal)
+        // Bot resolvió solo (no derivó): mantener/clasificar el lead del CRM en
+        // segundo plano, sin sumarle latencia a la respuesta que espera ManyChat.
+        else if (subId && pregunta.trim()) after(() => clasificarLeadBot(subId, canal, body))
         return NextResponse.json({ ok: true, respuesta, derivar })
     } catch (e: any) {
         return NextResponse.json({ ok: false, error: e?.message || 'Error del asistente' }, { status: 500 })

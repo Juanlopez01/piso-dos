@@ -339,6 +339,7 @@ export default function CrmPanel() {
                                 <button onClick={() => setVerChat(l)} title="Ver chat" className="text-gray-500 hover:text-white p-1 shrink-0"><Eye size={15} /></button>
                             </div>
                             <button onClick={() => setEditar(l)} className="w-full text-left flex flex-wrap items-center gap-1.5 mt-2 pl-6">
+                                {l.autoClasificado && <span title="Clasificado por el bot — revisá" className="text-[9px] px-1.5 py-0.5 rounded-full bg-[#D4E655]/10 text-[#D4E655] border border-[#D4E655]/30 uppercase font-bold">Bot</span>}
                                 {l.producto && <span className="text-[10px] bg-white/5 border border-white/10 text-gray-300 px-2 py-0.5 rounded-full">{l.producto}</span>}
                                 {l.estilo && <span className="text-[10px] bg-white/5 border border-white/10 text-gray-400 px-2 py-0.5 rounded-full">{l.estilo}</span>}
                                 {l.profe && <span className="text-[10px] bg-white/5 border border-white/10 text-gray-400 px-2 py-0.5 rounded-full">👤 {l.profe}</span>}
