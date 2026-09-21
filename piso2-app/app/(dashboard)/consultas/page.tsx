@@ -1,17 +1,18 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power, Sparkles, Zap, Image as ImageIcon } from 'lucide-react'
+import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power, Sparkles, Zap, Image as ImageIcon, Target } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
 import {
-    getConsultasAction, responderConsultaAction, marcarResueltaAction,
+    getConsultasAction, responderConsultaAction,
     getAsistenteStatsAction, getContactosAction, getConversacionContactoAction,
     getConocimientoAction, guardarConocimientoAction, toggleConocimientoAction, eliminarConocimientoAction,
     sugerirRespuestaAction, responderImagenAction,
 } from '@/app/actions/consultas'
 import FichaAlumno from './FichaAlumno'
+import CrmPanel, { CrmFinalizarModal } from './CrmPanel'
 
 // ¿el texto del mensaje es una imagen (URL)? → se muestra como <img> en el hilo.
 const esImagenUrl = (t: string) => /^https?:\/\//.test(t || '') && (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(t) || t.includes('/storage/v1/object'))
@@ -42,7 +43,7 @@ type Stats = {
 type Contacto = { subscriber_id: string; canal: string; nombre: string | null; usuario: string | null; derivada: boolean; mensajes: number; ultimo: string; ultimoAt: string }
 
 const hora = (iso: string) => new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-type Tab = 'resumen' | 'bandeja' | 'contactos' | 'conocimiento'
+type Tab = 'resumen' | 'bandeja' | 'crm' | 'contactos' | 'conocimiento'
 type Conocimiento = { id: string; tipo: 'info' | 'no_responder' | 'respuesta'; texto: string; activo: boolean; created_at: string }
 
 export default function ConsultasPage() {
@@ -59,6 +60,7 @@ export default function ConsultasPage() {
     const [abierta, setAbierta] = useState<string | null>(null)
     const [respuesta, setRespuesta] = useState('')
     const [enviando, setEnviando] = useState(false)
+    const [finalizando, setFinalizando] = useState<Consulta | null>(null)   // cartelito de cierre → CRM
 
     // Resumen
     const [stats, setStats] = useState<Stats | null>(null)
@@ -233,10 +235,12 @@ export default function ConsultasPage() {
         } else toast.error(r.error || 'No se pudo enviar')
         setEnviando(false)
     }
-    const resolver = async (c: Consulta) => {
-        const r = await marcarResueltaAction(c.id, true)
-        if (r.ok) { toast.success('Marcada como resuelta'); setConsultas(cs => soloPend ? cs.filter(x => x.id !== c.id) : cs.map(x => x.id === c.id ? { ...x, estado: 'resuelta' } : x)) }
-        else toast.error(r.error || 'Error')
+    // Finalizar una consulta abre el "cartelito": resumen del chat + ficha del CRM.
+    const resolver = (c: Consulta) => setFinalizando(c)
+    // Cierre efectivo (lo llama el cartelito al guardar): saca la consulta de la bandeja.
+    const alFinalizar = (consultaId: string) => {
+        setConsultas(cs => soloPend ? cs.filter(x => x.id !== consultaId) : cs.map(x => x.id === consultaId ? { ...x, estado: 'resuelta' } : x))
+        setFinalizando(null)
     }
 
     // Respuestas rápidas (plantillas activas) + borrador IA.
@@ -295,6 +299,7 @@ export default function ConsultasPage() {
             <div className="flex flex-wrap gap-2 mb-6">
                 <TabBtn id="resumen" icon={BarChart3} label="Resumen" />
                 <TabBtn id="bandeja" icon={Inbox} label="Bandeja" badge={pendientesCount} />
+                <TabBtn id="crm" icon={Target} label="CRM / Embudo" />
                 <TabBtn id="contactos" icon={Users} label="Contactos" />
                 <TabBtn id="conocimiento" icon={BookOpen} label="Info del bot" />
             </div>
@@ -517,6 +522,18 @@ export default function ConsultasPage() {
             )}
 
             {/* ================= CONTACTOS ================= */}
+            {/* ================= CRM / EMBUDO ================= */}
+            {tab === 'crm' && <CrmPanel />}
+
+            {/* Cartelito de cierre: resumen del chat + ficha del CRM */}
+            {finalizando && (
+                <CrmFinalizarModal
+                    consulta={{ id: finalizando.id, subscriber_id: finalizando.subscriber_id, contacto_nombre: finalizando.contacto_nombre, contacto_usuario: finalizando.contacto_usuario, canal: finalizando.canal }}
+                    onClose={() => setFinalizando(null)}
+                    onDone={alFinalizar}
+                />
+            )}
+
             {tab === 'contactos' && (
                 <div className="max-w-2xl mx-auto">
                     <div className="mb-4 space-y-3">
