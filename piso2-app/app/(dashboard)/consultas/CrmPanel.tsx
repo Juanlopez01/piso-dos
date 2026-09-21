@@ -1,10 +1,49 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Loader2, RefreshCw, Search, Instagram, MessageCircle, Sparkles, Check, X, Users, AlertTriangle } from 'lucide-react'
+import { Loader2, RefreshCw, Search, Instagram, MessageCircle, Sparkles, Check, X, Users, AlertTriangle, Eye, Link2, UserCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { getCrmLeadsAction, guardarLeadAction, resumirChatCrmAction, finalizarConsultaCrmAction, type CrmLead } from '@/app/actions/crm'
+import { getConversacionContactoAction, buscarPerfilesAction, vincularContactoAction, desvincularContactoAction } from '@/app/actions/consultas'
 import { CRM_ETAPAS, CRM_PRODUCTOS, etapaInfo } from '@/lib/crm'
+
+const esImagenUrl = (t: string) => /^https?:\/\//.test(t || '') && (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(t) || t.includes('/storage/v1/object'))
+
+// ============================ VER CHAT ============================
+function ChatModal({ subscriberId, titulo, onClose }: { subscriberId: string; titulo: string; onClose: () => void }) {
+    const [msgs, setMsgs] = useState<{ de: string; texto: string; created_at: string }[]>([])
+    const [loading, setLoading] = useState(true)
+    useEffect(() => {
+        let vivo = true
+        ;(async () => {
+            const r = await getConversacionContactoAction(subscriberId)
+            if (vivo) { if (r.ok) setMsgs(r.mensajes as any[]); setLoading(false) }
+        })()
+        return () => { vivo = false }
+    }, [subscriberId])
+    return (
+        <div className="fixed inset-0 z-[60] bg-black/70 flex items-end md:items-center justify-center p-0 md:p-4" onClick={onClose}>
+            <div className="bg-[#0b0b0d] border border-white/10 rounded-t-2xl md:rounded-2xl w-full max-w-lg h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
+                    <p className="text-sm font-bold truncate">{titulo}</p>
+                    <button onClick={onClose} className="text-gray-500 hover:text-white p-1"><X size={18} /></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                    {loading ? <div className="flex justify-center py-10"><Loader2 className="animate-spin text-[#D4E655]" /></div>
+                        : msgs.length === 0 ? <p className="text-center text-gray-500 text-sm py-10">No hay chat guardado de este contacto.</p>
+                            : msgs.map((m, i) => (
+                                <div key={i} className={`flex ${m.de === 'usuario' ? 'justify-start' : 'justify-end'}`}>
+                                    <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.de === 'usuario' ? 'bg-white/5 text-gray-200' : m.de === 'recep' ? 'bg-[#D4E655] text-black' : 'bg-indigo-500/20 text-indigo-100'}`}>
+                                        {esImagenUrl(m.texto) ? <img src={m.texto} alt="" className="rounded-lg max-h-48" /> : <span className="whitespace-pre-wrap break-words">{m.texto}</span>}
+                                        <div className="text-[9px] opacity-60 mt-0.5">{m.de === 'usuario' ? 'Cliente' : m.de === 'recep' ? 'Recepción' : 'Bot'}</div>
+                                    </div>
+                                </div>
+                            ))}
+                </div>
+            </div>
+        </div>
+    )
+}
 
 const chipEtapa: Record<string, string> = {
     sky: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
@@ -22,7 +61,7 @@ const inp = 'w-full bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-s
 const lbl = 'block text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-1'
 
 // ============================ EDITOR DE UN LEAD ============================
-function LeadEditor({ lead, onClose, onSaved }: { lead: CrmLead; onClose: () => void; onSaved: () => void }) {
+function LeadEditor({ lead, onClose, onSaved, onVerChat }: { lead: CrmLead; onClose: () => void; onSaved: () => void; onVerChat: (l: CrmLead) => void }) {
     const [etapa, setEtapa] = useState(lead.etapa)
     const [producto, setProducto] = useState(lead.producto || '')
     const [estilo, setEstilo] = useState(lead.estilo || '')
@@ -30,6 +69,28 @@ function LeadEditor({ lead, onClose, onSaved }: { lead: CrmLead; onClose: () => 
     const [notas, setNotas] = useState(lead.notas || '')
     const [nombre, setNombre] = useState(lead.nombre || '')
     const [saving, setSaving] = useState(false)
+
+    // Vínculo con alumno (reusa asistente_contacto_perfil).
+    const [perfilNombre, setPerfilNombre] = useState(lead.perfil_nombre || '')
+    const [term, setTerm] = useState('')
+    const [resultados, setResultados] = useState<any[]>([])
+    const [buscando, setBuscando] = useState(false)
+    const buscar = async (t: string) => {
+        setTerm(t)
+        if (t.trim().length < 2) { setResultados([]); return }
+        setBuscando(true)
+        const r = await buscarPerfilesAction(t)
+        if (r.ok) setResultados(r.perfiles); setBuscando(false)
+    }
+    const vincular = async (p: any) => {
+        const r = await vincularContactoAction(lead.subscriber_id, lead.canal || 'instagram', p.id)
+        if (r.ok) { setPerfilNombre(p.nombre_completo || p.email || 'Alumno'); setTerm(''); setResultados([]); toast.success('Alumno vinculado') }
+        else toast.error(r.error || 'No se pudo vincular')
+    }
+    const desvincular = async () => {
+        const r = await desvincularContactoAction(lead.subscriber_id)
+        if (r.ok) { setPerfilNombre(''); toast.success('Desvinculado') } else toast.error('No se pudo desvincular')
+    }
 
     const guardar = async () => {
         setSaving(true)
@@ -49,7 +110,37 @@ function LeadEditor({ lead, onClose, onSaved }: { lead: CrmLead; onClose: () => 
                         <p className="text-sm font-black uppercase tracking-wide flex items-center gap-2">{canalIcon(lead.canal)} {nombre || lead.instagram || 'Contacto'}</p>
                         <p className="text-[11px] text-gray-500">{lead.instagram ? '@' + lead.instagram : ''} {lead.diasSinContacto ? `· hace ${lead.diasSinContacto} día${lead.diasSinContacto === 1 ? '' : 's'}` : ''}</p>
                     </div>
-                    <button onClick={onClose} className="text-gray-500 hover:text-white p-1"><X size={18} /></button>
+                    <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={() => onVerChat(lead)} className="text-[10px] font-bold uppercase tracking-wide text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1"><Eye size={13} /> Ver chat</button>
+                        <button onClick={onClose} className="text-gray-500 hover:text-white p-1"><X size={18} /></button>
+                    </div>
+                </div>
+
+                {/* Vínculo con alumno */}
+                <div className="mb-3 rounded-xl bg-[#111] border border-white/10 p-3">
+                    {perfilNombre ? (
+                        <div className="flex items-center gap-2">
+                            <UserCheck size={15} className="text-emerald-400 shrink-0" />
+                            <span className="text-sm font-semibold flex-1 truncate">Alumno: {perfilNombre}</span>
+                            <button onClick={desvincular} className="text-[10px] font-bold uppercase tracking-wide text-gray-500 hover:text-red-400">Desvincular</button>
+                        </div>
+                    ) : (
+                        <div>
+                            <label className={lbl}><Link2 size={11} className="inline mr-1" />Vincular a un alumno</label>
+                            <input value={term} onChange={e => buscar(e.target.value)} className={inp} placeholder="Buscar por nombre, email o teléfono…" />
+                            {buscando && <p className="text-[11px] text-gray-500 mt-1">Buscando…</p>}
+                            {resultados.length > 0 && (
+                                <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                                    {resultados.map(p => (
+                                        <button key={p.id} onClick={() => vincular(p)} className="w-full text-left bg-[#0e0e10] border border-white/10 rounded-lg px-3 py-2 hover:border-[#D4E655]/40">
+                                            <p className="text-sm font-semibold truncate">{p.nombre_completo || p.email}</p>
+                                            <p className="text-[10px] text-gray-500 truncate">{[p.email, p.telefono].filter(Boolean).join(' · ')}</p>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <div className="space-y-3">
@@ -183,6 +274,7 @@ export default function CrmPanel() {
     const [q, setQ] = useState('')
     const [filtro, setFiltro] = useState<string>('todas')
     const [editar, setEditar] = useState<CrmLead | null>(null)
+    const [verChat, setVerChat] = useState<CrmLead | null>(null)
 
     const cargar = async () => {
         setLoading(true)
@@ -237,26 +329,29 @@ export default function CrmPanel() {
             ) : (
                 <div className="space-y-2">
                     {visibles.map(l => (
-                        <button key={l.subscriber_id} onClick={() => setEditar(l)} className="w-full text-left bg-[#0e0e10] border border-white/10 rounded-xl p-3 hover:border-white/25 transition-colors">
+                        <div key={l.subscriber_id} className="w-full bg-[#0e0e10] border border-white/10 rounded-xl p-3 hover:border-white/25 transition-colors">
                             <div className="flex items-center gap-2">
                                 <span className={`w-2 h-2 rounded-full shrink-0 ${alertaDot(l.alerta)}`} title={l.alerta === 'urgente' ? 'Sin contacto 7+ días' : l.alerta === 'seguir' ? 'Seguir' : 'Al día'} />
                                 {canalIcon(l.canal)}
-                                <span className="font-bold text-sm truncate flex-1">{l.nombre || (l.instagram ? '@' + l.instagram : 'Contacto')}</span>
+                                <button onClick={() => setEditar(l)} className="font-bold text-sm truncate flex-1 text-left hover:text-[#D4E655]">{l.nombre || (l.instagram ? '@' + l.instagram : 'Contacto')}</button>
+                                {l.perfil_nombre && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 uppercase font-bold flex items-center gap-0.5"><UserCheck size={9} /> Cliente</span>}
                                 <span className={`text-[9px] px-2 py-0.5 rounded-full border uppercase font-bold ${cls(l.etapa)}`}>{etapaInfo(l.etapa).label}</span>
+                                <button onClick={() => setVerChat(l)} title="Ver chat" className="text-gray-500 hover:text-white p-1 shrink-0"><Eye size={15} /></button>
                             </div>
-                            <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-6">
+                            <button onClick={() => setEditar(l)} className="w-full text-left flex flex-wrap items-center gap-1.5 mt-2 pl-6">
                                 {l.producto && <span className="text-[10px] bg-white/5 border border-white/10 text-gray-300 px-2 py-0.5 rounded-full">{l.producto}</span>}
                                 {l.estilo && <span className="text-[10px] bg-white/5 border border-white/10 text-gray-400 px-2 py-0.5 rounded-full">{l.estilo}</span>}
                                 {l.profe && <span className="text-[10px] bg-white/5 border border-white/10 text-gray-400 px-2 py-0.5 rounded-full">👤 {l.profe}</span>}
                                 <span className="text-[10px] text-gray-600 ml-auto">{l.diasSinContacto === 0 ? 'hoy' : `hace ${l.diasSinContacto}d`}</span>
-                            </div>
+                            </button>
                             {l.notas && <p className="text-[11px] text-gray-500 mt-1.5 pl-6 line-clamp-2">{l.notas}</p>}
-                        </button>
+                        </div>
                     ))}
                 </div>
             )}
 
-            {editar && <LeadEditor lead={editar} onClose={() => setEditar(null)} onSaved={() => { setEditar(null); cargar() }} />}
+            {editar && <LeadEditor lead={editar} onClose={() => { setEditar(null); cargar() }} onSaved={() => { setEditar(null); cargar() }} onVerChat={(l) => setVerChat(l)} />}
+            {verChat && <ChatModal subscriberId={verChat.subscriber_id} titulo={verChat.nombre || (verChat.instagram ? '@' + verChat.instagram : 'Chat')} onClose={() => setVerChat(null)} />}
         </div>
     )
 }

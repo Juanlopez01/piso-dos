@@ -35,6 +35,7 @@ export type CrmLead = {
     whatsapp: string | null
     mail: string | null
     perfil_id: string | null
+    perfil_nombre: string | null
     etapa: string
     producto: string | null
     estilo: string | null
@@ -54,11 +55,22 @@ export async function getCrmLeadsAction(dias = 120) {
     const admin = getAdminClient()
     const desde = new Date(Date.now() - dias * 86400_000).toISOString()
 
-    const [{ data: hist }, { data: cons }, { data: overlay }] = await Promise.all([
+    const [{ data: hist }, { data: cons }, { data: overlay }, { data: vinc }] = await Promise.all([
         admin.from('asistente_historial').select('subscriber_id, canal, de, texto, created_at').gte('created_at', desde).order('created_at', { ascending: true }),
         admin.from('asistente_consultas').select('subscriber_id, contacto_nombre, contacto_usuario, estado, canal, created_at'),
         admin.from('crm_leads').select('*'),
+        admin.from('asistente_contacto_perfil').select('subscriber_id, perfil_id'),
     ])
+
+    // Alumno vinculado por contacto (reusa el vínculo que ya usa la bandeja/ficha).
+    const perfilDe: Record<string, string> = {}
+    for (const v of (vinc || []) as any[]) if (v.subscriber_id && v.perfil_id) perfilDe[v.subscriber_id] = v.perfil_id
+    const perfilIds = [...new Set(Object.values(perfilDe))]
+    const nombrePerfil: Record<string, string> = {}
+    if (perfilIds.length) {
+        const { data: perfiles } = await admin.from('profiles').select('id, nombre_completo').in('id', perfilIds)
+        for (const p of (perfiles || []) as any[]) nombrePerfil[p.id] = p.nombre_completo || ''
+    }
 
     // Datos de contacto derivados de las consultas (nombre/usuario/canal/pendiente).
     const info: Record<string, { nombre?: string; usuario?: string; canal?: string; derivada?: boolean; pendiente?: boolean }> = {}
@@ -103,7 +115,8 @@ export async function getCrmLeadsAction(dias = 120) {
             instagram: o.instagram || i.usuario || null,
             whatsapp: o.whatsapp || null,
             mail: o.mail || null,
-            perfil_id: o.perfil_id || null,
+            perfil_id: perfilDe[b.subscriber_id] || o.perfil_id || null,
+            perfil_nombre: perfilDe[b.subscriber_id] ? (nombrePerfil[perfilDe[b.subscriber_id]] || null) : null,
             etapa,
             producto: o.producto || null,
             estilo: o.estilo || null,
