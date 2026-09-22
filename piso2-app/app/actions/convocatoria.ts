@@ -149,13 +149,19 @@ export async function getPropuestasObraAction() {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error, propuestas: [] as any[], esAdmin: false }
     const admin = getAdminClient()
-    let q = admin.from('obra_propuestas').select('*').order('created_at', { ascending: false })
+    // Las archivadas (papelera) nunca aparecen en las listas normales.
+    let q = admin.from('obra_propuestas').select('*').is('archivada_at', null).order('created_at', { ascending: false })
     // Las rechazadas ("no aprobadas") quedan reservadas SOLO para admin.
     if (perm.rol !== 'admin') q = q.neq('estado', 'rechazada')
     const { data } = await q
     const propuestas = (data || []) as any[]
+    await adjuntarCicloYFuncion(admin, propuestas)
+    return { ok: true as const, propuestas, esAdmin: perm.rol === 'admin' }
+}
 
-    // Adjuntamos el título del ciclo al que pertenece cada propuesta (si tiene).
+// Adjunta a cada propuesta el título del ciclo y, si está aceptada y vinculada a
+// una función, el nombre/fecha de esa función (para agrupar seleccionados x fecha).
+async function adjuntarCicloYFuncion(admin: any, propuestas: any[]) {
     const cicloIds = [...new Set(propuestas.map(p => p.convocatoria_id).filter(Boolean))]
     if (cicloIds.length) {
         const { data: ciclos } = await admin.from('convocatorias').select('id, titulo').in('id', cicloIds)
@@ -163,7 +169,31 @@ export async function getPropuestasObraAction() {
         for (const c of (ciclos || []) as any[]) titulo[c.id] = c.titulo
         for (const p of propuestas) p.convocatoria_titulo = p.convocatoria_id ? (titulo[p.convocatoria_id] || null) : null
     }
-    return { ok: true as const, propuestas, esAdmin: perm.rol === 'admin' }
+    const eventoIds = [...new Set(propuestas.map(p => p.evento_id).filter(Boolean))]
+    if (eventoIds.length) {
+        const { data: evs } = await admin.from('eventos').select('id, nombre, fecha, estado').in('id', eventoIds)
+        const em: Record<string, any> = {}
+        for (const e of (evs || []) as any[]) em[e.id] = e
+        for (const p of propuestas) {
+            const e = p.evento_id ? em[p.evento_id] : null
+            p.evento_nombre = e?.nombre || null
+            p.evento_fecha = e?.fecha || null
+            p.evento_estado = e?.estado || null
+        }
+    }
+}
+
+// Papelera: postulaciones archivadas (solo admin).
+export async function getPapeleraAction() {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, propuestas: [] as any[] }
+    if (perm.rol !== 'admin') return { ok: false as const, error: 'Solo admin', propuestas: [] as any[] }
+    const admin = getAdminClient()
+    const { data } = await admin.from('obra_propuestas').select('*')
+        .not('archivada_at', 'is', null).order('archivada_at', { ascending: false })
+    const propuestas = (data || []) as any[]
+    await adjuntarCicloYFuncion(admin, propuestas)
+    return { ok: true as const, propuestas }
 }
 
 export async function curarPropuestaAction(id: string, decision: 'aceptada' | 'rechazada', nota?: string) {
@@ -260,13 +290,66 @@ export async function desvincularObraAction(propuestaId: string) {
     return { ok: true as const }
 }
 
-export async function eliminarPropuestaAction(id: string) {
+// "Eliminar" ya NO borra: manda a la papelera (borrado blando). El contacto y
+// todos los datos quedan en la base y se pueden restaurar.
+export async function archivarPropuestaAction(id: string) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
+    const { error } = await admin.from('obra_propuestas')
+        .update({ archivada_at: new Date().toISOString(), archivada_por: perm.userId }).eq('id', id)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+// Restaurar desde la papelera: vuelve a la lista según su estado (sigue aceptada,
+// pendiente o no aprobada tal como estaba).
+export async function restaurarPropuestaAction(id: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('obra_propuestas')
+        .update({ archivada_at: null, archivada_por: null }).eq('id', id)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
+// Borrado definitivo (irreversible): SOLO admin y SOLO desde la papelera.
+export async function borrarPropuestaDefinitivoAction(id: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    if (perm.rol !== 'admin') return { ok: false as const, error: 'Solo admin puede borrar definitivamente.' }
+    const admin = getAdminClient()
+    const { data: p } = await admin.from('obra_propuestas').select('archivada_at').eq('id', id).maybeSingle()
+    if (!p?.archivada_at) return { ok: false as const, error: 'Primero mandala a la papelera.' }
     const { error } = await admin.from('obra_propuestas').delete().eq('id', id)
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
+}
+
+// ---- Agrupar seleccionados por fecha/función (reusa Eventos) ----
+// Lista de funciones existentes para asignar seleccionados.
+export async function getFuncionesAction() {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, funciones: [] as any[] }
+    const admin = getAdminClient()
+    const { data } = await admin.from('eventos')
+        .select('id, nombre, fecha, estado')
+        .order('fecha', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false })
+    return { ok: true as const, funciones: (data || []) as any[] }
+}
+
+// Crea una función (evento en borrador) para agrupar seleccionados de una fecha.
+export async function crearFuncionAction(data: { nombre: string; fecha?: string | null }) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    if (!data.nombre?.trim()) return { ok: false as const, error: 'Poné un nombre a la fecha/función.' }
+    const admin = getAdminClient()
+    const { data: ev, error } = await admin.from('eventos').insert({
+        nombre: data.nombre.trim(), fecha: data.fecha || null, estado: 'borrador', created_by: perm.userId,
+    }).select('id, nombre, fecha, estado').single()
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const, funcion: ev }
 }
 
 // ---- Ficha técnica y reparto POR OBRA ----
