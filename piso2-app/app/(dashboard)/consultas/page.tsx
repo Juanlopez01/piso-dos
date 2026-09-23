@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power, Sparkles, Zap, Image as ImageIcon, Target } from 'lucide-react'
+import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power, Sparkles, Zap, Image as ImageIcon, Target, Pencil, FlaskConical } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
@@ -9,6 +9,7 @@ import {
     getConsultasAction, responderConsultaAction,
     getAsistenteStatsAction, getContactosAction, getConversacionContactoAction,
     getConocimientoAction, guardarConocimientoAction, toggleConocimientoAction, eliminarConocimientoAction,
+    probarAsistenteAction,
     sugerirRespuestaAction, responderImagenAction,
 } from '@/app/actions/consultas'
 import FichaAlumno from './FichaAlumno'
@@ -79,6 +80,11 @@ export default function ConsultasPage() {
     const [nuevoTipo, setNuevoTipo] = useState<'info' | 'no_responder' | 'respuesta'>('info')
     const [nuevoTexto, setNuevoTexto] = useState('')
     const [guardandoConoc, setGuardandoConoc] = useState(false)
+    const [editandoConoc, setEditandoConoc] = useState<string | null>(null) // id en edición
+    // Probador del bot
+    const [pruebaTexto, setPruebaTexto] = useState('')
+    const [probando, setProbando] = useState(false)
+    const [pruebaResp, setPruebaResp] = useState<{ respuesta: string; derivar: boolean } | null>(null)
     const [sugiriendo, setSugiriendo] = useState<string | null>(null) // id de consulta sugiriendo
     const [subiendoImg, setSubiendoImg] = useState(false)
     const [supabaseBrowser] = useState(() => createClient())
@@ -182,9 +188,21 @@ export default function ConsultasPage() {
     const agregarConoc = async () => {
         if (!nuevoTexto.trim()) return toast.error('Escribí el texto')
         setGuardandoConoc(true)
-        const r = await guardarConocimientoAction({ tipo: nuevoTipo, texto: nuevoTexto.trim() })
-        if (r.ok) { toast.success('Guardado'); setNuevoTexto(''); cargarConoc() } else toast.error(r.error || 'Error')
+        const r = await guardarConocimientoAction({ id: editandoConoc || undefined, tipo: nuevoTipo, texto: nuevoTexto.trim() })
+        if (r.ok) { toast.success(editandoConoc ? 'Cambios guardados' : 'Guardado'); setNuevoTexto(''); setEditandoConoc(null); cargarConoc() } else toast.error(r.error || 'Error')
         setGuardandoConoc(false)
+    }
+    const editarConoc = (c: Conocimiento) => {
+        setEditandoConoc(c.id); setNuevoTipo(c.tipo); setNuevoTexto(c.texto)
+        try { window.scrollTo({ top: 0, behavior: 'smooth' }) } catch { }
+    }
+    const cancelarEdicion = () => { setEditandoConoc(null); setNuevoTexto('') }
+    const probar = async () => {
+        if (!pruebaTexto.trim()) return toast.error('Escribí una pregunta de prueba')
+        setProbando(true); setPruebaResp(null)
+        const r = await probarAsistenteAction(pruebaTexto.trim())
+        if (r.ok) setPruebaResp({ respuesta: r.respuesta, derivar: r.derivar }); else toast.error(r.error || 'Error')
+        setProbando(false)
     }
     const toggleConoc = async (c: Conocimiento) => {
         const r = await toggleConocimientoAction(c.id, !c.activo)
@@ -603,11 +621,40 @@ export default function ConsultasPage() {
                                     : 'Ej: "clase de adrian manzano" · "precios de verano" — poné palabras clave del tema; si el mensaje las menciona, el bot no responde y deriva.'}
                             className="w-full bg-black border border-white/10 rounded-xl py-2.5 px-3 text-sm outline-none focus:border-[#D4E655] resize-y"
                         />
-                        <div className="flex justify-end mt-2">
+                        <div className="flex justify-end items-center gap-2 mt-2">
+                            {editandoConoc && <button onClick={cancelarEdicion} className="px-3 py-2 rounded-lg border border-white/10 text-gray-400 text-xs font-bold uppercase tracking-wide hover:text-white">Cancelar</button>}
                             <button onClick={agregarConoc} disabled={guardandoConoc} className="px-4 py-2 rounded-lg bg-[#D4E655] text-black text-xs font-black uppercase tracking-wide hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
-                                {guardandoConoc ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Agregar
+                                {guardandoConoc ? <Loader2 size={14} className="animate-spin" /> : editandoConoc ? <Check size={14} /> : <Plus size={14} />} {editandoConoc ? 'Guardar cambios' : 'Agregar'}
                             </button>
                         </div>
+                    </div>
+
+                    {/* Probador: confirmar que el bot lee y entiende lo cargado */}
+                    <div className="rounded-2xl border border-blue-500/20 bg-blue-500/[0.04] p-4 mb-5">
+                        <p className="text-[11px] font-black uppercase tracking-widest text-blue-300 mb-1 flex items-center gap-1.5"><FlaskConical size={13} /> Probar el bot</p>
+                        <p className="text-[11px] text-gray-500 mb-3 max-w-2xl">Escribí una pregunta como si fueras un cliente y mirá qué contestaría el bot <b className="text-gray-300">con la info que está cargada ahora</b>. No le llega a nadie: es solo una prueba.</p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            <input
+                                value={pruebaTexto} onChange={e => setPruebaTexto(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') probar() }}
+                                placeholder='Ej: "¿Cuánto sale el seminario de contemporáneo?"'
+                                className="flex-1 bg-black border border-white/10 rounded-xl py-2.5 px-3 text-sm outline-none focus:border-blue-400" />
+                            <button onClick={probar} disabled={probando} className="px-4 py-2.5 rounded-xl bg-blue-500 text-white text-xs font-black uppercase tracking-wide hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5 shrink-0">
+                                {probando ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Probar
+                            </button>
+                        </div>
+                        {pruebaResp && (
+                            <div className="mt-3">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-[9px] text-gray-500 uppercase tracking-wide flex items-center gap-1"><Bot size={11} /> El bot contestaría:</span>
+                                    {pruebaResp.derivar
+                                        ? <span className="text-[9px] px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-400 uppercase font-bold">Deriva a recepción</span>
+                                        : <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 uppercase font-bold">Responde solo</span>}
+                                </div>
+                                <div className="bg-[#12203a] text-blue-100 border border-blue-500/20 rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap">{pruebaResp.respuesta || '(sin respuesta)'}</div>
+                                <p className="text-[10px] text-gray-600 mt-1.5">Si la respuesta no es la que esperabas, editá o agregá info arriba y volvé a probar.</p>
+                            </div>
+                        )}
                     </div>
 
                     {/* Lista */}
@@ -622,6 +669,7 @@ export default function ConsultasPage() {
                                     <span className={`text-[8px] px-2 py-1 rounded-full uppercase font-black shrink-0 ${c.tipo === 'info' ? 'bg-[#D4E655]/15 text-[#D4E655]' : c.tipo === 'respuesta' ? 'bg-blue-500/15 text-blue-300' : 'bg-orange-500/15 text-orange-400'}`}>{c.tipo === 'info' ? 'Info' : c.tipo === 'respuesta' ? 'Respuesta' : 'No responde'}</span>
                                     <p className="flex-1 text-sm text-gray-200 whitespace-pre-wrap">{c.texto}</p>
                                     <div className="flex items-center gap-1 shrink-0">
+                                        <button onClick={() => editarConoc(c)} title="Editar" className={`p-1.5 rounded-lg ${editandoConoc === c.id ? 'text-[#D4E655] bg-[#D4E655]/10' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}><Pencil size={14} /></button>
                                         <button onClick={() => toggleConoc(c)} title={c.activo ? 'Desactivar' : 'Activar'} className={`p-1.5 rounded-lg ${c.activo ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-gray-500 hover:bg-white/5'}`}><Power size={14} /></button>
                                         <button onClick={() => borrarConoc(c)} title="Borrar" className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10"><Trash2 size={14} /></button>
                                     </div>

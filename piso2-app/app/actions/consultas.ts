@@ -466,3 +466,18 @@ export async function eliminarConocimientoAction(id: string) {
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
 }
+
+// Probar el bot SIN efectos: corre el mismo motor que en vivo (lee el conocimiento
+// activo) pero no guarda historial, no crea consultas ni notifica. Sirve para
+// confirmar que lo cargado se está leyendo y entendiendo bien.
+export async function probarAsistenteAction(pregunta: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    if (!pregunta?.trim()) return { ok: false as const, error: 'Escribí una pregunta de prueba.' }
+    try {
+        const { respuesta, derivar } = await responderAsistente(pregunta.trim(), [])
+        return { ok: true as const, respuesta, derivar }
+    } catch (e: any) {
+        return { ok: false as const, error: e?.message || 'No se pudo probar el bot.' }
+    }
+}
