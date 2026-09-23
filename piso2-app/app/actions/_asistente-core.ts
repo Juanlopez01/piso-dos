@@ -489,9 +489,9 @@ async function textoRuteado(pregunta: string): Promise<string | null> {
         return preciosPacks({ q })
     }
 
-    // Formaciones (cursos)
-    if (/(formacion|formaciones|curso|carrera|profesorado|elenco de formacion)/.test(q)) {
-        return formaciones()
+    // Formación / cursos / carrera / profesorado = La Liga (formación profesional).
+    if (/(formacion|formaciones|curso|cursos|carrera|carreras|profesorado|profesorados)/.test(q)) {
+        return laLiga()
     }
 
     // Clases (agenda), con filtro por ritmo/profe/día
@@ -543,9 +543,8 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
 const IA_TOOLS = [
     { type: 'function', function: { name: 'clases', description: 'Horarios de clases (Regular/Especial) por día, ritmo o profesor. Usar para "qué clases hay", horarios, profes, "qué días da clase X", cartelera.', parameters: { type: 'object', properties: { dia: { type: 'string', description: 'Completar SOLO si el usuario menciona un día concreto ("hoy", "manana", "sabado", "30/08"). Si el usuario NO menciona un día (ej "clases de jazz", "qué días da clase Nico", "cuándo hay reggaeton"), dejar VACÍO o poner "semana" para ver toda la agenda de la semana. Nunca asumas "hoy".' }, filtro: { type: 'string', description: 'Opcional: estilo/ritmo (ej "jazz", "heels", "ballet") o nombre del profe (ej "Nico Chávez"). Poné el estilo O el nombre del profe, no toda la frase.' } } } } },
-    { type: 'function', function: { name: 'formaciones', description: 'Lista las formaciones/cursos disponibles.', parameters: { type: 'object', properties: {} } } },
-    { type: 'function', function: { name: 'grupos', description: 'Info de las Compañías/Grupos (elencos que entrenan y producen juntos): cuota mensual. Usar para "grupos", "compañías", o "el programa" cuando se refiere a los grupos. NO es lo mismo que formaciones/cursos.', parameters: { type: 'object', properties: {} } } },
-    { type: 'function', function: { name: 'la_liga', description: 'Info de La Liga: programa de formación por niveles, con su cuota mensual vigente. Usar para "La Liga" o "la formación de la liga".', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'grupos', description: 'Info de las Compañías/Grupos (elencos que entrenan y producen juntos): cuota mensual. Usar para "grupos", "compañías", o "el programa" cuando se refiere a los grupos. NO es lo mismo que la formación/La Liga.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'la_liga', description: 'Info de La Liga, que es NUESTRA formación profesional. Usar SIEMPRE para "formación", "formaciones", "curso", "cursos", "carrera", "carreras", "profesorado", "profesorados" o "La Liga": todos se refieren a esto. Programa por niveles con su cuota mensual vigente. NO usar la herramienta "clases" para esto.', parameters: { type: 'object', properties: {} } } },
     { type: 'function', function: { name: 'precios', description: 'Precios de clases sueltas y packs. Usar para "cuánto sale/vale", valores, abonos, packs.', parameters: { type: 'object', properties: { termino: { type: 'string', description: 'Opcional: filtro como "suelta", "x4", "ballroom".' } } } } },
     { type: 'function', function: { name: 'alquiler_tarifas', description: 'Tarifas de alquiler de salas (por hora: mañana/noche/finde). Da SOLO precios, NO disponibilidad de horarios.', parameters: { type: 'object', properties: { sala: { type: 'string', description: 'Opcional: nombre de sala (ej "sala 1", "blanca", "negra").' } } } } },
     { type: 'function', function: { name: 'ubicacion', description: 'Direcciones de las sedes.', parameters: { type: 'object', properties: {} } } },
@@ -572,7 +571,6 @@ async function ejecutarToolIA(name: string, args: any): Promise<string> {
             if (filtro) return await clasesAgenda({ cuando: 'semana', filtro })
             return await clasesAgenda({ cuando: 'hoy' })
         }
-        if (name === 'formaciones') return await formaciones()
         if (name === 'grupos') return await grupos()
         if (name === 'la_liga') return await laLiga()
         if (name === 'precios') return await preciosPacks({ q: norm(args?.termino || '') })
@@ -586,7 +584,7 @@ async function ejecutarToolIA(name: string, args: any): Promise<string> {
 function systemIA(infoExtra: string[] = []): string {
     const fechaTxt = new Date(Date.now() - 3 * 3600_000).toLocaleDateString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: TZ })
     const extra = infoExtra.length
-        ? `\n\nINFO EXTRA cargada por el equipo (es FUENTE DE VERDAD, más importante que el resto; si preguntan por esto, respondé con esto y NO derives por "no saberlo"):\n- ${infoExtra.join('\n- ')}`
+        ? `\n\nINFO EXTRA cargada por el equipo (FUENTE DE VERDAD y MANDA sobre todo lo demás, incluidas las herramientas): si lo que te preguntan está cubierto acá, armá la respuesta CON ESTO usando TODOS los detalles que traiga (días, horarios, contenidos, requisitos, cómo inscribirse). Las herramientas solo COMPLEMENTAN (ej: un precio vigente); NUNCA reemplaces ni omitas los detalles de acá con la respuesta más corta de una herramienta, y NUNCA digas que "no encontraste" algo que está acá. Si preguntan por esto, respondé con esto y NO derives por "no saberlo":\n- ${infoExtra.join('\n- ')}`
         : ''
     return `Sos la atención por chat (Instagram/WhatsApp) de Piso 2, un estudio de danza en CABA con dos sedes (Congreso y Obelisco). Hoy es ${fechaTxt}.${extra}
 
@@ -597,8 +595,8 @@ ESCRITURA INFORMAL: la gente escribe rápido, con faltas de ortografía, sin til
 Respondé con datos REALES obtenidos SOLO con las herramientas. Nunca inventes horarios, precios, profes ni direcciones.
 
 QUÉ RESOLVÉS VOS (respondé directo con las herramientas):
-- Información: qué clases/horarios/profes hay, precios y packs, tarifas de alquiler, formaciones, direcciones, medios de pago, cómo funciona la web.
-- Mapeo: clases/horarios/profes → "clases"; cuánto sale/valores → "precios"; alquiler → "alquiler_tarifas" (SOLO precios); direcciones → "ubicacion"; cursos → "formaciones". Podés encadenar herramientas si hay varias partes.
+- Información: qué clases/horarios/profes hay, precios y packs, tarifas de alquiler, la formación profesional (La Liga), direcciones, medios de pago, cómo funciona la web.
+- Mapeo: clases/horarios/profes → "clases"; cuánto sale/valores → "precios"; alquiler → "alquiler_tarifas" (SOLO precios); direcciones → "ubicacion"; formación/formaciones/curso/cursos/carrera/profesorado → "la_liga" (es NUESTRA formación profesional). Podés encadenar herramientas si hay varias partes.
 - ALQUILER DE SALAS: podés dar las TARIFAS (precio por hora). Pero NUNCA afirmes que un horario está libre u ocupado ni confirmes disponibilidad: hay alquileres fijos que NO están en el sistema, así que no tenés la disponibilidad real. Si preguntan por un día/horario, si está libre, o quieren reservar → dales la tarifa si corresponde y DERIVÁ ("derivar_a_recepcion"): la disponibilidad y la reserva las confirma el equipo.
 - IMPORTANTE con "clases": NO asumas "hoy". Si el usuario pregunta por un profe o un estilo, o "qué días/cuándo da clase X", llamá a "clases" SIN "dia" (o dia="semana") para ver toda la semana. Solo poné "dia" si el usuario nombra un día puntual. Si la herramienta dice que no encontró a ese profe/estilo, no muestres otras clases como si nada: contale que no lo encontraste y ofrecé derivar.
 
@@ -608,9 +606,11 @@ CUÁNDO DERIVÁS (usá "derivar_a_recepcion" — la persona no lo va a pedir, de
 - FUERA DE LOS DATOS: si preguntan algo puntual que las herramientas NO cubren (edades/niños, niveles, si es apto principiantes, requisitos, lesiones, convenios, eventos, prensa), NO lo afirmes ni lo niegues (no inventes): derivá para que el equipo confirme.
 - Cualquier cosa que no puedas responder con certeza. Ante la duda entre responder o derivar, DERIVÁ.
 
-"PROGRAMA" (¡ojo, es ambiguo!): cuando alguien pregunta por "el programa", "los grupos", "las compañías" o "la liga / la formación de La Liga", NO se refiere a las "formaciones/cursos" comunes ni a los "precios" de clases. Puede ser: (a) las Compañías/Grupos → usá la herramienta "grupos"; o (b) La Liga (formación por niveles) → usá "la_liga". Si dice "programa" a secas y no queda claro, preguntá a cuál se refiere. El ingreso a grupos/La Liga lo coordina el equipo: después de dar la info, si se quiere sumar, derivá con "derivar_a_recepcion". Nunca respondas a "programa/grupos/compañías/liga" con la info de cursos ni con los packs de clases.
+FORMACIÓN / LA LIGA: "formación", "formaciones", "curso/cursos", "carrera/carreras", "profesorado" y "La Liga" son TODOS lo mismo: nuestra formación profesional (La Liga). Para cualquiera de esas palabras usá SIEMPRE la herramienta "la_liga" y, si hay INFO EXTRA sobre La Liga, respondé con esos detalles (días, horarios, disciplinas, cómo inscribirse). La Liga NO está en la grilla de clases: NUNCA la busques con la herramienta "clases" ni digas que "no encontraste clases de La Liga en la agenda". Los packs/precios de clases sueltas NO aplican a La Liga.
 
-Para dudas de SOLO información (qué clases hay, precios, tarifas de alquiler, direcciones, formaciones) respondé vos directo, sin derivar. La DISPONIBILIDAD de salas NO es info que des vos: siempre la confirma el equipo (derivá).
+"PROGRAMA" / GRUPOS (¡ojo, es ambiguo!): cuando alguien pregunta por "el programa", "los grupos" o "las compañías" puede ser: (a) las Compañías/Grupos → usá la herramienta "grupos"; o (b) La Liga → usá "la_liga". Si dice "programa" a secas y no queda claro, preguntá a cuál se refiere. El ingreso a grupos/La Liga lo coordina el equipo: después de dar la info, si se quiere sumar, derivá con "derivar_a_recepcion". Nunca respondas a "programa/grupos/compañías" con los packs de clases.
+
+Para dudas de SOLO información (qué clases hay, precios, tarifas de alquiler, direcciones, la formación/La Liga) respondé vos directo, sin derivar. La DISPONIBILIDAD de salas NO es info que des vos: siempre la confirma el equipo (derivá).
 
 CÓMO DERIVAR (sin romper el tono humano): respondé lo que puedas al toque y ofrecé seguir; pedile un teléfono o mail y un horario, y decile que en un rato le confirman. Ej: "Buenísimo, eso lo dejo coordinado con el equipo y te escribimos en un rato 🙌 ¿me pasás un teléfono o mail por las dudas?".
 
