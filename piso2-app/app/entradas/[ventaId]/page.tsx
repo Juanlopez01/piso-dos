@@ -1,5 +1,6 @@
 import QRCode from 'qrcode'
 import { getEntradasPublicasAction } from '@/app/actions/eventos'
+import DescargarEntrada from './DescargarEntrada'
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' }) : null
@@ -38,6 +39,17 @@ export default async function EntradasPage({ params, searchParams }: { params: P
                 <p className="text-xs text-neutral-400 mt-2">{data.comprador} · {data.tickets.length} entrada{data.tickets.length === 1 ? '' : 's'} · {pesos(data.total)}</p>
             </div>
 
+            <div className="mb-5">
+                <DescargarEntrada
+                    evento={data.evento.nombre}
+                    fecha={fmtFecha(data.evento.fecha)}
+                    lugar={data.evento.lugar || null}
+                    comprador={data.comprador}
+                    tickets={data.tickets.map(tk => ({ codigo: tk.codigo, entrada: tk.entrada }))}
+                    qrs={qrs}
+                />
+            </div>
+
             <div className="space-y-4">
                 {data.tickets.map((tk, i) => (
                     <div key={tk.codigo} className="bg-white border border-neutral-200 rounded-2xl p-5 text-center shadow-sm">
@@ -49,7 +61,7 @@ export default async function EntradasPage({ params, searchParams }: { params: P
                 ))}
             </div>
 
-            <p className="text-[11px] text-neutral-400 text-center mt-6">Mostrá este QR en la entrada. Guardá esta página o sacale una captura.</p>
+            <p className="text-[11px] text-neutral-400 text-center mt-6">Descargá la entrada o guardá esta página. Mostrá el QR en la puerta.</p>
         </Marco>
     )
 }
