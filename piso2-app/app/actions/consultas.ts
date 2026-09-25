@@ -69,8 +69,22 @@ export async function getConsultasAction(soloPendientes = true) {
             .select('consulta_id, de, texto, created_at').in('consulta_id', ids).order('created_at')
         mensajes = data || []
     }
+
+    // Estado de pausa (bot detenido) por contacto, para el botón de la bandeja.
+    const subs = [...new Set((consultas || []).map((c: any) => c.subscriber_id).filter(Boolean))]
+    const pausadoDe: Record<string, boolean> = {}
+    if (subs.length) {
+        const { data: pausas } = await admin.from('asistente_pausa')
+            .select('subscriber_id, pausado_hasta').in('subscriber_id', subs)
+        const ahora = Date.now()
+        for (const p of (pausas || []) as any[]) {
+            if (p.pausado_hasta && new Date(p.pausado_hasta).getTime() > ahora) pausadoDe[p.subscriber_id] = true
+        }
+    }
+
     const conHilo = (consultas || []).map((c: any) => ({
         ...c, mensajes: mensajes.filter(m => m.consulta_id === c.id),
+        pausado: !!(c.subscriber_id && pausadoDe[c.subscriber_id]),
     }))
     return { ok: true, consultas: conHilo }
 }
@@ -284,6 +298,22 @@ export async function responderImagenAction(consultaId: string, imagenUrl: strin
             updated_at: new Date().toISOString(),
         }, { onConflict: 'subscriber_id' })
     }
+    return { ok: true }
+}
+
+// Pausa el bot para un contacto (recep toma la charla, ej. va a responder por IG).
+export async function pausarBotAction(subscriberId: string, horas = 24) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false, error: perm.error }
+    if (!subscriberId) return { ok: false, error: 'Falta el contacto.' }
+    const h = Math.min(72, Math.max(1, Number(horas) || 24))
+    const admin = getAdminClient()
+    const { error } = await admin.from('asistente_pausa').upsert({
+        subscriber_id: subscriberId,
+        pausado_hasta: new Date(Date.now() + h * 3600_000).toISOString(),
+        updated_at: new Date().toISOString(),
+    }, { onConflict: 'subscriber_id' })
+    if (error) return { ok: false, error: error.message }
     return { ok: true }
 }
 

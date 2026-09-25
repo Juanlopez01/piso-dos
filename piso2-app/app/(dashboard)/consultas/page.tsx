@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power, Sparkles, Zap, Image as ImageIcon, Target, Pencil, FlaskConical } from 'lucide-react'
+import { Loader2, Send, Check, MessageCircle, Instagram, RefreshCw, Inbox, BarChart3, Users, Bot, Clock, X, Search, BookOpen, Plus, Trash2, Power, Sparkles, Zap, Image as ImageIcon, Target, Pencil, FlaskConical, PauseCircle, PlayCircle } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
@@ -9,7 +9,7 @@ import {
     getConsultasAction, responderConsultaAction,
     getAsistenteStatsAction, getContactosAction, getConversacionContactoAction,
     getConocimientoAction, guardarConocimientoAction, toggleConocimientoAction, eliminarConocimientoAction,
-    probarAsistenteAction,
+    probarAsistenteAction, pausarBotAction, reactivarBotAction,
     sugerirRespuestaAction, responderImagenAction,
 } from '@/app/actions/consultas'
 import FichaAlumno from './FichaAlumno'
@@ -31,7 +31,7 @@ type Msg = { de: 'usuario' | 'recep' | 'bot'; texto: string; created_at: string 
 type Consulta = {
     id: string; created_at: string; canal: string
     contacto_nombre: string | null; contacto_usuario: string | null; subscriber_id: string | null
-    consulta: string | null; estado: string; mensajes: Msg[]
+    consulta: string | null; estado: string; mensajes: Msg[]; pausado?: boolean
 }
 type Stats = {
     dias: number
@@ -253,6 +253,20 @@ export default function ConsultasPage() {
         } else toast.error(r.error || 'No se pudo enviar')
         setEnviando(false)
     }
+    // Pausar / reactivar el bot para un contacto (recep toma la charla, ej. va a
+    // responder por Instagram directamente). Optimista + refresco.
+    const [pausandoId, setPausandoId] = useState<string | null>(null)
+    const togglePausa = async (c: Consulta) => {
+        if (!c.subscriber_id) return toast.error('Este contacto no tiene ID para pausar.')
+        setPausandoId(c.id)
+        const nuevo = !c.pausado
+        const r = nuevo ? await pausarBotAction(c.subscriber_id) : await reactivarBotAction(c.subscriber_id)
+        if (r.ok) {
+            toast.success(nuevo ? 'Bot pausado — respondés vos' : 'Bot reactivado')
+            setConsultas(cs => cs.map(x => x.subscriber_id === c.subscriber_id ? { ...x, pausado: nuevo } : x))
+        } else toast.error((r as any).error || 'Error')
+        setPausandoId(null)
+    }
     // Finalizar una consulta abre el "cartelito": resumen del chat + ficha del CRM.
     const resolver = (c: Consulta) => setFinalizando(c)
     // Cierre efectivo (lo llama el cartelito al guardar): saca la consulta de la bandeja.
@@ -459,6 +473,7 @@ export default function ConsultasPage() {
                                                     <p className="font-bold text-sm truncate">{nombre}</p>
                                                     <span className={`text-[8px] px-1.5 py-0.5 rounded-full uppercase font-bold ${ci.chip}`}>{ci.label}</span>
                                                     {c.estado === 'resuelta' && <span className="text-[9px] bg-green-500/15 text-green-400 px-2 py-0.5 rounded-full uppercase font-bold">Resuelta</span>}
+                                                    {c.pausado && <span className="text-[9px] bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase font-bold flex items-center gap-0.5"><PauseCircle size={9} /> Bot en pausa</span>}
                                                 </div>
                                                 {c.contacto_usuario && <p className="text-[11px] text-gray-500 truncate">{c.canal === 'whatsapp' ? c.contacto_usuario : '@' + c.contacto_usuario.replace(/^@/, '')}</p>}
                                                 <p className="text-gray-400 text-sm mt-0.5 line-clamp-2">{c.consulta}</p>
@@ -524,11 +539,18 @@ export default function ConsultasPage() {
                                                 </div>
                                                 <p className="text-[10px] text-gray-600 mt-2">La respuesta le llega a su {c.canal === 'instagram' ? 'Instagram' : 'WhatsApp'} (dentro de las 24hs del último mensaje).</p>
 
-                                                {c.estado !== 'resuelta' && (
-                                                    <button onClick={() => resolver(c)} className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-gray-400 hover:text-green-400 flex items-center gap-1.5">
-                                                        <Check size={13} /> Marcar como resuelta
+                                                <div className="mt-3 flex items-center gap-4 flex-wrap">
+                                                    {c.estado !== 'resuelta' && (
+                                                        <button onClick={() => resolver(c)} className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 hover:text-green-400 flex items-center gap-1.5">
+                                                            <Check size={13} /> Marcar como resuelta
+                                                        </button>
+                                                    )}
+                                                    <button onClick={() => togglePausa(c)} disabled={pausandoId === c.id}
+                                                        className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 disabled:opacity-50 ${c.pausado ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-white'}`}>
+                                                        {pausandoId === c.id ? <Loader2 size={13} className="animate-spin" /> : c.pausado ? <PlayCircle size={13} /> : <PauseCircle size={13} />}
+                                                        {c.pausado ? 'Reactivar bot' : 'Pausar bot (respondo yo)'}
                                                     </button>
-                                                )}
+                                                </div>
                                             </div>
                                         )}
                                     </div>
