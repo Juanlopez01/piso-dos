@@ -207,10 +207,15 @@ async function manejar(req: NextRequest, body: any) {
     const canal = (body?.canal || 'instagram').toString()
     try {
         // HAND-OFF: si la recep tomó la conversación (respondió hace poco), el bot
-        // NO contesta. Igual registramos el mensaje del usuario para que la recep
-        // lo vea en el hilo, y devolvemos respuesta vacía (ManyChat no envía nada).
+        // NO contesta. Pero el mensaje que manda el cliente TIENE que llegarle a la
+        // recep para que pueda responder: lo sumamos al hilo de la consulta y la
+        // reabrimos/notificamos en la bandeja (si no, quedaba solo en el historial y
+        // recep nunca lo veía). Devolvemos respuesta vacía (ManyChat no envía nada).
         if (await estaPausado(subId)) {
-            if (subId) await logInteraccion(subId, canal, pregunta, '')
+            if (subId) {
+                await logInteraccion(subId, canal, pregunta, '')
+                if (pregunta.trim()) await capturarConsulta(body, pregunta, subId, canal)
+            }
             return NextResponse.json({ ok: true, respuesta: '', derivar: false, pausado: true })
         }
         // Contexto: turnos previos de este contacto (memoria de conversación).
