@@ -148,7 +148,7 @@ export default function AlquileresPage() {
 
     // Modal edición fecha/hora
     const [modalEditar, setModalEditar] = useState<{ isOpen: boolean; item: any }>({ isOpen: false, item: null })
-    const [editForm, setEditForm] = useState({ fecha: '', hora_inicio: '', hora_fin: '' })
+    const [editForm, setEditForm] = useState({ fecha: '', hora_inicio: '', hora_fin: '', monto_total: 0 })
     const [procesandoEdicion, setProcesandoEdicion] = useState(false)
 
     const [form, setForm] = useState({
@@ -166,6 +166,38 @@ export default function AlquileresPage() {
         precio_noche: 0,
         precio_finde: 0,
     })
+
+    // Horario POR DÍA: cada fecha seleccionada puede tener su propio inicio/fin.
+    // Se guarda por clave 'yyyy-MM-dd'. Si un día no tiene override, usa el horario
+    // por defecto del form (form.hora_inicio/fin).
+    const [horasPorFecha, setHorasPorFecha] = useState<Record<string, { inicio: string; fin: string }>>({})
+    const keyOf = (d: Date) => format(d, 'yyyy-MM-dd')
+    const horasDe = (d: Date) => horasPorFecha[keyOf(d)] || { inicio: form.hora_inicio, fin: form.hora_fin }
+
+    // Al cambiar las fechas, sincronizamos el mapa de horarios: mantenemos los que
+    // ya estaban, agregamos los nuevos con el horario por defecto y sacamos los que
+    // se deseleccionaron.
+    const sincronizarHoras = (dates: Date[], base?: { inicio: string; fin: string }) => {
+        setHorasPorFecha(prev => {
+            const next: Record<string, { inicio: string; fin: string }> = {}
+            for (const d of dates) {
+                const k = keyOf(d)
+                next[k] = prev[k] || base || { inicio: form.hora_inicio, fin: form.hora_fin }
+            }
+            return next
+        })
+    }
+    const setHoraDia = (k: string, campo: 'inicio' | 'fin', valor: string) => {
+        setHorasPorFecha(prev => ({ ...prev, [k]: { ...(prev[k] || { inicio: form.hora_inicio, fin: form.hora_fin }), [campo]: valor } }))
+    }
+    const aplicarHorarioATodos = () => {
+        setHorasPorFecha(() => {
+            const next: Record<string, { inicio: string; fin: string }> = {}
+            for (const d of form.fechas) next[keyOf(d)] = { inicio: form.hora_inicio, fin: form.hora_fin }
+            return next
+        })
+        toast.success('Horario aplicado a todos los días')
+    }
 
     // Al elegir sala o actividad, precargamos el valor/hora desde el tarifario.
     // El admin lo puede editar para esta reserva puntual.
@@ -205,10 +237,6 @@ export default function AlquileresPage() {
         const pFinde = Number(form.precio_finde || 0)
 
         const parseTime = (t: string) => { const [h, m] = t.split(':').map(Number); return h + m / 60 }
-        const start = parseTime(form.hora_inicio)
-        const end = parseTime(form.hora_fin)
-        let duration = end - start
-        if (duration < 0) duration = 0
 
         let totalHManana = 0
         let totalHNoche = 0
@@ -216,6 +244,10 @@ export default function AlquileresPage() {
         const CORTE_HORARIO = 18.0
 
         form.fechas.forEach(fecha => {
+            const { inicio, fin } = horasDe(fecha)
+            const start = parseTime(inicio)
+            const end = parseTime(fin)
+            const duration = Math.max(0, end - start)
             if (isSunday(fecha)) {
                 totalHFinde += duration
             } else {
@@ -241,7 +273,7 @@ export default function AlquileresPage() {
             total: subtotalCalculado - descuentoCalculado
         })
 
-    }, [form.sala_id, form.hora_inicio, form.hora_fin, form.tipo_uso, form.fechas, form.descuento, form.precio_manana, form.precio_noche, form.precio_finde, salas])
+    }, [form.sala_id, form.hora_inicio, form.hora_fin, form.tipo_uso, form.fechas, form.descuento, form.precio_manana, form.precio_noche, form.precio_finde, horasPorFecha, salas])
 
     const handleTarifaChange = (salaId: string, field: string, value: string) => {
         const numValue = value === '' ? 0 : Number(value)
@@ -303,7 +335,8 @@ export default function AlquileresPage() {
 
         try {
             const conflictosPromises = form.fechas.map(async (date) => {
-                const conflicto = await checkConflictos(form.sala_id, date, form.hora_inicio, form.hora_fin)
+                const { inicio, fin } = horasDe(date)
+                const conflicto = await checkConflictos(form.sala_id, date, inicio, fin)
                 if (conflicto) return `Conflicto el ${format(date, 'dd/MM')}: ya existe un/a ${conflicto}`
                 return null
             })
@@ -317,9 +350,10 @@ export default function AlquileresPage() {
 
             const calculateDayCost = (date: Date) => {
                 if (!sala) return 0
+                const { inicio, fin } = horasDe(date)
                 const parseTime = (t: string) => { const [h, m] = t.split(':').map(Number); return h + m / 60 }
-                const start = parseTime(form.hora_inicio)
-                const end = parseTime(form.hora_fin)
+                const start = parseTime(inicio)
+                const end = parseTime(fin)
                 const duration = Math.max(0, end - start)
 
                 let baseCost = 0
@@ -343,8 +377,8 @@ export default function AlquileresPage() {
                 cliente_contacto: form.cliente_contacto,
                 sala_id: form.sala_id,
                 fecha: date, // 🚀 SE ENVÍA EL DATE, LA ACTION LO LIMPIA (O format(date, 'yyyy-MM-dd') si prefieres mandarlo limpio desde acá)
-                hora_inicio: form.hora_inicio,
-                hora_fin: form.hora_fin,
+                hora_inicio: horasDe(date).inicio,
+                hora_fin: horasDe(date).fin,
                 monto_total: calculateDayCost(date),
                 monto_pagado: 0,
                 estado_pago: 'pendiente',
@@ -373,9 +407,12 @@ export default function AlquileresPage() {
         const nombreSala = sala ? sala.nombre : "Sala seleccionada"
         const actividad = form.tipo_uso.charAt(0).toUpperCase() + form.tipo_uso.slice(1)
 
-        let fechasTexto = form.fechas.map(d => `- ${format(d, 'EEEE dd/MM', { locale: es })}`).join('\n')
+        let fechasTexto = [...form.fechas].sort((a, b) => a.getTime() - b.getTime()).map(d => {
+            const h = horasDe(d)
+            return `- ${format(d, 'EEEE dd/MM', { locale: es })}: ${h.inicio} a ${h.fin} hs`
+        }).join('\n')
 
-        let textoWsp = `*Presupuesto de Alquiler* 🏢\n\n*Actividad:* ${actividad}\n*Sala:* ${nombreSala}\n*Horario:* ${form.hora_inicio} a ${form.hora_fin} hs\n\n*Fechas solicitadas:*\n${fechasTexto}\n\n`
+        let textoWsp = `*Presupuesto de Alquiler* 🏢\n\n*Actividad:* ${actividad}\n*Sala:* ${nombreSala}\n\n*Fechas y horarios:*\n${fechasTexto}\n\n`
         if (form.descuento > 0) {
             textoWsp += `*Subtotal Base:* $${priceBreakdown.subtotalBase.toLocaleString()}\n*Descuento especial (${form.descuento}%):* -$${priceBreakdown.montoDescuento.toLocaleString()}\n`
         }
@@ -504,19 +541,24 @@ export default function AlquileresPage() {
     }
 
     const abrirModalEditar = (item: any) => {
-        setEditForm({ fecha: item.fecha, hora_inicio: item.hora_inicio, hora_fin: item.hora_fin })
+        setEditForm({ fecha: item.fecha, hora_inicio: item.hora_inicio, hora_fin: item.hora_fin, monto_total: Number(item.monto_total) || 0 })
         setModalEditar({ isOpen: true, item })
     }
 
     const handleEditarFechaHora = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!modalEditar.item) return
+        const pagado = Number(modalEditar.item.monto_pagado || 0)
+        if (editForm.monto_total < pagado) {
+            return toast.error(`El precio no puede ser menor a lo ya abonado ($${pagado.toLocaleString()}).`)
+        }
         setProcesandoEdicion(true)
         const res = await editarAlquilerFechaHoraAction(
             modalEditar.item.id,
             editForm.fecha,
             editForm.hora_inicio,
-            editForm.hora_fin
+            editForm.hora_fin,
+            editForm.monto_total
         )
         if (res.success) {
             toast.success('Reserva actualizada')
@@ -542,6 +584,16 @@ export default function AlquileresPage() {
             toast.error(res.error || "Error al eliminar")
             mutate()
         }
+    }
+
+    const handleDeleteItem = async (item: any, group: ReservaGroup) => {
+        const esUltimo = group.items.length === 1
+        if (!confirm(esUltimo
+            ? '¿Eliminar esta reserva? Es el único día del grupo.'
+            : `¿Eliminar solo el ${format(new Date(item.fecha + 'T12:00:00'), "EEEE d/MM", { locale: es })} de ${group.cliente_nombre}?`)) return
+        const res = await eliminarReservaAction([item.id])
+        if (res.success) { toast.success('Día eliminado'); mutate() }
+        else toast.error(res.error || 'Error al eliminar')
     }
 
     const handleRenovar = (group: ReservaGroup) => {
@@ -584,6 +636,25 @@ export default function AlquileresPage() {
         }
         return true
     })
+
+    // Vista por DÍA: aplanamos los items de los grupos filtrados y los agrupamos
+    // por fecha. Cada fila es una reserva (un día); el cobro sigue siendo por grupo.
+    const itemsPorDia: Record<string, { item: any; group: ReservaGroup }[]> = {}
+    for (const g of gruposFiltrados) {
+        for (const it of g.items) {
+            if (!verPasados && it.fecha < hoyStr) continue
+            ;(itemsPorDia[it.fecha] ||= []).push({ item: it, group: g })
+        }
+    }
+    const diasOrdenados = Object.keys(itemsPorDia).sort() // ascendente: hoy → futuro
+    for (const d of diasOrdenados) itemsPorDia[d].sort((a, b) => (a.item.hora_inicio || '').localeCompare(b.item.hora_inicio || ''))
+    const hayItems = diasOrdenados.length > 0
+
+    const estadoChip = (estadoPago: string) => {
+        if (estadoPago === 'pagado') return { cls: 'bg-green-500/15 text-green-400', txt: 'Pagado' }
+        if (estadoPago === 'seña_pagada') return { cls: 'bg-yellow-500/15 text-yellow-400', txt: 'Parcial' }
+        return { cls: 'bg-red-500/15 text-red-400', txt: 'Pendiente' }
+    }
 
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32">
@@ -634,10 +705,10 @@ export default function AlquileresPage() {
                 </button>
             </div>
 
-            {/* GRILLA GRUPOS */}
+            {/* LISTADO POR DÍA */}
             {isLoading && grupos.length === 0 ? (
                 <div className="min-h-[50vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
-            ) : gruposFiltrados.length === 0 ? (
+            ) : !hayItems ? (
                 <div className="min-h-[40vh] flex flex-col items-center justify-center text-center text-gray-500 gap-2">
                     <Calendar size={32} className="opacity-40" />
                     <p className="text-sm font-medium">
@@ -645,89 +716,71 @@ export default function AlquileresPage() {
                     </p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {gruposFiltrados.map((group) => {
-                        const isFullyPaid = group.estado_pago === 'pagado'
-                        const isSena = group.estado_pago === 'seña_pagada'
-                        const isOpen = expandedGroup === group.group_id
-
-                        let tagClass = 'bg-red-500/20 text-red-500'
-                        let tagText = 'Pendiente'
-                        if (isSena) { tagClass = 'bg-yellow-500/20 text-yellow-500'; tagText = 'Pago Parcial' }
-                        if (isFullyPaid) { tagClass = 'bg-green-500/20 text-green-500'; tagText = 'Pagado' }
-
-                        const saldoRestante = group.total_grupo - group.total_pagado
-
+                <div className="space-y-6 max-w-4xl mx-auto">
+                    {diasOrdenados.map(dia => {
+                        const filas = itemsPorDia[dia]
+                        const esHoy = dia === hoyStr
+                        const totalDia = filas.reduce((s, f) => s + Number(f.item.monto_total || 0), 0)
                         return (
-                            <div key={group.group_id} className="bg-[#09090b] border border-white/10 rounded-2xl overflow-hidden flex flex-col hover:border-[#D4E655]/30 transition-all">
-                                <div className="p-4 border-b border-white/5 bg-[#111]/50 relative">
-                                    <div className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${tagClass}`}>{tagText}</div>
-                                    <div className="flex items-center gap-2 mb-1 text-[#D4E655] text-[10px] font-black uppercase tracking-wider"><MapPin size={12} /> {group.sala_nombre} • {group.tipo_uso}</div>
-                                    <h3 className="text-lg font-bold text-white truncate pr-16">{group.cliente_nombre}</h3>
-                                    {group.cliente_contacto && <div className="flex items-center gap-2 mt-1"><a href={`https://wa.me/${group.cliente_contacto.replace(/[^0-9]/g, '')}`} target="_blank" className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-green-400 transition-colors"><MessageCircle size={12} /> {group.cliente_contacto}</a></div>}
+                            <div key={dia}>
+                                {/* Cabecera del día */}
+                                <div className="flex items-center gap-3 mb-2 px-1 sticky top-0 z-10 bg-[#050505] py-1">
+                                    <Calendar size={15} className={esHoy ? 'text-[#D4E655]' : 'text-gray-500'} />
+                                    <h3 className={`text-sm font-black uppercase tracking-wide ${esHoy ? 'text-[#D4E655]' : 'text-white'}`}>
+                                        {format(new Date(dia + 'T12:00:00'), "EEEE d 'de' MMMM", { locale: es })}{esHoy && ' · Hoy'}
+                                    </h3>
+                                    <span className="text-[10px] text-gray-500">{filas.length} reserva{filas.length !== 1 ? 's' : ''}</span>
+                                    <span className="ml-auto text-[11px] font-bold text-gray-400">${totalDia.toLocaleString()}</span>
                                 </div>
-                                <div className="p-4 flex-1">
-                                    <div className="flex justify-between items-center mb-1">
-                                        <div className="flex items-center gap-2 text-xs font-bold text-gray-300"><Layers size={14} /> {group.items.length} Reservas</div>
-                                        <div className="text-right"><span className="block text-[10px] text-gray-500 uppercase font-bold">Total</span><span className="text-sm font-black text-white">${group.total_grupo.toLocaleString()}</span></div>
-                                    </div>
-                                    <div className="flex justify-between items-center mb-3 pt-2 border-t border-white/5">
-                                        <div className="text-[9px] uppercase font-bold text-gray-500">Abonado: <span className={isSena || isFullyPaid ? 'text-green-400' : 'text-gray-400'}>${group.total_pagado.toLocaleString()}</span></div>
-                                        <div className="text-[9px] uppercase font-bold text-gray-500">Saldo: <span className={saldoRestante > 0 ? 'text-red-400' : 'text-gray-400'}>${saldoRestante.toLocaleString()}</span></div>
-                                    </div>
 
-                                    <div className={`space-y-1 overflow-hidden transition-all duration-300 ${isOpen ? 'max-h-64 overflow-y-auto custom-scrollbar' : 'max-h-0'}`}>
-                                        {group.items.map(item => {
-                                            const fechaItem = new Date(`${item.fecha}T${item.hora_inicio}`)
-                                            const puedeEditar = fechaItem.getTime() - Date.now() > 24 * 60 * 60 * 1000
-                                            return (
-                                                <div key={item.id} className="flex justify-between items-center text-[10px] p-2 rounded bg-white/5 border border-white/5">
-                                                    <div className="flex items-center gap-2 text-gray-300">
-                                                        <Calendar size={10} />
-                                                        {format(new Date(item.fecha + 'T12:00:00'), "EEE d MMM", { locale: es })}
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="font-mono text-gray-500">{item.hora_inicio}-{item.hora_fin}</span>
-                                                        <span className="font-bold text-[#D4E655]">${item.monto_total}</span>
-                                                        {puedeEditar && (
-                                                            <button
-                                                                onClick={() => abrirModalEditar(item)}
-                                                                className="p-1 text-gray-600 hover:text-[#D4E655] hover:bg-white/10 rounded transition-colors"
-                                                                title="Editar fecha y hora"
-                                                            >
-                                                                <Pencil size={11} />
-                                                            </button>
-                                                        )}
-                                                    </div>
+                                {/* Filas del día */}
+                                <div className="space-y-2">
+                                    {filas.map(({ item, group }) => {
+                                        const isFullyPaid = group.estado_pago === 'pagado'
+                                        const chip = estadoChip(group.estado_pago)
+                                        return (
+                                            <div key={item.id} className="bg-[#09090b] border border-white/10 rounded-xl p-3 flex flex-wrap items-center gap-x-4 gap-y-2 hover:border-[#D4E655]/30 transition-colors">
+                                                {/* Hora */}
+                                                <div className="flex items-center gap-1.5 font-mono text-sm text-white shrink-0 w-[110px]">
+                                                    <Clock size={13} className="text-gray-500" />
+                                                    {item.hora_inicio}–{item.hora_fin}
                                                 </div>
-                                            )
-                                        })}
-                                    </div>
-
-                                    {group.notas_recepcion && isOpen && (
-                                        <div className="mt-3 bg-yellow-500/10 border border-yellow-500/20 p-2 rounded-lg flex items-start gap-2">
-                                            <ShieldAlert size={12} className="text-yellow-500 shrink-0 mt-0.5" />
-                                            <p className="text-[10px] text-yellow-200/80 leading-tight italic">{group.notas_recepcion}</p>
-                                        </div>
-                                    )}
-
-                                    <button onClick={() => setExpandedGroup(isOpen ? null : group.group_id)} className="w-full mt-2 py-1 flex items-center justify-center gap-1 text-[9px] font-bold text-gray-500 uppercase hover:text-white transition-colors">{isOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />} {isOpen ? 'Ocultar' : 'Ver detalle'}</button>
-                                </div>
-                                <div className="p-3 bg-[#111] flex gap-2 border-t border-white/5">
-                                    <button onClick={() => handleRenovar(group)} className="p-2 text-gray-500 hover:text-white bg-white/5 rounded-lg transition-colors"><Repeat size={16} /></button>
-                                    {!isFullyPaid ? (
-                                        <button onClick={() => openPaymentModal(group)} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase rounded-lg hover:bg-white transition-colors flex items-center justify-center gap-2">
-                                            <DollarSign size={14} /> Cobrar
-                                        </button>
-                                    ) : (
-                                        <div className="flex-1 flex items-center justify-center gap-2 text-[10px] font-black uppercase text-green-500 opacity-50 cursor-default border border-green-500/20 rounded-lg"><CheckCircle size={14} /> Cobrado</div>
-                                    )}
-                                    <button onClick={() => handleDeleteGroup(group)} className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={16} /></button>
+                                                {/* Sala + actividad */}
+                                                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-[#D4E655] shrink-0">
+                                                    <MapPin size={12} /> {group.sala_nombre} <span className="text-gray-500 normal-case">· {group.tipo_uso}</span>
+                                                </div>
+                                                {/* Cliente */}
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="text-sm font-bold text-white truncate">{group.cliente_nombre}</p>
+                                                    <div className="flex items-center gap-2">
+                                                        {group.cliente_contacto && <a href={`https://wa.me/${group.cliente_contacto.replace(/[^0-9]/g, '')}`} target="_blank" className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-green-400 transition-colors"><MessageCircle size={11} /> {group.cliente_contacto}</a>}
+                                                        {group.items.length > 1 && <span className="text-[9px] text-gray-600 uppercase flex items-center gap-0.5"><Layers size={9} /> {group.items.length} días</span>}
+                                                    </div>
+                                                    {group.notas_recepcion && (
+                                                        <p className="text-[10px] text-yellow-200/70 italic flex items-center gap-1 mt-0.5"><ShieldAlert size={10} className="text-yellow-500 shrink-0" /> {group.notas_recepcion}</p>
+                                                    )}
+                                                </div>
+                                                {/* Monto + estado */}
+                                                <div className="text-right shrink-0">
+                                                    <div className="text-sm font-black text-white">${Number(item.monto_total).toLocaleString()}</div>
+                                                    <span className={`text-[8px] px-2 py-0.5 rounded-full uppercase font-black ${chip.cls}`}>{chip.txt}</span>
+                                                </div>
+                                                {/* Acciones */}
+                                                <div className="flex items-center gap-1 shrink-0">
+                                                    <button onClick={() => abrirModalEditar(item)} title="Editar día, hora y precio" className="p-2 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-lg transition-colors"><Pencil size={15} /></button>
+                                                    {!isFullyPaid && (
+                                                        <button onClick={() => openPaymentModal(group)} title="Cobrar reserva" className="p-2 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-lg transition-colors"><DollarSign size={15} /></button>
+                                                    )}
+                                                    <button onClick={() => handleRenovar(group)} title="Renovar (nuevas fechas)" className="p-2 text-gray-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors"><Repeat size={15} /></button>
+                                                    <button onClick={() => handleDeleteItem(item, group)} title="Eliminar este día" className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={15} /></button>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
                                 </div>
                             </div>
                         )
                     })}
-                    {grupos.length === 0 && <div className="col-span-full text-center py-20 opacity-50"><p className="text-gray-500 font-bold uppercase text-xs">No hay reservas activas.</p></div>}
                 </div>
             )}
 
@@ -771,6 +824,23 @@ export default function AlquileresPage() {
                                         className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-all"
                                     />
                                 </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-[#D4E655] uppercase tracking-widest mb-2 block flex items-center gap-1"><DollarSign size={12} /> Precio de este día</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#D4E655] font-bold">$</span>
+                                    <input
+                                        required
+                                        type="number"
+                                        min="0"
+                                        value={editForm.monto_total || ''}
+                                        onChange={e => setEditForm({ ...editForm, monto_total: Number(e.target.value) })}
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 pl-8 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-all"
+                                    />
+                                </div>
+                                {Number(modalEditar.item?.monto_pagado || 0) > 0 && (
+                                    <p className="text-[9px] text-gray-500 mt-1">Ya abonado en este día: ${Number(modalEditar.item.monto_pagado).toLocaleString()}</p>
+                                )}
                             </div>
                             <button
                                 type="submit"
@@ -899,21 +969,35 @@ export default function AlquileresPage() {
                         <div className="flex flex-col lg:flex-row gap-8">
                             <div className="flex-1">
                                 <label className="text-[10px] font-bold text-gray-500 uppercase block mb-3 text-center">1. Seleccionar Fechas</label>
-                                <MultiDatePicker selectedDates={form.fechas} onChange={(dates) => setForm({ ...form, fechas: dates })} />
+                                <MultiDatePicker selectedDates={form.fechas} onChange={(dates) => { setForm({ ...form, fechas: dates }); sincronizarHoras(dates) }} />
 
                                 <div className="mt-4 bg-[#111] p-3 rounded-xl border border-white/10">
                                     <div className="flex justify-between items-center mb-2">
-                                        <p className="text-[10px] text-gray-500 uppercase font-bold">Fechas ({form.fechas.length})</p>
+                                        <p className="text-[10px] text-gray-500 uppercase font-bold">Horario por día ({form.fechas.length})</p>
+                                        {form.fechas.length > 1 && (
+                                            <button type="button" onClick={aplicarHorarioATodos} className="text-[9px] font-bold uppercase text-[#D4E655] hover:underline flex items-center gap-1">
+                                                <Copy size={10} /> Aplicar {form.hora_inicio}–{form.hora_fin} a todos
+                                            </button>
+                                        )}
                                     </div>
-                                    <div className="flex flex-wrap gap-2">
-                                        {form.fechas.length === 0 && <span className="text-xs text-gray-600 italic">Ninguna seleccionada</span>}
-                                        {form.fechas.slice(0, VISIBLE_TAGS).map((d, i) => (
-                                            <span key={i} className="text-[10px] bg-[#D4E655]/20 text-[#D4E655] px-2 py-1 rounded border border-[#D4E655]/30">
-                                                {format(d, 'dd/MM')}
-                                            </span>
-                                        ))}
-                                        {form.fechas.length > VISIBLE_TAGS && <span className="text-[10px] bg-white/10 text-white px-2 py-1 rounded border border-white/10">...</span>}
-                                    </div>
+                                    {form.fechas.length === 0 ? (
+                                        <span className="text-xs text-gray-600 italic">Ninguna seleccionada</span>
+                                    ) : (
+                                        <div className="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                                            {[...form.fechas].sort((a, b) => a.getTime() - b.getTime()).map((d) => {
+                                                const k = keyOf(d)
+                                                const h = horasPorFecha[k] || { inicio: form.hora_inicio, fin: form.hora_fin }
+                                                return (
+                                                    <div key={k} className="flex items-center gap-2 bg-black/40 rounded-lg px-2 py-1.5 border border-white/5">
+                                                        <span className="text-[11px] font-bold text-gray-200 w-24 shrink-0 capitalize">{format(d, 'EEE dd/MM', { locale: es })}</span>
+                                                        <input type="time" value={h.inicio} onChange={e => setHoraDia(k, 'inicio', e.target.value)} className="bg-[#111] border border-white/10 rounded-md px-1.5 py-1 text-xs text-white outline-none focus:border-[#D4E655]" />
+                                                        <span className="text-gray-600 text-xs">a</span>
+                                                        <input type="time" value={h.fin} onChange={e => setHoraDia(k, 'fin', e.target.value)} className="bg-[#111] border border-white/10 rounded-md px-1.5 py-1 text-xs text-white outline-none focus:border-[#D4E655]" />
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -928,9 +1012,10 @@ export default function AlquileresPage() {
                                     <div className="space-y-1"><label className="text-[10px] font-bold text-gray-500 uppercase">Actividad</label><select value={form.tipo_uso} onChange={e => setForm({ ...form, tipo_uso: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]"><option value="ensayo">Ensayo</option><option value="clase">Clase</option><option value="produccion">Producción</option></select></div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-gray-500 uppercase">Inicio</label><input type="time" required value={form.hora_inicio} onChange={e => setForm({ ...form, hora_inicio: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" /></div>
-                                    <div className="space-y-1"><label className="text-[10px] font-bold text-gray-500 uppercase">Fin</label><input type="time" required value={form.hora_fin} onChange={e => setForm({ ...form, hora_fin: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" /></div>
+                                    <div className="space-y-1"><label className="text-[10px] font-bold text-gray-500 uppercase">Inicio (por defecto)</label><input type="time" value={form.hora_inicio} onChange={e => setForm({ ...form, hora_inicio: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" /></div>
+                                    <div className="space-y-1"><label className="text-[10px] font-bold text-gray-500 uppercase">Fin (por defecto)</label><input type="time" value={form.hora_fin} onChange={e => setForm({ ...form, hora_fin: e.target.value })} className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm outline-none focus:border-[#D4E655]" /></div>
                                 </div>
+                                <p className="text-[9px] text-gray-600 -mt-2">Este horario se aplica a los días nuevos que elijas. Ajustá cada día por separado en la lista de la izquierda.</p>
 
                                 <div className="space-y-1 pt-2">
                                     <label className="text-[10px] font-bold text-[#D4E655] uppercase flex items-center gap-1"><Tag size={12} /> Descuento Comercial (%)</label>
