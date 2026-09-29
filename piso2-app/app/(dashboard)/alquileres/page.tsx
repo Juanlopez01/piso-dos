@@ -219,18 +219,14 @@ export default function AlquileresPage() {
         }))
     }, [form.sala_id, form.tipo_uso, salas])
 
-    const [priceBreakdown, setPriceBreakdown] = useState({
-        manana: { horas: 0, precio: 0, subtotal: 0 },
-        noche: { horas: 0, precio: 0, subtotal: 0 },
-        finde: { horas: 0, precio: 0, subtotal: 0 },
-        subtotalBase: 0,
-        montoDescuento: 0,
-        total: 0
-    })
+    type DiaResumen = { fecha: Date; inicio: string; fin: string; horas: number; costo: number }
+    const [priceBreakdown, setPriceBreakdown] = useState<{
+        dias: DiaResumen[]; subtotalBase: number; montoDescuento: number; total: number
+    }>({ dias: [], subtotalBase: 0, montoDescuento: 0, total: 0 })
 
     useEffect(() => {
-        if (!form.sala_id || !form.hora_inicio || !form.hora_fin || form.fechas.length === 0) {
-            setPriceBreakdown({ manana: { horas: 0, precio: 0, subtotal: 0 }, noche: { horas: 0, precio: 0, subtotal: 0 }, finde: { horas: 0, precio: 0, subtotal: 0 }, subtotalBase: 0, montoDescuento: 0, total: 0 })
+        if (!form.sala_id || form.fechas.length === 0) {
+            setPriceBreakdown({ dias: [], subtotalBase: 0, montoDescuento: 0, total: 0 })
             return
         }
 
@@ -243,40 +239,37 @@ export default function AlquileresPage() {
         const pFinde = Number(form.precio_finde || 0)
 
         const parseTime = (t: string) => { const [h, m] = t.split(':').map(Number); return h + m / 60 }
-
-        let totalHManana = 0
-        let totalHNoche = 0
-        let totalHFinde = 0
         const CORTE_HORARIO = 18.0
 
-        form.fechas.forEach(fecha => {
-            const { inicio, fin } = horasDe(fecha)
-            const start = parseTime(inicio)
-            const end = parseTime(fin)
-            const duration = Math.max(0, end - start)
-            if (isSunday(fecha)) {
-                totalHFinde += duration
-            } else {
-                let hManana = 0
-                let hNoche = 0
-                if (end <= CORTE_HORARIO) { hManana = duration }
-                else if (start >= CORTE_HORARIO) { hNoche = duration }
-                else { hManana = CORTE_HORARIO - start; hNoche = end - CORTE_HORARIO }
-                totalHManana += hManana
-                totalHNoche += hNoche
-            }
-        })
+        // Costo POR DÍA (cada uno con su propio horario).
+        const dias: DiaResumen[] = [...form.fechas]
+            .sort((a, b) => a.getTime() - b.getTime())
+            .map(fecha => {
+                const { inicio, fin } = horasDe(fecha)
+                const start = parseTime(inicio)
+                const end = parseTime(fin)
+                const duration = Math.max(0, end - start)
+                let costo = 0
+                if (isSunday(fecha)) {
+                    costo = duration * pFinde
+                } else if (end <= CORTE_HORARIO) {
+                    costo = duration * pManana
+                } else if (start >= CORTE_HORARIO) {
+                    costo = duration * pNoche
+                } else {
+                    costo = (CORTE_HORARIO - start) * pManana + (end - CORTE_HORARIO) * pNoche
+                }
+                return { fecha, inicio, fin, horas: duration, costo }
+            })
 
-        const subtotalCalculado = (totalHManana * pManana) + (totalHNoche * pNoche) + (totalHFinde * pFinde)
+        const subtotalCalculado = dias.reduce((s, d) => s + d.costo, 0)
         const descuentoCalculado = subtotalCalculado * ((form.descuento || 0) / 100)
 
         setPriceBreakdown({
-            manana: { horas: totalHManana, precio: pManana, subtotal: totalHManana * pManana },
-            noche: { horas: totalHNoche, precio: pNoche, subtotal: totalHNoche * pNoche },
-            finde: { horas: totalHFinde, precio: pFinde, subtotal: totalHFinde * pFinde },
+            dias,
             subtotalBase: subtotalCalculado,
             montoDescuento: descuentoCalculado,
-            total: subtotalCalculado - descuentoCalculado
+            total: subtotalCalculado - descuentoCalculado,
         })
 
     }, [form.sala_id, form.hora_inicio, form.hora_fin, form.tipo_uso, form.fechas, form.descuento, form.precio_manana, form.precio_noche, form.precio_finde, horasPorFecha, salas])
@@ -1172,29 +1165,17 @@ export default function AlquileresPage() {
                                         </button>
                                     )}
 
-                                    <label className="text-[10px] font-bold text-[#D4E655] uppercase block border-b border-white/10 pb-2 mb-2 pr-6">Resumen de Costos</label>
+                                    <label className="text-[10px] font-bold text-[#D4E655] uppercase block border-b border-white/10 pb-2 mb-2 pr-6">Resumen por día</label>
 
-                                    <div className="space-y-1.5 text-xs text-gray-300">
-                                        {priceBreakdown.manana.horas > 0 && (
-                                            <div className="flex justify-between">
-                                                <span className="flex items-center gap-1.5"><Sun size={12} className="text-yellow-500" /> Matutino (9-18)</span>
-                                                <span>{priceBreakdown.manana.horas}hs x ${priceBreakdown.manana.precio} = <span className="font-bold text-white">${priceBreakdown.manana.subtotal.toLocaleString()}</span></span>
+                                    <div className="space-y-1 text-xs text-gray-300 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                                        {priceBreakdown.dias.map((d, i) => (
+                                            <div key={i} className="flex justify-between items-center gap-2">
+                                                <span className="capitalize text-gray-400 truncate">{format(d.fecha, "EEE dd/MM", { locale: es })}</span>
+                                                <span className="text-gray-500 font-mono text-[11px] shrink-0">{d.inicio}–{d.fin}</span>
+                                                <span className="font-bold text-white shrink-0 w-20 text-right">${Math.round(d.costo).toLocaleString()}</span>
                                             </div>
-                                        )}
-                                        {priceBreakdown.noche.horas > 0 && (
-                                            <div className="flex justify-between">
-                                                <span className="flex items-center gap-1.5"><Moon size={12} className="text-blue-400" /> Nocturno (18-22)</span>
-                                                <span>{priceBreakdown.noche.horas}hs x ${priceBreakdown.noche.precio} = <span className="font-bold text-white">${priceBreakdown.noche.subtotal.toLocaleString()}</span></span>
-                                            </div>
-                                        )}
-                                        {priceBreakdown.finde.horas > 0 && (
-                                            <div className="flex justify-between">
-                                                <span className="flex items-center gap-1.5"><Zap size={12} className="text-purple-500" /> Domingos/Feriados</span>
-                                                <span>{priceBreakdown.finde.horas}hs x ${priceBreakdown.finde.precio} = <span className="font-bold text-white">${priceBreakdown.finde.subtotal.toLocaleString()}</span></span>
-                                            </div>
-                                        )}
-
-                                        {priceBreakdown.total === 0 && <p className="text-[10px] text-gray-500 italic text-center">Seleccioná días y horarios para calcular</p>}
+                                        ))}
+                                        {priceBreakdown.dias.length === 0 && <p className="text-[10px] text-gray-500 italic text-center">Seleccioná días y horarios para calcular</p>}
                                     </div>
 
                                     <div className="flex flex-col gap-1 mt-3 pt-3 border-t border-white/10">
