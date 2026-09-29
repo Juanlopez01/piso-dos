@@ -219,7 +219,7 @@ export default function AlquileresPage() {
         }))
     }, [form.sala_id, form.tipo_uso, salas])
 
-    type DiaResumen = { fecha: Date; inicio: string; fin: string; horas: number; costo: number }
+    type DiaResumen = { fecha: Date; inicio: string; fin: string; horas: number; costo: number; detalle: string }
     const [priceBreakdown, setPriceBreakdown] = useState<{
         dias: DiaResumen[]; subtotalBase: number; montoDescuento: number; total: number
     }>({ dias: [], subtotalBase: 0, montoDescuento: 0, total: 0 })
@@ -249,17 +249,24 @@ export default function AlquileresPage() {
                 const start = parseTime(inicio)
                 const end = parseTime(fin)
                 const duration = Math.max(0, end - start)
+                const hs = (n: number) => Number.isInteger(n) ? `${n}h` : `${n.toFixed(1)}h`
                 let costo = 0
+                let detalle = ''
                 if (isSunday(fecha)) {
                     costo = duration * pFinde
+                    detalle = `${hs(duration)} finde × $${pFinde.toLocaleString()}`
                 } else if (end <= CORTE_HORARIO) {
                     costo = duration * pManana
+                    detalle = `${hs(duration)} × $${pManana.toLocaleString()}`
                 } else if (start >= CORTE_HORARIO) {
                     costo = duration * pNoche
+                    detalle = `${hs(duration)} × $${pNoche.toLocaleString()}`
                 } else {
-                    costo = (CORTE_HORARIO - start) * pManana + (end - CORTE_HORARIO) * pNoche
+                    const hMan = CORTE_HORARIO - start, hNoc = end - CORTE_HORARIO
+                    costo = hMan * pManana + hNoc * pNoche
+                    detalle = `${hs(hMan)} × $${pManana.toLocaleString()} + ${hs(hNoc)} × $${pNoche.toLocaleString()}`
                 }
-                return { fecha, inicio, fin, horas: duration, costo }
+                return { fecha, inicio, fin, horas: duration, costo, detalle }
             })
 
         const subtotalCalculado = dias.reduce((s, d) => s + d.costo, 0)
@@ -406,10 +413,9 @@ export default function AlquileresPage() {
         const nombreSala = sala ? sala.nombre : "Sala seleccionada"
         const actividad = form.tipo_uso.charAt(0).toUpperCase() + form.tipo_uso.slice(1)
 
-        let fechasTexto = [...form.fechas].sort((a, b) => a.getTime() - b.getTime()).map(d => {
-            const h = horasDe(d)
-            return `- ${format(d, 'EEEE dd/MM', { locale: es })}: ${h.inicio} a ${h.fin} hs`
-        }).join('\n')
+        let fechasTexto = priceBreakdown.dias.map(d =>
+            `- ${format(d.fecha, 'EEEE dd/MM', { locale: es })}: ${d.inicio} a ${d.fin} hs — $${Math.round(d.costo).toLocaleString()}`
+        ).join('\n')
 
         let textoWsp = `*Presupuesto de Alquiler* 🏢\n\n*Actividad:* ${actividad}\n*Sala:* ${nombreSala}\n\n*Fechas y horarios:*\n${fechasTexto}\n\n`
         if (form.descuento > 0) {
@@ -792,41 +798,43 @@ export default function AlquileresPage() {
                                     {filas.map(({ item, group }) => {
                                         const isFullyPaid = group.estado_pago === 'pagado'
                                         const chip = estadoChip(group.estado_pago)
+                                        const saldoDia = Number(item.monto_total || 0) - Number(item.monto_pagado || 0)
                                         return (
-                                            <div key={item.id} className="bg-[#09090b] border border-white/10 rounded-xl p-3 flex flex-wrap items-center gap-x-4 gap-y-2 hover:border-[#D4E655]/30 transition-colors">
-                                                {/* Hora */}
-                                                <div className="flex items-center gap-1.5 font-mono text-sm text-white shrink-0 w-[110px]">
-                                                    <Clock size={13} className="text-gray-500" />
-                                                    {item.hora_inicio}–{item.hora_fin}
-                                                </div>
-                                                {/* Sala + actividad */}
-                                                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-[#D4E655] shrink-0">
-                                                    <MapPin size={12} /> {group.sala_nombre} <span className="text-gray-500 normal-case">· {group.tipo_uso}</span>
-                                                </div>
-                                                {/* Cliente */}
-                                                <div className="min-w-0 flex-1">
-                                                    <p className="text-sm font-bold text-white truncate">{group.cliente_nombre}</p>
-                                                    <div className="flex items-center gap-2">
-                                                        {group.cliente_contacto && <a href={`https://wa.me/${group.cliente_contacto.replace(/[^0-9]/g, '')}`} target="_blank" className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-green-400 transition-colors"><MessageCircle size={11} /> {group.cliente_contacto}</a>}
-                                                        {group.items.length > 1 && <span className="text-[9px] text-gray-600 uppercase flex items-center gap-0.5"><Layers size={9} /> {group.items.length} días</span>}
+                                            <div key={item.id} className="bg-[#09090b] border border-white/10 rounded-xl p-3 hover:border-[#D4E655]/30 transition-colors">
+                                                <div className="flex items-start justify-between gap-3">
+                                                    {/* Info */}
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <span className="flex items-center gap-1.5 font-mono text-sm text-white"><Clock size={13} className="text-gray-500" /> {item.hora_inicio}–{item.hora_fin}</span>
+                                                            <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-[#D4E655]"><MapPin size={11} /> {group.sala_nombre}</span>
+                                                            <span className="text-[10px] text-gray-500 uppercase">· {group.tipo_uso}</span>
+                                                        </div>
+                                                        <p className="text-sm font-bold text-white truncate mt-1">{group.cliente_nombre}</p>
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            {group.cliente_contacto && <a href={`https://wa.me/${group.cliente_contacto.replace(/[^0-9]/g, '')}`} target="_blank" className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-green-400 transition-colors"><MessageCircle size={11} /> {group.cliente_contacto}</a>}
+                                                            {group.items.length > 1 && <span className="text-[9px] text-gray-600 uppercase flex items-center gap-0.5"><Layers size={9} /> {group.items.length} días</span>}
+                                                        </div>
+                                                        {group.notas_recepcion && (
+                                                            <p className="text-[10px] text-yellow-200/70 italic flex items-start gap-1 mt-0.5"><ShieldAlert size={10} className="text-yellow-500 shrink-0 mt-0.5" /> {group.notas_recepcion}</p>
+                                                        )}
                                                     </div>
-                                                    {group.notas_recepcion && (
-                                                        <p className="text-[10px] text-yellow-200/70 italic flex items-center gap-1 mt-0.5"><ShieldAlert size={10} className="text-yellow-500 shrink-0" /> {group.notas_recepcion}</p>
-                                                    )}
-                                                </div>
-                                                {/* Monto + estado */}
-                                                <div className="text-right shrink-0">
-                                                    <div className="text-sm font-black text-white">${Number(item.monto_total).toLocaleString()}</div>
-                                                    <span className={`text-[8px] px-2 py-0.5 rounded-full uppercase font-black ${chip.cls}`}>{chip.txt}</span>
+                                                    {/* Monto + estado */}
+                                                    <div className="text-right shrink-0">
+                                                        <div className="text-sm font-black text-white">${Number(item.monto_total).toLocaleString()}</div>
+                                                        <span className={`text-[8px] px-2 py-0.5 rounded-full uppercase font-black ${chip.cls}`}>{chip.txt}</span>
+                                                        {Number(item.monto_pagado || 0) > 0 && saldoDia > 0 && (
+                                                            <div className="text-[9px] text-red-400 mt-0.5">Saldo ${saldoDia.toLocaleString()}</div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 {/* Acciones */}
-                                                <div className="flex items-center gap-1 shrink-0">
-                                                    <button onClick={() => abrirModalEditar(item)} title="Editar día, hora y precio" className="p-2 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-lg transition-colors"><Pencil size={15} /></button>
-                                                    {Number(item.monto_pagado || 0) < Number(item.monto_total || 0) && (
-                                                        <button onClick={() => openCobroDia(item, group)} title="Cobrar" className="p-2 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-lg transition-colors"><DollarSign size={15} /></button>
+                                                <div className="flex items-center justify-end gap-1 mt-2 pt-2 border-t border-white/5">
+                                                    <button onClick={() => abrirModalEditar(item)} title="Editar día, hora y precio" className="p-2 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-lg transition-colors"><Pencil size={16} /></button>
+                                                    {saldoDia > 0 && (
+                                                        <button onClick={() => openCobroDia(item, group)} title="Cobrar" className="p-2 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-lg transition-colors"><DollarSign size={16} /></button>
                                                     )}
-                                                    <button onClick={() => handleRenovar(group)} title="Renovar (nuevas fechas)" className="p-2 text-gray-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors"><Repeat size={15} /></button>
-                                                    <button onClick={() => handleDeleteItem(item, group)} title="Eliminar este día" className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={15} /></button>
+                                                    <button onClick={() => handleRenovar(group)} title="Renovar (nuevas fechas)" className="p-2 text-gray-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors"><Repeat size={16} /></button>
+                                                    <button onClick={() => handleDeleteItem(item, group)} title="Eliminar este día" className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={16} /></button>
                                                 </div>
                                             </div>
                                         )
@@ -1167,12 +1175,17 @@ export default function AlquileresPage() {
 
                                     <label className="text-[10px] font-bold text-[#D4E655] uppercase block border-b border-white/10 pb-2 mb-2 pr-6">Resumen por día</label>
 
-                                    <div className="space-y-1 text-xs text-gray-300 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                                    <div className="space-y-2 text-xs text-gray-300 max-h-56 overflow-y-auto custom-scrollbar pr-1">
                                         {priceBreakdown.dias.map((d, i) => (
-                                            <div key={i} className="flex justify-between items-center gap-2">
-                                                <span className="capitalize text-gray-400 truncate">{format(d.fecha, "EEE dd/MM", { locale: es })}</span>
-                                                <span className="text-gray-500 font-mono text-[11px] shrink-0">{d.inicio}–{d.fin}</span>
-                                                <span className="font-bold text-white shrink-0 w-20 text-right">${Math.round(d.costo).toLocaleString()}</span>
+                                            <div key={i} className="flex items-start justify-between gap-2 border-b border-white/5 pb-1.5 last:border-0 last:pb-0">
+                                                <div className="min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="capitalize text-gray-200 font-semibold">{format(d.fecha, "EEE dd/MM", { locale: es })}</span>
+                                                        <span className="text-gray-500 font-mono text-[11px]">{d.inicio}–{d.fin}</span>
+                                                    </div>
+                                                    <p className="text-[10px] text-gray-500 mt-0.5">{d.detalle}</p>
+                                                </div>
+                                                <span className="font-bold text-white shrink-0 text-right">${Math.round(d.costo).toLocaleString()}</span>
                                             </div>
                                         ))}
                                         {priceBreakdown.dias.length === 0 && <p className="text-[10px] text-gray-500 italic text-center">Seleccioná días y horarios para calcular</p>}
