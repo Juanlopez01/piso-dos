@@ -137,7 +137,7 @@ export default function AlquileresPage() {
     const [busqueda, setBusqueda] = useState('')
     const [filtroSede, setFiltroSede] = useState('')
     const [verPasados, setVerPasados] = useState(false)
-    const [filtroMes, setFiltroMes] = useState('') // 'yyyy-MM' o '' (sin filtro)
+    const [filtroMes, setFiltroMes] = useState(() => format(new Date(), 'yyyy-MM')) // arranca en el mes actual; '' = todos
 
     // Modal Cobro
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
@@ -661,6 +661,12 @@ export default function AlquileresPage() {
     const sedesDisponibles = Array.from(new Set(salas.map(sedeDeSala).filter(Boolean)))
     const hoyStr = format(new Date(), 'yyyy-MM-dd')
 
+    // Opciones de meses para el filtro: los meses con reservas + el mes actual.
+    const mesesSet = new Set<string>([format(new Date(), 'yyyy-MM')])
+    for (const g of grupos) for (const it of g.items) if (it.fecha) mesesSet.add(it.fecha.slice(0, 7))
+    const mesesOpciones = Array.from(mesesSet).sort().reverse() // recientes primero
+    const labelMes = (ym: string) => format(new Date(ym + '-01T12:00:00'), 'LLLL yyyy', { locale: es })
+
     // Aplicamos filtros: búsqueda por cliente, sede, y próximos/pasados.
     const gruposFiltrados = grupos.filter(g => {
         if (busqueda && !g.cliente_nombre.toLowerCase().includes(busqueda.trim().toLowerCase())) return false
@@ -741,21 +747,16 @@ export default function AlquileresPage() {
                         {sedesDisponibles.map(sede => <option key={sede} value={sede}>{sede}</option>)}
                     </select>
                 )}
-                <input
-                    type="month"
+                <select
                     value={filtroMes}
                     onChange={e => setFiltroMes(e.target.value)}
-                    className="bg-[#111] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#D4E655] transition-colors"
+                    className="bg-[#111] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#D4E655] transition-colors capitalize"
                     title="Filtrar por mes"
-                />
-                {filtroMes ? (
-                    <button
-                        onClick={() => setFiltroMes('')}
-                        className="px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide border border-[#D4E655] bg-[#D4E655] text-black transition-colors"
-                    >
-                        Mes: limpiar
-                    </button>
-                ) : (
+                >
+                    <option value="">Todos los meses</option>
+                    {mesesOpciones.map(ym => <option key={ym} value={ym} className="capitalize">{labelMes(ym)}</option>)}
+                </select>
+                {!filtroMes && (
                     <button
                         onClick={() => setVerPasados(v => !v)}
                         className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide border transition-colors ${verPasados ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-300 border-white/10 hover:border-white/30'}`}
