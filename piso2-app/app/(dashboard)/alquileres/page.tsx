@@ -137,6 +137,7 @@ export default function AlquileresPage() {
     const [busqueda, setBusqueda] = useState('')
     const [filtroSede, setFiltroSede] = useState('')
     const [verPasados, setVerPasados] = useState(false)
+    const [filtroMes, setFiltroMes] = useState('') // 'yyyy-MM' o '' (sin filtro)
 
     // Modal Cobro
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
@@ -667,7 +668,11 @@ export default function AlquileresPage() {
             const sala = salas.find((s: any) => s.id === g.sala_id)
             if (sedeDeSala(sala) !== filtroSede) return false
         }
-        if (!verPasados) {
+        if (filtroMes) {
+            // Con filtro de mes, mostramos ese mes (aunque sea pasado).
+            const tieneEseMes = g.items.some((it: any) => (it.fecha || '').startsWith(filtroMes))
+            if (!tieneEseMes) return false
+        } else if (!verPasados) {
             // Un grupo es "próximo" si tiene alguna fecha de hoy en adelante.
             const tieneFutura = g.items.some((it: any) => it.fecha >= hoyStr)
             if (!tieneFutura) return false
@@ -680,7 +685,8 @@ export default function AlquileresPage() {
     const itemsPorDia: Record<string, { item: any; group: ReservaGroup }[]> = {}
     for (const g of gruposFiltrados) {
         for (const it of g.items) {
-            if (!verPasados && it.fecha < hoyStr) continue
+            if (filtroMes) { if (!(it.fecha || '').startsWith(filtroMes)) continue }
+            else if (!verPasados && it.fecha < hoyStr) continue
             ;(itemsPorDia[it.fecha] ||= []).push({ item: it, group: g })
         }
     }
@@ -735,12 +741,28 @@ export default function AlquileresPage() {
                         {sedesDisponibles.map(sede => <option key={sede} value={sede}>{sede}</option>)}
                     </select>
                 )}
-                <button
-                    onClick={() => setVerPasados(v => !v)}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide border transition-colors ${verPasados ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-300 border-white/10 hover:border-white/30'}`}
-                >
-                    {verPasados ? 'Viendo todos' : 'Solo próximos'}
-                </button>
+                <input
+                    type="month"
+                    value={filtroMes}
+                    onChange={e => setFiltroMes(e.target.value)}
+                    className="bg-[#111] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#D4E655] transition-colors"
+                    title="Filtrar por mes"
+                />
+                {filtroMes ? (
+                    <button
+                        onClick={() => setFiltroMes('')}
+                        className="px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide border border-[#D4E655] bg-[#D4E655] text-black transition-colors"
+                    >
+                        Mes: limpiar
+                    </button>
+                ) : (
+                    <button
+                        onClick={() => setVerPasados(v => !v)}
+                        className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide border transition-colors ${verPasados ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-300 border-white/10 hover:border-white/30'}`}
+                    >
+                        {verPasados ? 'Viendo todos' : 'Solo próximos'}
+                    </button>
+                )}
             </div>
 
             {/* LISTADO POR DÍA */}
