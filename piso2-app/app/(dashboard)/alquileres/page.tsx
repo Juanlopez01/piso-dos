@@ -17,7 +17,7 @@ import MultiDatePicker from '@/components/MultiDatePicker'
 import { useCash } from '@/context/CashContext'
 
 // 🚀 IMPORTAMOS LAS ACTIONS BLINDADAS
-import { crearAlquileresAction, cobrarAlquilerAction, eliminarReservaAction, actualizarTarifaAction, editarAlquilerFechaHoraAction } from '@/app/actions/alquileres'
+import { crearAlquileresAction, cobrarAlquilerAction, eliminarReservaAction, actualizarTarifaAction, editarAlquilerFechaHoraAction, actualizarClienteGrupoAction } from '@/app/actions/alquileres'
 
 // --- TIPOS ---
 type ReservaGroup = {
@@ -141,6 +141,11 @@ export default function AlquileresPage() {
     // Modal Cobro
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
     const [selectedGroup, setSelectedGroup] = useState<ReservaGroup | null>(null)
+    // Cobro por día vs. reserva completa. Guardamos el grupo real y el día elegido
+    // para poder alternar el alcance dentro del modal.
+    const [payFullGroup, setPayFullGroup] = useState<ReservaGroup | null>(null)
+    const [payItem, setPayItem] = useState<any | null>(null)
+    const [paymentScope, setPaymentScope] = useState<'dia' | 'reserva'>('reserva')
     const [paymentType, setPaymentType] = useState<'seña' | 'total' | 'resto'>('total')
     const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'transferencia'>('efectivo')
     const [customSena, setCustomSena] = useState<string>('') // 🚀 PARA EL MONTO MANUAL
@@ -148,7 +153,7 @@ export default function AlquileresPage() {
 
     // Modal edición fecha/hora
     const [modalEditar, setModalEditar] = useState<{ isOpen: boolean; item: any }>({ isOpen: false, item: null })
-    const [editForm, setEditForm] = useState({ fecha: '', hora_inicio: '', hora_fin: '', monto_total: 0 })
+    const [editForm, setEditForm] = useState({ fecha: '', hora_inicio: '', hora_fin: '', monto_total: 0, cliente_nombre: '', cliente_contacto: '' })
     const [procesandoEdicion, setProcesandoEdicion] = useState(false)
 
     const [form, setForm] = useState({
@@ -424,15 +429,38 @@ export default function AlquileresPage() {
         navigator.clipboard.writeText(textoWsp).then(() => toast.success('¡Presupuesto copiado!')).catch(() => toast.error('Error al copiar'))
     }
 
-    const openPaymentModal = (group: ReservaGroup) => {
+    // Un día suelto convertido a "grupo" de un item, para reusar toda la lógica de
+    // cobro (que trabaja sobre selectedGroup.items).
+    const itemToGroup = (item: any, base: ReservaGroup): ReservaGroup => {
+        const total = Number(item.monto_total) || 0
+        const pagado = Number(item.monto_pagado || 0)
+        const estadoPago = pagado <= 0 ? 'pendiente' : (pagado >= total ? 'pagado' : 'seña_pagada')
+        return { ...base, group_id: item.id, total_grupo: total, total_pagado: pagado, estado_pago: estadoPago, estado: estadoPago, items: [item] }
+    }
+
+    const abrirCobro = (sg: ReservaGroup) => {
+        setSelectedGroup(sg)
+        setPaymentType(sg.estado_pago === 'pendiente' ? 'seña' : 'resto')
+        setPaymentMethod('efectivo')
+        setCustomSena('')
+    }
+
+    // Cobro de UN día. Desde el modal se puede pasar a "toda la reserva".
+    const openCobroDia = (item: any, group: ReservaGroup) => {
         if (!isBoxOpen || !currentTurnoId) {
             return toast.error('¡Caja Cerrada! Tenés que abrir la caja en tu sede antes de poder cobrar.')
         }
-        setSelectedGroup(group)
-        setPaymentType(group.estado_pago === 'pendiente' ? 'seña' : 'resto')
-        setPaymentMethod('efectivo')
-        setCustomSena('') // Limpiamos el monto manual
+        setPayFullGroup(group)
+        setPayItem(item)
+        setPaymentScope('dia')
+        abrirCobro(itemToGroup(item, group))
         setIsPaymentModalOpen(true)
+    }
+
+    const cambiarScope = (scope: 'dia' | 'reserva') => {
+        setPaymentScope(scope)
+        if (scope === 'reserva' && payFullGroup) abrirCobro(payFullGroup)
+        else if (scope === 'dia' && payItem && payFullGroup) abrirCobro(itemToGroup(payItem, payFullGroup))
     }
 
     // =======================================================
@@ -517,10 +545,11 @@ export default function AlquileresPage() {
                 }
             })
 
+            const detalleDia = paymentScope === 'dia' && payItem ? ` (${format(new Date(payItem.fecha + 'T12:00:00'), 'dd/MM')})` : ''
             const movimientoCaja = {
                 turno_id: currentTurnoId,
                 tipo: 'ingreso',
-                concepto: `Alquiler ${selectedGroup.sala_nombre}: ${selectedGroup.cliente_nombre} - ${labelCobro}`,
+                concepto: `Alquiler ${selectedGroup.sala_nombre}: ${selectedGroup.cliente_nombre}${detalleDia} - ${labelCobro}`,
                 monto: montoACobrarEnCaja,
                 metodo_pago: paymentMethod,
                 origen_referencia: 'alquileres'
@@ -541,32 +570,41 @@ export default function AlquileresPage() {
     }
 
     const abrirModalEditar = (item: any) => {
-        setEditForm({ fecha: item.fecha, hora_inicio: item.hora_inicio, hora_fin: item.hora_fin, monto_total: Number(item.monto_total) || 0 })
+        setEditForm({
+            fecha: item.fecha, hora_inicio: item.hora_inicio, hora_fin: item.hora_fin,
+            monto_total: Number(item.monto_total) || 0,
+            cliente_nombre: item.cliente_nombre || '', cliente_contacto: item.cliente_contacto || '',
+        })
         setModalEditar({ isOpen: true, item })
     }
 
     const handleEditarFechaHora = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!modalEditar.item) return
-        const pagado = Number(modalEditar.item.monto_pagado || 0)
+        const it = modalEditar.item
+        const pagado = Number(it.monto_pagado || 0)
         if (editForm.monto_total < pagado) {
             return toast.error(`El precio no puede ser menor a lo ya abonado ($${pagado.toLocaleString()}).`)
         }
+        if (!editForm.cliente_nombre.trim()) return toast.error('El nombre no puede quedar vacío.')
         setProcesandoEdicion(true)
         const res = await editarAlquilerFechaHoraAction(
-            modalEditar.item.id,
-            editForm.fecha,
-            editForm.hora_inicio,
-            editForm.hora_fin,
-            editForm.monto_total
+            it.id, editForm.fecha, editForm.hora_inicio, editForm.hora_fin, editForm.monto_total
         )
-        if (res.success) {
-            toast.success('Reserva actualizada')
-            setModalEditar({ isOpen: false, item: null })
-            mutate()
-        } else {
-            toast.error(res.error || 'Error al editar')
+        if (!res.success) { toast.error(res.error || 'Error al editar'); setProcesandoEdicion(false); return }
+
+        // Si cambió el nombre/contacto, lo aplicamos a TODA la reserva.
+        const nombreCambio = editForm.cliente_nombre.trim() !== (it.cliente_nombre || '')
+        const contactoCambio = editForm.cliente_contacto.trim() !== (it.cliente_contacto || '')
+        if (nombreCambio || contactoCambio) {
+            const gid = it.group_id || it.id
+            const r2 = await actualizarClienteGrupoAction(gid, editForm.cliente_nombre, editForm.cliente_contacto)
+            if (!r2.success) { toast.error(r2.error || 'Error al cambiar el nombre'); setProcesandoEdicion(false); mutate(); return }
         }
+
+        toast.success('Reserva actualizada')
+        setModalEditar({ isOpen: false, item: null })
+        mutate()
         setProcesandoEdicion(false)
     }
 
@@ -768,8 +806,8 @@ export default function AlquileresPage() {
                                                 {/* Acciones */}
                                                 <div className="flex items-center gap-1 shrink-0">
                                                     <button onClick={() => abrirModalEditar(item)} title="Editar día, hora y precio" className="p-2 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-lg transition-colors"><Pencil size={15} /></button>
-                                                    {!isFullyPaid && (
-                                                        <button onClick={() => openPaymentModal(group)} title="Cobrar reserva" className="p-2 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-lg transition-colors"><DollarSign size={15} /></button>
+                                                    {Number(item.monto_pagado || 0) < Number(item.monto_total || 0) && (
+                                                        <button onClick={() => openCobroDia(item, group)} title="Cobrar" className="p-2 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-lg transition-colors"><DollarSign size={15} /></button>
                                                     )}
                                                     <button onClick={() => handleRenovar(group)} title="Renovar (nuevas fechas)" className="p-2 text-gray-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors"><Repeat size={15} /></button>
                                                     <button onClick={() => handleDeleteItem(item, group)} title="Eliminar este día" className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={15} /></button>
@@ -793,6 +831,30 @@ export default function AlquileresPage() {
                             <button onClick={() => setModalEditar({ isOpen: false, item: null })} className="p-2 hover:bg-white/10 rounded-full"><X className="text-gray-500" size={18} /></button>
                         </div>
                         <form onSubmit={handleEditarFechaHora} className="space-y-4">
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Cliente</label>
+                                    <input
+                                        required
+                                        value={editForm.cliente_nombre}
+                                        onChange={e => setEditForm({ ...editForm, cliente_nombre: e.target.value })}
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-all"
+                                        placeholder="Nombre"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Contacto</label>
+                                    <input
+                                        value={editForm.cliente_contacto}
+                                        onChange={e => setEditForm({ ...editForm, cliente_contacto: e.target.value })}
+                                        className="w-full bg-[#111] border border-white/10 rounded-xl p-3 text-white text-sm font-bold outline-none focus:border-[#D4E655] transition-all"
+                                        placeholder="11..."
+                                    />
+                                </div>
+                            </div>
+                            {modalEditar.item && (modalEditar.item.group_id) && grupos.find(g => g.group_id === modalEditar.item.group_id && g.items.length > 1) && (
+                                <p className="text-[9px] text-gray-500 -mt-2">El nombre/contacto se cambia en toda la reserva (todos los días).</p>
+                            )}
                             <div>
                                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Nueva Fecha</label>
                                 <input
@@ -859,9 +921,21 @@ export default function AlquileresPage() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in">
                     <div className="bg-[#09090b] border border-[#D4E655]/30 w-full max-w-md rounded-3xl p-6 shadow-2xl shadow-[#D4E655]/10 relative">
                         <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-xl font-black text-white uppercase flex items-center gap-2"><DollarSign className="text-[#D4E655]" /> Cobrar Reserva</h3>
+                            <h3 className="text-xl font-black text-white uppercase flex items-center gap-2"><DollarSign className="text-[#D4E655]" /> Cobrar</h3>
                             <button onClick={() => setIsPaymentModalOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
                         </div>
+
+                        {/* Alcance: este día o toda la reserva (solo si hay más de un día) */}
+                        {payFullGroup && payFullGroup.items.length > 1 && (
+                            <div className="flex bg-[#111] rounded-xl border border-white/10 p-1 mb-4">
+                                <button onClick={() => cambiarScope('dia')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${paymentScope === 'dia' ? 'bg-[#D4E655] text-black' : 'text-gray-400'}`}>
+                                    Este día{payItem ? ` (${format(new Date(payItem.fecha + 'T12:00:00'), 'dd/MM')})` : ''}
+                                </button>
+                                <button onClick={() => cambiarScope('reserva')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${paymentScope === 'reserva' ? 'bg-[#D4E655] text-black' : 'text-gray-400'}`}>
+                                    Toda la reserva ({payFullGroup.items.length} días)
+                                </button>
+                            </div>
+                        )}
 
                         <div className="bg-[#111] p-4 rounded-2xl mb-6 border border-white/5 text-center">
                             <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">{selectedGroup.cliente_nombre}</p>

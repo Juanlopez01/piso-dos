@@ -171,6 +171,28 @@ export async function editarAlquilerFechaHoraAction(
     }
 }
 
+// Cambia el nombre/contacto del cliente en TODA la reserva (todos los días del
+// grupo). gid puede ser un group_id o, si la reserva es de un solo día sin grupo,
+// el id de la fila.
+export async function actualizarClienteGrupoAction(gid: string, nombre: string, contacto: string) {
+    const perm = await requireStaffAlquileres()
+    if (!perm.ok) return { success: false, error: perm.error }
+    if (!gid) return { success: false, error: 'Falta la reserva.' }
+    if (!nombre?.trim()) return { success: false, error: 'El nombre no puede quedar vacío.' }
+
+    const supabase = await createClient()
+    try {
+        const { error } = await supabase.from('alquileres')
+            .update({ cliente_nombre: nombre.trim(), cliente_contacto: (contacto || '').trim() })
+            .or(`group_id.eq.${gid},id.eq.${gid}`)
+        if (error) throw error
+        revalidatePath('/alquileres')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
 export async function actualizarTarifaAction(salaId: string, field: string, value: number) {
     const perm = await requireStaffAlquileres()
     if (!perm.ok) return { success: false, error: perm.error }
