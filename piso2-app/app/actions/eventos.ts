@@ -125,9 +125,14 @@ export async function getEventoAction(eventoId: string) {
             (itemsByVenta[it.venta_id] ||= []).push({ ...it, nombre: nombreEntrada[it.entrada_id] || 'Entrada' })
         }
     }
-    const ventasConItems = (ventas || []).map((v: any) => ({ ...v, items: itemsByVenta[v.id] || [] }))
+    // Los montos ($ total y precios unitarios) solo se mandan a quien tiene finanzas.
+    const ventasConItems = (ventas || []).map((v: any) => ({
+        ...v,
+        total: perm.finanzas ? v.total : null,
+        items: (itemsByVenta[v.id] || []).map((it: any) => ({ ...it, precio_unit: perm.finanzas ? it.precio_unit : null })),
+    }))
 
-    return { ok: true as const, evento, entradas: entradasConDisp, ventas: ventasConItems }
+    return { ok: true as const, evento, entradas: entradasConDisp, ventas: ventasConItems, finanzas: perm.finanzas }
 }
 
 // ---- Eventos ----------------------------------------------------------------

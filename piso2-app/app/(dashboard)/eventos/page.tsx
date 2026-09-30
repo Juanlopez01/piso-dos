@@ -48,6 +48,8 @@ export default function EventosPage() {
     const { userRole, hasAdminFinanzas } = useCash()
     const soloLectura = userRole === 'curador' || userRole === 'tecnica'
     const verDinero = !!hasAdminFinanzas
+    // La cantidad vendida la ven Chifle/Wally/recep/admin, NO las técnicas (solo ficha).
+    const verVentas = userRole !== 'tecnica'
     const [eventos, setEventos] = useState<EventoRow[]>([])
     const [loading, setLoading] = useState(true)
     const [sel, setSel] = useState<string | null>(null)
@@ -67,7 +69,7 @@ export default function EventosPage() {
             <Toaster position="top-center" richColors theme="dark" />
 
             {sel ? (
-                <Detalle eventoId={sel} soloLectura={soloLectura} verDinero={verDinero} onBack={() => { setSel(null); cargar() }} />
+                <Detalle eventoId={sel} soloLectura={soloLectura} verDinero={verDinero} verVentas={verVentas} onBack={() => { setSel(null); cargar() }} />
             ) : (
                 <>
                     <div className="flex items-end justify-between gap-3 mb-6">
@@ -107,7 +109,7 @@ export default function EventosPage() {
                                     </div>
                                     <div className="text-right shrink-0">
                                         {verDinero && <p className="text-[#D4E655] font-black">{pesos(e.recaudado)}</p>}
-                                        <p className="text-[10px] text-gray-500">{e.vendidas} entradas</p>
+                                        {verVentas && <p className="text-[10px] text-gray-500">{e.vendidas} entradas</p>}
                                     </div>
                                 </button>
                             ))}
@@ -186,7 +188,7 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
     )
 }
 
-function Detalle({ eventoId, soloLectura, verDinero, onBack }: { eventoId: string; soloLectura?: boolean; verDinero?: boolean; onBack: () => void }) {
+function Detalle({ eventoId, soloLectura, verDinero, verVentas = true, onBack }: { eventoId: string; soloLectura?: boolean; verDinero?: boolean; verVentas?: boolean; onBack: () => void }) {
     const [evento, setEvento] = useState<Evento | null>(null)
     const [entradas, setEntradas] = useState<Entrada[]>([])
     const [ventas, setVentas] = useState<Venta[]>([])
@@ -869,11 +871,13 @@ const agregarEntrada = async () => {
             )}
 
             {/* stats */}
-            <div className="grid grid-cols-3 gap-3 mb-6">
-                <Stat label="Recaudado" value={pesos(recaudado)} accent icon={DollarSign} />
-                <Stat label="Vendidas" value={`${vendidasTot}${cupoTot ? ` / ${cupoTot}` : ''}`} icon={Ticket} />
-                <Stat label="Ventas" value={ventas.filter(v => v.estado === 'confirmada').length} icon={Users} />
-            </div>
+            {(verDinero || verVentas) && (
+                <div className="flex gap-3 mb-6">
+                    {verDinero && <div className="flex-1"><Stat label="Recaudado" value={pesos(recaudado)} accent icon={DollarSign} /></div>}
+                    {verVentas && <div className="flex-1"><Stat label="Vendidas" value={`${vendidasTot}${cupoTot ? ` / ${cupoTot}` : ''}`} icon={Ticket} /></div>}
+                    {verVentas && <div className="flex-1"><Stat label="Ventas" value={ventas.filter(v => v.estado === 'confirmada').length} icon={Users} /></div>}
+                </div>
+            )}
 
             {/* entradas */}
             <Seccion titulo="Tipos de entrada">
@@ -907,7 +911,7 @@ const agregarEntrada = async () => {
                                 <div className="flex items-center gap-3">
                                     <div className="flex-1 min-w-0">
                                         <p className="font-bold text-sm truncate flex items-center gap-1.5">{e.nombre} {e.oculta && <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 uppercase font-bold"><EyeOff size={10} /> Oculta</span>}</p>
-                                        <p className="text-[11px] text-gray-500">{pesos(e.precio)} · {e.vendidas}/{e.cupo} vendidas · <span className={e.disponible > 0 ? 'text-[#D4E655]' : 'text-red-400'}>{e.disponible} libres</span></p>
+                                        <p className="text-[11px] text-gray-500">{pesos(e.precio)}{verVentas && <> · {e.vendidas}/{e.cupo} vendidas · <span className={e.disponible > 0 ? 'text-[#D4E655]' : 'text-red-400'}>{e.disponible} libres</span></>}</p>
                                         {e.obra_id && obras.length > 0 && (
                                             <p className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-gray-400"><Theater size={11} className="text-gray-500" /> {obras.find(o => o.id === e.obra_id)?.titulo || 'Obra'}</p>
                                         )}
@@ -994,7 +998,7 @@ const agregarEntrada = async () => {
             )}
 
             {/* ventas */}
-            <Seccion titulo={`Ventas (${ventas.length})`}>
+            {verVentas && <Seccion titulo={`Ventas (${ventas.length})`}>
                 {ventas.length === 0 ? (
                     <p className="text-xs text-gray-500">Todavía no hay ventas.</p>
                 ) : (
@@ -1030,10 +1034,10 @@ const agregarEntrada = async () => {
                         ))}
                     </div>
                 )}
-            </Seccion>
+            </Seccion>}
 
             {/* carritos abandonados */}
-            {carritos.length > 0 && (
+            {verVentas && carritos.length > 0 && (
                 <Seccion titulo={`Carritos abandonados (${carritos.length})`}>
                     <p className="text-[11px] text-gray-500 -mt-1 mb-3 flex items-center gap-1.5"><ShoppingCart size={13} className="text-[#D4E655]" /> Empezaron la compra online y no pagaron. Escribiles para que la completen.</p>
                     <div className="space-y-2">
