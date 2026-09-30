@@ -1010,7 +1010,7 @@ const agregarEntrada = async () => {
                                         <p className="text-[10px] text-gray-600 capitalize">{v.canal || 'mostrador'} · {v.medio_pago} · {fmtFecha(v.created_at)}</p>
                                     </div>
                                     <div className="text-right shrink-0">
-                                        <p className="font-black text-[#D4E655]">{pesos(v.total)}</p>
+                                        {verDinero && <p className="font-black text-[#D4E655]">{pesos(v.total)}</p>}
                                         {!soloLectura && v.estado === 'confirmada' && <div className="flex gap-2 justify-end">
                                             {fechasHermanas.length > 0 && <button onClick={() => setTraspasando(traspasando === v.id ? null : v.id)} className="text-[10px] text-gray-500 hover:text-blue-400 uppercase font-semibold">Traspasar</button>}
                                             <button onClick={() => reembolsar(v)} className="text-[10px] text-gray-500 hover:text-amber-400 uppercase font-semibold">Reembolsar</button>

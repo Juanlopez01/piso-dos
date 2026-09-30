@@ -11,6 +11,16 @@ import { getFichaObraAction, guardarFichaObraAction } from '@/app/actions/convoc
 
 type Ficha = Record<string, any>
 
+// Áreas de la ficha + los campos de cada una (para el índice y el punto de "cargada").
+const AREAS: { id: string; title: string; campos: string[] }[] = [
+    { id: 'funcion', title: 'Función', campos: ['dias_horarios', 'tipo_sala', 'necesidades_funcion', 'meet_tecnico'] },
+    { id: 'sonido', title: 'Sonido', campos: ['usa_sonido', 'track_cues', 'sonido_extra', 'encargado_sonido', 'track_por_piso2'] },
+    { id: 'iluminacion', title: 'Iluminación', campos: ['climas_escenas', 'grabacion_luces', 'luces_horas_extra', 'encargado_luces', 'diseno_por_piso2'] },
+    { id: 'proyecciones', title: 'Proyecciones', campos: ['usa_proyecciones', 'proyectores', 'track_video', 'resolucion'] },
+    { id: 'armado', title: 'Armado', campos: ['escenografia', 'ubicacion_tecnica', 'ensayo_general', 'ensayos_tecnicos'] },
+    { id: 'acuerdo', title: 'Acuerdo', campos: ['acuerdo_firmado', 'acuerdo_notas'] },
+]
+
 export default function FichaTecnicaPage() {
     const params = useParams()
     const eventoId = params.id as string
@@ -67,9 +77,22 @@ export default function FichaTecnicaPage() {
                     {soloLectura && <p className="mt-2 rounded-lg bg-[#D4E655]/10 border border-[#D4E655]/30 p-2.5 text-[11px] text-[#D4E655] font-semibold">Modo solo lectura: podés ver la ficha, no editarla.</p>}
                 </div>
 
+                {/* Índice de áreas: ir directo a cada parte. El punto marca si ya tiene algo cargado. */}
+                <div className="flex flex-wrap gap-2 mb-5">
+                    {AREAS.map(a => {
+                        const cargada = a.campos.some(k => { const val = f[k]; return typeof val === 'boolean' ? val : !!(val && String(val).trim()) })
+                        return (
+                            <a key={a.id} href={`#${a.id}`} className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide bg-[#111] border border-white/10 text-gray-300 px-2.5 py-1.5 rounded-lg hover:border-[#D4E655]/50 hover:text-white transition-colors">
+                                <span className={`w-1.5 h-1.5 rounded-full ${cargada ? 'bg-[#D4E655]' : 'bg-white/20'}`} />
+                                {a.title}
+                            </a>
+                        )
+                    })}
+                </div>
+
                 <fieldset disabled={soloLectura} className="min-w-0 border-0 p-0 m-0 disabled:opacity-100">
                 {/* Función */}
-                <Section icon={CalendarClock} title="Función">
+                <Section icon={CalendarClock} title="Función" id="funcion">
                     <Txt label="Días y horarios de función posibles" v={f.dias_horarios} on={v => set('dias_horarios', v)} ph="Ej: viernes 21h, sábado 20h y 22h" />
                     <Sel label="Tipo de sala" v={f.tipo_sala} on={v => set('tipo_sala', v)} opciones={['', 'Sala blanca', 'Sala negra', 'Sala entera']} />
                     <Area label="Necesidades de función" v={f.necesidades_funcion} on={v => set('necesidades_funcion', v)} ph="Cualquier cosa particular que necesiten para la función" />
@@ -77,7 +100,7 @@ export default function FichaTecnicaPage() {
                 </Section>
 
                 {/* Sonido */}
-                <Section icon={Music} title="Sonido">
+                <Section icon={Music} title="Sonido" id="sonido">
                     <Chk label="Usa música / micrófonos / instrumentos en vivo" v={f.usa_sonido} on={v => set('usa_sonido', v)} />
                     <Area label="Entrega del track probado y cues específicos" v={f.track_cues} on={v => set('track_cues', v)} ph="Cómo y cuándo entregan el track, cues de sonido" />
                     <Area label="Requerimientos fuera del equipamiento de Piso 2" v={f.sonido_extra} on={v => set('sonido_extra', v)} ph="Equipo extra que traen o que necesitan" />
@@ -86,7 +109,7 @@ export default function FichaTecnicaPage() {
                 </Section>
 
                 {/* Iluminación */}
-                <Section icon={Sun} title="Iluminación">
+                <Section icon={Sun} title="Iluminación" id="iluminacion">
                     <Area label="Climas y escenas de la obra" v={f.climas_escenas} on={v => set('climas_escenas', v)} ph="Descripción de los climas de luz por escena" />
                     <Txt label="Grabación de luces (fecha y hora)" v={f.grabacion_luces} on={v => set('grabacion_luces', v)} ph="Cuándo graban las luces" />
                     <Area label="Horas adicionales y requerimientos extra" v={f.luces_horas_extra} on={v => set('luces_horas_extra', v)} ph="Horas extra de sala, equipos especiales" />
@@ -95,7 +118,7 @@ export default function FichaTecnicaPage() {
                 </Section>
 
                 {/* Proyecciones */}
-                <Section icon={MonitorPlay} title="Proyecciones">
+                <Section icon={MonitorPlay} title="Proyecciones" id="proyecciones">
                     <Chk label="Usa proyecciones" v={f.usa_proyecciones} on={v => set('usa_proyecciones', v)} />
                     <Sel label="Cantidad de proyectores" v={f.proyectores} on={v => set('proyectores', v)} opciones={['', '1 proyector', '2 proyectores']} />
                     <Area label="Entrega del track de video editado" v={f.track_video} on={v => set('track_video', v)} ph="Cómo y cuándo entregan el video" />
@@ -103,7 +126,7 @@ export default function FichaTecnicaPage() {
                 </Section>
 
                 {/* Armado y ensayos */}
-                <Section icon={Boxes} title="Armado de sala y ensayos">
+                <Section icon={Boxes} title="Armado de sala y ensayos" id="armado">
                     <Area label="Escenografía, elementos y backstage" v={f.escenografia} on={v => set('escenografia', v)} ph="Qué llevan, qué necesitan de backstage" />
                     <Area label="Ubicación de técnica y armado de gradas" v={f.ubicacion_tecnica} on={v => set('ubicacion_tecnica', v)} ph="Dónde va la técnica, disposición de gradas" />
                     <Txt label="Ensayo general pactado (máx. 2 hs)" v={f.ensayo_general} on={v => set('ensayo_general', v)} ph="Fecha y hora del ensayo general" />
@@ -111,7 +134,7 @@ export default function FichaTecnicaPage() {
                 </Section>
 
                 {/* Acuerdo de sala */}
-                <Section icon={FileSignature} title="Acuerdo de sala">
+                <Section icon={FileSignature} title="Acuerdo de sala" id="acuerdo">
                     <div className="rounded-xl bg-[#111] border border-white/10 p-3 text-[11px] text-gray-400 leading-relaxed mb-3">
                         El uso de la sala está sujeto a la firma del <b className="text-gray-200">acuerdo de sala</b>. Se imprime, se firma y se entrega en Piso 2. Las opciones y valores de cada servicio (track, diseño de luces, horas y ensayos adicionales) se pactan y quedan asentados acá.
                     </div>
@@ -133,9 +156,9 @@ export default function FichaTecnicaPage() {
     )
 }
 
-function Section({ icon: Icon, title, children }: { icon: any; title: string; children: React.ReactNode }) {
+function Section({ icon: Icon, title, id, children }: { icon: any; title: string; id?: string; children: React.ReactNode }) {
     return (
-        <div className="mb-5 rounded-2xl bg-[#0b0b0d] border border-white/10 overflow-hidden">
+        <div id={id} className="mb-5 rounded-2xl bg-[#0b0b0d] border border-white/10 overflow-hidden scroll-mt-4">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10 bg-white/[0.02]">
                 <Icon size={16} className="text-[#D4E655]" />
                 <h2 className="font-black uppercase text-xs tracking-widest">{title}</h2>
