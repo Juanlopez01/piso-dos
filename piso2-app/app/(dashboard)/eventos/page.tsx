@@ -45,8 +45,9 @@ const ESTADOS: Record<string, { label: string; cls: string }> = {
 const MEDIOS = ['efectivo', 'transferencia', 'mercadopago']
 
 export default function EventosPage() {
-    const { userRole } = useCash()
-    const soloLectura = userRole === 'curador'
+    const { userRole, hasAdminFinanzas } = useCash()
+    const soloLectura = userRole === 'curador' || userRole === 'tecnica'
+    const verDinero = !!hasAdminFinanzas
     const [eventos, setEventos] = useState<EventoRow[]>([])
     const [loading, setLoading] = useState(true)
     const [sel, setSel] = useState<string | null>(null)
@@ -66,7 +67,7 @@ export default function EventosPage() {
             <Toaster position="top-center" richColors theme="dark" />
 
             {sel ? (
-                <Detalle eventoId={sel} soloLectura={soloLectura} onBack={() => { setSel(null); cargar() }} />
+                <Detalle eventoId={sel} soloLectura={soloLectura} verDinero={verDinero} onBack={() => { setSel(null); cargar() }} />
             ) : (
                 <>
                     <div className="flex items-end justify-between gap-3 mb-6">
@@ -105,7 +106,7 @@ export default function EventosPage() {
                                         </p>
                                     </div>
                                     <div className="text-right shrink-0">
-                                        <p className="text-[#D4E655] font-black">{pesos(e.recaudado)}</p>
+                                        {verDinero && <p className="text-[#D4E655] font-black">{pesos(e.recaudado)}</p>}
                                         <p className="text-[10px] text-gray-500">{e.vendidas} entradas</p>
                                     </div>
                                 </button>
@@ -185,7 +186,7 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
     )
 }
 
-function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLectura?: boolean; onBack: () => void }) {
+function Detalle({ eventoId, soloLectura, verDinero, onBack }: { eventoId: string; soloLectura?: boolean; verDinero?: boolean; onBack: () => void }) {
     const [evento, setEvento] = useState<Evento | null>(null)
     const [entradas, setEntradas] = useState<Entrada[]>([])
     const [ventas, setVentas] = useState<Venta[]>([])
@@ -207,6 +208,7 @@ function Detalle({ eventoId, soloLectura, onBack }: { eventoId: string; soloLect
     }
 
     const cargarBorderaux = async () => {
+        if (!verDinero) return // la liquidación (montos) solo la ve administración
         const r = await getBorderauxAction(eventoId)
         if (r.ok) setBorderaux(r)
     }
@@ -701,16 +703,20 @@ const agregarEntrada = async () => {
             </div>
 
             {/* check-in + reporte */}
-            <div className={`grid ${soloLectura ? 'grid-cols-1' : 'grid-cols-2'} gap-2 mb-5`}>
-                {!soloLectura && (
-                    <Link href={`/eventos/${eventoId}/checkin`} className="flex items-center justify-center gap-2 bg-[#D4E655] text-black font-bold py-3 rounded-xl uppercase text-[11px] tracking-wide hover:bg-white transition-colors">
-                        <ScanLine size={15} /> Check-in
-                    </Link>
-                )}
-                <button onClick={abrirReporte} className="flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-200 font-bold py-3 rounded-xl uppercase text-[11px] tracking-wide hover:border-white/30 transition-colors">
-                    <BarChart3 size={15} /> Reporte
-                </button>
-            </div>
+            {(!soloLectura || verDinero) && (
+                <div className={`grid ${(!soloLectura && verDinero) ? 'grid-cols-2' : 'grid-cols-1'} gap-2 mb-5`}>
+                    {!soloLectura && (
+                        <Link href={`/eventos/${eventoId}/checkin`} className="flex items-center justify-center gap-2 bg-[#D4E655] text-black font-bold py-3 rounded-xl uppercase text-[11px] tracking-wide hover:bg-white transition-colors">
+                            <ScanLine size={15} /> Check-in
+                        </Link>
+                    )}
+                    {verDinero && (
+                        <button onClick={abrirReporte} className="flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-200 font-bold py-3 rounded-xl uppercase text-[11px] tracking-wide hover:border-white/30 transition-colors">
+                            <BarChart3 size={15} /> Reporte
+                        </button>
+                    )}
+                </div>
+            )}
 
             {/* ficha técnica */}
             <Link href={`/eventos/${eventoId}/ficha`} className="w-full flex items-center justify-center gap-2 mb-2 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
@@ -1101,8 +1107,8 @@ const agregarEntrada = async () => {
                 </div>
             </Seccion>
 
-            {/* equipo de función */}
-            <Seccion titulo="Equipo de función">
+            {/* equipo de función (cachets = plata → solo administración) */}
+            {verDinero && <Seccion titulo="Equipo de función">
                 <p className="text-[11px] text-gray-500 -mt-1 mb-3 flex items-center gap-1.5"><HardHat size={13} className="text-[#D4E655]" /> Quién trabajó en la función y su cachet. Alimenta el borderaux.</p>
                 <div className="space-y-2">
                     {equipo.map(m => (
@@ -1142,7 +1148,7 @@ const agregarEntrada = async () => {
                         </div>
                     )}
                 </div>
-            </Seccion>
+            </Seccion>}
 
             {/* borderaux / liquidación */}
             {borderaux && (

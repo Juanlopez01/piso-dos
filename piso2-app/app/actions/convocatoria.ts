@@ -22,6 +22,22 @@ async function requireStaff() {
     return { ok: true as const, userId: session.user.id, rol: perfil.rol as string }
 }
 
+// Permiso de la FICHA por obra: la ven todos los involucrados y la escriben las
+// técnicas y el staff de eventos (no el curador, que queda en lectura).
+async function requireFichaObra(soloLectura = false) {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { ok: false as const, error: 'No autorizado' }
+    const { data: perfil } = await supabase.from('profiles').select('rol, acceso_curaduria').eq('id', session.user.id).single()
+    if (!perfil) return { ok: false as const, error: 'Sin permisos' }
+    const write = ['admin', 'recepcion', 'jefe_sala', 'tecnica']
+    const read = [...write, 'curador']
+    const rolesOk = soloLectura ? read : write
+    const ok = rolesOk.includes(perfil.rol) || (soloLectura && perfil.acceso_curaduria)
+    if (!ok) return { ok: false as const, error: 'Sin permisos' }
+    return { ok: true as const, userId: session.user.id, rol: perfil.rol as string }
+}
+
 // ---- Público: proponer una obra ----
 export async function crearPropuestaObraAction(payload: {
     titulo: string; director?: string; compania?: string; tipo_obra?: string
@@ -226,7 +242,7 @@ export async function curarPropuestaAction(id: string, decision: 'aceptada' | 'r
 // Las obras se vinculan por obra_propuestas.evento_id.
 
 export async function getObrasDeEventoAction(eventoId: string) {
-    const perm = await requireStaff()
+    const perm = await requireFichaObra(true)
     if (!perm.ok) return { ok: false as const, error: perm.error, obras: [] as any[] }
     const admin = getAdminClient()
     const { data } = await admin.from('obra_propuestas')
@@ -357,7 +373,7 @@ export async function crearFuncionAction(data: { nombre: string; fecha?: string 
 // técnica y su propio % de reparto. Se guardan en la misma propuesta de la obra.
 
 export async function getFichaObraAction(propuestaId: string) {
-    const perm = await requireStaff()
+    const perm = await requireFichaObra(true)
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
     const { data } = await admin.from('obra_propuestas')
@@ -367,9 +383,8 @@ export async function getFichaObraAction(propuestaId: string) {
 }
 
 export async function guardarFichaObraAction(propuestaId: string, ficha: Record<string, any>) {
-    const perm = await requireStaff()
+    const perm = await requireFichaObra()
     if (!perm.ok) return { ok: false as const, error: perm.error }
-    if (perm.rol === 'curador') return { ok: false as const, error: 'Modo solo lectura' }
     const admin = getAdminClient()
     const payload = { ...(ficha || {}), _updated_at: new Date().toISOString(), _updated_by: perm.userId }
     const { error } = await admin.from('obra_propuestas').update({ ficha_tecnica: payload }).eq('id', propuestaId)

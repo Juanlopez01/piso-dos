@@ -16,16 +16,33 @@ const getAdminClient = () => createAdminClient(
 )
 
 // El curador (Chifle) tiene acceso de SOLO LECTURA: puede ver, no editar.
-// requireStaff() = escritura (admin/recepción); requireStaff(true) = lectura (+ curador).
-const ROLES_STAFF = ['admin', 'recepcion']
+// Permisos de Eventos (PISO2E):
+//  - Escritura (crear/editar funciones, entradas, precios): admin, recepción, jefe de sala.
+//  - Lectura: los de escritura + curador + técnica + flag acceso_curaduria.
+//  - Dinero ($ recaudado, liquidación): SOLO flag admin_finanzas (Nico/Santi).
+const ROLES_WRITE = ['admin', 'recepcion', 'jefe_sala']
+const ROLES_READ = [...ROLES_WRITE, 'curador', 'tecnica']
+
 async function requireStaff(soloLectura = false) {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return { ok: false as const, error: 'No autorizado' }
-    const { data: perfil } = await supabase.from('profiles').select('rol, acceso_curaduria').eq('id', session.user.id).single()
-    const rolesOk = soloLectura ? [...ROLES_STAFF, 'curador'] : ROLES_STAFF
+    const { data: perfil } = await supabase.from('profiles').select('rol, acceso_curaduria, admin_finanzas').eq('id', session.user.id).single()
+    const rolesOk = soloLectura ? ROLES_READ : ROLES_WRITE
     // El flag acceso_curaduria da lectura de Eventos (igual que un curador), no escritura.
     const ok = perfil && (rolesOk.includes(perfil.rol) || (soloLectura && perfil.acceso_curaduria))
+    if (!ok) return { ok: false as const, error: 'Sin permisos' }
+    return { ok: true as const, userId: session.user.id, rol: perfil!.rol as string, finanzas: !!perfil!.admin_finanzas }
+}
+
+// Escritura de la ficha técnica: además del staff de escritura, las TÉCNICAS.
+// (El curador queda en solo lectura, como hasta ahora.)
+async function requireFichaWrite() {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { ok: false as const, error: 'No autorizado' }
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    const ok = perfil && [...ROLES_WRITE, 'tecnica'].includes(perfil.rol)
     if (!ok) return { ok: false as const, error: 'Sin permisos' }
     return { ok: true as const, userId: session.user.id }
 }
@@ -65,8 +82,14 @@ export async function getEventosAction() {
             for (const it of (items || []) as any[]) { const ev = ventaEvento[it.venta_id]; if (ev) vendidas[ev] = (vendidas[ev] || 0) + (it.cantidad || 0) }
         }
     }
-    const conStats = (eventos || []).map((e: any) => ({ ...e, recaudado: recaudado[e.id] || 0, vendidas: vendidas[e.id] || 0 }))
-    return { ok: true as const, eventos: conStats }
+    // El $ recaudado solo lo ve quien tiene finanzas (Nico/Santi). El resto ve la
+    // cantidad vendida, nunca los montos.
+    const conStats = (eventos || []).map((e: any) => ({
+        ...e,
+        recaudado: perm.finanzas ? (recaudado[e.id] || 0) : null,
+        vendidas: vendidas[e.id] || 0,
+    }))
+    return { ok: true as const, eventos: conStats, finanzas: perm.finanzas }
 }
 
 export async function getEventoAction(eventoId: string) {
@@ -585,6 +608,7 @@ export async function getCheckinStatsAction(eventoId: string) {
 export async function getReporteEventoAction(eventoId: string) {
     const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error }
+    if (!perm.finanzas) return { ok: false as const, error: 'Solo administración puede ver los montos.' }
     const admin = getAdminClient()
 
     const { data: evento } = await admin.from('eventos').select('nombre, fecha, lugar').eq('id', eventoId).maybeSingle()
@@ -746,7 +770,7 @@ export async function getFichaTecnicaAction(eventoId: string) {
 }
 
 export async function guardarFichaTecnicaAction(eventoId: string, ficha: Record<string, any>) {
-    const perm = await requireStaff()
+    const perm = await requireFichaWrite()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
     const payload = { ...(ficha || {}), _updated_at: new Date().toISOString(), _updated_by: perm.userId }
@@ -808,6 +832,7 @@ export async function eliminarMiembroEquipoAction(id: string) {
 export async function getBorderauxAction(eventoId: string) {
     const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error }
+    if (!perm.finanzas) return { ok: false as const, error: 'Solo administración puede ver la liquidación.' }
     const admin = getAdminClient()
 
     const { data: ev } = await admin.from('eventos')

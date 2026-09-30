@@ -89,6 +89,16 @@ function SidebarContent() {
             return ['Inicio', 'Curaduría', 'Eventos', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         }
 
+        // 🎟️ JEFE DE SALA (Wally): programa las funciones y entradas en la ticketera.
+        if (userRole === 'jefe_sala') {
+            return ['Inicio', 'Eventos', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        }
+
+        // 🔧 TÉCNICA (Ana/More/Abraham): entra a Eventos para cargar la ficha técnica.
+        if (userRole === 'tecnica') {
+            return ['Inicio', 'Eventos', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        }
+
         return item.roles.includes(userRole || 'visitante')
     })
 
