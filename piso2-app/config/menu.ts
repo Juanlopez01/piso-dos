@@ -5,7 +5,7 @@ export const menuItems = [
     // Alumno 1
     { name: 'Explorar', href: '/explorar', icon: Search, roles: ['admin', 'coordinador', 'alumno', 'visitante', 'recepcion', 'auxiliar', 'vendedor'] },
     // Alumno 2 | Profe 1
-    { name: 'Mi Perfil', href: '/perfil', icon: UserCircle, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'auxiliar', 'vendedor'] },
+    { name: 'Mi Perfil', href: '/perfil', icon: UserCircle, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'auxiliar', 'vendedor', 'audiciones'] },
     // Alumno 3 | Profe 2
     { name: 'Mis Clases', href: '/mis-clases', icon: BookOpen, roles: ['profesor', 'alumno'] },
     // Alumno 4
@@ -13,12 +13,12 @@ export const menuItems = [
     // Profe 3
     { name: 'Mis Pagos', href: '/mis-pagos', icon: Wallet, roles: ['profesor'] },
     // Profe 4
-    { name: 'Notificaciones', href: '/notificaciones', icon: Bell, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'auxiliar', 'vendedor'] },
+    { name: 'Notificaciones', href: '/notificaciones', icon: Bell, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'auxiliar', 'vendedor', 'audiciones'] },
     // Vendedor 1: su única herramienta
     { name: 'Ventas', href: '/vender', icon: Link2, roles: ['vendedor'] },
 
     // --- RESTO DEL MENÚ (Para Admin, Recepción y vistas generales) ---
-    { name: 'Inicio', href: '/', icon: Home, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'visitante', 'auxiliar', 'vendedor'] },
+    { name: 'Inicio', href: '/', icon: Home, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'alumno', 'visitante', 'auxiliar', 'vendedor', 'audiciones'] },
     { name: 'Agenda', href: '/calendario', icon: CalendarIcon, roles: ['admin', 'recepcion', 'profesor', 'coordinador', 'visitante', 'auxiliar'] },
     { name: 'Alumnos / Profes', href: '/usuarios', icon: Users, roles: ['admin', 'recepcion'] },
     { name: 'Staff / Equipo', href: '/usuarios?ver=staff', icon: Settings, roles: ['admin'] },
@@ -45,6 +45,8 @@ export const menuItems = [
     { name: 'Resumen Clases', href: '/resumen-clases', icon: ClipboardList, roles: ['admin', 'recepcion'] },
     { name: 'Eventos', href: '/eventos', icon: Ticket, roles: ['admin', 'recepcion', 'curador'] },
     { name: 'Curaduría', href: '/curaduria', icon: Theater, roles: ['admin', 'recepcion', 'curador'] },
+    { name: 'On Tour · Latin', href: '/audiciones/latin', icon: Sparkles, roles: ['admin', 'audiciones'] },
+    { name: 'On Tour · Liga', href: '/audiciones/liga', icon: GraduationCap, roles: ['admin', 'audiciones'] },
     { name: 'Sumate a Talent', href: '/talent/postular', icon: Sparkles, roles: ['alumno', 'profesor', 'coordinador'] },
     { name: 'La Liga', href: '/la-liga', icon: GraduationCap, roles: ['admin', 'profesor', 'coordinador', 'alumno', 'auxiliar'] },
     { name: 'Alquilar sala', href: '/alquilar-sala', icon: ShoppingBagIcon, roles: ['admin', 'profesor', 'coordinador', 'alumno'] },

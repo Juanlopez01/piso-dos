@@ -4,7 +4,7 @@
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
-export type UserRole = 'admin' | 'recepcion' | 'profesor' | 'alumno' | 'coordinador' | 'auxiliar' | 'visitante' | 'vendedor' | 'curador' | 'jefe_sala' | 'tecnica'
+export type UserRole = 'admin' | 'recepcion' | 'profesor' | 'alumno' | 'coordinador' | 'auxiliar' | 'visitante' | 'vendedor' | 'curador' | 'jefe_sala' | 'tecnica' | 'audiciones'
 
 export type Database = {
     public: {

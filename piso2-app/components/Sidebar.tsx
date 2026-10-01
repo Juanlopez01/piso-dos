@@ -61,7 +61,7 @@ function SidebarContent() {
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
         // Vistas base por rol
-        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Talents', 'Asistente', 'Consultas', 'Resumen Clases', 'Eventos', 'Curaduría', 'Caja', 'Liquidaciones', 'Remarketing', 'Ventas', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Talents', 'Asistente', 'Consultas', 'Resumen Clases', 'Eventos', 'Curaduría', 'On Tour · Latin', 'On Tour · Liga', 'Caja', 'Liquidaciones', 'Remarketing', 'Ventas', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         if (userRole === 'profesor') {
@@ -97,6 +97,11 @@ function SidebarContent() {
         // 🔧 TÉCNICA (Ana/More/Abraham): entra a Eventos para cargar la ficha técnica.
         if (userRole === 'tecnica') {
             return ['Inicio', 'Eventos', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        }
+
+        // 🎤 AUDICIONES (staff de gira): carga participantes de las audiciones.
+        if (userRole === 'audiciones') {
+            return ['Inicio', 'On Tour · Latin', 'On Tour · Liga', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         }
 
         return item.roles.includes(userRole || 'visitante')

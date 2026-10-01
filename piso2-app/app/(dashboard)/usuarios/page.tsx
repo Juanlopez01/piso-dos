@@ -895,6 +895,7 @@ function UsuariosContent() {
                                                             <option value="curador" disabled={!isAdmin}>Curador</option>
                                                             <option value="jefe_sala" disabled={!isAdmin}>Jefe de Sala</option>
                                                             <option value="tecnica" disabled={!isAdmin}>Técnica</option>
+                                                            <option value="audiciones" disabled={!isAdmin}>Audiciones (gira)</option>
                                                             <option value="coordinador">Coordinador</option>
                                                             <option value="vendedor">Vendedor</option>
                                                             <option value="profesor">Profe</option>
