@@ -215,17 +215,19 @@ function Detalle({ eventoId, soloLectura, verDinero, verVentas = true, onBack }:
         if (r.ok) setBorderaux(r)
     }
     const cargar = async () => {
+        // borderaux y carritos no dependen del evento → los disparamos en paralelo.
+        cargarBorderaux()
+        cargarCarritos()
         const r = await getEventoAction(eventoId)
         if (r.ok) { setEvento(r.evento as Evento); setEntradas(r.entradas as Entrada[]); setVentas(r.ventas as Venta[]) }
         else toast.error(r.error || 'Error')
-        cargarBorderaux()
-        cargarCarritos()
         setLoading(false)
     }
     const cargarEquipo = async () => {
         const r = await getEquipoAction(eventoId)
         if (r.ok) { setEquipo(r.equipo); setTotalEquipo(r.totalEquipo) }
-        cargarBorderaux()
+        // El borderaux NO se vuelve a pedir acá: en la carga inicial ya lo trae
+        // cargar(). Tras editar el equipo, el handler refresca el borderaux aparte.
     }
     useEffect(() => { cargar(); cargarEquipo(); cargarInvitados() }, [eventoId])
 
@@ -394,9 +396,14 @@ const agregarEntrada = async () => {
     const [obras, setObras] = useState<any[]>([])
     const [obrasDisp, setObrasDisp] = useState<any[]>([])
     const cargarObras = async () => {
-        const [a, b] = await Promise.all([getObrasDeEventoAction(eventoId), getObrasAceptadasDisponiblesAction(eventoId)])
+        // Las obras del programa se muestran a todos; la lista de "obras disponibles
+        // para sumar" solo hace falta si podés editar (evita una consulta de más).
+        const a = await getObrasDeEventoAction(eventoId)
         if (a.ok) setObras(a.obras)
-        if (b.ok) setObrasDisp(b.obras)
+        if (!soloLectura) {
+            const b = await getObrasAceptadasDisponiblesAction(eventoId)
+            if (b.ok) setObrasDisp(b.obras)
+        }
     }
     useEffect(() => { cargarObras() }, [eventoId])
     const agregarObra = async (propuestaId: string) => {
@@ -423,7 +430,11 @@ const agregarEntrada = async () => {
     // --- traspaso de fecha ---
     const [fechasHermanas, setFechasHermanas] = useState<any[]>([])
     const [traspasando, setTraspasando] = useState<string | null>(null)
-    useEffect(() => { (async () => { const r = await getFechasHermanasAction(eventoId); if (r.ok) setFechasHermanas(r.fechas) })() }, [eventoId, evento?.ciclo_id])
+    // Fechas hermanas (para traspasar ventas) solo aplican a eventos de un ciclo.
+    useEffect(() => {
+        if (!evento?.ciclo_id) { setFechasHermanas([]); return }
+        (async () => { const r = await getFechasHermanasAction(eventoId); if (r.ok) setFechasHermanas(r.fechas) })()
+    }, [eventoId, evento?.ciclo_id])
     const traspasar = async (ventaId: string, destino: string) => {
         if (!destino) return
         const r = await traspasarVentaAction(ventaId, destino)
@@ -447,15 +458,15 @@ const agregarEntrada = async () => {
     const agregarMiembro = async () => {
         if (!nuevoMiembro.nombre.trim()) return toast.error('Nombre de quien trabajó')
         const r = await guardarMiembroEquipoAction({ evento_id: eventoId, nombre: nuevoMiembro.nombre, rol: nuevoMiembro.rol, monto: Number(nuevoMiembro.monto) })
-        if (r.ok) { setNuevoMiembro({ nombre: '', rol: '', monto: '' }); cargarEquipo() } else toast.error(r.error || 'Error')
+        if (r.ok) { setNuevoMiembro({ nombre: '', rol: '', monto: '' }); cargarEquipo(); cargarBorderaux() } else toast.error(r.error || 'Error')
     }
     const guardarEditMiembro = async (id: string) => {
         const r = await guardarMiembroEquipoAction({ id, evento_id: eventoId, nombre: editMiembroVals.nombre, rol: editMiembroVals.rol, monto: Number(editMiembroVals.monto) })
-        if (r.ok) { setEditMiembro(null); cargarEquipo() } else toast.error(r.error || 'Error')
+        if (r.ok) { setEditMiembro(null); cargarEquipo(); cargarBorderaux() } else toast.error(r.error || 'Error')
     }
     const borrarMiembro = async (id: string) => {
         const r = await eliminarMiembroEquipoAction(id)
-        if (r.ok) cargarEquipo(); else toast.error(r.error || 'Error')
+        if (r.ok) { cargarEquipo(); cargarBorderaux() } else toast.error(r.error || 'Error')
     }
 
     // --- borderaux ---
