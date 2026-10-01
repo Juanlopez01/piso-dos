@@ -457,6 +457,18 @@ export default function AlquileresPage() {
         setIsPaymentModalOpen(true)
     }
 
+    // Cobro de TODA la reserva (desde la tarjeta del cliente).
+    const openPaymentModal = (group: ReservaGroup) => {
+        if (!isBoxOpen || !currentTurnoId) {
+            return toast.error('¡Caja Cerrada! Tenés que abrir la caja en tu sede antes de poder cobrar.')
+        }
+        setPayFullGroup(group)
+        setPayItem(null)
+        setPaymentScope('reserva')
+        abrirCobro(group)
+        setIsPaymentModalOpen(true)
+    }
+
     const cambiarScope = (scope: 'dia' | 'reserva') => {
         setPaymentScope(scope)
         if (scope === 'reserva' && payFullGroup) abrirCobro(payFullGroup)
@@ -685,20 +697,6 @@ export default function AlquileresPage() {
         return true
     })
 
-    // Vista por DÍA: aplanamos los items de los grupos filtrados y los agrupamos
-    // por fecha. Cada fila es una reserva (un día); el cobro sigue siendo por grupo.
-    const itemsPorDia: Record<string, { item: any; group: ReservaGroup }[]> = {}
-    for (const g of gruposFiltrados) {
-        for (const it of g.items) {
-            if (filtroMes) { if (!(it.fecha || '').startsWith(filtroMes)) continue }
-            else if (!verPasados && it.fecha < hoyStr) continue
-            ;(itemsPorDia[it.fecha] ||= []).push({ item: it, group: g })
-        }
-    }
-    const diasOrdenados = Object.keys(itemsPorDia).sort() // ascendente: hoy → futuro
-    for (const d of diasOrdenados) itemsPorDia[d].sort((a, b) => (a.item.hora_inicio || '').localeCompare(b.item.hora_inicio || ''))
-    const hayItems = diasOrdenados.length > 0
-
     const estadoChip = (estadoPago: string) => {
         if (estadoPago === 'pagado') return { cls: 'bg-green-500/15 text-green-400', txt: 'Pagado' }
         if (estadoPago === 'seña_pagada') return { cls: 'bg-yellow-500/15 text-yellow-400', txt: 'Parcial' }
@@ -765,10 +763,10 @@ export default function AlquileresPage() {
                 )}
             </div>
 
-            {/* LISTADO POR DÍA */}
+            {/* LISTADO POR CLIENTE (TARJETAS) */}
             {isLoading && grupos.length === 0 ? (
                 <div className="min-h-[50vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
-            ) : !hayItems ? (
+            ) : gruposFiltrados.length === 0 ? (
                 <div className="min-h-[40vh] flex flex-col items-center justify-center text-center text-gray-500 gap-2">
                     <Calendar size={32} className="opacity-40" />
                     <p className="text-sm font-medium">
@@ -776,69 +774,83 @@ export default function AlquileresPage() {
                     </p>
                 </div>
             ) : (
-                <div className="space-y-6 max-w-4xl mx-auto">
-                    {diasOrdenados.map(dia => {
-                        const filas = itemsPorDia[dia]
-                        const esHoy = dia === hoyStr
-                        const totalDia = filas.reduce((s, f) => s + Number(f.item.monto_total || 0), 0)
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-5xl mx-auto">
+                    {gruposFiltrados.map((group) => {
+                        const isOpen = expandedGroup === group.group_id
+                        const chip = estadoChip(group.estado_pago)
+                        const isFullyPaid = group.estado_pago === 'pagado'
+                        const saldo = group.total_grupo - group.total_pagado
+                        const items = [...group.items].sort((a, b) => (a.fecha + a.hora_inicio).localeCompare(b.fecha + b.hora_inicio))
+                        const primera = items[0], ultima = items[items.length - 1]
+                        const rango = primera.fecha === ultima.fecha
+                            ? format(new Date(primera.fecha + 'T12:00:00'), "d MMM", { locale: es })
+                            : `${format(new Date(primera.fecha + 'T12:00:00'), "d MMM", { locale: es })} → ${format(new Date(ultima.fecha + 'T12:00:00'), "d MMM", { locale: es })}`
                         return (
-                            <div key={dia}>
-                                {/* Cabecera del día */}
-                                <div className="flex items-center gap-3 mb-2 px-1 sticky top-0 z-10 bg-[#050505] py-1">
-                                    <Calendar size={15} className={esHoy ? 'text-[#D4E655]' : 'text-gray-500'} />
-                                    <h3 className={`text-sm font-black uppercase tracking-wide ${esHoy ? 'text-[#D4E655]' : 'text-white'}`}>
-                                        {format(new Date(dia + 'T12:00:00'), "EEEE d 'de' MMMM", { locale: es })}{esHoy && ' · Hoy'}
-                                    </h3>
-                                    <span className="text-[10px] text-gray-500">{filas.length} reserva{filas.length !== 1 ? 's' : ''}</span>
-                                    <span className="ml-auto text-[11px] font-bold text-gray-400">${totalDia.toLocaleString()}</span>
+                            <div key={group.group_id} className="bg-[#09090b] border border-white/10 rounded-2xl overflow-hidden flex flex-col hover:border-[#D4E655]/30 transition-colors">
+                                {/* Cabecera del cliente */}
+                                <div className="p-4 border-b border-white/5 bg-[#111]/40 relative">
+                                    <span className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl text-[8px] font-black uppercase tracking-widest ${chip.cls}`}>{chip.txt}</span>
+                                    <div className="flex items-center gap-2 mb-1 text-[#D4E655] text-[10px] font-black uppercase tracking-wider"><MapPin size={12} /> {group.sala_nombre} · {group.tipo_uso}</div>
+                                    <h3 className="text-lg font-bold text-white truncate pr-16">{group.cliente_nombre}</h3>
+                                    <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                        {group.cliente_contacto && <a href={`https://wa.me/${group.cliente_contacto.replace(/[^0-9]/g, '')}`} target="_blank" className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-green-400 transition-colors"><MessageCircle size={12} /> {group.cliente_contacto}</a>}
+                                        <span className="text-[10px] text-gray-500 flex items-center gap-1"><Calendar size={11} /> {items.length} día{items.length !== 1 ? 's' : ''} · {rango}</span>
+                                    </div>
                                 </div>
 
-                                {/* Filas del día */}
-                                <div className="space-y-2">
-                                    {filas.map(({ item, group }) => {
-                                        const isFullyPaid = group.estado_pago === 'pagado'
-                                        const chip = estadoChip(group.estado_pago)
-                                        const saldoDia = Number(item.monto_total || 0) - Number(item.monto_pagado || 0)
-                                        return (
-                                            <div key={item.id} className="bg-[#09090b] border border-white/10 rounded-xl p-3 hover:border-[#D4E655]/30 transition-colors">
-                                                <div className="flex items-start justify-between gap-3">
-                                                    {/* Info */}
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="flex items-center gap-2 flex-wrap">
-                                                            <span className="flex items-center gap-1.5 font-mono text-sm text-white"><Clock size={13} className="text-gray-500" /> {item.hora_inicio}–{item.hora_fin}</span>
-                                                            <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-[#D4E655]"><MapPin size={11} /> {group.sala_nombre}</span>
-                                                            <span className="text-[10px] text-gray-500 uppercase">· {group.tipo_uso}</span>
+                                <div className="p-4 flex-1">
+                                    {/* Totales */}
+                                    <div className="grid grid-cols-3 gap-2 text-center mb-3">
+                                        <div><span className="block text-[9px] text-gray-500 uppercase font-bold">Total</span><span className="text-sm font-black text-white">${group.total_grupo.toLocaleString()}</span></div>
+                                        <div><span className="block text-[9px] text-gray-500 uppercase font-bold">Abonado</span><span className={`text-sm font-black ${group.total_pagado > 0 ? 'text-green-400' : 'text-gray-500'}`}>${group.total_pagado.toLocaleString()}</span></div>
+                                        <div><span className="block text-[9px] text-gray-500 uppercase font-bold">Saldo</span><span className={`text-sm font-black ${saldo > 0 ? 'text-red-400' : 'text-gray-500'}`}>${saldo.toLocaleString()}</span></div>
+                                    </div>
+
+                                    {group.notas_recepcion && (
+                                        <div className="mb-3 bg-yellow-500/10 border border-yellow-500/20 p-2 rounded-lg flex items-start gap-2">
+                                            <ShieldAlert size={12} className="text-yellow-500 shrink-0 mt-0.5" />
+                                            <p className="text-[10px] text-yellow-200/80 leading-tight italic">{group.notas_recepcion}</p>
+                                        </div>
+                                    )}
+
+                                    {/* Detalle por día (editar + cobrar por día) */}
+                                    {isOpen && (
+                                        <div className="space-y-1.5 mb-1">
+                                            {items.map(item => {
+                                                const saldoDia = Number(item.monto_total || 0) - Number(item.monto_pagado || 0)
+                                                return (
+                                                    <div key={item.id} className="bg-[#0e0e10] border border-white/5 rounded-lg p-2.5 flex items-center gap-2 flex-wrap">
+                                                        <span className="text-[11px] font-semibold text-gray-200 capitalize w-20 shrink-0">{format(new Date(item.fecha + 'T12:00:00'), "EEE d/MM", { locale: es })}</span>
+                                                        <span className="text-[11px] font-mono text-gray-400">{item.hora_inicio}–{item.hora_fin}</span>
+                                                        <span className="text-[11px] font-bold text-white ml-auto">${Number(item.monto_total).toLocaleString()}</span>
+                                                        {saldoDia <= 0
+                                                            ? <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 uppercase font-black">Pago</span>
+                                                            : Number(item.monto_pagado || 0) > 0 && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-yellow-500/15 text-yellow-400 uppercase font-black">Parcial</span>}
+                                                        <div className="flex items-center gap-0.5 shrink-0">
+                                                            <button onClick={() => abrirModalEditar(item)} title="Editar día, hora y precio" className="p-1.5 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-md transition-colors"><Pencil size={14} /></button>
+                                                            {saldoDia > 0 && <button onClick={() => openCobroDia(item, group)} title="Cobrar este día" className="p-1.5 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-md transition-colors"><DollarSign size={14} /></button>}
+                                                            <button onClick={() => handleDeleteItem(item, group)} title="Eliminar este día" className="p-1.5 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-md transition-colors"><Trash2 size={14} /></button>
                                                         </div>
-                                                        <p className="text-sm font-bold text-white truncate mt-1">{group.cliente_nombre}</p>
-                                                        <div className="flex items-center gap-2 flex-wrap">
-                                                            {group.cliente_contacto && <a href={`https://wa.me/${group.cliente_contacto.replace(/[^0-9]/g, '')}`} target="_blank" className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-green-400 transition-colors"><MessageCircle size={11} /> {group.cliente_contacto}</a>}
-                                                            {group.items.length > 1 && <span className="text-[9px] text-gray-600 uppercase flex items-center gap-0.5"><Layers size={9} /> {group.items.length} días</span>}
-                                                        </div>
-                                                        {group.notas_recepcion && (
-                                                            <p className="text-[10px] text-yellow-200/70 italic flex items-start gap-1 mt-0.5"><ShieldAlert size={10} className="text-yellow-500 shrink-0 mt-0.5" /> {group.notas_recepcion}</p>
-                                                        )}
                                                     </div>
-                                                    {/* Monto + estado */}
-                                                    <div className="text-right shrink-0">
-                                                        <div className="text-sm font-black text-white">${Number(item.monto_total).toLocaleString()}</div>
-                                                        <span className={`text-[8px] px-2 py-0.5 rounded-full uppercase font-black ${chip.cls}`}>{chip.txt}</span>
-                                                        {Number(item.monto_pagado || 0) > 0 && saldoDia > 0 && (
-                                                            <div className="text-[9px] text-red-400 mt-0.5">Saldo ${saldoDia.toLocaleString()}</div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                {/* Acciones */}
-                                                <div className="flex items-center justify-end gap-1 mt-2 pt-2 border-t border-white/5">
-                                                    <button onClick={() => abrirModalEditar(item)} title="Editar día, hora y precio" className="p-2 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-lg transition-colors"><Pencil size={16} /></button>
-                                                    {saldoDia > 0 && (
-                                                        <button onClick={() => openCobroDia(item, group)} title="Cobrar" className="p-2 text-gray-500 hover:text-[#D4E655] hover:bg-white/10 rounded-lg transition-colors"><DollarSign size={16} /></button>
-                                                    )}
-                                                    <button onClick={() => handleRenovar(group)} title="Renovar (nuevas fechas)" className="p-2 text-gray-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors"><Repeat size={16} /></button>
-                                                    <button onClick={() => handleDeleteItem(item, group)} title="Eliminar este día" className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={16} /></button>
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+
+                                    <button onClick={() => setExpandedGroup(isOpen ? null : group.group_id)} className="w-full mt-2 py-1.5 flex items-center justify-center gap-1 text-[9px] font-bold text-gray-500 uppercase hover:text-white transition-colors">
+                                        {isOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />} {isOpen ? 'Ocultar detalle' : 'Ver detalle por día'}
+                                    </button>
+                                </div>
+
+                                {/* Acciones del cliente */}
+                                <div className="p-3 bg-[#111] flex gap-2 border-t border-white/5">
+                                    <button onClick={() => handleRenovar(group)} title="Renovar (nuevas fechas)" className="p-2 text-gray-500 hover:text-white bg-white/5 rounded-lg transition-colors"><Repeat size={16} /></button>
+                                    {!isFullyPaid ? (
+                                        <button onClick={() => openPaymentModal(group)} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase rounded-lg hover:bg-white transition-colors flex items-center justify-center gap-2"><DollarSign size={14} /> Cobrar</button>
+                                    ) : (
+                                        <div className="flex-1 flex items-center justify-center gap-2 text-[10px] font-black uppercase text-green-500 opacity-60 cursor-default border border-green-500/20 rounded-lg"><CheckCircle size={14} /> Cobrado</div>
+                                    )}
+                                    <button onClick={() => handleDeleteGroup(group)} title="Eliminar reserva completa" className="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={16} /></button>
                                 </div>
                             </div>
                         )
@@ -949,8 +961,8 @@ export default function AlquileresPage() {
                             <button onClick={() => setIsPaymentModalOpen(false)}><X className="text-gray-500 hover:text-white" /></button>
                         </div>
 
-                        {/* Alcance: este día o toda la reserva (solo si hay más de un día) */}
-                        {payFullGroup && payFullGroup.items.length > 1 && (
+                        {/* Alcance: este día o toda la reserva (solo si entraste por un día) */}
+                        {payFullGroup && payItem && payFullGroup.items.length > 1 && (
                             <div className="flex bg-[#111] rounded-xl border border-white/10 p-1 mb-4">
                                 <button onClick={() => cambiarScope('dia')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${paymentScope === 'dia' ? 'bg-[#D4E655] text-black' : 'text-gray-400'}`}>
                                     Este día{payItem ? ` (${format(new Date(payItem.fecha + 'T12:00:00'), 'dd/MM')})` : ''}
