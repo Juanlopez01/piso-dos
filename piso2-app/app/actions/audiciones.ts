@@ -1,11 +1,10 @@
 'use server'
 
 // ============================================================================
-// Audiciones de gira (Latin casting + La Liga becas/formación).
-// Cada audición = ciudad + fecha. Los participantes se cargan de dos formas:
-//  - por un LINK PÚBLICO (se inscriben solos desde el celu), o
-//  - a mano por el staff que viaja (rol 'audiciones' / admin), que les asigna
-//    el número y marca presente.
+// Piso 2 On Tour — audiciones de gira (una sola cosa). Cada audición = ciudad +
+// fecha. Los participantes se cargan por un LINK PÚBLICO (se inscriben solos) o
+// a mano por el staff de gira. Al seleccionar a alguien se define su DESTINO:
+// La Liga (formación del año próximo, con beca / media beca) o Talents (Latin).
 // ============================================================================
 
 import { createClient } from '@/utils/supabase/server-helper'
@@ -46,12 +45,12 @@ async function siguienteNumero(admin: any, audicionId: string): Promise<number> 
 }
 
 // ---- Admin / staff ----
-export async function getAudicionesAction(tipo: Tipo) {
+export async function getAudicionesAction() {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error, audiciones: [] as any[] }
     const admin = getAdminClient()
     const { data } = await admin.from('audiciones').select('*')
-        .eq('tipo', tipo).order('fecha', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false })
+        .order('fecha', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false })
     const ids = (data || []).map((a: any) => a.id)
     const counts: Record<string, number> = {}
     if (ids.length) {
@@ -62,13 +61,14 @@ export async function getAudicionesAction(tipo: Tipo) {
     return { ok: true as const, audiciones }
 }
 
-export async function crearAudicionAction(data: { tipo: Tipo; ciudad: string; lugar?: string; fecha?: string | null }) {
+export async function crearAudicionAction(data: { ciudad: string; lugar?: string; fecha?: string | null }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     if (!data.ciudad?.trim()) return { ok: false as const, error: 'Poné la ciudad.' }
     const admin = getAdminClient()
     const { data: a, error } = await admin.from('audiciones').insert({
-        tipo: data.tipo, ciudad: data.ciudad.trim(), lugar: data.lugar?.trim() || null,
+        tipo: 'latin', // columna vestigial (On Tour es una sola cosa)
+        ciudad: data.ciudad.trim(), lugar: data.lugar?.trim() || null,
         fecha: data.fecha || null, token: nuevoToken(), created_by: perm.userId,
     }).select('id').single()
     if (error) return { ok: false as const, error: error.message }

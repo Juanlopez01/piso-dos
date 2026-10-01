@@ -1,8 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'next/navigation'
-import { Loader2, Plus, MapPin, CalendarDays, Users, X, Copy, Trash2, Power, Search, ArrowLeft, Download, Pencil, Check, Instagram, MessageCircle } from 'lucide-react'
+import { Loader2, Plus, MapPin, CalendarDays, Users, Copy, Trash2, Power, Search, ArrowLeft, Download, Pencil, Check, Instagram, MessageCircle } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
     getAudicionesAction, crearAudicionAction, getAudicionAction, agregarParticipanteAction,
@@ -10,22 +9,21 @@ import {
     type Participante,
 } from '@/app/actions/audiciones'
 
+// Destino del participante: pendiente, o seleccionado para La Liga (con/ sin beca)
+// o para Talents (Latin), o descartado.
 const RESULTADOS: { v: string; label: string; cls: string }[] = [
     { v: 'pendiente', label: 'Pendiente', cls: 'bg-white/10 text-gray-300' },
-    { v: 'seleccionado', label: 'Seleccionado', cls: 'bg-[#D4E655]/20 text-[#D4E655]' },
-    { v: 'beca', label: 'Beca', cls: 'bg-emerald-500/20 text-emerald-400' },
-    { v: 'media_beca', label: 'Media beca', cls: 'bg-blue-500/20 text-blue-300' },
+    { v: 'la_liga', label: 'La Liga', cls: 'bg-[#D4E655]/20 text-[#D4E655]' },
+    { v: 'beca_liga', label: 'Beca Liga', cls: 'bg-emerald-500/20 text-emerald-400' },
+    { v: 'media_beca_liga', label: 'Media beca', cls: 'bg-blue-500/20 text-blue-300' },
+    { v: 'talents', label: 'Talents', cls: 'bg-purple-500/20 text-purple-300' },
     { v: 'no', label: 'No', cls: 'bg-rose-500/15 text-rose-400' },
 ]
 const resultadoInfo = (v: string) => RESULTADOS.find(r => r.v === v) || RESULTADOS[0]
 const fmtFecha = (iso: string | null) => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : 'Sin fecha'
 const edadDe = (nac: string | null) => { if (!nac) return ''; const d = new Date(nac + 'T12:00:00'); const h = new Date(); let e = h.getFullYear() - d.getFullYear(); if (h.getMonth() < d.getMonth() || (h.getMonth() === d.getMonth() && h.getDate() < d.getDate())) e--; return e >= 0 && e < 120 ? `${e}` : '' }
 
-export default function AudicionesPage() {
-    const params = useParams()
-    const tipo = (params.tipo === 'liga' ? 'liga' : 'latin') as 'latin' | 'liga'
-    const titulo = tipo === 'latin' ? 'Latin' : 'La Liga'
-
+export default function OnTourPage() {
     const [audiciones, setAudiciones] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [sel, setSel] = useState<string | null>(null)
@@ -34,16 +32,16 @@ export default function AudicionesPage() {
 
     const cargar = async () => {
         setLoading(true)
-        const r = await getAudicionesAction(tipo)
+        const r = await getAudicionesAction()
         if (r.ok) setAudiciones(r.audiciones); else toast.error((r as any).error || 'Error')
         setLoading(false)
     }
-    useEffect(() => { setSel(null); cargar() }, [tipo])
+    useEffect(() => { cargar() }, [])
 
     const crear = async () => {
         if (!nueva.ciudad.trim()) return toast.error('Poné la ciudad')
         setCreando(true)
-        const r = await crearAudicionAction({ tipo, ciudad: nueva.ciudad, lugar: nueva.lugar, fecha: nueva.fecha || null })
+        const r = await crearAudicionAction({ ciudad: nueva.ciudad, lugar: nueva.lugar, fecha: nueva.fecha || null })
         if (r.ok) { toast.success('Audición creada'); setNueva({ ciudad: '', lugar: '', fecha: '' }); cargar() } else toast.error((r as any).error || 'Error')
         setCreando(false)
     }
@@ -57,7 +55,7 @@ export default function AudicionesPage() {
                 <>
                     <div className="mb-6">
                         <h1 className="text-3xl font-black uppercase tracking-tighter flex items-center gap-2">Piso 2 On Tour</h1>
-                        <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">{titulo} · Audiciones de gira</p>
+                        <p className="text-[#D4E655] font-bold text-xs uppercase tracking-widest mt-1">Audiciones de gira</p>
                     </div>
 
                     {/* Nueva audición */}
@@ -76,7 +74,7 @@ export default function AudicionesPage() {
                     ) : audiciones.length === 0 ? (
                         <div className="min-h-[30vh] flex flex-col items-center justify-center text-center text-gray-500 gap-2">
                             <CalendarDays size={32} className="opacity-40" />
-                            <p className="text-sm">Todavía no hay audiciones de {titulo}. Creá la primera arriba.</p>
+                            <p className="text-sm">Todavía no hay audiciones. Creá la primera arriba.</p>
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-w-5xl">

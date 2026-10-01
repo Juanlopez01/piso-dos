@@ -18,7 +18,7 @@ export default async function AudicionPublicaPage({ params, searchParams }: { pa
     if (!r.ok) return <Marco><p className="text-center text-neutral-500 text-sm py-16">Este link no es válido. Pedile a recepción el link correcto.</p></Marco>
 
     const a = r.audicion
-    const titulo = a.tipo === 'latin' ? 'Casting Latin' : 'Audición La Liga'
+    const titulo = 'Piso 2 On Tour'
 
     if (a.estado !== 'abierta') return (
         <Marco>
