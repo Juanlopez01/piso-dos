@@ -12,7 +12,7 @@ import {
     getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction, setRepartoPctObraAction, setFlyerObraAction,
 } from '@/app/actions/convocatoria'
 import {
-    getEventosAction, getEventoAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
+    getEventosAction, getEventoAction, getEventoDetalleAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
     eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction, reembolsarVentaAction, cancelarEventoAction,
     getEquipoAction, guardarMiembroEquipoAction, eliminarMiembroEquipoAction,
     getBorderauxAction, setRepartoPctAction, toggleIncluirEquipoAction, guardarGastoAction, eliminarGastoAction,
@@ -214,22 +214,33 @@ function Detalle({ eventoId, soloLectura, verDinero, verVentas = true, onBack }:
         const r = await getBorderauxAction(eventoId)
         if (r.ok) setBorderaux(r)
     }
-    const cargar = async () => {
-        // borderaux y carritos no dependen del evento → los disparamos en paralelo.
+    // Carga inicial: TODO en una sola consulta (evento, entradas, ventas, equipo,
+    // invitados, obras, disponibles, carritos, fechas). El borderaux (liquidación)
+    // se pide aparte y solo lo ve administración.
+    const cargarTodo = async () => {
+        const r = await getEventoDetalleAction(eventoId)
+        if (r.ok) {
+            setEvento(r.evento as Evento); setEntradas(r.entradas as Entrada[]); setVentas(r.ventas as Venta[])
+            setEquipo(r.equipo); setTotalEquipo(r.totalEquipo)
+            setInvitados(r.invitados)
+            setObras(r.obras); setObrasDisp(r.obrasDisp)
+            setCarritos(r.carritos)
+            setFechasHermanas(r.fechasHermanas)
+        } else toast.error((r as any).error || 'Error')
         cargarBorderaux()
-        cargarCarritos()
+        setLoading(false)
+    }
+    // Refrescos puntuales tras editar (vuelven a traer solo su parte).
+    const cargar = async () => {
         const r = await getEventoAction(eventoId)
         if (r.ok) { setEvento(r.evento as Evento); setEntradas(r.entradas as Entrada[]); setVentas(r.ventas as Venta[]) }
         else toast.error(r.error || 'Error')
-        setLoading(false)
     }
     const cargarEquipo = async () => {
         const r = await getEquipoAction(eventoId)
         if (r.ok) { setEquipo(r.equipo); setTotalEquipo(r.totalEquipo) }
-        // El borderaux NO se vuelve a pedir acá: en la carga inicial ya lo trae
-        // cargar(). Tras editar el equipo, el handler refresca el borderaux aparte.
     }
-    useEffect(() => { cargar(); cargarEquipo(); cargarInvitados() }, [eventoId])
+    useEffect(() => { cargarTodo() }, [eventoId])
 
     // --- entradas (alta/edición inline) ---
     const [nuevaEnt, setNuevaEnt] = useState({ nombre: '', precio: '', cupo: '', oculta: false, codigo_promo: '', obra_id: '' })
@@ -405,7 +416,6 @@ const agregarEntrada = async () => {
             if (b.ok) setObrasDisp(b.obras)
         }
     }
-    useEffect(() => { cargarObras() }, [eventoId])
     const agregarObra = async (propuestaId: string) => {
         const r = await vincularObraAEventoAction(propuestaId, eventoId)
         if (r.ok) cargarObras(); else toast.error((r as any).error || 'Error')
@@ -430,11 +440,8 @@ const agregarEntrada = async () => {
     // --- traspaso de fecha ---
     const [fechasHermanas, setFechasHermanas] = useState<any[]>([])
     const [traspasando, setTraspasando] = useState<string | null>(null)
-    // Fechas hermanas (para traspasar ventas) solo aplican a eventos de un ciclo.
-    useEffect(() => {
-        if (!evento?.ciclo_id) { setFechasHermanas([]); return }
-        (async () => { const r = await getFechasHermanasAction(eventoId); if (r.ok) setFechasHermanas(r.fechas) })()
-    }, [eventoId, evento?.ciclo_id])
+    // Las fechas hermanas (para traspasar ventas) ya vienen en la carga inicial
+    // (getEventoDetalleAction). Si se asigna un ciclo después, se refrescan al recargar.
     const traspasar = async (ventaId: string, destino: string) => {
         if (!destino) return
         const r = await traspasarVentaAction(ventaId, destino)

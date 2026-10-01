@@ -135,6 +135,90 @@ export async function getEventoAction(eventoId: string) {
     return { ok: true as const, evento, entradas: entradasConDisp, ventas: ventasConItems, finanzas: perm.finanzas }
 }
 
+// Carga TODO el detalle de un evento en UNA sola llamada (una autenticación +
+// consultas en paralelo): evento, entradas, ventas, equipo, invitados, obras del
+// programa, obras disponibles para sumar, carritos y fechas hermanas. La
+// liquidación (borderaux) se pide aparte porque solo la ve administración.
+export async function getEventoDetalleAction(eventoId: string) {
+    const perm = await requireStaff(true)
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const finanzas = perm.finanzas
+    const canWrite = ROLES_WRITE.includes(perm.rol)
+
+    const [
+        { data: evento },
+        { data: entradas },
+        vendidas,
+        { data: ventas },
+        { data: equipoData },
+        { data: invitadosData },
+        { data: obrasData },
+        { data: obrasAll },
+        { data: ventasPend },
+    ] = await Promise.all([
+        admin.from('eventos').select('*').eq('id', eventoId).single(),
+        admin.from('evento_entradas').select('*').eq('evento_id', eventoId).order('orden'),
+        vendidasPorEntrada(admin, eventoId),
+        admin.from('evento_ventas').select('id, comprador_nombre, comprador_contacto, medio_pago, total, estado, canal, reembolsada, created_at').eq('evento_id', eventoId).order('created_at', { ascending: false }),
+        admin.from('evento_equipo').select('id, nombre, rol, monto, notas, created_at').eq('evento_id', eventoId).order('created_at'),
+        admin.from('evento_invitados').select('id, nombre, contacto, cantidad, notas, presente, created_at').eq('evento_id', eventoId).order('created_at'),
+        admin.from('obra_propuestas').select('id, titulo, director, compania, duracion_min, descripcion, imagenes, flyer_url').eq('evento_id', eventoId).eq('estado', 'aceptada').order('created_at'),
+        canWrite ? admin.from('obra_propuestas').select('id, titulo, compania, evento_id').eq('estado', 'aceptada').order('created_at', { ascending: false }) : Promise.resolve({ data: [] as any[] }),
+        admin.from('evento_ventas').select('id, comprador_nombre, comprador_contacto, total, created_at').eq('evento_id', eventoId).eq('estado', 'pendiente').order('created_at', { ascending: false }),
+    ])
+    if (!evento) return { ok: false as const, error: 'Evento no encontrado' }
+
+    if (evento.ciclo_id) {
+        const { data: ciclo } = await admin.from('evento_ciclos').select('nombre, slug').eq('id', evento.ciclo_id).maybeSingle()
+        ;(evento as any).ciclo = ciclo || null
+    }
+
+    const entradasConDisp = (entradas || []).map((e: any) => ({
+        ...e, vendidas: vendidas[e.id] || 0, disponible: Math.max(0, (e.cupo || 0) - (vendidas[e.id] || 0)),
+    }))
+
+    const nombreEntrada: Record<string, string> = {}
+    for (const e of (entradas || []) as any[]) nombreEntrada[e.id] = e.nombre
+    const allVentaIds = [...(ventas || []).map((v: any) => v.id), ...(ventasPend || []).map((v: any) => v.id)]
+    const itemsByVenta: Record<string, any[]> = {}
+    if (allVentaIds.length) {
+        const { data: items } = await admin.from('evento_venta_items').select('venta_id, entrada_id, cantidad, precio_unit').in('venta_id', allVentaIds)
+        for (const it of (items || []) as any[]) (itemsByVenta[it.venta_id] ||= []).push({ ...it, nombre: nombreEntrada[it.entrada_id] || 'Entrada' })
+    }
+
+    // Los montos solo a quien tiene finanzas.
+    const ventasConItems = (ventas || []).map((v: any) => ({
+        ...v, total: finanzas ? v.total : null,
+        items: (itemsByVenta[v.id] || []).map((it: any) => ({ ...it, precio_unit: finanzas ? it.precio_unit : null })),
+    }))
+
+    const equipo = (equipoData || []) as any[]
+    const totalEquipo = equipo.reduce((a, m) => a + Number(m.monto || 0), 0)
+    const invitados = (invitadosData || []) as any[]
+    const totalInvitados = invitados.reduce((a, i) => a + Number(i.cantidad || 1), 0)
+    const presentes = invitados.filter(i => i.presente).reduce((a, i) => a + Number(i.cantidad || 1), 0)
+    const obras = (obrasData || []) as any[]
+    const obrasDisp = (obrasAll || []).filter((o: any) => o.evento_id !== eventoId)
+    const carritos = (ventasPend || []).map((v: any) => ({
+        id: v.id, nombre: v.comprador_nombre || 'Sin nombre', contacto: v.comprador_contacto || '',
+        detalle: (itemsByVenta[v.id] || []).map((it: any) => `${it.cantidad}× ${it.nombre}`).join(' · '),
+        total: finanzas ? Number(v.total || 0) : null, created_at: v.created_at,
+    }))
+
+    let fechasHermanas: any[] = []
+    if (evento.ciclo_id) {
+        const { data } = await admin.from('eventos').select('id, fecha, lugar').eq('ciclo_id', evento.ciclo_id).neq('id', eventoId).eq('cancelado', false).order('fecha')
+        fechasHermanas = data || []
+    }
+
+    return {
+        ok: true as const, evento, entradas: entradasConDisp, ventas: ventasConItems,
+        equipo, totalEquipo, invitados, totalInvitados, presentes,
+        obras, obrasDisp, carritos, fechasHermanas, finanzas,
+    }
+}
+
 // ---- Eventos ----------------------------------------------------------------
 
 export async function crearEventoAction(data: { nombre: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string }) {

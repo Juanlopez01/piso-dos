@@ -189,7 +189,7 @@ export default function CuraduriaPage() {
     const aceptar = async (p: Propuesta) => {
         setProcesando(p.id)
         const r = await curarPropuestaAction(p.id, 'aceptada')
-        if (r.ok) { toast.success('Aceptada. Se creó la función en Eventos.'); cargar(); cargarFunciones() } else toast.error(r.error || 'Error')
+        if (r.ok) { toast.success('Aceptada. Ya podés sumarla a una función desde Eventos.'); cargar(); cargarFunciones() } else toast.error(r.error || 'Error')
         setProcesando(null)
     }
     const rechazar = async (p: Propuesta) => {

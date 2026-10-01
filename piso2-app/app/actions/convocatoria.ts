@@ -219,22 +219,14 @@ export async function curarPropuestaAction(id: string, decision: 'aceptada' | 'r
     const { data: p } = await admin.from('obra_propuestas').select('*').eq('id', id).maybeSingle()
     if (!p) return { ok: false as const, error: 'Propuesta no encontrada.' }
 
+    // Al ACEPTAR la obra NO se crea un evento: queda "aceptada" y disponible para
+    // sumarla a una función cuando se cree el evento (desde Eventos o acá, agrupando
+    // seleccionados por fecha). Así no se generan funciones automáticas.
     const patch: any = { estado: decision, nota_curaduria: nota?.trim() || null, curada_at: new Date().toISOString(), curada_por: perm.userId }
-
-    // Al ACEPTAR se abre la "función": creamos el evento (borrador) con los datos ya cargados.
-    if (decision === 'aceptada' && !p.evento_id) {
-        const desc = [p.descripcion, p.director ? `Dirección: ${p.director}` : '', p.compania ? `Compañía: ${p.compania}` : '', p.duracion_min ? `Duración: ${p.duracion_min} min` : '']
-            .filter(Boolean).join('\n')
-        const { data: ev } = await admin.from('eventos').insert({
-            nombre: p.titulo, descripcion: desc || null, estado: 'borrador', created_by: perm.userId,
-            flyer_url: (p.imagenes || [])[0] || null, // primera foto de la obra = flyer del evento
-        }).select('id').single()
-        if (ev?.id) patch.evento_id = ev.id
-    }
 
     const { error } = await admin.from('obra_propuestas').update(patch).eq('id', id)
     if (error) return { ok: false as const, error: error.message }
-    return { ok: true as const, eventoId: patch.evento_id || p.evento_id || null }
+    return { ok: true as const, eventoId: p.evento_id || null }
 }
 
 // ---- Varias obras en un evento ----
