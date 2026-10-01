@@ -221,7 +221,7 @@ export async function getEventoDetalleAction(eventoId: string) {
 
 // ---- Eventos ----------------------------------------------------------------
 
-export async function crearEventoAction(data: { nombre: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string }) {
+export async function crearEventoAction(data: { nombre: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string; obra_ids?: string[] }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     if (!data.nombre?.trim()) return { ok: false as const, error: 'Poné un nombre al evento.' }
@@ -235,6 +235,12 @@ export async function crearEventoAction(data: { nombre: string; descripcion?: st
         created_by: perm.userId,
     }).select('id').single()
     if (error) return { ok: false as const, error: error.message }
+
+    // Obras elegidas al crear → se vinculan a esta función (solo aceptadas).
+    const obraIds = (data.obra_ids || []).filter(Boolean)
+    if (obraIds.length) {
+        await admin.from('obra_propuestas').update({ evento_id: ev.id }).in('id', obraIds).eq('estado', 'aceptada')
+    }
     return { ok: true as const, id: ev.id }
 }
 

@@ -157,11 +157,21 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
     const [descripcion, setDescripcion] = useState('')
     const [flyer, setFlyer] = useState('')
     const [saving, setSaving] = useState(false)
+    // Obras aceptadas y libres (sin función) para sumar a esta función.
+    const [obrasLibres, setObrasLibres] = useState<any[]>([])
+    const [sel, setSel] = useState<Set<string>>(new Set())
+    useEffect(() => {
+        (async () => {
+            const r = await getObrasAceptadasDisponiblesAction('')
+            if (r.ok) setObrasLibres(r.obras.filter((o: any) => !o.evento_id))
+        })()
+    }, [])
+    const toggleObra = (id: string) => setSel(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
     const crear = async () => {
         if (!nombre.trim()) return toast.error('Poné un nombre')
         setSaving(true)
-        const r = await crearEventoAction({ nombre, fecha: fecha || null, lugar, descripcion, flyer_url: flyer })
+        const r = await crearEventoAction({ nombre, fecha: fecha || null, lugar, descripcion, flyer_url: flyer, obra_ids: [...sel] })
         if (r.ok) { toast.success('Evento creado'); onCreated(r.id) }
         else { toast.error(r.error || 'Error'); setSaving(false) }
     }
@@ -179,6 +189,27 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
                     <Campo label="Lugar"><input value={lugar} onChange={e => setLugar(e.target.value)} placeholder="Teatro / Sede Obelisco…" className="inp w-full" /></Campo>
                     <Campo label="Descripción (opcional)"><textarea value={descripcion} onChange={e => setDescripcion(e.target.value)} rows={2} className="inp w-full resize-none" /></Campo>
                     <Campo label="Flyer"><FlyerUploader value={flyer} onChange={setFlyer} /></Campo>
+
+                    {/* Obras de esta función */}
+                    <Campo label={`Obras de la función${sel.size ? ` (${sel.size})` : ''}`}>
+                        {obrasLibres.length === 0 ? (
+                            <p className="text-[11px] text-gray-500">No hay obras aceptadas libres. Aceptá obras en Curaduría y aparecen acá.</p>
+                        ) : (
+                            <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto custom-scrollbar">
+                                {obrasLibres.map(o => {
+                                    const on = sel.has(o.id)
+                                    return (
+                                        <button key={o.id} type="button" onClick={() => toggleObra(o.id)}
+                                            className={`text-[11px] px-2.5 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 ${on ? 'bg-[#D4E655] text-black border-[#D4E655] font-bold' : 'bg-[#111] border-white/10 text-gray-300 hover:border-white/30'}`}>
+                                            {on && <Check size={12} />} {o.titulo}{o.compania ? ` · ${o.compania}` : ''}
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        )}
+                        <p className="text-[10px] text-gray-600 mt-1.5">Elegí una o varias. Después podés sumar o quitar desde el evento.</p>
+                    </Campo>
+
                     <button onClick={crear} disabled={saving} className="w-full bg-[#D4E655] text-black font-bold py-3 rounded-xl uppercase text-xs tracking-wide hover:bg-white disabled:opacity-50 flex items-center justify-center gap-2">
                         {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Crear evento
                     </button>
