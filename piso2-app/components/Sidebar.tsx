@@ -55,13 +55,13 @@ function SidebarContent() {
         if (item.name === 'Grupos' && !hasCompaniaAccess) return false;
         // Libro de administración: SOLO usuarios con el flag (Nico/Santi), no por rol.
         if (item.name === 'Administración') return hasAdminFinanzas;
-        // Permiso aditivo de curaduría: da Curaduría + Eventos a cualquier rol (ej. un profe).
-        if ((item.name === 'Curaduría' || item.name === 'Eventos') && hasAccesoCuraduria) return true;
+        // Permiso aditivo de curaduría: da Curaduría + Eventos + Cartelera a cualquier rol (ej. un profe como Chifle).
+        if ((item.name === 'Curaduría' || item.name === 'Eventos' || item.name === 'Cartelera') && hasAccesoCuraduria) return true;
 
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
         // Vistas base por rol
-        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Talents', 'Asistente', 'Consultas', 'Resumen Clases', 'Eventos', 'Curaduría', 'Piso 2 On Tour', 'Caja', 'Liquidaciones', 'Remarketing', 'Ventas', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Talents', 'Asistente', 'Consultas', 'Resumen Clases', 'Eventos', 'Cartelera', 'Curaduría', 'Piso 2 On Tour', 'Caja', 'Liquidaciones', 'Remarketing', 'Ventas', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         if (userRole === 'profesor') {
@@ -69,8 +69,8 @@ function SidebarContent() {
         }
 
         if (userRole === 'recepcion') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Eventos', 'Curaduría'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Eventos', 'Curaduría'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Eventos', 'Cartelera', 'Curaduría'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Eventos', 'Cartelera', 'Curaduría'].includes(item.name)
         }
 
         // 🚀 ROL AUXILIAR: Ve Grupos y Alquileres, pero NUNCA La Liga.
@@ -86,17 +86,17 @@ function SidebarContent() {
 
         // 🎭 ROL CURADOR (Chifle): Curaduría (ve postulaciones y elige) + Eventos + básicos.
         if (userRole === 'curador') {
-            return ['Inicio', 'Curaduría', 'Eventos', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+            return ['Inicio', 'Curaduría', 'Eventos', 'Cartelera', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         }
 
         // 🎟️ JEFE DE SALA (Wally): programa las funciones y entradas en la ticketera.
         if (userRole === 'jefe_sala') {
-            return ['Inicio', 'Eventos', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+            return ['Inicio', 'Eventos', 'Cartelera', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         }
 
         // 🔧 TÉCNICA (Ana/More/Abraham): entra a Eventos para cargar la ficha técnica.
         if (userRole === 'tecnica') {
-            return ['Inicio', 'Eventos', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+            return ['Inicio', 'Eventos', 'Cartelera', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         }
 
         // 🎤 AUDICIONES (staff de gira): carga participantes de las audiciones.

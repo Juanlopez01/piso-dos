@@ -1557,6 +1557,38 @@ export async function enviarEncuestaEventoAction(eventoId: string) {
     return { ok: true as const, enviados, total: destinatarios.length }
 }
 
+// ============================================================================
+// AGENDA DE FUNCIONES — calendario del equipo PISO2E con las funciones ACTIVAS
+// y CONFIRMADAS (estado 'activo', no canceladas). Solo lectura, sin montos.
+// ============================================================================
+export async function getFuncionesAgendaAction() {
+    const perm = await requireStaff(true)
+    if (!perm.ok) return { ok: false as const, error: perm.error, funciones: [] as any[] }
+    const admin = getAdminClient()
+
+    // Funciones confirmadas = publicadas (activo) y no canceladas, con fecha puesta.
+    const { data: eventos } = await admin.from('eventos')
+        .select('id, nombre, fecha, lugar, estado, venta_online, cancelado')
+        .eq('estado', 'activo').eq('cancelado', false).not('fecha', 'is', null)
+        .order('fecha', { ascending: true })
+
+    const ids = (eventos || []).map((e: any) => e.id)
+    const obrasPorEvento: Record<string, { titulo: string; compania: string | null }[]> = {}
+    if (ids.length) {
+        const { data: obras } = await admin.from('obra_propuestas')
+            .select('titulo, compania, evento_id').in('evento_id', ids).eq('estado', 'aceptada')
+        for (const o of (obras || []) as any[]) {
+            (obrasPorEvento[o.evento_id] ||= []).push({ titulo: o.titulo, compania: o.compania || null })
+        }
+    }
+
+    const funciones = (eventos || []).map((e: any) => ({
+        id: e.id, nombre: e.nombre, fecha: e.fecha, lugar: e.lugar || null,
+        ventaOnline: !!e.venta_online, obras: obrasPorEvento[e.id] || [],
+    }))
+    return { ok: true as const, funciones }
+}
+
 // Reenvía la entrada+QR por mail para una venta puntual (desde compradores/detalle).
 export async function reenviarEntradaAction(ventaId: string, emailOverride?: string) {
     const perm = await requireStaff()

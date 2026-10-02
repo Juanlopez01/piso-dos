@@ -63,6 +63,11 @@ export default function EventosPage() {
         setLoading(false)
     }
     useEffect(() => { cargar() }, [])
+    // Si vienen desde la Cartelera con ?ev=ID, abrimos esa función directamente.
+    useEffect(() => {
+        const ev = new URLSearchParams(window.location.search).get('ev')
+        if (ev) setSel(ev)
+    }, [])
 
     return (
         <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-24">
