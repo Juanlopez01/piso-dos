@@ -1,12 +1,16 @@
 -- ============================================================================
 -- Métricas por recepcionista — autoría de 3 acciones que hoy no se atribuían:
---   1) Clases cargadas  -> clases.creado_por
+--   1) Clases cargadas  -> clases.creado_por (+ created_at, que no existía)
 --   2) Newsletters       -> notificaciones.creado_por (la notificación "madre")
 --   3) Revisiones de cuponeras vencidas -> tabla nueva cuponera_revisiones
 -- Correr una vez en el SQL Editor de Supabase.
 -- ============================================================================
 
+-- clases no tenía marca de creación: la agregamos (las viejas quedan con la
+-- fecha de la migración, pero no cuentan porque no tienen autor).
+alter table public.clases add column if not exists created_at timestamptz not null default now();
 alter table public.clases add column if not exists creado_por uuid references public.profiles(id);
+
 alter table public.notificaciones add column if not exists creado_por uuid references public.profiles(id);
 
 create table if not exists public.cuponera_revisiones (
