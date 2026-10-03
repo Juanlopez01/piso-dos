@@ -46,7 +46,7 @@ export const menuItems = [
     { name: 'Eventos', href: '/eventos', icon: Ticket, grupo: 'piso2e', roles: ['admin', 'recepcion', 'curador'] },
     { name: 'Cartelera', href: '/funciones', icon: CalendarCheck, grupo: 'piso2e', roles: ['admin', 'recepcion', 'curador', 'jefe_sala', 'tecnica'] },
     { name: 'Curaduría', href: '/curaduria', icon: Theater, grupo: 'piso2e', roles: ['admin', 'recepcion', 'curador'] },
-    { name: 'Piso 2 On Tour', href: '/audiciones', icon: Sparkles, grupo: 'piso2e', roles: ['admin', 'audiciones'] },
+    { name: 'Piso 2 On Tour', href: '/audiciones', icon: Sparkles, grupo: 'escuela', roles: ['admin', 'audiciones'] },
     { name: 'Sumate a Talent', href: '/talent/postular', icon: Sparkles, grupo: 'miespacio', roles: ['alumno', 'profesor', 'coordinador'] },
     { name: 'La Liga', href: '/la-liga', icon: GraduationCap, grupo: 'escuela', roles: ['admin', 'profesor', 'coordinador', 'alumno', 'auxiliar'] },
     { name: 'Alquilar sala', href: '/alquilar-sala', icon: ShoppingBagIcon, grupo: 'miespacio', roles: ['admin', 'profesor', 'coordinador', 'alumno'] },
