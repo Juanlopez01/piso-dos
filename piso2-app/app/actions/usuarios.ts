@@ -967,6 +967,20 @@ type SegmentoAnuncio =
     | 'regulares'
     | string
 
+// Registra que una recep revisó/contactó a un alumno con la cuponera vencida o
+// agotada (para las métricas: "revisiones de cuponeras"). Best-effort.
+export async function marcarCuponeraRevisadaAction(alumnoId: string, packId?: string) {
+    const ssr = await createClient()
+    const { data: { session } } = await ssr.auth.getSession()
+    if (!session?.user) return { success: false as const, error: 'No autorizado' }
+    const admin = getAdminClient()
+    const { error } = await admin.from('cuponera_revisiones').insert({
+        alumno_id: alumnoId, pack_id: packId || null, revisado_por: session.user.id,
+    })
+    if (error) return { success: false as const, error: error.message }
+    return { success: true as const }
+}
+
 export async function crearAnuncioAction(
     titulo: string,
     mensaje: string,
@@ -988,6 +1002,14 @@ export async function crearAnuncioAction(
             )
         }
 
+        // Quién envía el newsletter (para las métricas de recepción).
+        let creadoPor: string | null = null
+        try {
+            const ssr = await createClient()
+            const { data: { session } } = await ssr.auth.getSession()
+            creadoPor = session?.user?.id || null
+        } catch { /* best-effort */ }
+
         const {
             data: anuncio,
             error: errAnuncio
@@ -999,6 +1021,7 @@ export async function crearAnuncioAction(
                     mensaje,
                     categoria: 'general',
                     segmento,
+                    creado_por: creadoPor,
                     created_at:
                         new Date().toISOString()
                 }

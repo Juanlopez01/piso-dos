@@ -45,6 +45,9 @@ export type MetricaRecep = {
     movimientos: number        // cantidad de movimientos de caja cargados
     mensajes: number           // respuestas enviadas a consultas
     contactos: number          // contactos distintos atendidos
+    clases: number             // clases cargadas en el período
+    newsletters: number        // newsletters / anuncios enviados
+    revisiones: number         // cuponeras vencidas revisadas/contactadas
     sedes: string[]
 }
 
@@ -71,7 +74,8 @@ export async function getMetricasRecepAction(desdeISO: string, hastaISO: string)
         base[p.id] = {
             id: p.id, nombre: p.nombre_completo || 'Sin nombre', rol: p.rol,
             turnos: 0, turnosAbiertos: 0, horas: 0, ingresos: 0, egresos: 0,
-            ventas: 0, ventasMonto: 0, movimientos: 0, mensajes: 0, contactos: 0, sedes: [],
+            ventas: 0, ventasMonto: 0, movimientos: 0, mensajes: 0, contactos: 0,
+            clases: 0, newsletters: 0, revisiones: 0, sedes: [],
         }
     }
     for (const t of (turnosData || []) as any[]) {
@@ -117,6 +121,16 @@ export async function getMetricasRecepAction(desdeISO: string, hastaISO: string)
         ;(contactosSet[msg.autor_id] ||= new Set()).add(msg.consulta_id)
     }
     for (const uid of Object.keys(contactosSet)) base[uid].contactos = contactosSet[uid].size
+
+    // 5) Clases cargadas, newsletters enviados y cuponeras revisadas en el rango.
+    const [{ data: clases }, { data: anuncios }, { data: revis }] = await Promise.all([
+        admin.from('clases').select('creado_por').in('creado_por', ids).gte('created_at', desdeISO).lt('created_at', hastaISO),
+        admin.from('notificaciones').select('creado_por').in('creado_por', ids).gte('created_at', desdeISO).lt('created_at', hastaISO),
+        admin.from('cuponera_revisiones').select('revisado_por').in('revisado_por', ids).gte('created_at', desdeISO).lt('created_at', hastaISO),
+    ])
+    for (const c of (clases || []) as any[]) { const m = base[c.creado_por]; if (m) m.clases++ }
+    for (const a of (anuncios || []) as any[]) { const m = base[a.creado_por]; if (m) m.newsletters++ }
+    for (const r of (revis || []) as any[]) { const m = base[r.revisado_por]; if (m) m.revisiones++ }
 
     // Redondeo de horas y orden por horas trabajadas (más activo primero).
     const recep = Object.values(base)

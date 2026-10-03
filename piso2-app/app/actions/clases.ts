@@ -264,7 +264,8 @@ export async function crearClasesAction(form: any, publicUrl: string | null) {
             liga_nivel: form.esLaLiga ? form.ligaNivel : null,
             compania_id: form.tipo === 'Compañía' ? form.companiaId : null,
             es_audicion: form.esAudicion,
-            es_combinable: form.esCombinable ?? true // 🚀 Agregado al guardado de creación masiva
+            es_combinable: form.esCombinable ?? true, // 🚀 Agregado al guardado de creación masiva
+            creado_por: session.user.id, // quién cargó la clase (métricas de recepción)
         }))
 
         const { error } = await supabase.from('clases').insert(clasesAInsertar)
@@ -332,6 +333,7 @@ export async function duplicarMesAction(mesOrigen: string) {
                 ...datosClase,
                 inicio: nuevaFecha.toISOString(),
                 serie_id: nuevoSerieId,
+                creado_por: session.user.id, // quien duplica es el autor del mes nuevo
                 // El mes nuevo arranca sin liquidar: nunca heredar el flag de pago
                 // del mes de origen (si no, las clases aparecen como "OK" ya pagadas).
                 pagado_profe: false,

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, BarChart3, RefreshCw, Clock, DollarSign, Ticket, MessageCircle, DoorOpen, AlertTriangle, Users } from 'lucide-react'
+import { Loader2, BarChart3, RefreshCw, Clock, DollarSign, Ticket, MessageCircle, DoorOpen, AlertTriangle, Users, CalendarPlus, Megaphone, UserCheck } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { getMetricasRecepAction, type MetricaRecep } from '@/app/actions/metricas'
 
@@ -125,6 +125,9 @@ export default function MetricasPage() {
                                     <Metric icon={Ticket} label="Ventas de clases" v={`${r.ventas} · ${pesos(r.ventasMonto)}`} />
                                     <Metric icon={MessageCircle} label="Mensajes resp." v={String(r.mensajes)} />
                                     <Metric icon={Users} label="Contactos" v={String(r.contactos)} />
+                                    <Metric icon={CalendarPlus} label="Clases cargadas" v={String(r.clases)} />
+                                    <Metric icon={Megaphone} label="Newsletters" v={String(r.newsletters)} />
+                                    <Metric icon={UserCheck} label="Cuponeras revisadas" v={String(r.revisiones)} />
                                 </div>
                                 {/* mini-barras comparativas */}
                                 <div className="mt-4 space-y-1.5">
@@ -137,7 +140,7 @@ export default function MetricasPage() {
                     </div>
 
                     <p className="text-[11px] text-gray-600 mt-6 leading-relaxed">
-                        Los datos salen de la actividad real en la página: turnos y horas de caja, plata y ventas registradas en su turno, y mensajes respondidos en Consultas. Las ventas de clases se cuentan por los movimientos de caja de cada turno.
+                        Los datos salen de la actividad real en la página: turnos y horas de caja, plata y ventas registradas en su turno, mensajes respondidos en Consultas, clases cargadas, newsletters enviados y cuponeras vencidas revisadas (botón "Marcar" en Remarketing). Las ventas de clases se cuentan por los movimientos de caja de cada turno.
                     </p>
                 </>
             )}

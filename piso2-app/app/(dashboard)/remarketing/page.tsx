@@ -16,8 +16,10 @@ import {
     obtenerPacksAgotadosParaNotificarAction,
     crearAnuncioAction,
     obtenerAnunciosAction,
-    obtenerCompaniasAction
+    obtenerCompaniasAction,
+    marcarCuponeraRevisadaAction
 } from '@/app/actions/usuarios'
+import { Check } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 
 interface PackAgotado {
@@ -64,6 +66,16 @@ export default function RemarketingPage() {
     const [notificarApp, setNotificarApp] = useState(true)
 
     const [enviandoAnuncio, setEnviandoAnuncio] = useState(false)
+    const [revisados, setRevisados] = useState<Record<string, boolean>>({})
+
+    const marcarRevisado = async (userId: string) => {
+        setRevisados(r => ({ ...r, [userId]: true }))
+        const res = await marcarCuponeraRevisadaAction(userId)
+        if (!(res as any).success) {
+            setRevisados(r => ({ ...r, [userId]: false }))
+            toast.error((res as any).error || 'No se pudo registrar')
+        } else toast.success('Marcado como contactado')
+    }
 
     useEffect(() => {
         if (
@@ -285,19 +297,29 @@ export default function RemarketingPage() {
                                                 )}
                                             </div>
 
-                                            {telefono && (
-                                                <a
-                                                    href={`https://wa.me/${telefono}?text=${encodeURIComponent(
-                                                        `Hola ${alumno.nombre}, vimos que tu pack finalizó y queríamos saber si te interesa renovarlo.`
-                                                    )}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="w-full bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/20 py-3 rounded-xl flex items-center justify-center gap-2 text-xs font-bold uppercase"
+                                            <div className="flex gap-2">
+                                                {telefono && (
+                                                    <a
+                                                        href={`https://wa.me/${telefono}?text=${encodeURIComponent(
+                                                            `Hola ${alumno.nombre}, vimos que tu pack finalizó y queríamos saber si te interesa renovarlo.`
+                                                        )}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="flex-1 bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#25D366] border border-[#25D366]/20 py-3 rounded-xl flex items-center justify-center gap-2 text-xs font-bold uppercase"
+                                                    >
+                                                        <MessageCircle size={16} />
+                                                        WhatsApp
+                                                    </a>
+                                                )}
+                                                <button
+                                                    onClick={() => marcarRevisado(alumno.user_id)}
+                                                    disabled={!!revisados[alumno.user_id]}
+                                                    title="Registrar que contactaste/revisaste a este alumno"
+                                                    className={`py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-xs font-bold uppercase transition-colors ${revisados[alumno.user_id] ? 'bg-[#D4E655]/15 text-[#D4E655] border border-[#D4E655]/30' : 'bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10'}`}
                                                 >
-                                                    <MessageCircle size={16} />
-                                                    WhatsApp
-                                                </a>
-                                            )}
+                                                    <Check size={16} /> {revisados[alumno.user_id] ? 'Contactado' : 'Marcar'}
+                                                </button>
+                                            </div>
                                         </div>
                                     )
                                 })}
