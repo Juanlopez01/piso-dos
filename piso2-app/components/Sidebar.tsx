@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { LogOut, UserCircle, Shield, Radio, LogIn, UsersRound, Zap, KeyRound } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
-import { menuItems } from '@/config/menu'
+import { menuItems, menuGroups } from '@/config/menu'
 import { useCash } from '@/context/CashContext'
 import { getConsultasPendientesCountAction } from '@/app/actions/consultas'
 import { toast } from 'sonner'
@@ -140,35 +140,45 @@ function SidebarContent() {
                     </p>
                 </div>
 
-                {visibleItems.map((item) => {
-                    let isActive = false;
-                    if (item.name === 'Staff / Equipo') {
-                        isActive = pathname === '/usuarios' && searchParams.get('ver') === 'staff';
-                    } else if (item.name === 'Alumnos / Profes') {
-                        isActive = pathname === '/usuarios' && searchParams.get('ver') !== 'staff';
-                    } else {
-                        isActive = pathname === item.href;
-                    }
-
+                {menuGroups.map(grupo => {
+                    const items = visibleItems.filter(it => (it as any).grupo === grupo.key)
+                    if (!items.length) return null
                     return (
-                        <Link
-                            key={item.name}
-                            href={item.href}
-                            className={`flex items-center gap-3 px-3 py-3 rounded-xl text-xs font-bold uppercase tracking-wide transition-all ${isActive ? 'bg-[#D4E655] text-black shadow-lg' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
-                        >
-                            <item.icon size={18} strokeWidth={isActive ? 2.5 : 2} />
-                            {item.name}
-                            {item.name === 'Notificaciones' && unreadNotifs > 0 && (
-                                <span className={`ml-auto w-5 h-5 flex items-center justify-center rounded-full text-[9px] font-black ${isActive ? 'bg-black text-[#D4E655]' : 'bg-[#D4E655] text-black'}`}>
-                                    {unreadNotifs}
-                                </span>
+                        <div key={grupo.key} className="pt-1">
+                            {grupo.label && (
+                                <p className="px-3 pt-3 pb-1 text-[9px] font-black text-gray-600 uppercase tracking-[0.2em]">{grupo.label}</p>
                             )}
-                            {item.name === 'Consultas' && consultasPend > 0 && (
-                                <span className={`ml-auto min-w-5 h-5 px-1 flex items-center justify-center rounded-full text-[9px] font-black ${isActive ? 'bg-black text-[#D4E655]' : 'bg-red-500 text-white'}`}>
-                                    {consultasPend}
-                                </span>
-                            )}
-                        </Link>
+                            {items.map((item) => {
+                                let isActive = false;
+                                if (item.name === 'Staff / Equipo') {
+                                    isActive = pathname === '/usuarios' && searchParams.get('ver') === 'staff';
+                                } else if (item.name === 'Alumnos / Profes') {
+                                    isActive = pathname === '/usuarios' && searchParams.get('ver') !== 'staff';
+                                } else {
+                                    isActive = pathname === item.href;
+                                }
+                                return (
+                                    <Link
+                                        key={item.name}
+                                        href={item.href}
+                                        className={`flex items-center gap-3 px-3 py-3 rounded-xl text-xs font-bold uppercase tracking-wide transition-all ${isActive ? 'bg-[#D4E655] text-black shadow-lg' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+                                    >
+                                        <item.icon size={18} strokeWidth={isActive ? 2.5 : 2} />
+                                        {item.name}
+                                        {item.name === 'Notificaciones' && unreadNotifs > 0 && (
+                                            <span className={`ml-auto w-5 h-5 flex items-center justify-center rounded-full text-[9px] font-black ${isActive ? 'bg-black text-[#D4E655]' : 'bg-[#D4E655] text-black'}`}>
+                                                {unreadNotifs}
+                                            </span>
+                                        )}
+                                        {item.name === 'Consultas' && consultasPend > 0 && (
+                                            <span className={`ml-auto min-w-5 h-5 px-1 flex items-center justify-center rounded-full text-[9px] font-black ${isActive ? 'bg-black text-[#D4E655]' : 'bg-red-500 text-white'}`}>
+                                                {consultasPend}
+                                            </span>
+                                        )}
+                                    </Link>
+                                )
+                            })}
+                        </div>
                     )
                 })}
             </nav>

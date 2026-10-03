@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { Menu, X, LogOut, UserCircle, Shield, Radio, LogIn, UsersRound, Zap, KeyRound } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
-import { menuItems } from '@/config/menu'
+import { menuItems, menuGroups } from '@/config/menu'
 import { useCash } from '@/context/CashContext'
 import { getConsultasPendientesCountAction } from '@/app/actions/consultas'
 import { toast } from 'sonner'
@@ -212,24 +212,37 @@ function MobileNavContent() {
                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Conectado como: {userRole || 'visitante'}</span>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
-                        {visibleItems.map((item) => {
-                            const isActive = checkIsActive(item.name, item.href)
+                    <div className="flex-1 overflow-y-auto p-4 space-y-1 custom-scrollbar">
+                        {menuGroups.map(grupo => {
+                            const items = visibleItems.filter(it => (it as any).grupo === grupo.key)
+                            if (!items.length) return null
                             return (
-                                <Link key={item.name} href={item.href} className={`flex items-center gap-4 px-4 py-4 rounded-xl text-sm font-bold uppercase tracking-widest transition-all ${isActive ? 'bg-[#D4E655] text-black shadow-lg' : 'text-gray-300 hover:text-white bg-white/5 hover:bg-white/10'}`}>
-                                    <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} />
-                                    {item.name}
-                                    {item.name === 'Notificaciones' && unreadNotifs > 0 && (
-                                        <span className={`ml-auto w-6 h-6 flex items-center justify-center rounded-full text-[10px] font-black ${isActive ? 'bg-black text-[#D4E655]' : 'bg-[#D4E655] text-black'}`}>
-                                            {unreadNotifs}
-                                        </span>
+                                <div key={grupo.key} className="pt-1">
+                                    {grupo.label && (
+                                        <p className="px-4 pt-3 pb-1.5 text-[9px] font-black text-gray-600 uppercase tracking-[0.2em]">{grupo.label}</p>
                                     )}
-                                    {item.name === 'Consultas' && consultasPend > 0 && (
-                                        <span className={`ml-auto min-w-6 h-6 px-1.5 flex items-center justify-center rounded-full text-[10px] font-black ${isActive ? 'bg-black text-[#D4E655]' : 'bg-red-500 text-white'}`}>
-                                            {consultasPend}
-                                        </span>
-                                    )}
-                                </Link>
+                                    <div className="space-y-2">
+                                        {items.map((item) => {
+                                            const isActive = checkIsActive(item.name, item.href)
+                                            return (
+                                                <Link key={item.name} href={item.href} className={`flex items-center gap-4 px-4 py-4 rounded-xl text-sm font-bold uppercase tracking-widest transition-all ${isActive ? 'bg-[#D4E655] text-black shadow-lg' : 'text-gray-300 hover:text-white bg-white/5 hover:bg-white/10'}`}>
+                                                    <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+                                                    {item.name}
+                                                    {item.name === 'Notificaciones' && unreadNotifs > 0 && (
+                                                        <span className={`ml-auto w-6 h-6 flex items-center justify-center rounded-full text-[10px] font-black ${isActive ? 'bg-black text-[#D4E655]' : 'bg-[#D4E655] text-black'}`}>
+                                                            {unreadNotifs}
+                                                        </span>
+                                                    )}
+                                                    {item.name === 'Consultas' && consultasPend > 0 && (
+                                                        <span className={`ml-auto min-w-6 h-6 px-1.5 flex items-center justify-center rounded-full text-[10px] font-black ${isActive ? 'bg-black text-[#D4E655]' : 'bg-red-500 text-white'}`}>
+                                                            {consultasPend}
+                                                        </span>
+                                                    )}
+                                                </Link>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
                             )
                         })}
                     </div>
