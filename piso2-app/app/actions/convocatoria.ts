@@ -44,6 +44,7 @@ export async function crearPropuestaObraAction(payload: {
     participantes?: number; duracion_min?: number; descripcion?: string
     instagram?: string; email?: string; telefono?: string
     videos?: string[]; imagenes?: string[]; convocatoria_id?: string
+    necesidades?: string
 }) {
     if (!payload.titulo?.trim()) return { ok: false as const, error: 'Poné el nombre de la obra.' }
     if (!payload.email?.includes('@') && !payload.telefono?.trim()) return { ok: false as const, error: 'Dejanos un email o teléfono de contacto.' }
@@ -74,6 +75,11 @@ export async function crearPropuestaObraAction(payload: {
         videos: (payload.videos || []).filter(Boolean),
         imagenes: (payload.imagenes || []).filter(Boolean),
         convocatoria_id: convocatoriaId,
+        // Las necesidades que carga la compañía al postularse arrancan la ficha
+        // técnica de la obra: la técnica las ve pre-cargadas y las ajusta.
+        ficha_tecnica: payload.necesidades?.trim()
+            ? { necesidades_compania: payload.necesidades.trim(), _origen: 'postulacion' }
+            : null,
     })
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }

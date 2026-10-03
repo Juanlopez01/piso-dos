@@ -861,7 +861,17 @@ export async function getFichaTecnicaAction(eventoId: string) {
     const { data: evento } = await admin.from('eventos')
         .select('id, nombre, ficha_tecnica').eq('id', eventoId).single()
     if (!evento) return { ok: false as const, error: 'Evento no encontrado' }
-    return { ok: true as const, nombre: evento.nombre, ficha: evento.ficha_tecnica || {} }
+
+    // Necesidades que cargaron las compañías al postularse (viven en la ficha de
+    // cada obra vinculada a esta función). Las mostramos para que la técnica las
+    // tenga a mano al armar la ficha.
+    const { data: obras } = await admin.from('obra_propuestas')
+        .select('titulo, compania, ficha_tecnica').eq('evento_id', eventoId).eq('estado', 'aceptada')
+    const necesidadesCompania = (obras || [])
+        .map((o: any) => ({ titulo: o.titulo, compania: o.compania || null, texto: (o.ficha_tecnica?.necesidades_compania || '').trim() }))
+        .filter((o: any) => o.texto)
+
+    return { ok: true as const, nombre: evento.nombre, ficha: evento.ficha_tecnica || {}, necesidadesCompania }
 }
 
 export async function guardarFichaTecnicaAction(eventoId: string, ficha: Record<string, any>) {

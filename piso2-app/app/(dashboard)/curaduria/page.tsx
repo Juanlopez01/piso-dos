@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Theater, RefreshCw, Copy, Check, X, Trash2, Play, Inbox, Ticket, Plus, Megaphone, Power, Upload, Maximize2, Image as ImageIcon, MessageCircle, Archive, RotateCcw, FileDown, CalendarPlus, CalendarDays } from 'lucide-react'
+import { Loader2, Theater, RefreshCw, Copy, Check, X, Trash2, Play, Inbox, Ticket, Plus, Megaphone, Power, Upload, Maximize2, Image as ImageIcon, MessageCircle, Archive, RotateCcw, FileDown, CalendarPlus, CalendarDays, HardHat } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { jsPDF } from 'jspdf'
 import { createClient } from '@/utils/supabase/client'
@@ -23,6 +23,7 @@ type Propuesta = {
     instagram: string | null; email: string | null; telefono: string | null; videos: string[]; imagenes: string[]
     estado: Estado; nota_curaduria: string | null; evento_id: string | null
     convocatoria_id: string | null; convocatoria_titulo?: string | null
+    ficha_tecnica?: { necesidades_compania?: string } | null
     archivada_at?: string | null
     evento_nombre?: string | null; evento_fecha?: string | null; evento_estado?: string | null
 }
@@ -283,7 +284,7 @@ export default function CuraduriaPage() {
                         {p.tipo_obra && <span className="text-[9px] px-2 py-0.5 rounded-full bg-white/10 text-gray-300 uppercase font-bold">{p.tipo_obra}</span>}
                         {p.convocatoria_titulo
                             ? <span className="text-[9px] px-2 py-0.5 rounded-full bg-[#D4E655]/15 text-[#D4E655] uppercase font-bold flex items-center gap-1"><Megaphone size={9} /> {p.convocatoria_titulo}</span>
-                            : <span className="text-[9px] px-2 py-0.5 rounded-full bg-white/5 text-gray-500 uppercase font-bold">General</span>}
+                            : <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 uppercase font-bold">Abierta</span>}
                     </div>
                     <p className="text-[11px] text-gray-400 mt-1">
                         {[p.director && `Dir: ${p.director}`, p.compania, p.participantes != null && `${p.participantes} integrantes`, p.duracion_min != null && `${p.duracion_min} min`].filter(Boolean).join(' · ')}
@@ -472,6 +473,12 @@ export default function CuraduriaPage() {
                         </div>
                         <div className="overflow-y-auto p-4 space-y-4">
                             {verProp.descripcion && <p className="text-sm text-gray-200 whitespace-pre-line leading-relaxed">{verProp.descripcion}</p>}
+                            {verProp.ficha_tecnica?.necesidades_compania && (
+                                <div className="rounded-xl bg-[#D4E655]/10 border border-[#D4E655]/30 p-3">
+                                    <p className="text-[10px] uppercase tracking-widest text-[#D4E655] font-black mb-1.5 flex items-center gap-1.5"><HardHat size={12} /> Necesidades técnicas</p>
+                                    <p className="text-sm text-gray-200 whitespace-pre-line leading-relaxed">{verProp.ficha_tecnica.necesidades_compania}</p>
+                                </div>
+                            )}
                             {verProp.imagenes?.length > 0 && (
                                 <div>
                                     <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2 flex items-center gap-1.5"><ImageIcon size={12} /> Fotos</p>

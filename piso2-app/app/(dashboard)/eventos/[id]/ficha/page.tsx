@@ -33,6 +33,7 @@ export default function FichaTecnicaPage() {
     const [nombre, setNombre] = useState('')
     const [f, setF] = useState<Ficha>({})
     const [updatedAt, setUpdatedAt] = useState<string | null>(null)
+    const [necCompania, setNecCompania] = useState<{ titulo: string; compania: string | null; texto: string }[]>([])
 
     const set = (k: string, v: any) => setF(prev => ({ ...prev, [k]: v }))
 
@@ -42,7 +43,14 @@ export default function FichaTecnicaPage() {
             const r = obraId ? await getFichaObraAction(obraId) : await getFichaTecnicaAction(eventoId)
             if (r.ok) {
                 setNombre(r.nombre)
-                const { _updated_at, ...rest } = (r.ficha || {}) as any
+                const { _updated_at, _origen, necesidades_compania, ...rest } = (r.ficha || {}) as any
+                const nec = (r as any).necesidadesCompania || (necesidades_compania ? [{ titulo: r.nombre, compania: null, texto: necesidades_compania }] : [])
+                setNecCompania(nec)
+                // Las necesidades que cargó la compañía arrancan la ficha: si todavía
+                // no hay "Necesidades de función" escritas, las pre-cargamos ahí.
+                if (!String(rest.necesidades_funcion || '').trim() && nec.length) {
+                    rest.necesidades_funcion = nec.map((n: any) => (n.compania ? `[${n.compania}] ` : '') + n.texto).join('\n\n')
+                }
                 setF(rest)
                 setUpdatedAt(_updated_at || null)
             } else toast.error((r as any).error || 'No se pudo cargar la ficha')
@@ -93,6 +101,18 @@ export default function FichaTecnicaPage() {
                 <fieldset disabled={soloLectura} className="min-w-0 border-0 p-0 m-0 disabled:opacity-100">
                 {/* Función */}
                 <Section icon={CalendarClock} title="Función" id="funcion">
+                    {necCompania.length > 0 && (
+                        <div className="rounded-xl bg-[#D4E655]/10 border border-[#D4E655]/30 p-3">
+                            <p className="text-[10px] uppercase tracking-widest text-[#D4E655] font-black mb-1.5">Necesidades que cargó la compañía al postularse</p>
+                            {necCompania.map((n, i) => (
+                                <div key={i} className="mb-2 last:mb-0">
+                                    {n.compania && <p className="text-[11px] font-bold text-white">{n.compania}</p>}
+                                    <p className="text-[12px] text-gray-200 whitespace-pre-line leading-relaxed">{n.texto}</p>
+                                </div>
+                            ))}
+                            <p className="text-[10px] text-gray-400 mt-1">Esto es lo que mandaron al postularse. Ajustalo y completalo abajo.</p>
+                        </div>
+                    )}
                     <Txt label="Días y horarios de función posibles" v={f.dias_horarios} on={v => set('dias_horarios', v)} ph="Ej: viernes 21h, sábado 20h y 22h" />
                     <Sel label="Tipo de sala" v={f.tipo_sala} on={v => set('tipo_sala', v)} opciones={['', 'Sala blanca', 'Sala negra', 'Sala entera']} />
                     <Area label="Necesidades de función" v={f.necesidades_funcion} on={v => set('necesidades_funcion', v)} ph="Cualquier cosa particular que necesiten para la función" />

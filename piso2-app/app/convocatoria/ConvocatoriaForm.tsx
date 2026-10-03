@@ -15,7 +15,7 @@ type Ciclo = { id: string; titulo: string; descripcion?: string | null; flyer_ur
 
 export default function ConvocatoriaForm({ ciclo }: { ciclo?: Ciclo | null }) {
     const [supabase] = useState(() => createClient())
-    const [f, setF] = useState({ titulo: '', director: '', compania: '', tipo: '', participantes: '', duracion: '', descripcion: '', instagram: '', email: '', telefono: '' })
+    const [f, setF] = useState({ titulo: '', director: '', compania: '', tipo: '', participantes: '', duracion: '', descripcion: '', instagram: '', email: '', telefono: '', necesidades: '' })
     const [imagenes, setImagenes] = useState<string[]>([])
     const [videos, setVideos] = useState<string[]>(['', '', ''])
     const [subiendo, setSubiendo] = useState(false)
@@ -62,6 +62,7 @@ export default function ConvocatoriaForm({ ciclo }: { ciclo?: Ciclo | null }) {
             descripcion: f.descripcion, instagram: f.instagram, email: f.email, telefono: f.telefono,
             videos: videos.map(v => v.trim()).filter(Boolean), imagenes,
             convocatoria_id: ciclo?.id,
+            necesidades: f.necesidades,
         })
         if (r.ok) setListo(true); else toast.error(r.error || 'Error al enviar')
         setEnviando(false)
@@ -82,11 +83,11 @@ export default function ConvocatoriaForm({ ciclo }: { ciclo?: Ciclo | null }) {
 
             <div className="max-w-lg mx-auto px-5 py-8">
                 {ciclo?.flyer_url && <img src={ciclo.flyer_url} alt="" className="w-full rounded-xl mb-5 object-cover" />}
-                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.25em] text-neutral-400 mb-1"><Theater size={14} /> {ciclo ? 'Convocatoria' : 'Convocatoria de obras'}</div>
-                <h1 className="text-2xl md:text-3xl font-black tracking-tight">{ciclo ? ciclo.titulo : 'Proponé tu obra en Piso 2'}</h1>
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.25em] text-neutral-400 mb-1"><Theater size={14} /> {ciclo ? 'Convocatoria' : 'Postulación abierta'}</div>
+                <h1 className="text-2xl md:text-3xl font-black tracking-tight">{ciclo ? ciclo.titulo : '¿Tenés una obra que querés presentar?'}</h1>
                 {ciclo?.descripcion
                     ? <p className="text-sm text-neutral-600 mt-2 whitespace-pre-line">{ciclo.descripcion}</p>
-                    : <p className="text-sm text-neutral-500 mt-2">Contanos de tu obra y el equipo la evalúa para programarla. Es gratis postular.</p>}
+                    : <p className="text-sm text-neutral-500 mt-2">Cargá tu obra y nos contactamos con vos. Esto es por fuera de nuestras búsquedas: podés postularte cuando quieras. Es gratis.</p>}
 
                 <div className="mt-6 space-y-4">
                     <div><label className={lbl}>Nombre de la obra *</label><input value={f.titulo} onChange={e => set('titulo', e.target.value)} className={inp} /></div>
@@ -100,6 +101,7 @@ export default function ConvocatoriaForm({ ciclo }: { ciclo?: Ciclo | null }) {
                         <div><label className={lbl}>Duración (min) *</label><input type="number" min={1} value={f.duracion} onChange={e => set('duracion', e.target.value)} className={inp} /></div>
                     </div>
                     <div><label className={lbl}>Descripción *</label><textarea rows={3} value={f.descripcion} onChange={e => set('descripcion', e.target.value)} className={`${inp} resize-none`} placeholder="De qué trata, estilo, antecedentes…" /></div>
+                    <div><label className={lbl}>Necesidades técnicas</label><textarea rows={3} value={f.necesidades} onChange={e => set('necesidades', e.target.value)} className={`${inp} resize-none`} placeholder="Sonido, luces, proyecciones, escenografía, tiempo de armado… (lo que sepas; después lo terminamos de armar con vos)" /><p className="text-[11px] text-neutral-400 mt-1">Esto arranca la ficha técnica de tu obra.</p></div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div><label className={lbl}>Instagram (obra/director)</label><input value={f.instagram} onChange={e => set('instagram', e.target.value)} className={inp} placeholder="@…" /></div>
                         <div><label className={lbl}>Email de contacto *</label><input type="email" value={f.email} onChange={e => set('email', e.target.value)} className={inp} /></div>
