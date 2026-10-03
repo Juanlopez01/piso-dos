@@ -26,6 +26,7 @@ export const menuItems = [
     { name: 'Productos', href: '/productos', icon: Package, roles: ['admin', 'recepcion'] },
     { name: 'Caja', href: '/caja', icon: ShoppingBag, roles: ['admin', 'recepcion', 'auxiliar'] },
     { name: 'Administración', href: '/reporte-caja', icon: Wallet, roles: ['admin', 'recepcion'] },
+    { name: 'Métricas', href: '/metricas', icon: FileSpreadsheet, roles: ['admin'] },
     {
         name: 'Liquidaciones',
         href: '/liquidaciones',

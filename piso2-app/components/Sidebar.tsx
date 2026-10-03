@@ -55,13 +55,15 @@ function SidebarContent() {
         if (item.name === 'Grupos' && !hasCompaniaAccess) return false;
         // Libro de administración: SOLO usuarios con el flag (Nico/Santi), no por rol.
         if (item.name === 'Administración') return hasAdminFinanzas;
+        // Métricas de recepción: administración (flag) siempre; además los admin (ver lista).
+        if (item.name === 'Métricas' && hasAdminFinanzas) return true;
         // Permiso aditivo de curaduría: da Curaduría + Eventos + Cartelera a cualquier rol (ej. un profe como Chifle).
         if ((item.name === 'Curaduría' || item.name === 'Eventos' || item.name === 'Cartelera') && hasAccesoCuraduria) return true;
 
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
         // Vistas base por rol
-        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Talents', 'Asistente', 'Consultas', 'Resumen Clases', 'Eventos', 'Cartelera', 'Curaduría', 'Piso 2 On Tour', 'Caja', 'Liquidaciones', 'Remarketing', 'Ventas', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Talents', 'Asistente', 'Consultas', 'Resumen Clases', 'Eventos', 'Cartelera', 'Curaduría', 'Piso 2 On Tour', 'Caja', 'Liquidaciones', 'Remarketing', 'Métricas', 'Ventas', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         if (userRole === 'profesor') {

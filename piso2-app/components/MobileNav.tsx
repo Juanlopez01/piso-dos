@@ -58,6 +58,8 @@ function MobileNavContent() {
         if (item.name === 'Grupos' && !hasCompaniaAccess && userRole !== 'profesor') return false;
         // Libro de administración: SOLO usuarios con el flag (Nico/Santi), no por rol.
         if (item.name === 'Administración') return hasAdminFinanzas;
+        // Métricas de recepción: administración (flag) siempre; además los admin (ver lista).
+        if (item.name === 'Métricas' && hasAdminFinanzas) return true;
         // Permiso aditivo de curaduría: da Curaduría + Eventos + Cartelera a cualquier rol (ej. un profe como Chifle).
         if ((item.name === 'Curaduría' || item.name === 'Eventos' || item.name === 'Cartelera') && hasAccesoCuraduria) return true;
 
@@ -82,6 +84,7 @@ function MobileNavContent() {
             'Piso 2 On Tour',
             'Liquidaciones',
             'Remarketing',
+            'Métricas',
             'Caja',
             'Ventas',
             'Sedes',
