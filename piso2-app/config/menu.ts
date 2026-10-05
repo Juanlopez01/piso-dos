@@ -37,6 +37,7 @@ export const menuItems = [
     { name: 'Administración', href: '/reporte-caja', icon: Wallet, grupo: 'admin', roles: ['admin', 'recepcion'] },
     { name: 'Métricas', href: '/metricas', icon: FileSpreadsheet, grupo: 'admin', roles: ['admin'] },
     { name: 'Liquidaciones', href: '/liquidaciones', icon: FileSpreadsheet, grupo: 'admin', roles: ['admin', 'recepcion'] },
+    { name: 'Pagos La Liga', href: '/pagos-liga', icon: GraduationCap, grupo: 'admin', roles: ['admin', 'recepcion'] },
     { name: 'Remarketing', href: '/remarketing', icon: Megaphone, grupo: 'comunicacion', roles: ['admin', 'recepcion'] },
     { name: 'Sedes', href: '/sedes', icon: MapPin, grupo: 'admin', roles: ['admin'] },
     { name: 'Grupos', href: '/companias', icon: UsersRound, grupo: 'escuela', roles: ['admin', 'coordinador', 'profesor', 'alumno'] },

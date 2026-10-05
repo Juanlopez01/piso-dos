@@ -83,6 +83,7 @@ function MobileNavContent() {
             'Curaduría',
             'Piso 2 On Tour',
             'Liquidaciones',
+            'Pagos La Liga',
             'Remarketing',
             'Métricas',
             'Caja',
@@ -111,9 +112,10 @@ function MobileNavContent() {
                     'Consultas', 'Resumen Clases',
                     'Eventos',
                     'Cartelera',
-                    'Curaduría'
+                    'Curaduría',
+                    'Pagos La Liga'
                 ].includes(item.name)
-            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Eventos', 'Cartelera', 'Curaduría'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Alumnos / Profes', 'Explorar', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Pagos La Liga', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Eventos', 'Cartelera', 'Curaduría'].includes(item.name)
         }
 
         // 🚀 ROL AUXILIAR: Mismo menú cerrado que recepción, ve Grupos y Alquileres pero NUNCA La Liga.
