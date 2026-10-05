@@ -679,7 +679,12 @@ export async function responderAsistente(pregunta: string, historial: { de: stri
     // Tema de manejo manual: clase especial hardcodeada (ej. Adrián Manzano) o
     // un tema que el equipo cargó como "no_responder". El bot NO responde ni
     // cotiza; deriva directo. Va PRIMERO (corta todo).
-    const bloqueado = esClaseManual(q) || cono.noResponder.some(k => k && q.includes(norm(k)))
+    // PERO: si el equipo CARGÓ info que cubre ese tema, la info manda y el bot sí
+    // responde con ella (la info cargada es la fuente de verdad). Si igual se
+    // quieren anotar, la regla de "concretar" avisa a recepción más abajo.
+    const claveManual = CLASES_MANUALES.find(k => q.includes(k))
+    const infoCubreTema = !!claveManual && cono.info.some(t => norm(t).includes(claveManual))
+    const bloqueado = (!!claveManual && !infoCubreTema) || cono.noResponder.some(k => k && q.includes(norm(k)))
     if (bloqueado) return { respuesta: mensajeManual(), derivar: true }
     // Pedido explícito de humano → derivar sí o sí (no depende de la IA).
     if (esPedidoHumano(q)) return { respuesta: derivarMsg(), derivar: true }
