@@ -71,8 +71,8 @@ function SidebarContent() {
         }
 
         if (userRole === 'recepcion') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Pagos La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Eventos', 'Cartelera', 'Curaduría'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Pagos La Liga', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Eventos', 'Cartelera', 'Curaduría'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Pagos La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Eventos', 'Cartelera', 'Curaduría', 'Piso 2 On Tour'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Pagos La Liga', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Eventos', 'Cartelera', 'Curaduría', 'Piso 2 On Tour'].includes(item.name)
         }
 
         // 🚀 ROL AUXILIAR: Ve Grupos y Alquileres, pero NUNCA La Liga.
