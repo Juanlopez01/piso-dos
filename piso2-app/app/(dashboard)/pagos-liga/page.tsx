@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Loader2, Wallet, RefreshCw, Copy, Check, ChevronDown, GraduationCap } from 'lucide-react'
+import { Loader2, Wallet, RefreshCw, Copy, Check, ChevronDown, GraduationCap, Banknote, ArrowLeftRight } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
-import { getPagosLigaAction } from '@/app/actions/liquidaciones'
+import { getPagosLigaAction, pagarClaseProfeAction } from '@/app/actions/liquidaciones'
 
 type Detalle = { id: string; nombre: string; fecha: string; valor: number; pagado: boolean }
 type ProfePago = {
@@ -24,6 +24,7 @@ export default function PagosLigaPage() {
     const [mes, setMes] = useState(hoy.getMonth() + 1)
     const [abierto, setAbierto] = useState<string | null>(null)
     const [copiado, setCopiado] = useState<string | null>(null)
+    const [pagando, setPagando] = useState<string | null>(null)
 
     const cargar = async () => {
         setLoading(true)
@@ -37,6 +38,23 @@ export default function PagosLigaPage() {
     const copiar = async (alias: string, id: string) => {
         try { await navigator.clipboard.writeText(alias); setCopiado(id); toast.success('Alias copiado'); setTimeout(() => setCopiado(null), 1500) }
         catch { toast.error('No se pudo copiar') }
+    }
+
+    // Marca como pagadas una o varias clases de un profe con el medio elegido.
+    // Reusa el flujo de Liquidaciones (descuenta de caja + deja la clase pagada).
+    const pagar = async (clases: Detalle[], metodo: 'efectivo' | 'transferencia', nombreProfe: string, key: string) => {
+        const pend = clases.filter(c => !c.pagado)
+        if (!pend.length) return
+        if (!confirm(`¿Registrar el pago de ${pend.length} clase(s) a ${nombreProfe} por ${pesos(pend.reduce((a, c) => a + c.valor, 0))} en ${metodo}?`)) return
+        setPagando(key)
+        let ok = 0
+        for (const c of pend) {
+            const r = await pagarClaseProfeAction(c.id, c.valor, metodo, c.nombre, nombreProfe, c.fecha)
+            if (r.success) ok++
+            else { toast.error(r.error || 'No se pudo registrar el pago'); break }
+        }
+        setPagando(null)
+        if (ok > 0) { toast.success(`${ok} clase(s) pagada(s) a ${nombreProfe}`); cargar() }
     }
 
     const cambiarMes = (delta: number) => {
@@ -126,6 +144,18 @@ export default function PagosLigaPage() {
                                             </div>
                                         )}
 
+                                        {p.montoPendiente > 0 && (
+                                            <div className="mt-3 flex items-center gap-2">
+                                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Pagar todo:</span>
+                                                <button disabled={pagando === p.profesor_id} onClick={() => pagar(p.detalle, 'efectivo', p.nombre, p.profesor_id)} className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 rounded-lg px-3 py-1.5 hover:bg-emerald-500 hover:text-white transition-colors disabled:opacity-40">
+                                                    {pagando === p.profesor_id ? <Loader2 size={13} className="animate-spin" /> : <Banknote size={13} />} Efectivo
+                                                </button>
+                                                <button disabled={pagando === p.profesor_id} onClick={() => pagar(p.detalle, 'transferencia', p.nombre, p.profesor_id)} className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide bg-sky-500/15 text-sky-300 border border-sky-500/25 rounded-lg px-3 py-1.5 hover:bg-sky-500 hover:text-white transition-colors disabled:opacity-40">
+                                                    {pagando === p.profesor_id ? <Loader2 size={13} className="animate-spin" /> : <ArrowLeftRight size={13} />} Transferencia
+                                                </button>
+                                            </div>
+                                        )}
+
                                         <button onClick={() => setAbierto(exp ? null : p.profesor_id)} className="mt-3 flex items-center gap-1 text-[11px] font-bold text-gray-400 hover:text-white">
                                             <ChevronDown size={13} className={`transition-transform ${exp ? 'rotate-180' : ''}`} /> {exp ? 'Ocultar' : 'Ver'} clases
                                         </button>
@@ -140,7 +170,12 @@ export default function PagosLigaPage() {
                                                         <span className="font-bold">{pesos(d.valor)}</span>
                                                         {d.pagado
                                                             ? <span className="text-[9px] font-black uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Pagada</span>
-                                                            : <span className="text-[9px] font-black uppercase bg-amber-500/15 text-amber-400 rounded-full px-2 py-0.5">Pendiente</span>}
+                                                            : (
+                                                                <span className="flex items-center gap-1">
+                                                                    <button disabled={pagando === d.id} onClick={() => pagar([d], 'efectivo', p.nombre, d.id)} title="Pagar en efectivo" className="text-[9px] font-black uppercase bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 rounded-full px-2 py-0.5 hover:bg-emerald-500 hover:text-white disabled:opacity-40">{pagando === d.id ? '…' : 'Efec'}</button>
+                                                                    <button disabled={pagando === d.id} onClick={() => pagar([d], 'transferencia', p.nombre, d.id)} title="Pagar por transferencia" className="text-[9px] font-black uppercase bg-sky-500/15 text-sky-300 border border-sky-500/25 rounded-full px-2 py-0.5 hover:bg-sky-500 hover:text-white disabled:opacity-40">{pagando === d.id ? '…' : 'Transf'}</button>
+                                                                </span>
+                                                            )}
                                                     </span>
                                                 </div>
                                             ))}
