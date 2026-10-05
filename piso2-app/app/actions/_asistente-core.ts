@@ -147,6 +147,9 @@ export async function clasesAgenda(opts: { cuando?: 'hoy' | 'manana' | 'semana';
         .select('nombre, inicio, tipo_clase, profesor:profiles!clases_profesor_id_fkey(nombre_completo), sala:salas(nombre, sede:sedes(nombre))')
         .gte('inicio', desde).lt('inicio', hasta)
         .neq('estado', 'cancelada').eq('es_alquiler', false)
+        // La Liga es formación cerrada: NUNCA se lista en la grilla de clases
+        // abiertas (aunque alguna esté cargada como tipo Regular). Va por su tool.
+        .neq('es_la_liga', true)
         .in('tipo_clase', ['Regular', 'Especial'])
         .order('inicio')
 
