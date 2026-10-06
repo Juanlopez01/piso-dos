@@ -433,15 +433,10 @@ export default function AdminLiquidacionesPage() {
         setProcesandoPago(false)
     }
 
-    // Fecha para atribuir el egreso al mes que se está liquidando.
-    // Si es el mes actual → ahora (undefined). Si es un mes pasado → día 28 de ese mes.
-    const getFechaRefLiquidacion = (): string | undefined => {
-        const [y, m] = selectedMonth.split('-').map(Number)
-        const now = new Date()
-        const esMesActual = now.getFullYear() === y && (now.getMonth() + 1) === m
-        if (esMesActual) return undefined
-        return `${selectedMonth}-28T12:00:00`
-    }
+    // El egreso del pago se fecha SIEMPRE cuando se paga (ahora), aunque se esté
+    // liquidando un mes pasado. Así el pozo que baja es el del mes en que sale la
+    // plata (criterio de caja), que es como lo controla administración.
+    const getFechaRefLiquidacion = (): string | undefined => undefined
 
     const handleProcesarPago = async (metodo: 'efectivo' | 'transferencia') => {
         if (!modalPago.clase) return
