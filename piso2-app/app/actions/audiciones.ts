@@ -32,7 +32,8 @@ export type Tipo = 'latin' | 'liga'
 export type Participante = {
     id: string; audicion_id: string; numero: number | null
     nombre: string; instagram: string | null; telefono: string | null; mail: string | null
-    fecha_nacimiento: string | null; ciudad_origen: string | null
+    fecha_nacimiento: string | null; ciudad_origen: string | null; altura: string | null
+    manejo_tacos: boolean; sabe_jazz_heels: boolean; sabe_tecnica: boolean; sabe_urbano: boolean
     resultado: string; presente: boolean; notas: string | null; origen: string; created_at: string
 }
 
@@ -107,6 +108,7 @@ export async function getAudicionAction(id: string) {
 type PatchParticipante = {
     numero?: number | null; nombre?: string; instagram?: string | null; telefono?: string | null; mail?: string | null
     fecha_nacimiento?: string | null; ciudad_origen?: string | null; resultado?: string; presente?: boolean; notas?: string | null
+    altura?: string | null; manejo_tacos?: boolean; sabe_jazz_heels?: boolean; sabe_tecnica?: boolean; sabe_urbano?: boolean
 }
 
 export async function agregarParticipanteAction(audicionId: string, data: PatchParticipante) {
@@ -119,6 +121,8 @@ export async function agregarParticipanteAction(audicionId: string, data: PatchP
         audicion_id: audicionId, numero,
         nombre: data.nombre.trim(), instagram: data.instagram?.trim() || null, telefono: data.telefono?.trim() || null,
         mail: data.mail?.trim() || null, fecha_nacimiento: data.fecha_nacimiento || null, ciudad_origen: data.ciudad_origen?.trim() || null,
+        altura: data.altura?.trim() || null,
+        manejo_tacos: !!data.manejo_tacos, sabe_jazz_heels: !!data.sabe_jazz_heels, sabe_tecnica: !!data.sabe_tecnica, sabe_urbano: !!data.sabe_urbano,
         notas: data.notas?.trim() || null, origen: 'recep',
     })
     if (error) return { ok: false as const, error: error.message }
@@ -130,7 +134,7 @@ export async function editarParticipanteAction(id: string, patch: PatchParticipa
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
     const row: any = {}
-    for (const k of ['numero', 'nombre', 'instagram', 'telefono', 'mail', 'fecha_nacimiento', 'ciudad_origen', 'resultado', 'presente', 'notas'] as const) {
+    for (const k of ['numero', 'nombre', 'instagram', 'telefono', 'mail', 'fecha_nacimiento', 'ciudad_origen', 'resultado', 'presente', 'notas', 'altura', 'manejo_tacos', 'sabe_jazz_heels', 'sabe_tecnica', 'sabe_urbano'] as const) {
         if (patch[k] !== undefined) row[k] = typeof patch[k] === 'string' ? (patch[k] as string).trim() || null : patch[k]
     }
     if (row.nombre === null) return { ok: false as const, error: 'El nombre no puede quedar vacío.' }
@@ -158,6 +162,7 @@ export async function getAudicionPublicaAction(id: string, token: string) {
 
 export async function inscribirPublicoAction(id: string, token: string, data: {
     nombre: string; instagram?: string; telefono?: string; mail?: string; fecha_nacimiento?: string; ciudad_origen?: string
+    altura?: string; manejo_tacos?: boolean; sabe_jazz_heels?: boolean; sabe_tecnica?: boolean; sabe_urbano?: boolean
 }) {
     const admin = getAdminClient()
     const { data: a } = await admin.from('audiciones').select('id, token, estado').eq('id', id).maybeSingle()
@@ -169,6 +174,8 @@ export async function inscribirPublicoAction(id: string, token: string, data: {
         audicion_id: id, numero,
         nombre: data.nombre.trim(), instagram: data.instagram?.trim() || null, telefono: data.telefono?.trim() || null,
         mail: data.mail?.trim() || null, fecha_nacimiento: data.fecha_nacimiento || null, ciudad_origen: data.ciudad_origen?.trim() || null,
+        altura: data.altura?.trim() || null,
+        manejo_tacos: !!data.manejo_tacos, sabe_jazz_heels: !!data.sabe_jazz_heels, sabe_tecnica: !!data.sabe_tecnica, sabe_urbano: !!data.sabe_urbano,
         origen: 'publico',
     })
     if (error) return { ok: false as const, error: error.message }

@@ -101,7 +101,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
     const [parts, setParts] = useState<Participante[]>([])
     const [loading, setLoading] = useState(true)
     const [busca, setBusca] = useState('')
-    const [nuevo, setNuevo] = useState({ nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '' })
+    const [nuevo, setNuevo] = useState({ nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '', altura: '' })
     const [guardando, setGuardando] = useState(false)
     const [editId, setEditId] = useState<string | null>(null)
     const [editVals, setEditVals] = useState<any>({})
@@ -118,7 +118,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
         if (!nuevo.nombre.trim()) return toast.error('Poné el nombre')
         setGuardando(true)
         const r = await agregarParticipanteAction(audicionId, nuevo)
-        if (r.ok) { setNuevo({ nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '' }); cargar() } else toast.error((r as any).error || 'Error')
+        if (r.ok) { setNuevo({ nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '', altura: '' }); cargar() } else toast.error((r as any).error || 'Error')
         setGuardando(false)
     }
     const setResultado = async (id: string, resultado: string) => {
@@ -142,6 +142,9 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
             nombre: editVals.nombre, instagram: editVals.instagram, telefono: editVals.telefono, mail: editVals.mail,
             fecha_nacimiento: editVals.fecha_nacimiento || null, ciudad_origen: editVals.ciudad_origen,
             numero: editVals.numero === '' ? null : Number(editVals.numero),
+            altura: editVals.altura, notas: editVals.notas,
+            manejo_tacos: !!editVals.manejo_tacos, sabe_jazz_heels: !!editVals.sabe_jazz_heels,
+            sabe_tecnica: !!editVals.sabe_tecnica, sabe_urbano: !!editVals.sabe_urbano,
         })
         if (r.ok) { setEditId(null); cargar() } else toast.error((r as any).error || 'Error')
     }
@@ -160,8 +163,8 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
         toast.success('Link de inscripción copiado')
     }
     const exportarCSV = () => {
-        const head = ['N°', 'Nombre', 'Instagram', 'Teléfono', 'Mail', 'Nacimiento', 'Edad', 'Ciudad', 'Resultado', 'Presente', 'Notas']
-        const rows = parts.map(p => [p.numero ?? '', p.nombre, p.instagram || '', p.telefono || '', p.mail || '', p.fecha_nacimiento || '', edadDe(p.fecha_nacimiento), p.ciudad_origen || '', resultadoInfo(p.resultado).label, p.presente ? 'Sí' : 'No', (p.notas || '').replace(/\n/g, ' ')])
+        const head = ['N°', 'Nombre', 'Instagram', 'Teléfono', 'Mail', 'Nacimiento', 'Edad', 'Ciudad', 'Altura', 'Tacos', 'Jazz/Heels', 'Técnica', 'Urbano', 'Resultado', 'Presente', 'Notas']
+        const rows = parts.map(p => [p.numero ?? '', p.nombre, p.instagram || '', p.telefono || '', p.mail || '', p.fecha_nacimiento || '', edadDe(p.fecha_nacimiento), p.ciudad_origen || '', p.altura || '', p.manejo_tacos ? 'Sí' : 'No', p.sabe_jazz_heels ? 'Sí' : 'No', p.sabe_tecnica ? 'Sí' : 'No', p.sabe_urbano ? 'Sí' : 'No', resultadoInfo(p.resultado).label, p.presente ? 'Sí' : 'No', (p.notas || '').replace(/\n/g, ' ')])
         const csv = [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
         const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }))
         const a = document.createElement('a'); a.href = url; a.download = `audicion-${audicion.ciudad}.csv`.replace(/[^\w.-]+/g, '_'); a.click(); URL.revokeObjectURL(url)
@@ -205,7 +208,9 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                     <input value={nuevo.mail} onChange={e => setNuevo(v => ({ ...v, mail: e.target.value }))} placeholder="Mail" className="inp" />
                     <input value={nuevo.fecha_nacimiento} onChange={e => setNuevo(v => ({ ...v, fecha_nacimiento: e.target.value }))} type="date" title="Fecha de nacimiento" className="inp" />
                     <input value={nuevo.ciudad_origen} onChange={e => setNuevo(v => ({ ...v, ciudad_origen: e.target.value }))} placeholder="Ciudad de origen" className="inp" />
+                    <input value={nuevo.altura} onChange={e => setNuevo(v => ({ ...v, altura: e.target.value }))} placeholder="Altura (ej: 1.70)" className="inp" />
                 </div>
+                <p className="text-[10px] text-gray-600 mt-1.5">Las aptitudes (tacos, jazz/heels, técnica, urbano) y la anotación se cargan al editar.</p>
                 <div className="flex justify-end mt-2">
                     <button onClick={agregar} disabled={guardando} className="bg-[#D4E655] text-black px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-1.5 disabled:opacity-50">
                         {guardando ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Anotar
@@ -236,7 +241,16 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                                         <input value={editVals.mail ?? ''} onChange={e => setEditVals((v: any) => ({ ...v, mail: e.target.value }))} placeholder="Mail" className="inp" />
                                         <input value={editVals.fecha_nacimiento ?? ''} onChange={e => setEditVals((v: any) => ({ ...v, fecha_nacimiento: e.target.value }))} type="date" className="inp" />
                                         <input value={editVals.ciudad_origen ?? ''} onChange={e => setEditVals((v: any) => ({ ...v, ciudad_origen: e.target.value }))} placeholder="Ciudad" className="inp" />
+                                        <input value={editVals.altura ?? ''} onChange={e => setEditVals((v: any) => ({ ...v, altura: e.target.value }))} placeholder="Altura (ej: 1.70)" className="inp" />
                                     </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {([['manejo_tacos', 'Manejo de tacos'], ['sabe_jazz_heels', 'Jazz / Heels'], ['sabe_tecnica', 'Técnica'], ['sabe_urbano', 'Urbano / comercial']] as const).map(([k, label]) => (
+                                            <button type="button" key={k} onClick={() => setEditVals((v: any) => ({ ...v, [k]: !v[k] }))} className={`flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide rounded-lg px-2.5 py-1.5 border transition-colors ${editVals[k] ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/10 hover:border-white/30'}`}>
+                                                {editVals[k] && <Check size={12} />} {label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <textarea value={editVals.notas ?? ''} onChange={e => setEditVals((v: any) => ({ ...v, notas: e.target.value }))} placeholder="Anotación sobre la persona (impresión, observaciones…)" rows={2} className="inp w-full resize-none" />
                                     <div className="flex justify-end gap-2">
                                         <button onClick={() => setEditId(null)} className="text-[11px] font-bold uppercase text-gray-400 px-3 py-1.5">Cancelar</button>
                                         <button onClick={guardarEdit} className="bg-[#D4E655] text-black px-3 py-1.5 rounded-lg font-bold text-[11px] uppercase flex items-center gap-1"><Check size={13} /> Guardar</button>
@@ -255,14 +269,24 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                                             {p.instagram && <span className="text-[11px] text-gray-500 flex items-center gap-1"><Instagram size={11} /> {p.instagram}</span>}
                                             {p.telefono && <a href={`https://wa.me/${p.telefono.replace(/[^0-9]/g, '')}`} target="_blank" className="text-[11px] text-gray-500 hover:text-green-400 flex items-center gap-1"><MessageCircle size={11} /> {p.telefono}</a>}
                                             {p.ciudad_origen && <span className="text-[11px] text-gray-600">{p.ciudad_origen}</span>}
+                                            {p.altura && <span className="text-[11px] text-gray-600">{p.altura} m</span>}
                                         </div>
+                                        {(p.manejo_tacos || p.sabe_jazz_heels || p.sabe_tecnica || p.sabe_urbano) && (
+                                            <div className="flex flex-wrap gap-1 mt-1.5">
+                                                {p.manejo_tacos && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Tacos</span>}
+                                                {p.sabe_jazz_heels && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Jazz/Heels</span>}
+                                                {p.sabe_tecnica && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Técnica</span>}
+                                                {p.sabe_urbano && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Urbano</span>}
+                                            </div>
+                                        )}
+                                        {p.notas && <p className="text-[11px] text-gray-400 mt-1.5 italic whitespace-pre-line">{p.notas}</p>}
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">
                                         <select value={p.resultado} onChange={e => setResultado(p.id, e.target.value)} className={`text-[10px] font-bold uppercase rounded-lg px-2 py-1.5 border-0 outline-none ${resultadoInfo(p.resultado).cls}`}>
                                             {RESULTADOS.map(r => <option key={r.v} value={r.v} className="bg-[#111] text-white">{r.label}</option>)}
                                         </select>
                                         <button onClick={() => togglePresente(p)} title="Presente" className={`p-1.5 rounded-lg ${p.presente ? 'text-[#D4E655] bg-[#D4E655]/10' : 'text-gray-600 hover:bg-white/5'}`}><Check size={15} /></button>
-                                        <button onClick={() => { setEditId(p.id); setEditVals({ numero: p.numero ?? '', nombre: p.nombre, instagram: p.instagram || '', telefono: p.telefono || '', mail: p.mail || '', fecha_nacimiento: p.fecha_nacimiento || '', ciudad_origen: p.ciudad_origen || '' }) }} className="p-1.5 text-gray-500 hover:text-white rounded-lg"><Pencil size={14} /></button>
+                                        <button onClick={() => { setEditId(p.id); setEditVals({ numero: p.numero ?? '', nombre: p.nombre, instagram: p.instagram || '', telefono: p.telefono || '', mail: p.mail || '', fecha_nacimiento: p.fecha_nacimiento || '', ciudad_origen: p.ciudad_origen || '', altura: p.altura || '', notas: p.notas || '', manejo_tacos: p.manejo_tacos, sabe_jazz_heels: p.sabe_jazz_heels, sabe_tecnica: p.sabe_tecnica, sabe_urbano: p.sabe_urbano }) }} className="p-1.5 text-gray-500 hover:text-white rounded-lg"><Pencil size={14} /></button>
                                         <button onClick={() => borrar(p.id)} className="p-1.5 text-gray-600 hover:text-red-400 rounded-lg"><Trash2 size={14} /></button>
                                     </div>
                                 </div>
