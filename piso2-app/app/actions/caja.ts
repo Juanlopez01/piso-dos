@@ -209,14 +209,27 @@ export async function adminRetirarAction(monto: number, concepto: string) {
         if (!session?.user) throw new Error('No autorizado')
 
         const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
-        if (perfil?.rol !== 'admin') throw new Error('Solo administradores pueden hacer retiros al pozo.')
+        const rol = perfil?.rol
+        if (!['admin', 'recepcion', 'auxiliar'].includes(rol || '')) throw new Error('No tenés permisos para registrar retiros al pozo.')
 
         if (monto <= 0) throw new Error('El monto debe ser mayor a cero.')
 
+        // El admin no tiene turno: el retiro va directo al pozo (turno_id null).
+        // La recep/aux SÍ tiene caja: el efectivo sale de SU turno (así su cierre
+        // cuadra, porque la plata salió físicamente del cajón) y además suma al
+        // pozo de liquidaciones (ese cálculo no mira el turno).
+        let turnoId: string | null = null
+        if (rol === 'recepcion' || rol === 'auxiliar') {
+            const { data: turno } = await supabase.from('caja_turnos')
+                .select('id').eq('usuario_id', session.user.id).eq('estado', 'abierta').maybeSingle()
+            if (!turno) throw new Error('Abrí tu caja para registrar el retiro (el efectivo sale de tu turno).')
+            turnoId = turno.id
+        }
+
         const { error } = await adminSupabase.from('caja_movimientos').insert({
-            turno_id: null,
+            turno_id: turnoId,
             tipo: 'egreso',
-            concepto: concepto?.trim() || 'Retiro Admin → Pozo',
+            concepto: concepto?.trim() || 'Retiro → Pozo',
             monto,
             metodo_pago: 'efectivo',
             origen_referencia: 'retiro_pozo_liq'
