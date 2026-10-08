@@ -439,6 +439,30 @@ const agregarEntrada = async () => {
         if (r.ok) setEvento(ev => ev ? { ...ev, flyer_url: url || null } as any : ev); else toast.error((r as any).error || 'Error')
     }
 
+    // --- edición de datos de la función (nombre, fecha, lugar, descripción) ---
+    const [editInfo, setEditInfo] = useState(false)
+    const [infoVals, setInfoVals] = useState({ nombre: '', fecha: '', lugar: '', descripcion: '' })
+    const [guardandoInfo, setGuardandoInfo] = useState(false)
+    const abrirEditInfo = () => {
+        if (!evento) return
+        setInfoVals({
+            nombre: evento.nombre || '',
+            fecha: (evento.fecha || '').slice(0, 16), // ISO -> valor de datetime-local, sin corrimiento
+            lugar: evento.lugar || '',
+            descripcion: evento.descripcion || '',
+        })
+        setEditInfo(true)
+    }
+    const guardarInfo = async () => {
+        if (!infoVals.nombre.trim()) return toast.error('Poné un nombre a la función.')
+        setGuardandoInfo(true)
+        const patch = { nombre: infoVals.nombre.trim(), fecha: infoVals.fecha || null, lugar: infoVals.lugar.trim(), descripcion: infoVals.descripcion.trim() }
+        const r = await editarEventoAction(eventoId, patch)
+        if (r.ok) { setEvento(ev => ev ? { ...ev, ...patch } as any : ev); setEditInfo(false); toast.success('Función actualizada') }
+        else toast.error((r as any).error || 'Error')
+        setGuardandoInfo(false)
+    }
+
     // --- obras del evento (varias obras en un programa) ---
     const [obras, setObras] = useState<any[]>([])
     const [obrasDisp, setObrasDisp] = useState<any[]>([])
@@ -628,16 +652,38 @@ const agregarEntrada = async () => {
                 </div>
             )}
 
-            <div className="flex items-start justify-between gap-3 mb-4">
-                <div>
-                    <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">{evento.nombre} {evento.cancelado && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 uppercase font-bold">Cancelada</span>}</h1>
-                    <p className="text-[11px] text-gray-500 mt-1 flex items-center gap-3 flex-wrap">
-                        <span className="flex items-center gap-1"><CalendarDays size={12} /> {fmtFecha(evento.fecha)}</span>
-                        {evento.lugar && <span className="flex items-center gap-1"><MapPin size={12} /> {evento.lugar}</span>}
-                    </p>
+            {editInfo && !soloLectura ? (
+                <div className="mb-4 bg-[#0e0e10] border border-white/10 rounded-2xl p-4 space-y-3">
+                    <p className="text-[10px] uppercase tracking-widest text-[#D4E655] font-black">Editar datos de la función</p>
+                    <div><label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Nombre</label><input value={infoVals.nombre} onChange={e => setInfoVals(v => ({ ...v, nombre: e.target.value }))} className="inp w-full" /></div>
+                    <div className="grid md:grid-cols-2 gap-3">
+                        <div><label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Fecha y hora</label><input type="datetime-local" value={infoVals.fecha} onChange={e => setInfoVals(v => ({ ...v, fecha: e.target.value }))} className="inp w-full" /></div>
+                        <div><label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Lugar</label><input value={infoVals.lugar} onChange={e => setInfoVals(v => ({ ...v, lugar: e.target.value }))} placeholder="Teatro / Sede…" className="inp w-full" /></div>
+                    </div>
+                    <div><label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Descripción</label><textarea value={infoVals.descripcion} onChange={e => setInfoVals(v => ({ ...v, descripcion: e.target.value }))} rows={3} className="inp w-full resize-none" /></div>
+                    <div className="flex justify-end gap-2">
+                        <button onClick={() => setEditInfo(false)} className="text-[11px] font-bold uppercase text-gray-400 px-3 py-2">Cancelar</button>
+                        <button onClick={guardarInfo} disabled={guardandoInfo} className="bg-[#D4E655] text-black px-4 py-2 rounded-lg font-bold text-[11px] uppercase flex items-center gap-1.5 disabled:opacity-50">{guardandoInfo ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Guardar</button>
+                    </div>
                 </div>
-                {!soloLectura && <button onClick={borrarEvento} className="text-gray-600 hover:text-red-400 p-2"><Trash2 size={16} /></button>}
-            </div>
+            ) : (
+                <div className="flex items-start justify-between gap-3 mb-4">
+                    <div>
+                        <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">{evento.nombre} {evento.cancelado && <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 uppercase font-bold">Cancelada</span>}</h1>
+                        <p className="text-[11px] text-gray-500 mt-1 flex items-center gap-3 flex-wrap">
+                            <span className="flex items-center gap-1"><CalendarDays size={12} /> {fmtFecha(evento.fecha)}</span>
+                            {evento.lugar && <span className="flex items-center gap-1"><MapPin size={12} /> {evento.lugar}</span>}
+                        </p>
+                        {evento.descripcion && <p className="text-[12px] text-gray-400 mt-2 whitespace-pre-line max-w-xl">{evento.descripcion}</p>}
+                    </div>
+                    {!soloLectura && (
+                        <div className="flex items-center gap-1 shrink-0">
+                            <button onClick={abrirEditInfo} title="Editar datos de la función" className="text-gray-500 hover:text-white p-2"><Pencil size={16} /></button>
+                            <button onClick={borrarEvento} title="Borrar función" className="text-gray-600 hover:text-red-400 p-2"><Trash2 size={16} /></button>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {evento.cancelado && (
                 <div className="mb-4 rounded-xl bg-red-500/10 border border-red-500/30 p-3 text-[12px] text-red-300 flex items-center gap-2">
