@@ -143,8 +143,8 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
             fecha_nacimiento: editVals.fecha_nacimiento || null, ciudad_origen: editVals.ciudad_origen,
             numero: editVals.numero === '' ? null : Number(editVals.numero),
             altura: editVals.altura, notas: editVals.notas,
-            manejo_tacos: !!editVals.manejo_tacos, sabe_jazz_heels: !!editVals.sabe_jazz_heels,
-            sabe_tecnica: !!editVals.sabe_tecnica, sabe_urbano: !!editVals.sabe_urbano,
+            manejo_tacos: Number(editVals.manejo_tacos) || 0, sabe_jazz_heels: Number(editVals.sabe_jazz_heels) || 0,
+            sabe_tecnica: Number(editVals.sabe_tecnica) || 0, sabe_urbano: Number(editVals.sabe_urbano) || 0,
         })
         if (r.ok) { setEditId(null); cargar() } else toast.error((r as any).error || 'Error')
     }
@@ -164,7 +164,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
     }
     const exportarCSV = () => {
         const head = ['N°', 'Nombre', 'Instagram', 'Teléfono', 'Mail', 'Nacimiento', 'Edad', 'Ciudad', 'Altura', 'Tacos', 'Jazz/Heels', 'Técnica', 'Urbano', 'Resultado', 'Presente', 'Notas']
-        const rows = parts.map(p => [p.numero ?? '', p.nombre, p.instagram || '', p.telefono || '', p.mail || '', p.fecha_nacimiento || '', edadDe(p.fecha_nacimiento), p.ciudad_origen || '', p.altura || '', p.manejo_tacos ? 'Sí' : 'No', p.sabe_jazz_heels ? 'Sí' : 'No', p.sabe_tecnica ? 'Sí' : 'No', p.sabe_urbano ? 'Sí' : 'No', resultadoInfo(p.resultado).label, p.presente ? 'Sí' : 'No', (p.notas || '').replace(/\n/g, ' ')])
+        const rows = parts.map(p => [p.numero ?? '', p.nombre, p.instagram || '', p.telefono || '', p.mail || '', p.fecha_nacimiento || '', edadDe(p.fecha_nacimiento), p.ciudad_origen || '', p.altura || '', p.manejo_tacos || '', p.sabe_jazz_heels || '', p.sabe_tecnica || '', p.sabe_urbano || '', resultadoInfo(p.resultado).label, p.presente ? 'Sí' : 'No', (p.notas || '').replace(/\n/g, ' ')])
         const csv = [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
         const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }))
         const a = document.createElement('a'); a.href = url; a.download = `audicion-${audicion.ciudad}.csv`.replace(/[^\w.-]+/g, '_'); a.click(); URL.revokeObjectURL(url)
@@ -243,11 +243,15 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                                         <input value={editVals.ciudad_origen ?? ''} onChange={e => setEditVals((v: any) => ({ ...v, ciudad_origen: e.target.value }))} placeholder="Ciudad" className="inp" />
                                         <input value={editVals.altura ?? ''} onChange={e => setEditVals((v: any) => ({ ...v, altura: e.target.value }))} placeholder="Altura (ej: 1.70)" className="inp" />
                                     </div>
-                                    <div className="flex flex-wrap gap-2">
+                                    <div className="grid grid-cols-2 gap-2">
                                         {([['manejo_tacos', 'Manejo de tacos'], ['sabe_jazz_heels', 'Jazz / Heels'], ['sabe_tecnica', 'Técnica'], ['sabe_urbano', 'Urbano / comercial']] as const).map(([k, label]) => (
-                                            <button type="button" key={k} onClick={() => setEditVals((v: any) => ({ ...v, [k]: !v[k] }))} className={`flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide rounded-lg px-2.5 py-1.5 border transition-colors ${editVals[k] ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/10 hover:border-white/30'}`}>
-                                                {editVals[k] && <Check size={12} />} {label}
-                                            </button>
+                                            <div key={k} className="flex items-center justify-between gap-2 bg-[#111] border border-white/10 rounded-lg px-2.5 py-1.5">
+                                                <span className="text-[11px] font-bold uppercase tracking-wide text-gray-300">{label}</span>
+                                                <select value={editVals[k] ?? 0} onChange={e => setEditVals((v: any) => ({ ...v, [k]: Number(e.target.value) }))} className="bg-[#1a1a1a] border border-white/10 rounded px-1.5 py-1 text-xs font-bold text-white outline-none focus:border-[#D4E655]">
+                                                    <option value={0}>–</option>
+                                                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n}</option>)}
+                                                </select>
+                                            </div>
                                         ))}
                                     </div>
                                     <textarea value={editVals.notas ?? ''} onChange={e => setEditVals((v: any) => ({ ...v, notas: e.target.value }))} placeholder="Anotación sobre la persona (impresión, observaciones…)" rows={2} className="inp w-full resize-none" />
@@ -271,12 +275,12 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                                             {p.ciudad_origen && <span className="text-[11px] text-gray-600">{p.ciudad_origen}</span>}
                                             {p.altura && <span className="text-[11px] text-gray-600">{p.altura} m</span>}
                                         </div>
-                                        {(p.manejo_tacos || p.sabe_jazz_heels || p.sabe_tecnica || p.sabe_urbano) && (
+                                        {(p.manejo_tacos > 0 || p.sabe_jazz_heels > 0 || p.sabe_tecnica > 0 || p.sabe_urbano > 0) && (
                                             <div className="flex flex-wrap gap-1 mt-1.5">
-                                                {p.manejo_tacos && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Tacos</span>}
-                                                {p.sabe_jazz_heels && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Jazz/Heels</span>}
-                                                {p.sabe_tecnica && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Técnica</span>}
-                                                {p.sabe_urbano && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Urbano</span>}
+                                                {p.manejo_tacos > 0 && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Tacos {p.manejo_tacos}/10</span>}
+                                                {p.sabe_jazz_heels > 0 && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Jazz/Heels {p.sabe_jazz_heels}/10</span>}
+                                                {p.sabe_tecnica > 0 && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Técnica {p.sabe_tecnica}/10</span>}
+                                                {p.sabe_urbano > 0 && <span className="text-[9px] font-bold uppercase bg-[#D4E655]/15 text-[#D4E655] rounded-full px-2 py-0.5">Urbano {p.sabe_urbano}/10</span>}
                                             </div>
                                         )}
                                         {p.notas && <p className="text-[11px] text-gray-400 mt-1.5 italic whitespace-pre-line">{p.notas}</p>}

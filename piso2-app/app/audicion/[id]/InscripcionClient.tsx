@@ -7,13 +7,13 @@ import { inscribirPublicoAction } from '@/app/actions/audiciones'
 export default function InscripcionClient({ id, token }: { id: string; token: string }) {
     const [f, setF] = useState({
         nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '', altura: '',
-        manejo_tacos: false, sabe_jazz_heels: false, sabe_tecnica: false, sabe_urbano: false,
+        manejo_tacos: 0, sabe_jazz_heels: 0, sabe_tecnica: 0, sabe_urbano: 0,
     })
     const [enviando, setEnviando] = useState(false)
     const [hecho, setHecho] = useState<number | null>(null)
     const [error, setError] = useState('')
     const set = (k: string, v: string) => setF(prev => ({ ...prev, [k]: v }))
-    const toggle = (k: string) => setF(prev => ({ ...prev, [k]: !(prev as any)[k] }))
+    const setNum = (k: string, v: number) => setF(prev => ({ ...prev, [k]: v }))
 
     const enviar = async () => {
         if (!f.nombre.trim()) { setError('Poné tu nombre y apellido.'); return }
@@ -49,7 +49,7 @@ export default function InscripcionClient({ id, token }: { id: string; token: st
             <div><label className={lbl}>Altura</label><input className={inp} value={f.altura} onChange={e => set('altura', e.target.value)} placeholder="Ej: 1.70" /></div>
 
             <div>
-                <label className={lbl}>¿Con qué contás?</label>
+                <label className={lbl}>Puntuá tu nivel (0 = sin experiencia, 10 = experta/o)</label>
                 <div className="grid grid-cols-1 gap-2">
                     {([
                         ['manejo_tacos', 'Manejo de tacos'],
@@ -57,10 +57,13 @@ export default function InscripcionClient({ id, token }: { id: string; token: st
                         ['sabe_tecnica', 'Técnica'],
                         ['sabe_urbano', 'Danzas urbanas / comerciales'],
                     ] as const).map(([k, label]) => (
-                        <button type="button" key={k} onClick={() => toggle(k)} className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm font-medium text-left transition-colors ${(f as any)[k] ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-300'}`}>
-                            <span className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${(f as any)[k] ? 'bg-white border-white' : 'border-neutral-400'}`}>{(f as any)[k] && <Check size={14} className="text-black" strokeWidth={3} />}</span>
-                            {label}
-                        </button>
+                        <div key={k} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5">
+                            <span className="text-sm font-medium text-neutral-700">{label}</span>
+                            <select value={(f as any)[k]} onChange={e => setNum(k, Number(e.target.value))} className="bg-neutral-100 border border-neutral-300 rounded-lg px-2.5 py-1.5 text-sm font-bold outline-none focus:border-neutral-900">
+                                <option value={0}>–</option>
+                                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                        </div>
                     ))}
                 </div>
             </div>
