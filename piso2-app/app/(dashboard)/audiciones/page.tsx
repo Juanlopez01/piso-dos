@@ -23,8 +23,8 @@ const resultadoInfo = (v: string) => RESULTADOS.find(r => r.v === v) || RESULTAD
 // A qué aplica el participante: La Liga (beca/formación), Casting latino, o las dos.
 const APLICA: { v: string; label: string; cls: string }[] = [
     { v: 'ambas', label: 'Las dos', cls: 'bg-[#D4E655]/20 text-[#D4E655]' },
-    { v: 'la_liga', label: 'La Liga', cls: 'bg-emerald-500/20 text-emerald-400' },
-    { v: 'casting', label: 'Casting', cls: 'bg-purple-500/20 text-purple-300' },
+    { v: 'la_liga', label: 'Beca Formación', cls: 'bg-emerald-500/20 text-emerald-400' },
+    { v: 'casting', label: 'Casting Talent', cls: 'bg-purple-500/20 text-purple-300' },
 ]
 const aplicaInfo = (v: string) => APLICA.find(a => a.v === v) || APLICA[0]
 const fmtFecha = (iso: string | null) => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : 'Sin fecha'
@@ -238,7 +238,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
 
             {/* Carpetas: filtra por a qué aplican (los de "las dos" aparecen en ambas) */}
             <div className="flex items-center gap-2 mb-3">
-                {([['todas', 'Todos'], ['la_liga', 'La Liga'], ['casting', 'Casting']] as const).map(([v, label]) => (
+                {([['todas', 'Todos'], ['la_liga', 'Beca Formación'], ['casting', 'Casting Talent']] as const).map(([v, label]) => (
                     <button key={v} onClick={() => setFiltroAplica(v)} className={`text-[11px] font-bold uppercase tracking-wide rounded-lg px-3 py-1.5 border transition-colors ${filtroAplica === v ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/10 hover:border-white/30'}`}>{label}</button>
                 ))}
                 <span className="text-[11px] text-gray-600 ml-1">{visibles.length}</span>
