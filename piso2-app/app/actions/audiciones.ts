@@ -33,10 +33,15 @@ export type Participante = {
     id: string; audicion_id: string; numero: number | null
     nombre: string; instagram: string | null; telefono: string | null; mail: string | null
     fecha_nacimiento: string | null; ciudad_origen: string | null; altura: string | null
+    aplica_a: string // 'la_liga' | 'casting' | 'ambas'
     // Puntajes 0-10 (0 = sin puntuar).
     manejo_tacos: number; sabe_jazz_heels: number; sabe_tecnica: number; sabe_urbano: number
     resultado: string; presente: boolean; notas: string | null; origen: string; created_at: string
 }
+
+// A qué aplica el participante (Beca/Formación en La Liga, Casting latino, o las dos).
+const APLICA_OK = ['la_liga', 'casting', 'ambas']
+const aplicaDe = (v: any) => APLICA_OK.includes(v) ? v : 'ambas'
 
 // Próximo número de la audición (orden de llegada).
 async function siguienteNumero(admin: any, audicionId: string): Promise<number> {
@@ -110,6 +115,7 @@ type PatchParticipante = {
     numero?: number | null; nombre?: string; instagram?: string | null; telefono?: string | null; mail?: string | null
     fecha_nacimiento?: string | null; ciudad_origen?: string | null; resultado?: string; presente?: boolean; notas?: string | null
     altura?: string | null; manejo_tacos?: number; sabe_jazz_heels?: number; sabe_tecnica?: number; sabe_urbano?: number
+    aplica_a?: string
 }
 
 // Puntaje válido 0-10 (0 = sin puntuar).
@@ -125,7 +131,7 @@ export async function agregarParticipanteAction(audicionId: string, data: PatchP
         audicion_id: audicionId, numero,
         nombre: data.nombre.trim(), instagram: data.instagram?.trim() || null, telefono: data.telefono?.trim() || null,
         mail: data.mail?.trim() || null, fecha_nacimiento: data.fecha_nacimiento || null, ciudad_origen: data.ciudad_origen?.trim() || null,
-        altura: data.altura?.trim() || null,
+        altura: data.altura?.trim() || null, aplica_a: aplicaDe(data.aplica_a),
         manejo_tacos: punt(data.manejo_tacos), sabe_jazz_heels: punt(data.sabe_jazz_heels), sabe_tecnica: punt(data.sabe_tecnica), sabe_urbano: punt(data.sabe_urbano),
         notas: data.notas?.trim() || null, origen: 'recep',
     })
@@ -139,9 +145,10 @@ export async function editarParticipanteAction(id: string, patch: PatchParticipa
     const admin = getAdminClient()
     const row: any = {}
     const PUNTAJES = ['manejo_tacos', 'sabe_jazz_heels', 'sabe_tecnica', 'sabe_urbano']
-    for (const k of ['numero', 'nombre', 'instagram', 'telefono', 'mail', 'fecha_nacimiento', 'ciudad_origen', 'resultado', 'presente', 'notas', 'altura', 'manejo_tacos', 'sabe_jazz_heels', 'sabe_tecnica', 'sabe_urbano'] as const) {
+    for (const k of ['numero', 'nombre', 'instagram', 'telefono', 'mail', 'fecha_nacimiento', 'ciudad_origen', 'resultado', 'presente', 'notas', 'altura', 'manejo_tacos', 'sabe_jazz_heels', 'sabe_tecnica', 'sabe_urbano', 'aplica_a'] as const) {
         if (patch[k] === undefined) continue
         if (PUNTAJES.includes(k)) row[k] = punt(patch[k])
+        else if (k === 'aplica_a') row[k] = aplicaDe(patch[k])
         else row[k] = typeof patch[k] === 'string' ? (patch[k] as string).trim() || null : patch[k]
     }
     if (row.nombre === null) return { ok: false as const, error: 'El nombre no puede quedar vacío.' }
@@ -169,7 +176,7 @@ export async function getAudicionPublicaAction(id: string, token: string) {
 
 export async function inscribirPublicoAction(id: string, token: string, data: {
     nombre: string; instagram?: string; telefono?: string; mail?: string; fecha_nacimiento?: string; ciudad_origen?: string
-    altura?: string; manejo_tacos?: number; sabe_jazz_heels?: number; sabe_tecnica?: number; sabe_urbano?: number
+    altura?: string; manejo_tacos?: number; sabe_jazz_heels?: number; sabe_tecnica?: number; sabe_urbano?: number; aplica_a?: string
 }) {
     const admin = getAdminClient()
     const { data: a } = await admin.from('audiciones').select('id, token, estado').eq('id', id).maybeSingle()
@@ -181,7 +188,7 @@ export async function inscribirPublicoAction(id: string, token: string, data: {
         audicion_id: id, numero,
         nombre: data.nombre.trim(), instagram: data.instagram?.trim() || null, telefono: data.telefono?.trim() || null,
         mail: data.mail?.trim() || null, fecha_nacimiento: data.fecha_nacimiento || null, ciudad_origen: data.ciudad_origen?.trim() || null,
-        altura: data.altura?.trim() || null,
+        altura: data.altura?.trim() || null, aplica_a: aplicaDe(data.aplica_a),
         manejo_tacos: punt(data.manejo_tacos), sabe_jazz_heels: punt(data.sabe_jazz_heels), sabe_tecnica: punt(data.sabe_tecnica), sabe_urbano: punt(data.sabe_urbano),
         origen: 'publico',
     })

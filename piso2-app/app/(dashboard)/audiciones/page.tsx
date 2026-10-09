@@ -20,6 +20,13 @@ const RESULTADOS: { v: string; label: string; cls: string }[] = [
     { v: 'no', label: 'No', cls: 'bg-rose-500/15 text-rose-400' },
 ]
 const resultadoInfo = (v: string) => RESULTADOS.find(r => r.v === v) || RESULTADOS[0]
+// A qué aplica el participante: La Liga (beca/formación), Casting latino, o las dos.
+const APLICA: { v: string; label: string; cls: string }[] = [
+    { v: 'ambas', label: 'Las dos', cls: 'bg-[#D4E655]/20 text-[#D4E655]' },
+    { v: 'la_liga', label: 'La Liga', cls: 'bg-emerald-500/20 text-emerald-400' },
+    { v: 'casting', label: 'Casting', cls: 'bg-purple-500/20 text-purple-300' },
+]
+const aplicaInfo = (v: string) => APLICA.find(a => a.v === v) || APLICA[0]
 const fmtFecha = (iso: string | null) => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : 'Sin fecha'
 const edadDe = (nac: string | null) => { if (!nac) return ''; const d = new Date(nac + 'T12:00:00'); const h = new Date(); let e = h.getFullYear() - d.getFullYear(); if (h.getMonth() < d.getMonth() || (h.getMonth() === d.getMonth() && h.getDate() < d.getDate())) e--; return e >= 0 && e < 120 ? `${e}` : '' }
 
@@ -101,7 +108,8 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
     const [parts, setParts] = useState<Participante[]>([])
     const [loading, setLoading] = useState(true)
     const [busca, setBusca] = useState('')
-    const [nuevo, setNuevo] = useState({ nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '', altura: '' })
+    const [filtroAplica, setFiltroAplica] = useState<'todas' | 'la_liga' | 'casting'>('todas')
+    const [nuevo, setNuevo] = useState({ nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '', altura: '', aplica_a: 'ambas' })
     const [guardando, setGuardando] = useState(false)
     const [editId, setEditId] = useState<string | null>(null)
     const [editVals, setEditVals] = useState<any>({})
@@ -118,7 +126,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
         if (!nuevo.nombre.trim()) return toast.error('Poné el nombre')
         setGuardando(true)
         const r = await agregarParticipanteAction(audicionId, nuevo)
-        if (r.ok) { setNuevo({ nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '', altura: '' }); cargar() } else toast.error((r as any).error || 'Error')
+        if (r.ok) { setNuevo({ nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '', altura: '', aplica_a: 'ambas' }); cargar() } else toast.error((r as any).error || 'Error')
         setGuardando(false)
     }
     const setResultado = async (id: string, resultado: string) => {
@@ -142,7 +150,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
             nombre: editVals.nombre, instagram: editVals.instagram, telefono: editVals.telefono, mail: editVals.mail,
             fecha_nacimiento: editVals.fecha_nacimiento || null, ciudad_origen: editVals.ciudad_origen,
             numero: editVals.numero === '' ? null : Number(editVals.numero),
-            altura: editVals.altura, notas: editVals.notas,
+            altura: editVals.altura, notas: editVals.notas, aplica_a: editVals.aplica_a,
             manejo_tacos: Number(editVals.manejo_tacos) || 0, sabe_jazz_heels: Number(editVals.sabe_jazz_heels) || 0,
             sabe_tecnica: Number(editVals.sabe_tecnica) || 0, sabe_urbano: Number(editVals.sabe_urbano) || 0,
         })
@@ -163,8 +171,8 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
         toast.success('Link de inscripción copiado')
     }
     const exportarCSV = () => {
-        const head = ['N°', 'Nombre', 'Instagram', 'Teléfono', 'Mail', 'Nacimiento', 'Edad', 'Ciudad', 'Altura', 'Tacos', 'Jazz/Heels', 'Técnica', 'Urbano', 'Resultado', 'Presente', 'Notas']
-        const rows = parts.map(p => [p.numero ?? '', p.nombre, p.instagram || '', p.telefono || '', p.mail || '', p.fecha_nacimiento || '', edadDe(p.fecha_nacimiento), p.ciudad_origen || '', p.altura || '', p.manejo_tacos || '', p.sabe_jazz_heels || '', p.sabe_tecnica || '', p.sabe_urbano || '', resultadoInfo(p.resultado).label, p.presente ? 'Sí' : 'No', (p.notas || '').replace(/\n/g, ' ')])
+        const head = ['N°', 'Nombre', 'Aplica a', 'Instagram', 'Teléfono', 'Mail', 'Nacimiento', 'Edad', 'Ciudad', 'Altura', 'Tacos', 'Jazz/Heels', 'Técnica', 'Urbano', 'Resultado', 'Presente', 'Notas']
+        const rows = visibles.map(p => [p.numero ?? '', p.nombre, aplicaInfo(p.aplica_a).label, p.instagram || '', p.telefono || '', p.mail || '', p.fecha_nacimiento || '', edadDe(p.fecha_nacimiento), p.ciudad_origen || '', p.altura || '', p.manejo_tacos || '', p.sabe_jazz_heels || '', p.sabe_tecnica || '', p.sabe_urbano || '', resultadoInfo(p.resultado).label, p.presente ? 'Sí' : 'No', (p.notas || '').replace(/\n/g, ' ')])
         const csv = [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
         const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }))
         const a = document.createElement('a'); a.href = url; a.download = `audicion-${audicion.ciudad}.csv`.replace(/[^\w.-]+/g, '_'); a.click(); URL.revokeObjectURL(url)
@@ -172,9 +180,13 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
 
     const visibles = useMemo(() => {
         const q = busca.trim().toLowerCase()
-        if (!q) return parts
-        return parts.filter(p => [p.nombre, p.instagram, p.telefono, p.ciudad_origen, String(p.numero)].filter(Boolean).some(x => String(x).toLowerCase().includes(q)))
-    }, [parts, busca])
+        let base = parts
+        // "La Liga" y "Casting" muestran a los de esa opción + los que eligieron "las dos".
+        if (filtroAplica === 'la_liga') base = base.filter(p => p.aplica_a === 'la_liga' || p.aplica_a === 'ambas')
+        else if (filtroAplica === 'casting') base = base.filter(p => p.aplica_a === 'casting' || p.aplica_a === 'ambas')
+        if (!q) return base
+        return base.filter(p => [p.nombre, p.instagram, p.telefono, p.ciudad_origen, String(p.numero)].filter(Boolean).some(x => String(x).toLowerCase().includes(q)))
+    }, [parts, busca, filtroAplica])
 
     if (loading) return <div className="min-h-[50vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
     if (!audicion) return null
@@ -210,12 +222,26 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                     <input value={nuevo.ciudad_origen} onChange={e => setNuevo(v => ({ ...v, ciudad_origen: e.target.value }))} placeholder="Ciudad de origen" className="inp" />
                     <input value={nuevo.altura} onChange={e => setNuevo(v => ({ ...v, altura: e.target.value }))} placeholder="Altura (ej: 1.70)" className="inp" />
                 </div>
+                <div className="flex items-center gap-2 mt-2">
+                    <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Aplica a:</span>
+                    {APLICA.map(a => (
+                        <button type="button" key={a.v} onClick={() => setNuevo(v => ({ ...v, aplica_a: a.v }))} className={`text-[11px] font-bold uppercase tracking-wide rounded-lg px-2.5 py-1.5 border transition-colors ${nuevo.aplica_a === a.v ? a.cls + ' border-transparent' : 'bg-[#111] text-gray-400 border-white/10 hover:border-white/30'}`}>{a.label}</button>
+                    ))}
+                </div>
                 <p className="text-[10px] text-gray-600 mt-1.5">Las aptitudes (tacos, jazz/heels, técnica, urbano) y la anotación se cargan al editar.</p>
                 <div className="flex justify-end mt-2">
                     <button onClick={agregar} disabled={guardando} className="bg-[#D4E655] text-black px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-1.5 disabled:opacity-50">
                         {guardando ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Anotar
                     </button>
                 </div>
+            </div>
+
+            {/* Carpetas: filtra por a qué aplican (los de "las dos" aparecen en ambas) */}
+            <div className="flex items-center gap-2 mb-3">
+                {([['todas', 'Todos'], ['la_liga', 'La Liga'], ['casting', 'Casting']] as const).map(([v, label]) => (
+                    <button key={v} onClick={() => setFiltroAplica(v)} className={`text-[11px] font-bold uppercase tracking-wide rounded-lg px-3 py-1.5 border transition-colors ${filtroAplica === v ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/10 hover:border-white/30'}`}>{label}</button>
+                ))}
+                <span className="text-[11px] text-gray-600 ml-1">{visibles.length}</span>
             </div>
 
             {/* Buscador */}
@@ -243,6 +269,12 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                                         <input value={editVals.ciudad_origen ?? ''} onChange={e => setEditVals((v: any) => ({ ...v, ciudad_origen: e.target.value }))} placeholder="Ciudad" className="inp" />
                                         <input value={editVals.altura ?? ''} onChange={e => setEditVals((v: any) => ({ ...v, altura: e.target.value }))} placeholder="Altura (ej: 1.70)" className="inp" />
                                     </div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Aplica a:</span>
+                                        {APLICA.map(a => (
+                                            <button type="button" key={a.v} onClick={() => setEditVals((v: any) => ({ ...v, aplica_a: a.v }))} className={`text-[11px] font-bold uppercase tracking-wide rounded-lg px-2.5 py-1.5 border transition-colors ${(editVals.aplica_a || 'ambas') === a.v ? a.cls + ' border-transparent' : 'bg-[#111] text-gray-400 border-white/10 hover:border-white/30'}`}>{a.label}</button>
+                                        ))}
+                                    </div>
                                     <div className="grid grid-cols-2 gap-2">
                                         {([['manejo_tacos', 'Manejo de tacos'], ['sabe_jazz_heels', 'Jazz / Heels'], ['sabe_tecnica', 'Técnica'], ['sabe_urbano', 'Urbano / comercial']] as const).map(([k, label]) => (
                                             <div key={k} className="flex items-center justify-between gap-2 bg-[#111] border border-white/10 rounded-lg px-2.5 py-1.5">
@@ -266,6 +298,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <p className="font-bold text-sm truncate">{p.nombre}</p>
+                                            <span className={`text-[8px] px-1.5 py-0.5 rounded-full uppercase font-black ${aplicaInfo(p.aplica_a).cls}`}>{aplicaInfo(p.aplica_a).label}</span>
                                             {edadDe(p.fecha_nacimiento) && <span className="text-[10px] text-gray-500">{edadDe(p.fecha_nacimiento)} años</span>}
                                             {p.origen === 'publico' && <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-white/5 text-gray-500 uppercase font-bold">web</span>}
                                         </div>
@@ -290,7 +323,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                                             {RESULTADOS.map(r => <option key={r.v} value={r.v} className="bg-[#111] text-white">{r.label}</option>)}
                                         </select>
                                         <button onClick={() => togglePresente(p)} title="Presente" className={`p-1.5 rounded-lg ${p.presente ? 'text-[#D4E655] bg-[#D4E655]/10' : 'text-gray-600 hover:bg-white/5'}`}><Check size={15} /></button>
-                                        <button onClick={() => { setEditId(p.id); setEditVals({ numero: p.numero ?? '', nombre: p.nombre, instagram: p.instagram || '', telefono: p.telefono || '', mail: p.mail || '', fecha_nacimiento: p.fecha_nacimiento || '', ciudad_origen: p.ciudad_origen || '', altura: p.altura || '', notas: p.notas || '', manejo_tacos: p.manejo_tacos, sabe_jazz_heels: p.sabe_jazz_heels, sabe_tecnica: p.sabe_tecnica, sabe_urbano: p.sabe_urbano }) }} className="p-1.5 text-gray-500 hover:text-white rounded-lg"><Pencil size={14} /></button>
+                                        <button onClick={() => { setEditId(p.id); setEditVals({ numero: p.numero ?? '', nombre: p.nombre, instagram: p.instagram || '', telefono: p.telefono || '', mail: p.mail || '', fecha_nacimiento: p.fecha_nacimiento || '', ciudad_origen: p.ciudad_origen || '', altura: p.altura || '', notas: p.notas || '', aplica_a: p.aplica_a || 'ambas', manejo_tacos: p.manejo_tacos, sabe_jazz_heels: p.sabe_jazz_heels, sabe_tecnica: p.sabe_tecnica, sabe_urbano: p.sabe_urbano }) }} className="p-1.5 text-gray-500 hover:text-white rounded-lg"><Pencil size={14} /></button>
                                         <button onClick={() => borrar(p.id)} className="p-1.5 text-gray-600 hover:text-red-400 rounded-lg"><Trash2 size={14} /></button>
                                     </div>
                                 </div>

@@ -7,6 +7,7 @@ import { inscribirPublicoAction } from '@/app/actions/audiciones'
 export default function InscripcionClient({ id, token }: { id: string; token: string }) {
     const [f, setF] = useState({
         nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '', altura: '',
+        aplica_a: 'ambas',
         manejo_tacos: 0, sabe_jazz_heels: 0, sabe_tecnica: 0, sabe_urbano: 0,
     })
     const [enviando, setEnviando] = useState(false)
@@ -39,6 +40,25 @@ export default function InscripcionClient({ id, token }: { id: string; token: st
     return (
         <div className="space-y-3">
             <div><label className={lbl}>Nombre y apellido *</label><input className={inp} value={f.nombre} onChange={e => set('nombre', e.target.value)} placeholder="Tu nombre completo" /></div>
+
+            <div>
+                <label className={lbl}>¿A qué querés aplicar?</label>
+                <div className="grid grid-cols-1 gap-2">
+                    {([
+                        ['ambas', 'A las dos', 'Beca de formación (La Liga) + Casting latino'],
+                        ['la_liga', 'La Liga', 'Beca de formación'],
+                        ['casting', 'Casting latino', 'Elenco / casting'],
+                    ] as const).map(([k, label, sub]) => (
+                        <button type="button" key={k} onClick={() => set('aplica_a', k)} className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors ${f.aplica_a === k ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-300'}`}>
+                            <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${f.aplica_a === k ? 'border-[#D4E655]' : 'border-neutral-400'}`}>{f.aplica_a === k && <span className="w-2.5 h-2.5 rounded-full bg-[#D4E655]" />}</span>
+                            <span className="min-w-0">
+                                <span className="block text-sm font-bold">{label}</span>
+                                <span className={`block text-[11px] ${f.aplica_a === k ? 'text-neutral-300' : 'text-neutral-500'}`}>{sub}</span>
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            </div>
             <div><label className={lbl}>Instagram (que esté abierto / público, no privado)</label><input className={inp} value={f.instagram} onChange={e => set('instagram', e.target.value)} placeholder="@usuario" /></div>
             <div><label className={lbl}>Teléfono / WhatsApp</label><input className={inp} value={f.telefono} onChange={e => set('telefono', e.target.value)} placeholder="Cód. área + número" inputMode="tel" /></div>
             <div><label className={lbl}>Mail</label><input className={inp} value={f.mail} onChange={e => set('mail', e.target.value)} placeholder="tucorreo@mail.com" inputMode="email" /></div>
