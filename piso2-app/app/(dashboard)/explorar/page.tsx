@@ -78,8 +78,8 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
     const { data: clasesData } = await supabase
         .from('clases')
         .select(`
-            id, nombre, inicio, fin, tipo_clase, cupo_maximo, estado, imagen_url, ritmo_id, es_combinable, compania_id, liga_nivel,
-            profesor:profiles!clases_profesor_id_fkey(nombre_completo),
+            id, nombre, inicio, fin, tipo_clase, cupo_maximo, estado, imagen_url, ritmo_id, es_combinable, compania_id, liga_nivel, es_la_liga,
+            profesor:profiles!clases_profesor_id_fkey(nombre_completo, foto_url),
             sala:salas(nombre, sede:sedes(nombre)),
             inscripciones(user_id)
         `)
@@ -90,8 +90,16 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
     const agrupador: Record<string, ClaseAgrupada> = {}
     if (clasesData) {
         clasesData.forEach((c: any) => {
-            const nombreProfe = Array.isArray(c.profesor) ? c.profesor[0]?.nombre_completo : c.profesor?.nombre_completo || 'Staff'
-            const key = `${c.nombre}-${nombreProfe}-${c.tipo_clase}`
+            const profe = Array.isArray(c.profesor) ? c.profesor[0] : c.profesor
+            const nombreProfe = profe?.nombre_completo || 'Staff'
+            const profeFoto = profe?.foto_url || null
+            // La Liga SIEMPRE va en "Formación" (aunque la clase esté cargada como
+            // Regular), y usa la foto del profe. El resto usa la imagen de la clase,
+            // y si no tiene, cae a la foto del profe (así ninguna queda sin foto).
+            const esLiga = !!c.es_la_liga
+            const tipoEfectivo = esLiga ? 'Formacion' : c.tipo_clase
+            const imagen = esLiga ? (profeFoto || c.imagen_url || null) : (c.imagen_url || profeFoto || null)
+            const key = `${c.nombre}-${nombreProfe}-${tipoEfectivo}`
             const inscritos = c.inscripciones || []
             const instancia: ClaseInstancia = {
                 id: c.id, inicio: c.inicio, fin: c.fin, cupo_maximo: c.cupo_maximo,
@@ -102,8 +110,8 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
             }
             if (!agrupador[key]) {
                 agrupador[key] = {
-                    key_grupo: key, nombre: c.nombre, tipo_clase: c.tipo_clase,
-                    imagen_url: c.imagen_url, ritmo_id: c.ritmo_id, compania_id: c.compania_id, liga_nivel: c.liga_nivel,
+                    key_grupo: key, nombre: c.nombre, tipo_clase: tipoEfectivo,
+                    imagen_url: imagen, ritmo_id: c.ritmo_id, compania_id: c.compania_id, liga_nivel: c.liga_nivel,
                     profesor: { nombre_completo: nombreProfe }, instancias: [],
                     es_combinable: c.es_combinable ?? true
                 }
