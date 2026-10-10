@@ -21,7 +21,7 @@ export default function EscenaClient({ carteleraIniciales, convocatoriasIniciale
     const [cartelera] = useState<any[] | null>(carteleraIniciales)
     const [convocatorias] = useState<any[]>(convocatoriasIniciales)
 
-    const fmtFechaC = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: 'long' }) : 'Fecha a confirmar'
+    const fmtFechaC = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: 'long', timeZone: 'America/Buenos_Aires' }) : 'Fecha a confirmar'
 
     useEffect(() => {
         const fetchUser = async () => {

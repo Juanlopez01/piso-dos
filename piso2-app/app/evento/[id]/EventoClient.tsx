@@ -12,7 +12,7 @@ export type ObraPrograma = { id: string; titulo: string; compania: string | null
 export type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; flyer_url?: string | null; entradas: Entrada[]; obras?: ObraPrograma[] }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
-const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' }) : null
+const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'America/Buenos_Aires' }) : null
 
 export default function EventoClient({ ev }: { ev: Evento }) {
     const qs = useSearchParams()
