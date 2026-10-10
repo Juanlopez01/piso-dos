@@ -221,6 +221,18 @@ export async function getEventoDetalleAction(eventoId: string) {
 
 // ---- Eventos ----------------------------------------------------------------
 
+// La fecha viene de un <input datetime-local> (hora "de pared", sin zona). La
+// guardamos con el offset de Argentina (-03:00) para que no se corra 3hs al
+// mostrarla (si no, 20:00 se guardaba como UTC y se veía 17:00).
+function fechaArg(f?: string | null): string | null {
+    if (!f) return null
+    const s = String(f).trim()
+    if (!s) return null
+    if (/[zZ]$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s)) return s // ya trae zona → respetar
+    const base = s.length === 16 ? s + ':00' : s                  // "YYYY-MM-DDTHH:mm" -> +segundos
+    return base + '-03:00'
+}
+
 export async function crearEventoAction(data: { nombre: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string; obra_ids?: string[] }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
@@ -229,7 +241,7 @@ export async function crearEventoAction(data: { nombre: string; descripcion?: st
     const { data: ev, error } = await admin.from('eventos').insert({
         nombre: data.nombre.trim(),
         descripcion: data.descripcion?.trim() || null,
-        fecha: data.fecha || null,
+        fecha: fechaArg(data.fecha),
         lugar: data.lugar?.trim() || null,
         flyer_url: data.flyer_url?.trim() || null,
         created_by: perm.userId,
@@ -251,7 +263,7 @@ export async function editarEventoAction(eventoId: string, patch: { nombre?: str
     const upd: any = {}
     if (patch.nombre !== undefined) upd.nombre = patch.nombre.trim()
     if (patch.descripcion !== undefined) upd.descripcion = patch.descripcion?.trim() || null
-    if (patch.fecha !== undefined) upd.fecha = patch.fecha || null
+    if (patch.fecha !== undefined) upd.fecha = fechaArg(patch.fecha)
     if (patch.lugar !== undefined) upd.lugar = patch.lugar?.trim() || null
     if (patch.flyer_url !== undefined) upd.flyer_url = patch.flyer_url || null
     const { error } = await admin.from('eventos').update(upd).eq('id', eventoId)

@@ -30,6 +30,12 @@ type Evento = { id: string; nombre: string; descripcion: string | null; fecha: s
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Sin fecha'
+// ISO guardado -> "YYYY-MM-DDTHH:mm" en hora de Argentina (para el input datetime-local).
+const toLocalArg = (iso: string | null) => {
+    if (!iso) return ''
+    try { return new Date(iso).toLocaleString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' }).replace(' ', 'T').slice(0, 16) }
+    catch { return (iso || '').slice(0, 16) }
+}
 const haceCuanto = (iso: string) => {
     const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
     if (min < 60) return `hace ${min} min`
@@ -447,7 +453,7 @@ const agregarEntrada = async () => {
         if (!evento) return
         setInfoVals({
             nombre: evento.nombre || '',
-            fecha: (evento.fecha || '').slice(0, 16), // ISO -> valor de datetime-local, sin corrimiento
+            fecha: toLocalArg(evento.fecha), // ISO -> hora de pared en Argentina para el datetime-local
             lugar: evento.lugar || '',
             descripcion: evento.descripcion || '',
         })
