@@ -340,7 +340,7 @@ export default function LandingClient({ carteleraIniciales }: { carteleraInicial
                       </div>
                       <div className="p-3">
                         <h3 className="font-black uppercase tracking-tight text-sm leading-tight line-clamp-2">{c.titulo}</h3>
-                        {c.fecha && <p className="text-[10px] text-gray-500 mt-1.5 flex items-center gap-1 capitalize"><CalendarDays size={11} /> {new Date(c.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })}</p>}
+                        {c.fecha && <p className="text-[10px] text-gray-500 mt-1.5 flex items-center gap-1 capitalize"><CalendarDays size={11} /> {new Date(c.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', timeZone: 'America/Buenos_Aires' })}</p>}
                       </div>
                     </div>
                   )
