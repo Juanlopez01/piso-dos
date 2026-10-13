@@ -5,7 +5,7 @@ import { getCicloPublicoAction } from '@/app/actions/eventos'
 export const dynamic = 'force-dynamic'
 
 const fmtFecha = (iso: string | null) => iso
-    ? new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' })
+    ? new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
     : 'Fecha a confirmar'
 
 export default async function CicloPublicoPage({ params }: { params: Promise<{ slug: string }> }) {

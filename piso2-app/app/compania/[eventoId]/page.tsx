@@ -9,7 +9,7 @@ type Tipo = { nombre: string; precio: number; cupo: number; vendidas: number; di
 type Data = { evento: { nombre: string; fecha: string | null; lugar: string | null }; porTipo: Tipo[]; recaudado: number; vendidas: number; cupo: number; soldOut: boolean }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
-const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' }) : null
+const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }) : null
 
 export default function CompaniaPage() {
     const params = useParams()
