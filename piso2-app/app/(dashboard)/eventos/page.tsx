@@ -29,6 +29,19 @@ type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: 
 type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean; cancelado?: boolean; ciclo_id?: string | null; ciclo?: { nombre: string; slug: string } | null }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
+// Copia robusta: intenta el portapapeles moderno y, si falla (típico en celu
+// cuando el texto se copia después de un await), cae a un textarea temporal.
+function copiarTexto(texto: string): boolean {
+    try { navigator.clipboard?.writeText(texto) } catch { /* sigue al fallback */ }
+    try {
+        const ta = document.createElement('textarea')
+        ta.value = texto; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0'
+        document.body.appendChild(ta); ta.select()
+        const ok = document.execCommand('copy')
+        document.body.removeChild(ta)
+        return ok
+    } catch { return false }
+}
 const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Sin fecha'
 // ISO guardado -> "YYYY-MM-DDTHH:mm" en hora de Argentina (para el input datetime-local).
 const toLocalArg = (iso: string | null) => {
@@ -316,14 +329,19 @@ const agregarEntrada = async () => {
         else toast.error(r.error || 'Error')
     }
     const copiarLinkCompra = () => {
-        navigator.clipboard.writeText(`${window.location.origin}/evento/${eventoId}`)
+        copiarTexto(`${window.location.origin}/evento/${eventoId}`)
         toast.success('Link de compra copiado')
     }
+    // Pre-cargamos el token de la compañía al abrir, para poder copiar al instante
+    // (sin await en medio, que en el celu rompe el portapapeles).
+    const [tokenCompania, setTokenCompania] = useState('')
+    useEffect(() => { getLinkCompaniaAction(eventoId).then(r => { if (r.ok) setTokenCompania(r.token) }) }, [eventoId])
     const copiarLinkCompania = async () => {
-        const r = await getLinkCompaniaAction(eventoId)
-        if (!r.ok) return toast.error((r as any).error || 'Error')
-        navigator.clipboard.writeText(`${window.location.origin}/compania/${eventoId}?t=${r.token}`)
-        toast.success('Link de la compañía copiado (ve las ventas en vivo)')
+        let token = tokenCompania
+        if (!token) { const r = await getLinkCompaniaAction(eventoId); if (!r.ok) return toast.error((r as any).error || 'Error'); token = r.token; setTokenCompania(token) }
+        const ok = copiarTexto(`${window.location.origin}/compania/${eventoId}?t=${token}`)
+        if (ok) toast.success('Link de la compañía copiado (ve las ventas en vivo)')
+        else toast.error('No se pudo copiar. Mantené apretado el link para copiarlo a mano.')
     }
 
     const [reporte, setReporte] = useState<any>(null)
@@ -340,7 +358,7 @@ const agregarEntrada = async () => {
         getResenasAction(eventoId).then(r => { if (r.ok) setResenas({ resenas: r.resenas, promedio: r.promedio, total: r.total }) })
     }, [eventoId])
     const copiarLinkEncuesta = () => {
-        navigator.clipboard.writeText(`${window.location.origin}/resena/${eventoId}`)
+        copiarTexto(`${window.location.origin}/resena/${eventoId}`)
         toast.success('Link de encuesta copiado')
     }
     const enviarEncuesta = async () => {
@@ -437,7 +455,7 @@ const agregarEntrada = async () => {
     }
     const copiarLinkCiclo = () => {
         if (!evento?.ciclo?.slug) return
-        navigator.clipboard.writeText(`${window.location.origin}/ciclo/${evento.ciclo.slug}`)
+        copiarTexto(`${window.location.origin}/ciclo/${evento.ciclo.slug}`)
         toast.success('Link del ciclo copiado')
     }
     const cambiarFlyer = async (url: string) => {
@@ -499,8 +517,9 @@ const agregarEntrada = async () => {
     const copiarLinkPuerta = async () => {
         const r = await getLinkPuertaAction(eventoId)
         if (!r.ok) return toast.error((r as any).error || 'Error')
-        navigator.clipboard.writeText(`${window.location.origin}/puerta/${eventoId}?t=${r.token}`)
-        toast.success('Link de puerta copiado (leer QR + cargar ventas)')
+        const ok = copiarTexto(`${window.location.origin}/puerta/${eventoId}?t=${r.token}`)
+        if (ok) toast.success('Link de puerta copiado (leer QR + cargar ventas)')
+        else toast.error('No se pudo copiar. Mantené apretado el link para copiarlo a mano.')
     }
 
     // --- traspaso de fecha ---
@@ -832,12 +851,12 @@ const agregarEntrada = async () => {
             </Link>
 
             {/* acceso de la compañía */}
-            <button onClick={copiarLinkCompania} className="w-full flex items-center justify-center gap-2 mb-2 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
+            <button onClick={copiarLinkCompania} className="w-full select-none flex items-center justify-center gap-2 mb-2 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
                 <Copy size={14} /> Copiar link para la compañía (ve sus ventas en vivo)
             </button>
 
             {/* link de puerta para gente externa */}
-            <button onClick={copiarLinkPuerta} className="w-full flex items-center justify-center gap-2 mb-2 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
+            <button onClick={copiarLinkPuerta} className="w-full select-none flex items-center justify-center gap-2 mb-2 bg-[#0e0e10] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors">
                 <ScanLine size={14} /> Copiar link de puerta (gente externa: leer QR + vender)
             </button>
 
