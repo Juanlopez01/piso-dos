@@ -1006,27 +1006,28 @@ export async function getBorderauxAction(eventoId: string) {
     if (!ev) return { ok: false as const, error: 'Evento no encontrado' }
 
     const { data: ventas } = await admin.from('evento_ventas')
-        .select('id, total, estado').eq('evento_id', eventoId).eq('estado', 'confirmada')
+        .select('id, total, estado, obra_origen').eq('evento_id', eventoId).eq('estado', 'confirmada')
     const ingresos = (ventas || []).reduce((a: number, v: any) => a + Number(v.total || 0), 0)
     const ventasCount = (ventas || []).length
 
-    // Separamos el valor base de las entradas (lo que se reparte) del 10% de
-    // servicio (que es de Piso 2). base = suma de los ítems; servicio = lo cobrado
-    // por encima. Robusto también para ventas viejas sin servicio (servicio = 0).
+    // La atribución a cada compañía es POR EL LINK con que entró la venta
+    // (evento_ventas.obra_origen). Sin link = Piso 2. Acumulamos base (valor de
+    // las entradas, sin el 10% de servicio) y unidades por compañía de origen.
     const ventaIds = (ventas || []).map((v: any) => v.id)
+    const origenDeVenta: Record<string, string | null> = {}
+    for (const v of (ventas || []) as any[]) origenDeVenta[v.id] = v.obra_origen || null
+
     let baseEntradas = 0
-    // Base y unidades vendidas POR entrada (para poder liquidar por obra).
-    const basePorEntrada: Record<string, number> = {}
-    const vendidasPorEntradaId: Record<string, number> = {}
+    const basePorObraOrigen: Record<string, number> = {}   // clave: obra_origen o '' (Piso 2)
+    const vendidasPorObraOrigen: Record<string, number> = {}
     if (ventaIds.length) {
-        const { data: items } = await admin.from('evento_venta_items').select('entrada_id, cantidad, precio_unit').in('venta_id', ventaIds)
+        const { data: items } = await admin.from('evento_venta_items').select('venta_id, cantidad, precio_unit').in('venta_id', ventaIds)
         for (const it of (items || []) as any[]) {
             const sub = Number(it.cantidad || 0) * Number(it.precio_unit || 0)
             baseEntradas += sub
-            if (it.entrada_id) {
-                basePorEntrada[it.entrada_id] = (basePorEntrada[it.entrada_id] || 0) + sub
-                vendidasPorEntradaId[it.entrada_id] = (vendidasPorEntradaId[it.entrada_id] || 0) + Number(it.cantidad || 0)
-            }
+            const k = origenDeVenta[it.venta_id] || ''
+            basePorObraOrigen[k] = (basePorObraOrigen[k] || 0) + sub
+            vendidasPorObraOrigen[k] = (vendidasPorObraOrigen[k] || 0) + Number(it.cantidad || 0)
         }
     }
     const servicio = Math.max(0, ingresos - baseEntradas)
@@ -1054,23 +1055,18 @@ export async function getBorderauxAction(eventoId: string) {
     // los absorbe Piso 2. La base sin obra asignada también va a Piso 2.
     const { data: obrasEv } = await admin.from('obra_propuestas')
         .select('id, titulo, compania, reparto_pct').eq('evento_id', eventoId).eq('estado', 'aceptada')
-    const { data: entradasEv } = await admin.from('evento_entradas').select('id, obra_id').eq('evento_id', eventoId)
-    const obraDeEntrada: Record<string, string | null> = {}
-    for (const e of (entradasEv || []) as any[]) obraDeEntrada[e.id] = e.obra_id || null
 
+    // A cada compañía se le liquida la base de las ventas que entraron por SU link.
     const porObra = (obrasEv || []).map((o: any) => {
-        const idsDeObra = (entradasEv || []).filter((e: any) => e.obra_id === o.id).map((e: any) => e.id)
-        const base = idsDeObra.reduce((a: number, id: string) => a + (basePorEntrada[id] || 0), 0)
-        const vendidas = idsDeObra.reduce((a: number, id: string) => a + (vendidasPorEntradaId[id] || 0), 0)
+        const base = basePorObraOrigen[o.id] || 0
+        const vendidas = vendidasPorObraOrigen[o.id] || 0
         const pctObra = (o.reparto_pct === null || o.reparto_pct === undefined) ? pct : Number(o.reparto_pct)
         const aPagar = Math.round(base * pctObra) / 100
         return { obraId: o.id, titulo: o.titulo, compania: o.compania || null, pct: pctObra, vendidas, base, aPagar }
     })
-    // Base de entradas sin obra asignada (van enteras a Piso 2).
-    let baseSinObra = 0, vendidasSinObra = 0
-    for (const [entId, b] of Object.entries(basePorEntrada)) {
-        if (!obraDeEntrada[entId]) { baseSinObra += b; vendidasSinObra += (vendidasPorEntradaId[entId] || 0) }
-    }
+    // Ventas directas (sin link de compañía): van enteras a Piso 2.
+    const baseSinObra = basePorObraOrigen[''] || 0
+    const vendidasSinObra = vendidasPorObraOrigen[''] || 0
     const companiasTotal = porObra.reduce((a, o) => a + o.aPagar, 0)
     // Piso 2 cuando hay obras: lo que no se llevan las compañías + servicio − gastos internos.
     const piso2ConObras = (baseEntradas - companiasTotal) + servicio - deducido

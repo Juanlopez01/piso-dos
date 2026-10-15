@@ -1070,24 +1070,12 @@ const agregarEntrada = async () => {
                                         <button type="button" onClick={() => setEditVals(v => ({ ...v, oculta: !v.oculta }))} className={`flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${editVals.oculta ? 'bg-purple-500/15 border-purple-400/40 text-purple-300' : 'bg-white/5 border-white/10 text-gray-400'}`}><EyeOff size={13} /> Oculta (promo)</button>
                                         {editVals.oculta && <input value={editVals.codigo_promo} onChange={ev => setEditVals(v => ({ ...v, codigo_promo: ev.target.value }))} placeholder="Código de promo" className="inp flex-1 min-w-[120px]" />}
                                     </div>
-                                    {obras.length > 0 && (
-                                        <div className="flex items-center gap-2">
-                                            <Theater size={13} className="text-gray-500 shrink-0" />
-                                            <select value={editVals.obra_id} onChange={ev => setEditVals(v => ({ ...v, obra_id: ev.target.value }))} className="inp flex-1">
-                                                <option value="">Sin obra (general de la función)</option>
-                                                {obras.map(o => <option key={o.id} value={o.id}>{o.titulo}{o.compania ? ` — ${o.compania}` : ''}</option>)}
-                                            </select>
-                                        </div>
-                                    )}
                                 </div>
                             ) : (
                                 <div className="flex items-center gap-3">
                                     <div className="flex-1 min-w-0">
                                         <p className="font-bold text-sm truncate flex items-center gap-1.5">{e.nombre} {e.oculta && <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 uppercase font-bold"><EyeOff size={10} /> Oculta</span>}</p>
                                         <p className="text-[11px] text-gray-500">{pesos(e.precio)}{verVentas && <> · {e.vendidas}/{e.cupo} vendidas · <span className={e.disponible > 0 ? 'text-[#D4E655]' : 'text-red-400'}>{e.disponible} libres</span></>}</p>
-                                        {e.obra_id && obras.length > 0 && (
-                                            <p className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-gray-400"><Theater size={11} className="text-gray-500" /> {obras.find(o => o.id === e.obra_id)?.titulo || 'Obra'}</p>
-                                        )}
                                         {e.oculta && e.codigo_promo && (
                                             <button onClick={() => copiarLinkPromo(e.codigo_promo!)} className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-purple-300/80 hover:text-purple-300"><Copy size={11} /> Copiar link con promo “{e.codigo_promo}”</button>
                                         )}
@@ -1110,16 +1098,7 @@ const agregarEntrada = async () => {
                             <button type="button" onClick={() => setNuevaEnt(v => ({ ...v, oculta: !v.oculta }))} className={`flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${nuevaEnt.oculta ? 'bg-purple-500/15 border-purple-400/40 text-purple-300' : 'bg-white/5 border-white/10 text-gray-400'}`}><EyeOff size={13} /> Oculta (promo)</button>
                             {nuevaEnt.oculta && <input value={nuevaEnt.codigo_promo} onChange={e => setNuevaEnt(v => ({ ...v, codigo_promo: e.target.value }))} placeholder="Código de promo (ej: 2x1, AMIGOS)" className="inp flex-1 min-w-[140px]" />}
                         </div>
-                        {obras.length > 0 && (
-                            <div className="flex items-center gap-2">
-                                <Theater size={13} className="text-gray-500 shrink-0" />
-                                <select value={nuevaEnt.obra_id} onChange={e => setNuevaEnt(v => ({ ...v, obra_id: e.target.value }))} className="inp flex-1">
-                                    <option value="">Sin obra (general de la función)</option>
-                                    {obras.map(o => <option key={o.id} value={o.id}>{o.titulo}{o.compania ? ` — ${o.compania}` : ''}</option>)}
-                                </select>
-                            </div>
-                        )}
-                        {obras.length > 0 && <p className="text-[10px] text-gray-500">Asigná la entrada a una obra para que su venta liquide a esa compañía.</p>}
+                        {obras.length > 0 && <p className="text-[10px] text-gray-500">La venta se atribuye a cada compañía por su <b className="text-gray-300">link</b> (botón “Link” en cada obra, arriba). No hace falta asignar la entrada a una obra.</p>}
                         {nuevaEnt.oculta && <p className="text-[10px] text-gray-500">No aparece en la venta pública; solo con el link <span className="text-purple-300">?promo=código</span>.</p>}
                     </div>}
                 </div>
