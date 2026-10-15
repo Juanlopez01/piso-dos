@@ -1123,12 +1123,16 @@ const agregarEntrada = async () => {
             )}
 
             {/* ventas */}
-            {verVentas && <Seccion titulo={`Ventas (${ventas.length})`}>
-                {ventas.length === 0 ? (
-                    <p className="text-xs text-gray-500">Todavía no hay ventas.</p>
+            {verVentas && (() => {
+            // Las órdenes PENDIENTES (sin pagar) no son ventas: van solo a "Carritos
+            // abandonados". Acá mostramos las reales (confirmadas / anuladas).
+            const ventasReales = ventas.filter(v => v.estado !== 'pendiente')
+            return <Seccion titulo={`Ventas (${ventasReales.length})`}>
+                {ventasReales.length === 0 ? (
+                    <p className="text-xs text-gray-500">Todavía no hay ventas confirmadas.</p>
                 ) : (
                     <div className="space-y-2">
-                        {ventas.map(v => (
+                        {ventasReales.map(v => (
                             <div key={v.id} className={`bg-[#0e0e10] border rounded-xl p-3 ${v.estado === 'anulada' ? 'border-red-500/20 opacity-60' : 'border-white/10'}`}>
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="min-w-0">
@@ -1159,7 +1163,8 @@ const agregarEntrada = async () => {
                         ))}
                     </div>
                 )}
-            </Seccion>}
+            </Seccion>
+            })()}
 
             {/* carritos abandonados */}
             {verVentas && carritos.length > 0 && (
