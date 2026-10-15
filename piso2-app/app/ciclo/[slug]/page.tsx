@@ -8,8 +8,12 @@ const fmtFecha = (iso: string | null) => iso
     ? new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
     : 'Fecha a confirmar'
 
-export default async function CicloPublicoPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function CicloPublicoPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ promo?: string }> }) {
     const { slug } = await params
+    const { promo } = await searchParams
+    // Si el link del ciclo trae un código de promo, lo arrastramos a cada "Comprar"
+    // para que en la función se vean las entradas ocultas de esa promo/compañía.
+    const qs = promo ? `?promo=${encodeURIComponent(promo)}` : ''
     const ciclo = await getCicloPublicoAction(slug)
 
     if (!ciclo) return (
@@ -46,7 +50,7 @@ export default async function CicloPublicoPage({ params }: { params: Promise<{ s
                                 {f.agotado
                                     ? <span className="text-[11px] font-bold uppercase tracking-wide text-neutral-400 shrink-0">Agotada</span>
                                     : f.comprable
-                                        ? <Link href={`/evento/${f.id}`} className="flex items-center gap-1.5 bg-neutral-900 text-white text-[11px] font-bold uppercase tracking-wide px-4 py-2.5 rounded-lg hover:bg-black shrink-0">Comprar <ArrowRight size={14} /></Link>
+                                        ? <Link href={`/evento/${f.id}${qs}`} className="flex items-center gap-1.5 bg-neutral-900 text-white text-[11px] font-bold uppercase tracking-wide px-4 py-2.5 rounded-lg hover:bg-black shrink-0">Comprar <ArrowRight size={14} /></Link>
                                         : <span className="text-[11px] font-bold uppercase tracking-wide text-neutral-400 shrink-0">Próximamente</span>}
                             </div>
                         )
