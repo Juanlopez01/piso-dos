@@ -22,9 +22,9 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     }
 }
 
-export default async function EventoPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ promo?: string }> }) {
+export default async function EventoPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ promo?: string; cia?: string }> }) {
     const { id } = await params
-    const { promo } = await searchParams
+    const { promo, cia } = await searchParams
     const ev = await getEventoPublicoAction(id, promo || undefined).catch(() => null) as Evento | null
 
     if (!ev) return (
@@ -34,5 +34,5 @@ export default async function EventoPage({ params, searchParams }: { params: Pro
         </div>
     )
 
-    return <EventoClient ev={ev} />
+    return <EventoClient ev={ev} cia={cia || ''} />
 }

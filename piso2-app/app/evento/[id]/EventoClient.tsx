@@ -14,7 +14,7 @@ export type Evento = { id: string; nombre: string; descripcion: string | null; f
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 const fmtFecha = (iso: string | null) => iso ? new Date(iso).toLocaleString('es-AR', { weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'America/Buenos_Aires' }) : null
 
-export default function EventoClient({ ev }: { ev: Evento }) {
+export default function EventoClient({ ev, cia = '' }: { ev: Evento; cia?: string }) {
     const qs = useSearchParams()
     const [cant, setCant] = useState<Record<string, number>>({})
     const [nombre, setNombre] = useState('')
@@ -43,7 +43,7 @@ export default function EventoClient({ ev }: { ev: Evento }) {
         if (!acepta) return toast.error('Aceptá las condiciones de compra para continuar.')
         setPagando(true)
         try {
-            const orden = await crearOrdenEventoAction({ evento_id: ev.id, comprador_nombre: nombre, comprador_email: email, comprador_contacto: tel, items })
+            const orden = await crearOrdenEventoAction({ evento_id: ev.id, comprador_nombre: nombre, comprador_email: email, comprador_contacto: tel, items, cia: cia || undefined })
             if (!orden.ok) throw new Error(orden.error)
             const r = await fetch('/api/mercadopago/evento-preference', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },

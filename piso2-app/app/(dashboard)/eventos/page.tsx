@@ -179,6 +179,7 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
     const [fecha, setFecha] = useState('')
     const [lugar, setLugar] = useState('')
     const [descripcion, setDescripcion] = useState('')
+    const [aforo, setAforo] = useState('')
     const [flyer, setFlyer] = useState('')
     const [saving, setSaving] = useState(false)
     // Obras aceptadas y libres (sin función) para sumar a esta función.
@@ -195,7 +196,7 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
     const crear = async () => {
         if (!nombre.trim()) return toast.error('Poné un nombre')
         setSaving(true)
-        const r = await crearEventoAction({ nombre, fecha: fecha || null, lugar, descripcion, flyer_url: flyer, obra_ids: [...sel] })
+        const r = await crearEventoAction({ nombre, fecha: fecha || null, lugar, descripcion, flyer_url: flyer, obra_ids: [...sel], aforo: aforo.trim() === '' ? null : Number(aforo) })
         if (r.ok) { toast.success('Evento creado'); onCreated(r.id) }
         else { toast.error(r.error || 'Error'); setSaving(false) }
     }
@@ -211,6 +212,7 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
                     <Campo label="Nombre"><input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Muestra de fin de año" className="inp w-full" /></Campo>
                     <Campo label="Fecha y hora"><input type="datetime-local" value={fecha} onChange={e => setFecha(e.target.value)} className="inp w-full" /></Campo>
                     <Campo label="Lugar"><input value={lugar} onChange={e => setLugar(e.target.value)} placeholder="Teatro / Sede Obelisco…" className="inp w-full" /></Campo>
+                    <Campo label="Aforo total (opcional)"><input type="number" min={0} value={aforo} onChange={e => setAforo(e.target.value)} placeholder="Ej: 90 (cupo total del evento)" className="inp w-full" /></Campo>
                     <Campo label="Descripción (opcional)"><textarea value={descripcion} onChange={e => setDescripcion(e.target.value)} rows={2} className="inp w-full resize-none" /></Campo>
                     <Campo label="Flyer"><FlyerUploader value={flyer} onChange={setFlyer} /></Campo>
 
@@ -485,6 +487,22 @@ const agregarEntrada = async () => {
         if (r.ok) { setEvento(ev => ev ? { ...ev, ...patch } as any : ev); setEditInfo(false); toast.success('Función actualizada') }
         else toast.error((r as any).error || 'Error')
         setGuardandoInfo(false)
+    }
+
+    // --- aforo (cupo total del evento) ---
+    const [aforoVal, setAforoVal] = useState('')
+    const [editAforo, setEditAforo] = useState(false)
+    const guardarAforo = async () => {
+        const n = aforoVal.trim() === '' ? null : Math.max(0, Math.floor(Number(aforoVal) || 0))
+        const r = await editarEventoAction(eventoId, { aforo: n })
+        if (r.ok) { setEvento(ev => ev ? { ...ev, aforo: n } as any : ev); setEditAforo(false); toast.success('Aforo actualizado') }
+        else toast.error((r as any).error || 'Error')
+    }
+    // Link de una compañía (obra): la venta por ese link se le atribuye.
+    const copiarLinkCia = (obraId: string) => {
+        const ok = copiarTexto(`${window.location.origin}/evento/${eventoId}?cia=${obraId}`)
+        if (ok) toast.success('Link de la compañía copiado (sus ventas se le suman)')
+        else toast.error('No se pudo copiar.')
     }
 
     // --- obras del evento (varias obras en un programa) ---
@@ -814,6 +832,7 @@ const agregarEntrada = async () => {
                                     {(o.flyer_url || o.imagenes?.[0]) && <img src={o.flyer_url || o.imagenes[0]} alt="" className="w-8 h-10 object-cover rounded shrink-0" />}
                                     <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{o.titulo}</p><p className="text-[10px] text-gray-500 truncate">{[o.compania, o.duracion_min && `${o.duracion_min} min`].filter(Boolean).join(' · ')}</p></div>
                                     <Link href={`/eventos/${eventoId}/ficha?obra=${o.id}`} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-1.5 rounded-lg shrink-0" title="Ficha técnica de esta obra"><ClipboardList size={12} /> Ficha</Link>
+                                    {!soloLectura && <button onClick={() => copiarLinkCia(o.id)} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[#D4E655] bg-[#D4E655]/10 hover:bg-[#D4E655]/20 px-2 py-1.5 rounded-lg shrink-0 select-none" title="Copiar link de venta de esta compañía (sus ventas se le atribuyen)"><Copy size={12} /> Link</button>}
                                     {!soloLectura && <button onClick={() => quitarObra(o.id)} className="text-gray-600 hover:text-red-400 p-1"><X size={14} /></button>}
                                 </div>
                                 {!soloLectura && <FlyerUploader value={o.flyer_url || ''} onChange={url => cambiarFlyerObra(o.id, url)} label="Subí el flyer de esta obra (si no, se usa su foto)" />}
@@ -937,6 +956,14 @@ const agregarEntrada = async () => {
                                 <div><p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">Por canal</p>{Object.entries(reporte.porCanal).map(([k, v]: [string, any]) => (<div key={k} className="flex justify-between text-sm text-gray-300 capitalize mb-1"><span>{k}</span><span className="text-gray-500 text-xs">{v.cant} · {pesos(v.monto)}</span></div>))}</div>
                                 <div><p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">Por medio</p>{Object.entries(reporte.porMedio).map(([k, v]: [string, any]) => (<div key={k} className="flex justify-between text-sm text-gray-300 capitalize mb-1"><span>{k}</span><span className="text-gray-500 text-xs">{v.cant} · {pesos(v.monto)}</span></div>))}</div>
                             </div>
+                            {reporte.porCompania && Object.keys(reporte.porCompania).length > 0 && (
+                                <div>
+                                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">Por compañía (atribución)</p>
+                                    {Object.entries(reporte.porCompania).map(([k, v]: [string, any]) => (
+                                        <div key={k} className="flex justify-between text-sm text-gray-300 mb-1"><span>{k}</span><span className="text-gray-500 text-xs">{v.cant} entradas · {pesos(v.monto)}</span></div>
+                                    ))}
+                                </div>
+                            )}
                             <div>
                                 <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">Compradores ({reporte.filas.length})</p>
                                 <div className="space-y-1.5">
@@ -1001,6 +1028,27 @@ const agregarEntrada = async () => {
                     {verDinero && <div className="flex-1"><Stat label="Recaudado" value={pesos(recaudado)} accent icon={DollarSign} /></div>}
                     {verVentas && <div className="flex-1"><Stat label="Vendidas" value={`${vendidasTot}${cupoTot ? ` / ${cupoTot}` : ''}`} icon={Ticket} /></div>}
                     {verVentas && <div className="flex-1"><Stat label="Ventas" value={ventas.filter(v => v.estado === 'confirmada').length} icon={Users} /></div>}
+                </div>
+            )}
+
+            {/* aforo total del evento */}
+            {verVentas && (
+                <div className="mb-3 bg-[#0e0e10] border border-white/10 rounded-xl p-3 flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center gap-2"><Users size={15} className="text-[#D4E655]" /><span className="text-xs font-semibold text-gray-300">Aforo total</span></div>
+                    {editAforo && !soloLectura ? (
+                        <div className="flex items-center gap-2 ml-auto">
+                            <input type="number" min={0} value={aforoVal} onChange={e => setAforoVal(e.target.value)} placeholder="Sin tope" className="inp w-28 text-sm" />
+                            <button onClick={guardarAforo} className="bg-[#D4E655] text-black px-3 py-1.5 rounded-lg font-bold text-[11px] uppercase">Guardar</button>
+                            <button onClick={() => setEditAforo(false)} className="text-[11px] font-bold uppercase text-gray-400 px-2">Cancelar</button>
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-3 ml-auto">
+                            {(evento as any).aforo
+                                ? <span className="text-sm text-gray-200"><b className="text-white">{vendidasTot}</b> / {(evento as any).aforo} vendidas · <span className={((evento as any).aforo - vendidasTot) > 0 ? 'text-[#D4E655]' : 'text-red-400'}>{Math.max(0, (evento as any).aforo - vendidasTot)} libres</span></span>
+                                : <span className="text-sm text-gray-500">Sin tope de aforo</span>}
+                            {!soloLectura && <button onClick={() => { setAforoVal((evento as any).aforo ? String((evento as any).aforo) : ''); setEditAforo(true) }} className="text-gray-500 hover:text-white p-1.5"><Pencil size={14} /></button>}
+                        </div>
+                    )}
                 </div>
             )}
 

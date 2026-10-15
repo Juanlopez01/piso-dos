@@ -58,6 +58,12 @@ async function vendidasPorEntrada(admin: any, eventoId: string): Promise<Record<
     return acc
 }
 
+// Total de entradas confirmadas de un evento (para controlar el AFORO total).
+async function vendidasTotalEvento(admin: any, eventoId: string): Promise<number> {
+    const vp = await vendidasPorEntrada(admin, eventoId)
+    return Object.values(vp).reduce((a, n) => a + (n || 0), 0)
+}
+
 // ---- Lectura ----------------------------------------------------------------
 
 export async function getEventosAction() {
@@ -233,7 +239,7 @@ function fechaArg(f?: string | null): string | null {
     return base + '-03:00'
 }
 
-export async function crearEventoAction(data: { nombre: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string; obra_ids?: string[] }) {
+export async function crearEventoAction(data: { nombre: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string; obra_ids?: string[]; aforo?: number | null }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     if (!data.nombre?.trim()) return { ok: false as const, error: 'Poné un nombre al evento.' }
@@ -244,6 +250,7 @@ export async function crearEventoAction(data: { nombre: string; descripcion?: st
         fecha: fechaArg(data.fecha),
         lugar: data.lugar?.trim() || null,
         flyer_url: data.flyer_url?.trim() || null,
+        aforo: (data.aforo == null || Number(data.aforo) <= 0) ? null : Math.floor(Number(data.aforo)),
         created_by: perm.userId,
     }).select('id').single()
     if (error) return { ok: false as const, error: error.message }
@@ -256,7 +263,7 @@ export async function crearEventoAction(data: { nombre: string; descripcion?: st
     return { ok: true as const, id: ev.id }
 }
 
-export async function editarEventoAction(eventoId: string, patch: { nombre?: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string | null }) {
+export async function editarEventoAction(eventoId: string, patch: { nombre?: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string | null; aforo?: number | null }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
@@ -266,6 +273,7 @@ export async function editarEventoAction(eventoId: string, patch: { nombre?: str
     if (patch.fecha !== undefined) upd.fecha = fechaArg(patch.fecha)
     if (patch.lugar !== undefined) upd.lugar = patch.lugar?.trim() || null
     if (patch.flyer_url !== undefined) upd.flyer_url = patch.flyer_url || null
+    if (patch.aforo !== undefined) upd.aforo = (patch.aforo == null || Number(patch.aforo) <= 0) ? null : Math.floor(Number(patch.aforo))
     const { error } = await admin.from('eventos').update(upd).eq('id', eventoId)
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
@@ -367,7 +375,7 @@ export async function registrarVentaAction(data: {
     const items = (data.items || []).filter(i => i.entrada_id && Number(i.cantidad) > 0)
     if (!items.length) return { ok: false as const, error: 'Elegí al menos una entrada.' }
 
-    const { data: evChk } = await admin.from('eventos').select('cancelado').eq('id', data.evento_id).maybeSingle()
+    const { data: evChk } = await admin.from('eventos').select('cancelado, aforo').eq('id', data.evento_id).maybeSingle()
     if (evChk?.cancelado) return { ok: false as const, error: 'Esta función está cancelada.' }
 
     // Traer entradas + validar cupo disponible
@@ -376,7 +384,7 @@ export async function registrarVentaAction(data: {
     for (const e of (entradas || []) as any[]) mapa[e.id] = e
     const vendidas = await vendidasPorEntrada(admin, data.evento_id)
 
-    let total = 0
+    let total = 0, totalCant = 0
     const rows: any[] = []
     for (const it of items) {
         const e = mapa[it.entrada_id]
@@ -385,7 +393,15 @@ export async function registrarVentaAction(data: {
         const cant = Math.floor(Number(it.cantidad))
         if (cant > disp) return { ok: false as const, error: `No hay cupo suficiente de "${e.nombre}" (quedan ${disp}).` }
         total += cant * Number(e.precio || 0)
+        totalCant += cant
         rows.push({ entrada_id: e.id, cantidad: cant, precio_unit: Number(e.precio || 0) })
+    }
+    // Control de AFORO total del evento (además del cupo por tipo de entrada).
+    const aforo = Number(evChk?.aforo || 0)
+    if (aforo > 0) {
+        const yaVend = Object.values(vendidas).reduce((a: number, n: any) => a + (n || 0), 0)
+        const libres = Math.max(0, aforo - yaVend)
+        if (totalCant > libres) return { ok: false as const, error: `No hay lugar: el aforo del evento es ${aforo} y quedan ${libres}.` }
     }
     // El 10% de servicio se suma arriba del valor de las entradas.
     const totalFinal = total + montoServicio(total)
@@ -604,9 +620,10 @@ export async function crearOrdenEventoAction(payload: {
     comprador_email: string
     comprador_contacto?: string
     items: { entrada_id: string; cantidad: number }[]
+    cia?: string // obra/compañía que refirió la venta (del link ?cia=); null = Piso 2
 }) {
     const admin = getAdminClient()
-    const { data: evento } = await admin.from('eventos').select('id, estado, venta_online').eq('id', payload.evento_id).maybeSingle()
+    const { data: evento } = await admin.from('eventos').select('id, estado, venta_online, aforo').eq('id', payload.evento_id).maybeSingle()
     if (!evento || !evento.venta_online || evento.estado !== 'activo') return { ok: false as const, error: 'El evento no está disponible para compra online.' }
     if (!payload.comprador_nombre?.trim()) return { ok: false as const, error: 'Completá tu nombre.' }
     if (!payload.comprador_email?.includes('@')) return { ok: false as const, error: 'Completá un email válido.' }
@@ -619,7 +636,7 @@ export async function crearOrdenEventoAction(payload: {
     for (const e of (entradas || []) as any[]) mapa[e.id] = e
     const vendidas = await vendidasPorEntrada(admin, payload.evento_id)
 
-    let total = 0
+    let total = 0, totalCant = 0
     const filas: any[] = []
     for (const it of items) {
         const e = mapa[it.entrada_id]
@@ -628,9 +645,23 @@ export async function crearOrdenEventoAction(payload: {
         const cant = Math.floor(Number(it.cantidad))
         if (cant > disp) return { ok: false as const, error: `No hay cupo suficiente de "${e.nombre}" (quedan ${disp}).` }
         total += cant * Number(e.precio || 0)
+        totalCant += cant
         filas.push({ entrada_id: e.id, cantidad: cant, precio_unit: Number(e.precio || 0) })
     }
     if (total <= 0) return { ok: false as const, error: 'El total debe ser mayor a 0.' }
+    // Control de AFORO total.
+    const aforo = Number(evento?.aforo || 0)
+    if (aforo > 0) {
+        const yaVend = Object.values(vendidas).reduce((a: number, n: any) => a + (n || 0), 0)
+        const libres = Math.max(0, aforo - yaVend)
+        if (totalCant > libres) return { ok: false as const, error: `No hay lugar: quedan ${libres} de ${aforo}.` }
+    }
+    // Atribución por compañía: validamos que la obra del link pertenezca al evento.
+    let obraOrigen: string | null = null
+    if (payload.cia) {
+        const { data: ob } = await admin.from('obra_propuestas').select('id').eq('id', payload.cia).eq('evento_id', payload.evento_id).maybeSingle()
+        obraOrigen = ob?.id || null
+    }
     // El 10% de servicio se suma arriba del valor de las entradas.
     const totalFinal = total + montoServicio(total)
 
@@ -641,6 +672,7 @@ export async function crearOrdenEventoAction(payload: {
         comprador_contacto: payload.comprador_contacto?.trim() || payload.comprador_email.trim(),
         comprador_email: payload.comprador_email.trim(),
         medio_pago: 'mercadopago', total: totalFinal, estado: 'pendiente', canal: 'online', token,
+        obra_origen: obraOrigen,
     }).select('id').single()
     if (error || !venta) return { ok: false as const, error: error?.message || 'No se pudo crear la orden.' }
 
@@ -721,8 +753,13 @@ export async function getReporteEventoAction(eventoId: string) {
     const { data: evento } = await admin.from('eventos').select('nombre, fecha, lugar').eq('id', eventoId).maybeSingle()
     const { data: entradas } = await admin.from('evento_entradas').select('id, nombre, precio, cupo, orden').eq('evento_id', eventoId).order('orden')
     const { data: ventas } = await admin.from('evento_ventas')
-        .select('id, comprador_nombre, comprador_contacto, medio_pago, total, canal, created_at')
+        .select('id, comprador_nombre, comprador_contacto, medio_pago, total, canal, created_at, obra_origen')
         .eq('evento_id', eventoId).eq('estado', 'confirmada').order('created_at', { ascending: false })
+
+    // Nombre de cada obra/compañía del evento (para atribuir ventas por compañía).
+    const { data: obrasEv } = await admin.from('obra_propuestas').select('id, titulo, compania').eq('evento_id', eventoId)
+    const nombreObra: Record<string, string> = {}
+    for (const o of (obrasEv || []) as any[]) nombreObra[o.id] = o.compania || o.titulo || 'Compañía'
 
     const ventaIds = (ventas || []).map((v: any) => v.id)
     let items: any[] = [], tickets: any[] = []
@@ -754,6 +791,18 @@ export async function getReporteEventoAction(eventoId: string) {
         porMedio[m] = { cant: (porMedio[m]?.cant || 0) + 1, monto: (porMedio[m]?.monto || 0) + Number(v.total || 0) }
     }
 
+    // Por compañía (atribución): quién trajo cada venta. Sin obra_origen = Piso 2.
+    const cantPorVenta: Record<string, number> = {}
+    for (const it of items) cantPorVenta[it.venta_id] = (cantPorVenta[it.venta_id] || 0) + (it.cantidad || 0)
+    const porCompania: Record<string, { cant: number; monto: number }> = {}
+    for (const v of (ventas || []) as any[]) {
+        const nom = v.obra_origen ? (nombreObra[v.obra_origen] || 'Compañía') : 'Piso 2 (directo)'
+        porCompania[nom] = {
+            cant: (porCompania[nom]?.cant || 0) + (cantPorVenta[v.id] || 0),
+            monto: (porCompania[nom]?.monto || 0) + Number(v.total || 0),
+        }
+    }
+
     // Check-in
     const totalTickets = tickets.length
     const usados = tickets.filter(t => t.usado).length
@@ -783,7 +832,7 @@ export async function getReporteEventoAction(eventoId: string) {
         ok: true as const,
         evento: { nombre: evento?.nombre || 'Evento', fecha: evento?.fecha || null, lugar: evento?.lugar || null },
         totales: { recaudado, vendidas: vendidasTot, cupo: cupoTot, ventas: (ventas || []).length, ingresados: usados, tickets: totalTickets },
-        porTipo, porCanal, porMedio, filas,
+        porTipo, porCanal, porMedio, porCompania, filas,
     }
 }
 
