@@ -613,11 +613,15 @@ export async function getEventoPublicoAction(eventoId: string, promo?: string) {
     const { data: obrasProg } = obraIdsPub.length ? await admin.from('obra_propuestas')
         .select('id, titulo, compania, director, duracion_min, descripcion, imagenes, flyer_url')
         .in('id', obraIdsPub).eq('estado', 'aceptada').order('created_at') : { data: [] as any[] }
-    const obras = (obrasProg || []).map((o: any) => ({
-        id: o.id, titulo: o.titulo, compania: o.compania || null, director: o.director || null,
-        duracion_min: o.duracion_min || null, descripcion: o.descripcion || null,
-        imagen: o.flyer_url || (o.imagenes || [])[0] || null,
-    }))
+    const obras = (obrasProg || []).map((o: any) => {
+        // Todas las imágenes de la obra (flyer primero, después el carrusel), sin repetir.
+        const imagenes = [...new Set([o.flyer_url, ...(o.imagenes || [])].filter(Boolean))] as string[]
+        return {
+            id: o.id, titulo: o.titulo, compania: o.compania || null, director: o.director || null,
+            duracion_min: o.duracion_min || null, descripcion: o.descripcion || null,
+            imagen: imagenes[0] || null, imagenes,
+        }
+    })
 
     return {
         id: evento.id, nombre: evento.nombre, descripcion: evento.descripcion,

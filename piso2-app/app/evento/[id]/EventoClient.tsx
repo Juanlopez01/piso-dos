@@ -4,11 +4,11 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { crearOrdenEventoAction } from '@/app/actions/eventos'
 import { toast, Toaster } from 'sonner'
-import { Loader2, CalendarDays, MapPin, Minus, Plus, Ticket, Theater } from 'lucide-react'
+import { Loader2, CalendarDays, MapPin, Minus, Plus, Ticket, Theater, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 
 export type Entrada = { id: string; nombre: string; precio: number; disponible: number }
-export type ObraPrograma = { id: string; titulo: string; compania: string | null; director: string | null; duracion_min: number | null; descripcion: string | null; imagen: string | null }
+export type ObraPrograma = { id: string; titulo: string; compania: string | null; director: string | null; duracion_min: number | null; descripcion: string | null; imagen: string | null; imagenes?: string[] }
 export type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; flyer_url?: string | null; entradas: Entrada[]; obras?: ObraPrograma[] }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
@@ -22,6 +22,9 @@ export default function EventoClient({ ev, cia = '' }: { ev: Evento; cia?: strin
     const [tel, setTel] = useState('')
     const [acepta, setAcepta] = useState(false)
     const [pagando, setPagando] = useState(false)
+    // Visor de imágenes (lightbox) y descripciones expandidas.
+    const [lb, setLb] = useState<{ imgs: string[]; i: number } | null>(null)
+    const [abiertas, setAbiertas] = useState<Record<string, boolean>>({})
 
     useEffect(() => {
         if (qs.get('pago') === 'error') toast.error('El pago no se completó. Podés intentar de nuevo.')
@@ -79,18 +82,43 @@ export default function EventoClient({ ev, cia = '' }: { ev: Evento; cia?: strin
                             <Theater size={13} /> {ev.obras.length > 1 ? `El programa · ${ev.obras.length} obras` : 'La obra'}
                         </div>
                         <div className="space-y-3">
-                            {ev.obras.map(o => (
-                                <div key={o.id} className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
-                                    {o.imagen && <img src={o.imagen} alt={o.titulo} className="w-full aspect-[16/10] object-cover" />}
-                                    <div className="p-4">
-                                        <p className="font-black text-base leading-tight">{o.titulo}</p>
-                                        <p className="text-xs text-neutral-500 mt-1">
-                                            {[o.compania, o.director && `Dir: ${o.director}`, o.duracion_min && `${o.duracion_min} min`].filter(Boolean).join(' · ')}
-                                        </p>
-                                        {o.descripcion && <p className="text-[13px] text-neutral-600 leading-relaxed mt-2 whitespace-pre-line line-clamp-6">{o.descripcion}</p>}
+                            {ev.obras.map(o => {
+                                const imgs = (o.imagenes && o.imagenes.length ? o.imagenes : (o.imagen ? [o.imagen] : []))
+                                const expandida = !!abiertas[o.id]
+                                const larga = (o.descripcion || '').length > 220
+                                return (
+                                    <div key={o.id} className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
+                                        {imgs.length > 0 && (
+                                            imgs.length === 1 ? (
+                                                <button type="button" onClick={() => setLb({ imgs, i: 0 })} className="block w-full">
+                                                    <img src={imgs[0]} alt={o.titulo} className="w-full max-h-[70vh] object-contain bg-neutral-100" />
+                                                </button>
+                                            ) : (
+                                                <div className="flex gap-2 overflow-x-auto p-2 bg-neutral-100 snap-x">
+                                                    {imgs.map((u, i) => (
+                                                        <button type="button" key={i} onClick={() => setLb({ imgs, i })} className="shrink-0 snap-center">
+                                                            <img src={u} alt={`${o.titulo} ${i + 1}`} className="h-44 w-auto rounded-lg object-cover" />
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )
+                                        )}
+                                        <div className="p-4">
+                                            <p className="font-black text-base leading-tight">{o.titulo}</p>
+                                            <p className="text-xs text-neutral-500 mt-1">
+                                                {[o.compania, o.director && `Dir: ${o.director}`, o.duracion_min && `${o.duracion_min} min`].filter(Boolean).join(' · ')}
+                                            </p>
+                                            {o.descripcion && (
+                                                <>
+                                                    <p className={`text-[13px] text-neutral-600 leading-relaxed mt-2 whitespace-pre-line ${expandida ? '' : 'line-clamp-5'}`}>{o.descripcion}</p>
+                                                    {larga && <button type="button" onClick={() => setAbiertas(a => ({ ...a, [o.id]: !expandida }))} className="mt-1 text-[12px] font-bold text-neutral-900 underline">{expandida ? 'Ver menos' : 'Ver más'}</button>}
+                                                </>
+                                            )}
+                                            {imgs.length > 1 && <p className="mt-2 text-[11px] text-neutral-400">Tocá una foto para verla completa ({imgs.length})</p>}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                )
+                            })}
                         </div>
                     </div>
                 )}
@@ -148,6 +176,23 @@ export default function EventoClient({ ev, cia = '' }: { ev: Evento; cia?: strin
                     <p className="text-[10px] text-neutral-400 text-center mt-2">Pago seguro. Al aprobarse, recibís tus entradas con QR.</p>
                 </div>
             </div>
+
+            {/* Visor de imágenes a pantalla completa */}
+            {lb && (
+                <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center" onClick={() => setLb(null)}>
+                    <button onClick={() => setLb(null)} className="absolute top-4 right-4 text-white/80 hover:text-white p-2 z-10"><X size={26} /></button>
+                    {lb.imgs.length > 1 && (
+                        <button onClick={e => { e.stopPropagation(); setLb(v => v ? { ...v, i: (v.i - 1 + v.imgs.length) % v.imgs.length } : v) }} className="absolute left-2 text-white/80 hover:text-white p-2"><ChevronLeft size={34} /></button>
+                    )}
+                    <img src={lb.imgs[lb.i]} alt="" className="max-h-[88vh] max-w-[92vw] object-contain" onClick={e => e.stopPropagation()} />
+                    {lb.imgs.length > 1 && (
+                        <>
+                            <button onClick={e => { e.stopPropagation(); setLb(v => v ? { ...v, i: (v.i + 1) % v.imgs.length } : v) }} className="absolute right-2 text-white/80 hover:text-white p-2"><ChevronRight size={34} /></button>
+                            <div className="absolute bottom-5 left-0 right-0 text-center text-white/70 text-xs">{lb.i + 1} / {lb.imgs.length}</div>
+                        </>
+                    )}
+                </div>
+            )}
         </div>
     )
 }
