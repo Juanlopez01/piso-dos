@@ -93,7 +93,7 @@ export default function EventosPage() {
             <Toaster position="top-center" richColors theme="dark" />
 
             {sel ? (
-                <Detalle eventoId={sel} soloLectura={soloLectura} verDinero={verDinero} verVentas={verVentas} onBack={() => { setSel(null); cargar() }} />
+                <Detalle eventoId={sel} soloLectura={soloLectura} verDinero={verDinero} verVentas={verVentas} onBack={() => { setSel(null); cargar() }} onDuplicated={(id) => setSel(id)} />
             ) : (
                 <>
                     <div className="flex items-end justify-between gap-3 mb-6">
@@ -245,7 +245,7 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
     )
 }
 
-function Detalle({ eventoId, soloLectura, verDinero, verVentas = true, onBack }: { eventoId: string; soloLectura?: boolean; verDinero?: boolean; verVentas?: boolean; onBack: () => void }) {
+function Detalle({ eventoId, soloLectura, verDinero, verVentas = true, onBack, onDuplicated }: { eventoId: string; soloLectura?: boolean; verDinero?: boolean; verVentas?: boolean; onBack: () => void; onDuplicated?: (id: string) => void }) {
     const [evento, setEvento] = useState<Evento | null>(null)
     const [entradas, setEntradas] = useState<Entrada[]>([])
     const [ventas, setVentas] = useState<Venta[]>([])
@@ -452,8 +452,11 @@ const agregarEntrada = async () => {
     }
     const duplicarFecha = async () => {
         const r = await duplicarEventoAction(eventoId, fechaDup || null)
-        if (r.ok) { toast.success('Fecha duplicada (en borrador). Revisala y activala.'); setFechaDup('') }
-        else toast.error((r as any).error || 'Error')
+        if (r.ok) {
+            toast.success('Fecha duplicada (en borrador). Te llevo a la copia.'); setFechaDup('')
+            // Saltamos a la copia para no confundir con los links de la original.
+            if (onDuplicated) onDuplicated(r.id)
+        } else toast.error((r as any).error || 'Error')
     }
     const copiarLinkCiclo = () => {
         if (!evento?.ciclo?.slug) return
