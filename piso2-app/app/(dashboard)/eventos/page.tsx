@@ -188,7 +188,7 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
     useEffect(() => {
         (async () => {
             const r = await getObrasAceptadasDisponiblesAction('')
-            if (r.ok) setObrasLibres(r.obras.filter((o: any) => !o.evento_id))
+            if (r.ok) setObrasLibres(r.obras)
         })()
     }, [])
     const toggleObra = (id: string) => setSel(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -523,7 +523,7 @@ const agregarEntrada = async () => {
         if (r.ok) cargarObras(); else toast.error((r as any).error || 'Error')
     }
     const quitarObra = async (propuestaId: string) => {
-        const r = await desvincularObraAction(propuestaId)
+        const r = await desvincularObraAction(propuestaId, eventoId)
         if (r.ok) cargarObras(); else toast.error((r as any).error || 'Error')
     }
     const cambiarFlyerObra = async (propuestaId: string, url: string) => {

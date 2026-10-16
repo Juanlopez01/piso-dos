@@ -221,7 +221,7 @@ export default function CuraduriaPage() {
         setProcesando(p.id)
         const r = eventoId
             ? await vincularObraAEventoAction(p.id, eventoId)
-            : await desvincularObraAction(p.id)
+            : await desvincularObraAction(p.id, p.evento_id || '')
         if (r.ok) { cargar(); cargarFunciones() } else toast.error((r as any).error || 'Error')
         setProcesando(null)
     }

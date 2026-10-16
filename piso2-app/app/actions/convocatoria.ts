@@ -191,16 +191,25 @@ async function adjuntarCicloYFuncion(admin: any, propuestas: any[]) {
         for (const c of (ciclos || []) as any[]) titulo[c.id] = c.titulo
         for (const p of propuestas) p.convocatoria_titulo = p.convocatoria_id ? (titulo[p.convocatoria_id] || null) : null
     }
-    const eventoIds = [...new Set(propuestas.map(p => p.evento_id).filter(Boolean))]
-    if (eventoIds.length) {
-        const { data: evs } = await admin.from('eventos').select('id, nombre, fecha, estado').in('id', eventoIds)
+    // Una obra puede estar en varias funciones (muchos-a-muchos). Mostramos la
+    // primera función vinculada (para seguir agrupando "seleccionados por fecha").
+    const obraIds = propuestas.map(p => p.id)
+    if (obraIds.length) {
+        const { data: links } = await admin.from('evento_obras').select('evento_id, obra_id').in('obra_id', obraIds)
+        const evIds = [...new Set((links || []).map((l: any) => l.evento_id))]
         const em: Record<string, any> = {}
-        for (const e of (evs || []) as any[]) em[e.id] = e
+        if (evIds.length) {
+            const { data: evs } = await admin.from('eventos').select('id, nombre, fecha, estado').in('id', evIds)
+            for (const e of (evs || []) as any[]) em[e.id] = e
+        }
+        const porObra: Record<string, any[]> = {}
+        for (const l of (links || []) as any[]) if (em[l.evento_id]) (porObra[l.obra_id] ||= []).push(em[l.evento_id])
         for (const p of propuestas) {
-            const e = p.evento_id ? em[p.evento_id] : null
-            p.evento_nombre = e?.nombre || null
-            p.evento_fecha = e?.fecha || null
-            p.evento_estado = e?.estado || null
+            const first = (porObra[p.id] || [])[0] || null
+            p.evento_id = first?.id || null // primera función (la curaduría la maneja como una)
+            p.evento_nombre = first?.nombre || null
+            p.evento_fecha = first?.fecha || null
+            p.evento_estado = first?.estado || null
         }
     }
 }
@@ -232,20 +241,23 @@ export async function curarPropuestaAction(id: string, decision: 'aceptada' | 'r
 
     const { error } = await admin.from('obra_propuestas').update(patch).eq('id', id)
     if (error) return { ok: false as const, error: error.message }
-    return { ok: true as const, eventoId: p.evento_id || null }
+    return { ok: true as const, eventoId: null }
 }
 
 // ---- Varias obras en un evento ----
-// Un evento (función) puede juntar más de una obra aprobada (un programa).
-// Las obras se vinculan por obra_propuestas.evento_id.
+// Muchos-a-muchos: una función tiene varias obras y una obra puede estar en
+// varias funciones. El vínculo vive en la tabla evento_obras.
 
 export async function getObrasDeEventoAction(eventoId: string) {
     const perm = await requireFichaObra(true)
     if (!perm.ok) return { ok: false as const, error: perm.error, obras: [] as any[] }
     const admin = getAdminClient()
+    const { data: links } = await admin.from('evento_obras').select('obra_id').eq('evento_id', eventoId)
+    const ids = (links || []).map((l: any) => l.obra_id)
+    if (!ids.length) return { ok: true as const, obras: [] as any[] }
     const { data } = await admin.from('obra_propuestas')
         .select('id, titulo, director, compania, duracion_min, descripcion, imagenes, flyer_url')
-        .eq('evento_id', eventoId).eq('estado', 'aceptada').order('created_at')
+        .in('id', ids).eq('estado', 'aceptada').order('created_at')
     return { ok: true as const, obras: (data || []) as any[] }
 }
 
@@ -259,15 +271,21 @@ export async function setFlyerObraAction(propuestaId: string, url: string | null
     return { ok: true as const }
 }
 
-// Obras aceptadas que se pueden sumar (no están ya en este evento).
+// Obras aceptadas que se pueden sumar. Aparecen SIEMPRE todas (una obra puede
+// estar en varias funciones); solo ocultamos las que ya están en ESTA función.
 export async function getObrasAceptadasDisponiblesAction(eventoId: string) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error, obras: [] as any[] }
     const admin = getAdminClient()
+    let yaEnEvento: string[] = []
+    if (eventoId) {
+        const { data: links } = await admin.from('evento_obras').select('obra_id').eq('evento_id', eventoId)
+        yaEnEvento = (links || []).map((l: any) => l.obra_id)
+    }
     const { data } = await admin.from('obra_propuestas')
-        .select('id, titulo, compania, evento_id')
+        .select('id, titulo, compania')
         .eq('estado', 'aceptada').order('created_at', { ascending: false })
-    const obras = (data || []).filter((o: any) => o.evento_id !== eventoId)
+    const obras = (data || []).filter((o: any) => !yaEnEvento.includes(o.id))
     return { ok: true as const, obras }
 }
 
@@ -275,31 +293,18 @@ export async function vincularObraAEventoAction(propuestaId: string, eventoId: s
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
-    // Si la obra tenía su propio evento auto-creado y quedó vacío (sin entradas ni
-    // ventas, en borrador), lo limpiamos para no dejar funciones huérfanas.
-    const { data: obra } = await admin.from('obra_propuestas').select('evento_id').eq('id', propuestaId).maybeSingle()
-    const anterior = obra?.evento_id
-    const { error } = await admin.from('obra_propuestas').update({ evento_id: eventoId }).eq('id', propuestaId)
+    // Muchos-a-muchos: sumamos la obra a esta función sin sacarla de otras.
+    const { error } = await admin.from('evento_obras').upsert({ evento_id: eventoId, obra_id: propuestaId }, { onConflict: 'evento_id,obra_id' })
     if (error) return { ok: false as const, error: error.message }
-    if (anterior && anterior !== eventoId) {
-        const [{ count: ents }, { count: vts }, { data: evPrev }] = await Promise.all([
-            admin.from('evento_entradas').select('id', { count: 'exact', head: true }).eq('evento_id', anterior),
-            admin.from('evento_ventas').select('id', { count: 'exact', head: true }).eq('evento_id', anterior),
-            admin.from('eventos').select('estado, ciclo_id').eq('id', anterior).maybeSingle(),
-        ])
-        const { count: otras } = await admin.from('obra_propuestas').select('id', { count: 'exact', head: true }).eq('evento_id', anterior)
-        if ((ents || 0) === 0 && (vts || 0) === 0 && (otras || 0) === 0 && evPrev?.estado === 'borrador' && !evPrev?.ciclo_id) {
-            await admin.from('eventos').delete().eq('id', anterior)
-        }
-    }
     return { ok: true as const }
 }
 
-export async function desvincularObraAction(propuestaId: string) {
+export async function desvincularObraAction(propuestaId: string, eventoId: string) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
-    const { error } = await admin.from('obra_propuestas').update({ evento_id: null }).eq('id', propuestaId)
+    // Solo la saca de ESTA función; sigue en las demás donde esté.
+    const { error } = await admin.from('evento_obras').delete().eq('evento_id', eventoId).eq('obra_id', propuestaId)
     if (error) return { ok: false as const, error: error.message }
     return { ok: true as const }
 }

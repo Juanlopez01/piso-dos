@@ -47,6 +47,12 @@ async function requireFichaWrite() {
     return { ok: true as const, userId: session.user.id }
 }
 
+// IDs de las obras vinculadas a un evento (relación muchos-a-muchos: evento_obras).
+async function obraIdsDeEvento(admin: any, eventoId: string): Promise<string[]> {
+    const { data } = await admin.from('evento_obras').select('obra_id').eq('evento_id', eventoId)
+    return (data || []).map((r: any) => r.obra_id)
+}
+
 // Suma de entradas vendidas (confirmadas) por entrada_id, para un evento.
 async function vendidasPorEntrada(admin: any, eventoId: string): Promise<Record<string, number>> {
     const { data: ventas } = await admin.from('evento_ventas').select('id').eq('evento_id', eventoId).eq('estado', 'confirmada')
@@ -152,6 +158,8 @@ export async function getEventoDetalleAction(eventoId: string) {
     const finanzas = perm.finanzas
     const canWrite = ROLES_WRITE.includes(perm.rol)
 
+    const obraIdsEv = await obraIdsDeEvento(admin, eventoId)
+
     const [
         { data: evento },
         { data: entradas },
@@ -169,8 +177,8 @@ export async function getEventoDetalleAction(eventoId: string) {
         admin.from('evento_ventas').select('id, comprador_nombre, comprador_contacto, medio_pago, total, estado, canal, reembolsada, created_at').eq('evento_id', eventoId).order('created_at', { ascending: false }),
         admin.from('evento_equipo').select('id, nombre, rol, monto, notas, created_at').eq('evento_id', eventoId).order('created_at'),
         admin.from('evento_invitados').select('id, nombre, contacto, cantidad, notas, presente, created_at').eq('evento_id', eventoId).order('created_at'),
-        admin.from('obra_propuestas').select('id, titulo, director, compania, duracion_min, descripcion, imagenes, flyer_url').eq('evento_id', eventoId).eq('estado', 'aceptada').order('created_at'),
-        canWrite ? admin.from('obra_propuestas').select('id, titulo, compania, evento_id').eq('estado', 'aceptada').order('created_at', { ascending: false }) : Promise.resolve({ data: [] as any[] }),
+        obraIdsEv.length ? admin.from('obra_propuestas').select('id, titulo, director, compania, duracion_min, descripcion, imagenes, flyer_url').in('id', obraIdsEv).eq('estado', 'aceptada').order('created_at') : Promise.resolve({ data: [] as any[] }),
+        canWrite ? admin.from('obra_propuestas').select('id, titulo, compania').eq('estado', 'aceptada').order('created_at', { ascending: false }) : Promise.resolve({ data: [] as any[] }),
         admin.from('evento_ventas').select('id, comprador_nombre, comprador_contacto, total, created_at').eq('evento_id', eventoId).eq('estado', 'pendiente').order('created_at', { ascending: false }),
     ])
     if (!evento) return { ok: false as const, error: 'Evento no encontrado' }
@@ -205,7 +213,9 @@ export async function getEventoDetalleAction(eventoId: string) {
     const totalInvitados = invitados.reduce((a, i) => a + Number(i.cantidad || 1), 0)
     const presentes = invitados.filter(i => i.presente).reduce((a, i) => a + Number(i.cantidad || 1), 0)
     const obras = (obrasData || []) as any[]
-    const obrasDisp = (obrasAll || []).filter((o: any) => o.evento_id !== eventoId)
+    // Disponibles = todas las obras aceptadas que NO están ya en esta función
+    // (una obra puede estar en varias funciones; solo la ocultamos de ESTA).
+    const obrasDisp = (obrasAll || []).filter((o: any) => !obraIdsEv.includes(o.id))
     const carritos = (ventasPend || []).map((v: any) => ({
         id: v.id, nombre: v.comprador_nombre || 'Sin nombre', contacto: v.comprador_contacto || '',
         detalle: (itemsByVenta[v.id] || []).map((it: any) => `${it.cantidad}× ${it.nombre}`).join(' · '),
@@ -255,10 +265,10 @@ export async function crearEventoAction(data: { nombre: string; descripcion?: st
     }).select('id').single()
     if (error) return { ok: false as const, error: error.message }
 
-    // Obras elegidas al crear → se vinculan a esta función (solo aceptadas).
+    // Obras elegidas al crear → se vinculan a esta función (muchos-a-muchos).
     const obraIds = (data.obra_ids || []).filter(Boolean)
     if (obraIds.length) {
-        await admin.from('obra_propuestas').update({ evento_id: ev.id }).in('id', obraIds).eq('estado', 'aceptada')
+        await admin.from('evento_obras').upsert(obraIds.map(id => ({ evento_id: ev.id, obra_id: id })), { onConflict: 'evento_id,obra_id' })
     }
     return { ok: true as const, id: ev.id }
 }
@@ -309,8 +319,9 @@ export async function eliminarEventoAction(eventoId: string) {
     await admin.from('evento_gastos').delete().eq('evento_id', eventoId)
     await admin.from('evento_equipo').delete().eq('evento_id', eventoId)
     await admin.from('evento_invitados').delete().eq('evento_id', eventoId)
-    // Desvinculamos las obras que apuntaban a este evento (no las borramos).
-    await admin.from('obra_propuestas').update({ evento_id: null }).eq('evento_id', eventoId)
+    // Desvinculamos las obras de esta función (las obras no se borran, pueden
+    // estar en otras funciones).
+    await admin.from('evento_obras').delete().eq('evento_id', eventoId)
 
     const { error } = await admin.from('eventos').delete().eq('id', eventoId)
     if (error) return { ok: false as const, error: error.message }
@@ -598,9 +609,10 @@ export async function getEventoPublicoAction(eventoId: string, promo?: string) {
             disponible: Math.max(0, (e.cupo || 0) - (vendidas[e.id] || 0)),
         }))
     // Programa: obras vinculadas a la función (para lucir cada compañía en público).
-    const { data: obrasProg } = await admin.from('obra_propuestas')
+    const obraIdsPub = await obraIdsDeEvento(admin, eventoId)
+    const { data: obrasProg } = obraIdsPub.length ? await admin.from('obra_propuestas')
         .select('id, titulo, compania, director, duracion_min, descripcion, imagenes, flyer_url')
-        .eq('evento_id', eventoId).eq('estado', 'aceptada').order('created_at')
+        .in('id', obraIdsPub).eq('estado', 'aceptada').order('created_at') : { data: [] as any[] }
     const obras = (obrasProg || []).map((o: any) => ({
         id: o.id, titulo: o.titulo, compania: o.compania || null, director: o.director || null,
         duracion_min: o.duracion_min || null, descripcion: o.descripcion || null,
@@ -656,11 +668,11 @@ export async function crearOrdenEventoAction(payload: {
         const libres = Math.max(0, aforo - yaVend)
         if (totalCant > libres) return { ok: false as const, error: `No hay lugar: quedan ${libres} de ${aforo}.` }
     }
-    // Atribución por compañía: validamos que la obra del link pertenezca al evento.
+    // Atribución por compañía: validamos que la obra del link esté en este evento.
     let obraOrigen: string | null = null
     if (payload.cia) {
-        const { data: ob } = await admin.from('obra_propuestas').select('id').eq('id', payload.cia).eq('evento_id', payload.evento_id).maybeSingle()
-        obraOrigen = ob?.id || null
+        const { data: ob } = await admin.from('evento_obras').select('obra_id').eq('evento_id', payload.evento_id).eq('obra_id', payload.cia).maybeSingle()
+        obraOrigen = ob?.obra_id || null
     }
     // El 10% de servicio se suma arriba del valor de las entradas.
     const totalFinal = total + montoServicio(total)
@@ -757,7 +769,8 @@ export async function getReporteEventoAction(eventoId: string) {
         .eq('evento_id', eventoId).eq('estado', 'confirmada').order('created_at', { ascending: false })
 
     // Nombre de cada obra/compañía del evento (para atribuir ventas por compañía).
-    const { data: obrasEv } = await admin.from('obra_propuestas').select('id, titulo, compania').eq('evento_id', eventoId)
+    const obraIdsRep = await obraIdsDeEvento(admin, eventoId)
+    const { data: obrasEv } = obraIdsRep.length ? await admin.from('obra_propuestas').select('id, titulo, compania').in('id', obraIdsRep) : { data: [] as any[] }
     const nombreObra: Record<string, string> = {}
     for (const o of (obrasEv || []) as any[]) nombreObra[o.id] = o.compania || o.titulo || 'Compañía'
 
@@ -1053,8 +1066,9 @@ export async function getBorderauxAction(eventoId: string) {
     // A cada compañía se le paga: base de SUS entradas × su %. Los gastos internos
     // (equipo/gastos que paga Piso 2) NO se reparten: quedan en la admin general y
     // los absorbe Piso 2. La base sin obra asignada también va a Piso 2.
-    const { data: obrasEv } = await admin.from('obra_propuestas')
-        .select('id, titulo, compania, reparto_pct').eq('evento_id', eventoId).eq('estado', 'aceptada')
+    const obraIdsBord = await obraIdsDeEvento(admin, eventoId)
+    const { data: obrasEv } = obraIdsBord.length ? await admin.from('obra_propuestas')
+        .select('id, titulo, compania, reparto_pct').in('id', obraIdsBord).eq('estado', 'aceptada') : { data: [] as any[] }
 
     // A cada compañía se le liquida la base de las ventas que entraron por SU link.
     const porObra = (obrasEv || []).map((o: any) => {
@@ -1288,7 +1302,7 @@ export async function duplicarEventoAction(eventoId: string, fecha: string | nul
 
     const { data: nueva, error } = await admin.from('eventos').insert({
         nombre: ev.nombre, descripcion: ev.descripcion, lugar: ev.lugar,
-        ciclo_id: ev.ciclo_id, flyer_url: ev.flyer_url, fecha: fecha || null,
+        ciclo_id: ev.ciclo_id, flyer_url: ev.flyer_url, fecha: fecha || null, aforo: ev.aforo ?? null,
         estado: 'borrador', venta_online: ev.venta_online, created_by: perm.userId,
     }).select('id').single()
     if (error || !nueva) return { ok: false as const, error: error?.message || 'No se pudo duplicar.' }
@@ -1296,6 +1310,11 @@ export async function duplicarEventoAction(eventoId: string, fecha: string | nul
     const { data: entradas } = await admin.from('evento_entradas').select('nombre, precio, cupo, orden, oculta, codigo_promo, activo').eq('evento_id', eventoId)
     if (entradas?.length) {
         await admin.from('evento_entradas').insert(entradas.map((e: any) => ({ ...e, evento_id: nueva.id })))
+    }
+    // Copiamos las obras vinculadas (una obra puede estar en varias funciones).
+    const obraIdsOrig = await obraIdsDeEvento(admin, eventoId)
+    if (obraIdsOrig.length) {
+        await admin.from('evento_obras').upsert(obraIdsOrig.map(id => ({ evento_id: nueva.id, obra_id: id })), { onConflict: 'evento_id,obra_id' })
     }
     return { ok: true as const, id: nueva.id }
 }
@@ -1642,10 +1661,17 @@ export async function getFuncionesAgendaAction() {
     const ids = (eventos || []).map((e: any) => e.id)
     const obrasPorEvento: Record<string, { titulo: string; compania: string | null }[]> = {}
     if (ids.length) {
-        const { data: obras } = await admin.from('obra_propuestas')
-            .select('titulo, compania, evento_id').in('evento_id', ids).eq('estado', 'aceptada')
-        for (const o of (obras || []) as any[]) {
-            (obrasPorEvento[o.evento_id] ||= []).push({ titulo: o.titulo, compania: o.compania || null })
+        // Vínculos evento<->obra (muchos-a-muchos) y datos de cada obra.
+        const { data: links } = await admin.from('evento_obras').select('evento_id, obra_id').in('evento_id', ids)
+        const obraIds = [...new Set((links || []).map((l: any) => l.obra_id))]
+        const infoObra: Record<string, { titulo: string; compania: string | null }> = {}
+        if (obraIds.length) {
+            const { data: obras } = await admin.from('obra_propuestas').select('id, titulo, compania').in('id', obraIds).eq('estado', 'aceptada')
+            for (const o of (obras || []) as any[]) infoObra[o.id] = { titulo: o.titulo, compania: o.compania || null }
+        }
+        for (const l of (links || []) as any[]) {
+            const info = infoObra[l.obra_id]
+            if (info) (obrasPorEvento[l.evento_id] ||= []).push(info)
         }
     }
 
