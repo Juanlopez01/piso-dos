@@ -439,6 +439,7 @@ export async function convertirSueltaAPackAction(packId: string, nuevoProductoId
             creditos_restantes: Number(packActual.creditos_restantes) + delta,
             monto_abonado: Number(packActual.monto_abonado) + Number(montoDiferencia),
             precio_total: Number(nuevoProd.precio),
+            estado: 'activo',
         }).eq('id', packId)
         if (errPack) throw new Error('Error al actualizar el pack')
 
