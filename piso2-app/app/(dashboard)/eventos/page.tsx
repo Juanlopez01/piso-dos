@@ -9,7 +9,7 @@ import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 import {
-    getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction, setRepartoPctObraAction, setFlyerObraAction,
+    getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction, setRepartoPctObraAction, setFlyerObraAction, editarObraPropuestaAction,
 } from '@/app/actions/convocatoria'
 import {
     getEventosAction, getEventoAction, getEventoDetalleAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
@@ -533,6 +533,14 @@ const agregarEntrada = async () => {
         const r = await setFlyerObraAction(propuestaId, url || null)
         if (r.ok) cargarObras(); else toast.error((r as any).error || 'Error')
     }
+    const [editandoObra, setEditandoObra] = useState<string | null>(null)
+    const [obraEdit, setObraEdit] = useState<{ titulo: string; compania: string; director: string; duracion_min: string; descripcion: string }>({ titulo: '', compania: '', director: '', duracion_min: '', descripcion: '' })
+    const abrirEditObra = (o: any) => { setEditandoObra(o.id); setObraEdit({ titulo: o.titulo || '', compania: o.compania || '', director: o.director || '', duracion_min: o.duracion_min?.toString() || '', descripcion: o.descripcion || '' }) }
+    const guardarEditObra = async () => {
+        if (!editandoObra) return
+        const r = await editarObraPropuestaAction(editandoObra, { titulo: obraEdit.titulo, compania: obraEdit.compania, director: obraEdit.director, duracion_min: obraEdit.duracion_min ? Number(obraEdit.duracion_min) : null, descripcion: obraEdit.descripcion })
+        if (r.ok) { toast.success('Obra actualizada'); setEditandoObra(null); cargarObras() } else toast.error((r as any).error || 'Error')
+    }
 
     // --- link de puerta (gente externa) ---
     const copiarLinkPuerta = async () => {
@@ -834,10 +842,28 @@ const agregarEntrada = async () => {
                                 <div className="flex items-center gap-2">
                                     {(o.flyer_url || o.imagenes?.[0]) && <img src={o.flyer_url || o.imagenes[0]} alt="" className="w-8 h-10 object-cover rounded shrink-0" />}
                                     <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{o.titulo}</p><p className="text-[10px] text-gray-500 truncate">{[o.compania, o.duracion_min && `${o.duracion_min} min`].filter(Boolean).join(' · ')}</p></div>
+                                    {!soloLectura && <button onClick={() => abrirEditObra(o)} className="text-gray-400 hover:text-white p-1" title="Editar obra"><Pencil size={13} /></button>}
                                     <Link href={`/eventos/${eventoId}/ficha?obra=${o.id}`} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-1.5 rounded-lg shrink-0" title="Ficha técnica de esta obra"><ClipboardList size={12} /> Ficha</Link>
                                     {!soloLectura && <button onClick={() => copiarLinkCia(o.id)} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[#D4E655] bg-[#D4E655]/10 hover:bg-[#D4E655]/20 px-2 py-1.5 rounded-lg shrink-0 select-none" title="Copiar link de venta de esta compañía (sus ventas se le atribuyen)"><Copy size={12} /> Link</button>}
                                     {!soloLectura && <button onClick={() => quitarObra(o.id)} className="text-gray-600 hover:text-red-400 p-1"><X size={14} /></button>}
                                 </div>
+                                {editandoObra === o.id && (
+                                    <div className="space-y-2 pt-1 border-t border-white/5">
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <input value={obraEdit.titulo} onChange={e => setObraEdit({ ...obraEdit, titulo: e.target.value })} placeholder="Título" className="inp" />
+                                            <input value={obraEdit.compania} onChange={e => setObraEdit({ ...obraEdit, compania: e.target.value })} placeholder="Compañía" className="inp" />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <input value={obraEdit.director} onChange={e => setObraEdit({ ...obraEdit, director: e.target.value })} placeholder="Director/a" className="inp" />
+                                            <input value={obraEdit.duracion_min} onChange={e => setObraEdit({ ...obraEdit, duracion_min: e.target.value })} placeholder="Duración (min)" type="number" className="inp" />
+                                        </div>
+                                        <textarea value={obraEdit.descripcion} onChange={e => setObraEdit({ ...obraEdit, descripcion: e.target.value })} placeholder="Descripción (lo que ve el público al comprar entradas)" rows={3} className="inp w-full resize-none" />
+                                        <div className="flex gap-2 justify-end">
+                                            <button onClick={() => setEditandoObra(null)} className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 hover:text-white px-3 py-1.5 rounded-lg bg-white/5">Cancelar</button>
+                                            <button onClick={guardarEditObra} className="text-[10px] font-semibold uppercase tracking-wide text-black bg-[#D4E655] hover:bg-white px-3 py-1.5 rounded-lg">Guardar</button>
+                                        </div>
+                                    </div>
+                                )}
                                 {!soloLectura && <FlyerUploader value={o.flyer_url || ''} onChange={url => cambiarFlyerObra(o.id, url)} label="Subí el flyer de esta obra (si no, se usa su foto)" />}
                             </div>
                         ))}
