@@ -271,6 +271,22 @@ export async function setFlyerObraAction(propuestaId: string, url: string | null
     return { ok: true as const }
 }
 
+export async function editarObraPropuestaAction(propuestaId: string, patch: { titulo?: string; compania?: string; director?: string; duracion_min?: number | null; descripcion?: string }) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const upd: any = {}
+    if (patch.titulo !== undefined) upd.titulo = patch.titulo.trim()
+    if (patch.compania !== undefined) upd.compania = patch.compania?.trim() || null
+    if (patch.director !== undefined) upd.director = patch.director?.trim() || null
+    if (patch.duracion_min !== undefined) upd.duracion_min = (patch.duracion_min == null || Number(patch.duracion_min) <= 0) ? null : Math.floor(Number(patch.duracion_min))
+    if (patch.descripcion !== undefined) upd.descripcion = patch.descripcion?.trim() || null
+    if (!Object.keys(upd).length) return { ok: true as const }
+    const { error } = await admin.from('obra_propuestas').update(upd).eq('id', propuestaId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
 // Obras aceptadas que se pueden sumar. Aparecen SIEMPRE todas (una obra puede
 // estar en varias funciones); solo ocultamos las que ya están en ESTA función.
 export async function getObrasAceptadasDisponiblesAction(eventoId: string) {
