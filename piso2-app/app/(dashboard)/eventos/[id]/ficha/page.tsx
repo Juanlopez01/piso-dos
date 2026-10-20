@@ -69,7 +69,7 @@ export default function FichaTecnicaPage() {
     if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#050505]"><Loader2 className="animate-spin text-[#D4E655]" /></div>
 
     return (
-        <div className="min-h-screen bg-[#050505] text-white pb-28">
+        <div className="min-h-screen bg-[#050505] text-white pb-44 md:pb-28">
             <Toaster theme="dark" position="top-center" richColors />
 
             <div className="max-w-2xl mx-auto px-4 pt-6">
@@ -165,7 +165,7 @@ export default function FichaTecnicaPage() {
             </div>
 
             {/* barra fija guardar */}
-            {!soloLectura && <div className="fixed bottom-0 left-0 right-0 bg-[#09090b]/95 backdrop-blur border-t border-white/10 p-3 z-40">
+            {!soloLectura && <div className="fixed bottom-16 md:bottom-0 left-0 right-0 bg-[#09090b]/95 backdrop-blur border-t border-white/10 p-3 z-40">
                 <div className="max-w-2xl mx-auto">
                     <button onClick={guardar} disabled={saving} className="w-full flex items-center justify-center gap-2 bg-[#D4E655] text-black font-black py-3.5 rounded-xl uppercase text-sm tracking-wide hover:bg-white transition-colors disabled:opacity-60">
                         {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Guardar ficha
