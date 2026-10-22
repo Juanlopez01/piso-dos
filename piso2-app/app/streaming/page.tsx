@@ -206,7 +206,7 @@ export default function CotizadorPage() {
         const texto = esCobertura
             ? `¡Hola Piso 2! Me interesa coordinar una Cobertura de Evento Externo.\n\n*Nombre:* ${formData.nombre}\n*Marca:* ${formData.marca}\n*WhatsApp:* ${formData.whatsapp}${formData.empresa ? `\n*Empresa:* ${formData.empresa}` : ''}`
             : `¡Hola Piso 2! Completé el formulario de solicitud de presupuesto en la web.\n\n*Nombre:* ${formData.nombre}\n*Marca:* ${formData.marca}\n*Instagram:* ${formData.instagram}\n*Formato:* ${formData.tipo}\n*Set:* ${formData.espacio}\n*Adicionales:* ${formData.tecnica.length > 0 ? formData.tecnica.join(', ') : 'Ninguno'}\n*Participantes:* ${formData.participantes}\n*Fecha:* ${formData.fecha} a las ${formData.horario} hs\n*Duración:* ${formData.duracion} hora${formData.duracion > 1 ? 's' : ''}\n*Presupuesto estimado:* $${valorEstimado.toLocaleString('es-AR')}`
-        window.open(`https://wa.me/5491171190301?text=${encodeURIComponent(texto)}`, '_blank')
+        window.open(`https://wa.me/5491176766924?text=${encodeURIComponent(texto)}`, '_blank')
     }
 
     if (loadingDb) {
