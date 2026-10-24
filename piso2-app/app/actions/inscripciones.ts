@@ -871,6 +871,7 @@ export async function convertirAsistenteAPackAction(payload: {
                     creditos_restantes: Number(packActual.creditos_restantes) + delta,
                     monto_abonado: Number(packActual.monto_abonado) + Number(payload.diferencia),
                     precio_total: Number(prod.precio),
+                    estado: 'activo',
                 }).eq('id', packActual.id)
             }
         } else {
