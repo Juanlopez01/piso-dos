@@ -775,8 +775,15 @@ export async function getReporteEventoAction(eventoId: string) {
     // Nombre de cada obra/compañía del evento (para atribuir ventas por compañía).
     const obraIdsRep = await obraIdsDeEvento(admin, eventoId)
     const { data: obrasEv } = obraIdsRep.length ? await admin.from('obra_propuestas').select('id, titulo, compania').in('id', obraIdsRep) : { data: [] as any[] }
+    // Etiqueta = nombre de la OBRA; si además tiene compañía cargada (no "-"), la
+    // sumamos. Así nunca queda vacío aunque la compañía no esté puesta.
     const nombreObra: Record<string, string> = {}
-    for (const o of (obrasEv || []) as any[]) nombreObra[o.id] = o.compania || o.titulo || 'Compañía'
+    for (const o of (obrasEv || []) as any[]) {
+        const tit = (o.titulo || '').trim()
+        const comp = (o.compania || '').trim()
+        const compOk = comp && comp !== '-'
+        nombreObra[o.id] = tit ? (compOk ? `${tit} · ${comp}` : tit) : (compOk ? comp : 'Obra')
+    }
 
     const ventaIds = (ventas || []).map((v: any) => v.id)
     let items: any[] = [], tickets: any[] = []

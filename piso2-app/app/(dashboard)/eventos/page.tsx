@@ -987,7 +987,7 @@ const agregarEntrada = async () => {
                             </div>
                             {reporte.porCompania && Object.keys(reporte.porCompania).length > 0 && (
                                 <div>
-                                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">Por compañía (atribución)</p>
+                                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">Por obra / compañía (atribución)</p>
                                     {Object.entries(reporte.porCompania).map(([k, v]: [string, any]) => (
                                         <div key={k} className="flex justify-between text-sm text-gray-300 mb-1"><span>{k}</span><span className="text-gray-500 text-xs">{v.cant} entradas · {pesos(v.monto)}</span></div>
                                     ))}
