@@ -25,7 +25,7 @@ import {
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
 type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number; oculta?: boolean; codigo_promo?: string | null; obra_id?: string | null }
-type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; canal?: string | null; reembolsada?: boolean; created_at: string; items: { nombre: string; cantidad: number; precio_unit: number }[] }
+type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; canal?: string | null; reembolsada?: boolean; reembolso_ref?: string | null; reembolso_at?: string | null; created_at: string; items: { nombre: string; cantidad: number; precio_unit: number }[] }
 type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean; cancelado?: boolean; ciclo_id?: string | null; ciclo?: { nombre: string; slug: string } | null }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
@@ -1193,7 +1193,7 @@ const agregarEntrada = async () => {
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="min-w-0">
                                         <p className="font-bold text-sm truncate">{v.comprador_nombre || 'Sin nombre'}
-                                            {v.reembolsada ? <span className="text-[9px] text-amber-400 uppercase"> · reembolsada</span> : v.estado === 'anulada' && <span className="text-[9px] text-red-400 uppercase"> · anulada</span>}
+                                            {v.reembolsada ? <span className="text-[9px] text-amber-400 uppercase"> · {(v.reembolso_ref && v.reembolso_ref !== 'manual') ? 'reembolsada por MercadoPago' : 'reembolsada en mano'}</span> : v.estado === 'anulada' && <span className="text-[9px] text-red-400 uppercase"> · anulada</span>}
                                         </p>
                                         <p className="text-[11px] text-gray-500 truncate">{v.items.map(i => `${i.cantidad}× ${i.nombre}`).join(' · ')}</p>
                                         <p className="text-[10px] text-gray-600 capitalize">{v.canal || 'mostrador'} · {v.medio_pago} · {fmtFecha(v.created_at)}</p>

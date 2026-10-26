@@ -174,7 +174,7 @@ export async function getEventoDetalleAction(eventoId: string) {
         admin.from('eventos').select('*').eq('id', eventoId).single(),
         admin.from('evento_entradas').select('*').eq('evento_id', eventoId).order('orden'),
         vendidasPorEntrada(admin, eventoId),
-        admin.from('evento_ventas').select('id, comprador_nombre, comprador_contacto, medio_pago, total, estado, canal, reembolsada, created_at').eq('evento_id', eventoId).order('created_at', { ascending: false }),
+        admin.from('evento_ventas').select('id, comprador_nombre, comprador_contacto, medio_pago, total, estado, canal, reembolsada, reembolso_ref, reembolso_at, created_at').eq('evento_id', eventoId).order('created_at', { ascending: false }),
         admin.from('evento_equipo').select('id, nombre, rol, monto, notas, created_at').eq('evento_id', eventoId).order('created_at'),
         admin.from('evento_invitados').select('id, nombre, contacto, cantidad, notas, presente, created_at').eq('evento_id', eventoId).order('created_at'),
         obraIdsEv.length ? admin.from('obra_propuestas').select('id, titulo, director, compania, duracion_min, descripcion, imagenes, flyer_url').in('id', obraIdsEv).eq('estado', 'aceptada').order('created_at') : Promise.resolve({ data: [] as any[] }),
