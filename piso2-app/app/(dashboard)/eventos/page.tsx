@@ -20,7 +20,7 @@ import {
     getCarritosAbandonadosAction, descartarCarritoAction,
     getCiclosEventoAction, crearCicloEventoAction, asignarCicloAction, duplicarEventoAction,
     getLinkPuertaAction, getFechasHermanasAction, traspasarVentaAction,
-    getResenasAction, enviarEncuestaEventoAction,
+    getResenasAction, enviarEncuestaEventoAction, reenviarEntradasEventoAction,
 } from '@/app/actions/eventos'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
@@ -369,6 +369,15 @@ const agregarEntrada = async () => {
         const r = await enviarEncuestaEventoAction(eventoId)
         setEnviandoEncuesta(false)
         if (r.ok) toast.success(`Encuesta enviada a ${r.enviados} de ${r.total} comprador(es)`)
+        else toast.error((r as any).error || 'Error')
+    }
+    const [reenviando, setReenviando] = useState(false)
+    const reenviarEntradas = async () => {
+        if (!confirm('¿Reenviar la entrada por mail a TODOS los compradores de esta función? (sirve, por ej., si se corrigió el horario — el link ya muestra los datos actualizados)')) return
+        setReenviando(true)
+        const r = await reenviarEntradasEventoAction(eventoId)
+        setReenviando(false)
+        if (r.ok) toast.success(`Entrada reenviada a ${r.enviados} de ${r.total} comprador(es)`)
         else toast.error((r as any).error || 'Error')
     }
     const descargarCSV = () => {
@@ -926,6 +935,11 @@ const agregarEntrada = async () => {
                     {!soloLectura && (
                         <button onClick={enviarEncuesta} disabled={enviandoEncuesta} className="flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-300 py-2.5 rounded-lg text-[11px] font-semibold uppercase tracking-wide hover:border-white/30 transition-colors disabled:opacity-50">
                             {enviandoEncuesta ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />} Enviar encuesta por mail
+                        </button>
+                    )}
+                    {!soloLectura && (
+                        <button onClick={reenviarEntradas} disabled={reenviando} className="md:col-span-2 flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-300 py-2.5 rounded-lg text-[11px] font-semibold uppercase tracking-wide hover:border-[#D4E655]/50 transition-colors disabled:opacity-50">
+                            {reenviando ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />} Reenviar entrada a todos (mail)
                         </button>
                     )}
                 </div>

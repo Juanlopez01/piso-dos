@@ -1694,6 +1694,41 @@ export async function getFuncionesAgendaAction() {
 }
 
 // Reenvía la entrada+QR por mail para una venta puntual (desde compradores/detalle).
+// Reenvía la entrada por mail a TODOS los compradores confirmados (no reembolsados)
+// de una función que tengan email. Útil cuando hay que que vuelvan a abrir su
+// entrada (ej. se corrigió el horario). Devuelve cuántos se enviaron.
+export async function reenviarEntradasEventoAction(eventoId: string) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error, enviados: 0, total: 0 }
+    const { mailEnabled, enviarMail, mailEntradaHTML } = await import('@/lib/mail')
+    if (!mailEnabled()) return { ok: false as const, error: 'El envío de mails no está configurado (falta RESEND_API_KEY + MAIL_FROM).', enviados: 0, total: 0 }
+    const admin = getAdminClient()
+    const { data: ev } = await admin.from('eventos').select('nombre').eq('id', eventoId).maybeSingle()
+    const { data: ventas } = await admin.from('evento_ventas')
+        .select('id, comprador_nombre, comprador_email, comprador_contacto, token')
+        .eq('evento_id', eventoId).eq('estado', 'confirmada').eq('reembolsada', false)
+    const destinatarios = (ventas || []).map((v: any) => ({
+        ...v, email: (v.comprador_email || ((v.comprador_contacto || '').includes('@') ? v.comprador_contacto : '') || '').trim(),
+    })).filter((v: any) => v.email.includes('@'))
+    if (!destinatarios.length) return { ok: false as const, error: 'No hay compradores con email en esta función.', enviados: 0, total: 0 }
+
+    // Cantidad de tickets por venta (para el texto del mail).
+    const ids = destinatarios.map((d: any) => d.id)
+    const { data: tks } = await admin.from('evento_tickets').select('venta_id').in('venta_id', ids)
+    const cant: Record<string, number> = {}
+    for (const t of (tks || []) as any[]) cant[t.venta_id] = (cant[t.venta_id] || 0) + 1
+
+    let enviados = 0
+    for (const d of destinatarios.slice(0, 500)) {
+        const r = await enviarMail({
+            to: d.email, subject: `Tu entrada actualizada · ${ev?.nombre || 'Evento'}`,
+            html: mailEntradaHTML({ comprador: d.comprador_nombre, evento: ev?.nombre || 'Evento', ventaId: d.id, token: d.token, cantidad: cant[d.id] || 1 }),
+        })
+        if (r.ok) enviados++
+    }
+    return { ok: true as const, enviados, total: destinatarios.length }
+}
+
 export async function reenviarEntradaAction(ventaId: string, emailOverride?: string) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
