@@ -97,11 +97,11 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
             // Alumnos/Profes → "Cambiar"), luego la foto de Talent, y recién ahí la imagen de la clase.
             const profeFoto = profe?.avatar_url || profe?.foto_url || null
             // La Liga SIEMPRE va en "Formación" (aunque la clase esté cargada como
-            // Regular), y usa la foto del profe. El resto usa la imagen de la clase,
-            // y si no tiene, cae a la foto del profe (así ninguna queda sin foto).
+            // Regular). La imagen que se muestra es la de la clase (la que recepción
+            // elige en "Fotos de clases"); si no tiene, cae a la foto del profe.
             const esLiga = !!c.es_la_liga
             const tipoEfectivo = esLiga ? 'Formacion' : c.tipo_clase
-            const imagen = esLiga ? (profeFoto || c.imagen_url || null) : (c.imagen_url || profeFoto || null)
+            const imagen = c.imagen_url || profeFoto || null
             const key = `${c.nombre}-${nombreProfe}-${tipoEfectivo}`
             const inscritos = c.inscripciones || []
             const instancia: ClaseInstancia = {

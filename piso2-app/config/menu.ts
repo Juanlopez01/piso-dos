@@ -1,4 +1,4 @@
-import { Home, Calendar as CalendarIcon, CalendarCheck, Users, Settings, Package, ShoppingBag, MapPin, Bell, UserCircle, GraduationCap, UsersRound, Search, ShoppingBagIcon, BookOpen, Wallet, FileSpreadsheet, Megaphone, Sparkles, Link2, MessageCircle, Ticket, Theater, ClipboardList } from 'lucide-react'
+import { Home, Calendar as CalendarIcon, CalendarCheck, Users, Settings, Package, ShoppingBag, MapPin, Bell, UserCircle, GraduationCap, UsersRound, Search, ShoppingBagIcon, BookOpen, Wallet, FileSpreadsheet, Megaphone, Sparkles, Link2, MessageCircle, Ticket, Theater, ClipboardList, Camera } from 'lucide-react'
 
 // Tópicos del menú. Se muestran en este orden; el header aparece solo si el rol
 // tiene al menos un item visible en ese grupo. Los grupos sin label (top/cuenta)
@@ -44,6 +44,7 @@ export const menuItems = [
     { name: 'Talents', href: '/talents', icon: Sparkles, grupo: 'escuela', roles: ['admin'] },
     { name: 'Consultas', href: '/consultas', icon: MessageCircle, grupo: 'comunicacion', roles: ['admin', 'recepcion'] },
     { name: 'Resumen Clases', href: '/resumen-clases', icon: ClipboardList, grupo: 'escuela', roles: ['admin', 'recepcion'] },
+    { name: 'Fotos de clases', href: '/fotos-clases', icon: Camera, grupo: 'escuela', roles: ['admin', 'recepcion'] },
     { name: 'Eventos', href: '/eventos', icon: Ticket, grupo: 'piso2e', roles: ['admin', 'recepcion', 'curador'] },
     { name: 'Cartelera', href: '/funciones', icon: CalendarCheck, grupo: 'piso2e', roles: ['admin', 'recepcion', 'curador', 'jefe_sala', 'tecnica'] },
     { name: 'Curaduría', href: '/curaduria', icon: Theater, grupo: 'piso2e', roles: ['admin', 'recepcion', 'curador'] },

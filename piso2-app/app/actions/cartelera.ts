@@ -40,10 +40,10 @@ export async function getClasesPublicasAction(): Promise<ClasePublicaGrupo[]> {
         const profe = profeObj?.nombre_completo || 'Staff'
         const sala = Array.isArray(c.sala) ? c.sala[0] : c.sala
         const sede = (Array.isArray(sala?.sede) ? sala.sede[0]?.nombre : sala?.sede?.nombre) || ''
-        // La Liga muestra la foto del profe (avatar → Talent); el resto, la imagen de la
-        // clase y si no tiene, cae a la foto del profe. Misma lógica que /explorar.
+        // Imagen: la de la clase (la que recepción elige en "Fotos de clases"); si no
+        // tiene, cae a la foto del profe (avatar → Talent). Misma lógica que /explorar.
         const profeFoto = profeObj?.avatar_url || profeObj?.foto_url || null
-        const imagen = c.es_la_liga ? (profeFoto || c.imagen_url || null) : (c.imagen_url || profeFoto || null)
+        const imagen = c.imagen_url || profeFoto || null
         const key = `${c.nombre}-${profe}-${c.tipo_clase}`
         if (!agrup[key]) {
             agrup[key] = { key_grupo: key, nombre: c.nombre, tipo_clase: c.tipo_clase, imagen_url: imagen, profesor: profe, instancias: [] }
