@@ -13,6 +13,25 @@ const getAdminClient = () => {
     )
 }
 
+// Lista de grupos para la cartelera: todas las compañías con el nombre de su
+// coordinador. Sirve para mostrar en "Grupos" también los que todavía no tienen
+// clases futuras cargadas (si no, un grupo recién creado no aparecía en ningún lado).
+export async function getCompaniasVitrinaAction(): Promise<{ id: string; nombre: string; coordinador_nombre: string | null }[]> {
+    const admin = getAdminClient()
+    const { data } = await admin.from('companias').select('id, nombre, coordinador_id').order('nombre')
+    const companias = (data || []) as any[]
+    const coordIds = [...new Set(companias.map(c => c.coordinador_id).filter(Boolean))]
+    const nombrePorId: Record<string, string> = {}
+    if (coordIds.length) {
+        const { data: profs } = await admin.from('profiles').select('id, nombre_completo').in('id', coordIds)
+        for (const p of (profs || []) as any[]) nombrePorId[p.id] = p.nombre_completo
+    }
+    return companias.map(c => ({
+        id: String(c.id), nombre: c.nombre,
+        coordinador_nombre: c.coordinador_id ? (nombrePorId[c.coordinador_id] || null) : null,
+    }))
+}
+
 // 1. CREAR COMPAÑÍA (Solo Admin/Coord)
 export async function crearCompaniaAction(payload: { nombre: string, descripcion: string, coordinador_id: string }) {
     const supabase = await createClient()

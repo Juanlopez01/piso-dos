@@ -15,6 +15,7 @@ import { toast, Toaster } from 'sonner'
 import Link from 'next/link'
 import Image from 'next/image'
 import { inscribirAlumnoAction } from '@/app/actions/cartelera'
+import { getCompaniasVitrinaAction } from '@/app/actions/companias'
 import { useCash } from '@/context/CashContext'
 
 // 🚀 FIX ZONA HORARIA: Eliminamos el parseSafeDate complejo y usamos directamente new Date()
@@ -79,7 +80,7 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
         .from('clases')
         .select(`
             id, nombre, inicio, fin, tipo_clase, cupo_maximo, estado, imagen_url, ritmo_id, es_combinable, compania_id, liga_nivel, es_la_liga,
-            profesor:profiles!clases_profesor_id_fkey(nombre_completo, foto_url),
+            profesor:profiles!clases_profesor_id_fkey(nombre_completo, avatar_url, foto_url),
             sala:salas(nombre, sede:sedes(nombre)),
             inscripciones(user_id)
         `)
@@ -92,7 +93,9 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
         clasesData.forEach((c: any) => {
             const profe = Array.isArray(c.profesor) ? c.profesor[0] : c.profesor
             const nombreProfe = profe?.nombre_completo || 'Staff'
-            const profeFoto = profe?.foto_url || null
+            // Foto del profe para la tarjeta: primero su avatar (lo sube recepción en
+            // Alumnos/Profes → "Cambiar"), luego la foto de Talent, y recién ahí la imagen de la clase.
+            const profeFoto = profe?.avatar_url || profe?.foto_url || null
             // La Liga SIEMPRE va en "Formación" (aunque la clase esté cargada como
             // Regular), y usa la foto del profe. El resto usa la imagen de la clase,
             // y si no tiene, cae a la foto del profe (así ninguna queda sin foto).
@@ -121,8 +124,31 @@ const fetcherCartelera = async (uid: string | null, supabase: any): Promise<Cart
     }
 
     const arrAgrupado = Object.values(agrupador)
+
+    // Grupos (compañías) que todavía no tienen clases futuras cargadas: los mostramos
+    // igual como tarjeta en "Grupos", para que un grupo recién creado aparezca aunque
+    // no tenga fechas. La tarjeta/el modal manejan el caso sin instancias.
+    try {
+        const companias = await getCompaniasVitrinaAction()
+        const idsConClases = new Set(arrAgrupado.filter(g => g.compania_id != null).map(g => String(g.compania_id)))
+        for (const cia of companias) {
+            if (idsConClases.has(String(cia.id))) continue
+            arrAgrupado.push({
+                key_grupo: `cia-${cia.id}`, nombre: cia.nombre, tipo_clase: 'compania',
+                imagen_url: null, ritmo_id: null, compania_id: cia.id, liga_nivel: null,
+                profesor: { nombre_completo: cia.coordinador_nombre || 'Staff' },
+                instancias: [], es_combinable: false,
+            })
+        }
+    } catch { /* si falla, seguimos mostrando solo los grupos con clases */ }
+
     arrAgrupado.forEach(g => g.instancias.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime()))
-    arrAgrupado.sort((a, b) => new Date(a.instancias[0].inicio).getTime() - new Date(b.instancias[0].inicio).getTime())
+    // Los grupos sin fechas van al final (Infinity).
+    arrAgrupado.sort((a, b) => {
+        const ta = a.instancias[0] ? new Date(a.instancias[0].inicio).getTime() : Infinity
+        const tb = b.instancias[0] ? new Date(b.instancias[0].inicio).getTime() : Infinity
+        return ta - tb
+    })
 
     return { perfil: profile as any, clasesAgrupadas: arrAgrupado, pasesExclusivos }
 }
@@ -410,17 +436,23 @@ export default function ExplorarClasesPage() {
                                                 </div>
 
                                                 <div className="flex flex-col gap-2 pt-3 border-t border-white/10">
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex items-center gap-2 text-xs text-gray-300 font-medium drop-shadow-sm">
-                                                            <MapPin size={12} className="text-white/50" />
-                                                            <span>{proximaClase.sala?.nombre} <span className="text-[9px] uppercase ml-1 opacity-50 border border-white/20 px-1 rounded">{proximaClase.sala?.sede?.nombre}</span></span>
+                                                    {proximaClase ? (
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-2 text-xs text-gray-300 font-medium drop-shadow-sm">
+                                                                <MapPin size={12} className="text-white/50" />
+                                                                <span>{proximaClase.sala?.nombre} <span className="text-[9px] uppercase ml-1 opacity-50 border border-white/20 px-1 rounded">{proximaClase.sala?.sede?.nombre}</span></span>
+                                                            </div>
+                                                            {/* 🚀 FIX DE HORA APLICADO ACÁ */}
+                                                            <p className="flex items-center gap-1.5 text-[10px] font-black text-white uppercase tracking-widest bg-white/10 px-2 py-1.5 rounded-md border border-white/5 backdrop-blur-sm">
+                                                                <Clock size={12} className={estilos.icon} />
+                                                                {format(parseFechaLocal(proximaClase.inicio), "HH:mm")}
+                                                            </p>
                                                         </div>
-                                                        {/* 🚀 FIX DE HORA APLICADO ACÁ */}
-                                                        <p className="flex items-center gap-1.5 text-[10px] font-black text-white uppercase tracking-widest bg-white/10 px-2 py-1.5 rounded-md border border-white/5 backdrop-blur-sm">
-                                                            <Clock size={12} className={estilos.icon} />
-                                                            {format(parseFechaLocal(proximaClase.inicio), "HH:mm")}
-                                                        </p>
-                                                    </div>
+                                                    ) : (
+                                                        <div className="flex items-center gap-2 text-xs text-gray-400 font-medium drop-shadow-sm">
+                                                            <Calendar size={12} className="text-white/50" /> Fechas a confirmar
+                                                        </div>
+                                                    )}
                                                 </div>
 
                                                 <button
@@ -454,6 +486,13 @@ export default function ExplorarClasesPage() {
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 custom-scrollbar bg-[#050505]">
+                            {selectedGrupo.instancias.length === 0 && (
+                                <div className="py-12 flex flex-col items-center justify-center text-gray-500 text-center">
+                                    <Calendar size={36} className="opacity-20 mb-3" />
+                                    <p className="text-sm font-bold uppercase tracking-widest">Todavía no hay fechas cargadas</p>
+                                    <p className="text-[11px] text-gray-600 mt-1">Este grupo aún no tiene clases programadas.</p>
+                                </div>
+                            )}
                             {selectedGrupo.instancias.map((inst) => {
                                 const estaLleno = inst.cupo_maximo > 0 && inst.inscritos_count >= inst.cupo_maximo
                                 const esExclusivaModal = !selectedGrupo.es_combinable

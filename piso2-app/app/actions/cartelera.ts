@@ -26,8 +26,8 @@ export async function getClasesPublicasAction(): Promise<ClasePublicaGrupo[]> {
     const { data } = await admin
         .from('clases')
         .select(`
-            id, nombre, inicio, tipo_clase, imagen_url,
-            profesor:profiles!clases_profesor_id_fkey(nombre_completo),
+            id, nombre, inicio, tipo_clase, imagen_url, es_la_liga,
+            profesor:profiles!clases_profesor_id_fkey(nombre_completo, avatar_url, foto_url),
             sala:salas(nombre, sede:sedes(nombre))
         `)
         .gte('inicio', hoy)
@@ -36,12 +36,17 @@ export async function getClasesPublicasAction(): Promise<ClasePublicaGrupo[]> {
 
     const agrup: Record<string, ClasePublicaGrupo> = {}
     for (const c of (data || []) as any[]) {
-        const profe = (Array.isArray(c.profesor) ? c.profesor[0]?.nombre_completo : c.profesor?.nombre_completo) || 'Staff'
+        const profeObj = Array.isArray(c.profesor) ? c.profesor[0] : c.profesor
+        const profe = profeObj?.nombre_completo || 'Staff'
         const sala = Array.isArray(c.sala) ? c.sala[0] : c.sala
         const sede = (Array.isArray(sala?.sede) ? sala.sede[0]?.nombre : sala?.sede?.nombre) || ''
+        // La Liga muestra la foto del profe (avatar → Talent); el resto, la imagen de la
+        // clase y si no tiene, cae a la foto del profe. Misma lógica que /explorar.
+        const profeFoto = profeObj?.avatar_url || profeObj?.foto_url || null
+        const imagen = c.es_la_liga ? (profeFoto || c.imagen_url || null) : (c.imagen_url || profeFoto || null)
         const key = `${c.nombre}-${profe}-${c.tipo_clase}`
         if (!agrup[key]) {
-            agrup[key] = { key_grupo: key, nombre: c.nombre, tipo_clase: c.tipo_clase, imagen_url: c.imagen_url || null, profesor: profe, instancias: [] }
+            agrup[key] = { key_grupo: key, nombre: c.nombre, tipo_clase: c.tipo_clase, imagen_url: imagen, profesor: profe, instancias: [] }
         }
         agrup[key].instancias.push({ id: c.id, inicio: c.inicio, sala: sala?.nombre || '', sede })
     }
