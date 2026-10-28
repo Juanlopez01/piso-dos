@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, Plus, MapPin, CalendarDays, Users, Copy, Trash2, Power, Search, ArrowLeft, Download, Pencil, Check, Instagram, MessageCircle } from 'lucide-react'
+import { Loader2, Plus, MapPin, CalendarDays, Users, Copy, Trash2, Power, Search, ArrowLeft, Download, Pencil, Check, Instagram, MessageCircle, ChevronDown } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
     getAudicionesAction, crearAudicionAction, getAudicionAction, agregarParticipanteAction,
@@ -20,6 +20,54 @@ const RESULTADOS: { v: string; label: string; cls: string }[] = [
     { v: 'no', label: 'No', cls: 'bg-rose-500/15 text-rose-400' },
 ]
 const resultadoInfo = (v: string) => RESULTADOS.find(r => r.v === v) || RESULTADOS[0]
+// El resultado puede tener VARIAS marcas a la vez (ej. media beca + Talents). Se
+// guardan separadas por coma en la misma columna. "pendiente"/vacío = sin marcar.
+const parseResultados = (v?: string | null): string[] =>
+    (v || '').split(',').map(s => s.trim()).filter(Boolean).filter(x => x !== 'pendiente')
+const labelResultados = (v?: string | null) => {
+    const arr = parseResultados(v)
+    return arr.length ? arr.map(x => resultadoInfo(x).label).join(' + ') : 'Pendiente'
+}
+
+// Selector de resultado con varias opciones a la vez (checkboxes en un popover).
+function ResultadoMulti({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+    const [open, setOpen] = useState(false)
+    const sel = parseResultados(value)
+    const opciones = RESULTADOS.filter(r => r.v !== 'pendiente')
+    const toggle = (v: string) => {
+        const next = sel.includes(v) ? sel.filter(x => x !== v) : [...sel, v]
+        onChange(next.join(',')) // vacío => Pendiente
+    }
+    return (
+        <div className="relative">
+            <button onClick={() => setOpen(o => !o)} className="flex items-center gap-1 flex-wrap justify-end max-w-[190px] rounded-lg px-1.5 py-1 border border-white/10 hover:bg-white/5">
+                {sel.length === 0 ? (
+                    <span className={`text-[10px] font-bold uppercase rounded-md px-2 py-0.5 ${resultadoInfo('pendiente').cls}`}>Pendiente</span>
+                ) : sel.map(v => (
+                    <span key={v} className={`text-[10px] font-bold uppercase rounded-md px-2 py-0.5 ${resultadoInfo(v).cls}`}>{resultadoInfo(v).label}</span>
+                ))}
+                <ChevronDown size={12} className="text-gray-500 shrink-0" />
+            </button>
+            {open && (
+                <>
+                    <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+                    <div className="absolute right-0 mt-1 z-50 w-52 bg-[#111] border border-white/10 rounded-xl p-1.5 shadow-2xl">
+                        <p className="text-[9px] text-gray-500 uppercase font-bold px-2 py-1">Marcá todo lo que corresponda</p>
+                        {opciones.map(r => {
+                            const on = sel.includes(r.v)
+                            return (
+                                <button key={r.v} onClick={() => toggle(r.v)} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 text-left">
+                                    <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${on ? 'bg-[#D4E655] border-[#D4E655]' : 'border-white/30'}`}>{on && <Check size={11} className="text-black" strokeWidth={3} />}</span>
+                                    <span className={`text-[10px] font-bold uppercase rounded px-1.5 py-0.5 ${r.cls}`}>{r.label}</span>
+                                </button>
+                            )
+                        })}
+                    </div>
+                </>
+            )}
+        </div>
+    )
+}
 // A qué aplica el participante: La Liga (beca/formación), Casting latino, o las dos.
 const APLICA: { v: string; label: string; cls: string }[] = [
     { v: 'ambas', label: 'Las dos', cls: 'bg-[#D4E655]/20 text-[#D4E655]' },
@@ -172,7 +220,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
     }
     const exportarCSV = () => {
         const head = ['N°', 'Nombre', 'Aplica a', 'Instagram', 'Teléfono', 'Mail', 'Nacimiento', 'Edad', 'Ciudad', 'Altura', 'Tacos', 'Jazz/Heels', 'Técnica', 'Urbano', 'Resultado', 'Presente', 'Notas']
-        const rows = visibles.map(p => [p.numero ?? '', p.nombre, aplicaInfo(p.aplica_a).label, p.instagram || '', p.telefono || '', p.mail || '', p.fecha_nacimiento || '', edadDe(p.fecha_nacimiento), p.ciudad_origen || '', p.altura || '', p.manejo_tacos || '', p.sabe_jazz_heels || '', p.sabe_tecnica || '', p.sabe_urbano || '', resultadoInfo(p.resultado).label, p.presente ? 'Sí' : 'No', (p.notas || '').replace(/\n/g, ' ')])
+        const rows = visibles.map(p => [p.numero ?? '', p.nombre, aplicaInfo(p.aplica_a).label, p.instagram || '', p.telefono || '', p.mail || '', p.fecha_nacimiento || '', edadDe(p.fecha_nacimiento), p.ciudad_origen || '', p.altura || '', p.manejo_tacos || '', p.sabe_jazz_heels || '', p.sabe_tecnica || '', p.sabe_urbano || '', labelResultados(p.resultado), p.presente ? 'Sí' : 'No', (p.notas || '').replace(/\n/g, ' ')])
         const csv = [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
         const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }))
         const a = document.createElement('a'); a.href = url; a.download = `audicion-${audicion.ciudad}.csv`.replace(/[^\w.-]+/g, '_'); a.click(); URL.revokeObjectURL(url)
@@ -319,9 +367,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                                         {p.notas && <p className="text-[11px] text-gray-400 mt-1.5 italic whitespace-pre-line">{p.notas}</p>}
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">
-                                        <select value={p.resultado} onChange={e => setResultado(p.id, e.target.value)} className={`text-[10px] font-bold uppercase rounded-lg px-2 py-1.5 border-0 outline-none ${resultadoInfo(p.resultado).cls}`}>
-                                            {RESULTADOS.map(r => <option key={r.v} value={r.v} className="bg-[#111] text-white">{r.label}</option>)}
-                                        </select>
+                                        <ResultadoMulti value={p.resultado} onChange={v => setResultado(p.id, v)} />
                                         <button onClick={() => togglePresente(p)} title="Presente" className={`p-1.5 rounded-lg ${p.presente ? 'text-[#D4E655] bg-[#D4E655]/10' : 'text-gray-600 hover:bg-white/5'}`}><Check size={15} /></button>
                                         <button onClick={() => { setEditId(p.id); setEditVals({ numero: p.numero ?? '', nombre: p.nombre, instagram: p.instagram || '', telefono: p.telefono || '', mail: p.mail || '', fecha_nacimiento: p.fecha_nacimiento || '', ciudad_origen: p.ciudad_origen || '', altura: p.altura || '', notas: p.notas || '', aplica_a: p.aplica_a || 'ambas', manejo_tacos: p.manejo_tacos, sabe_jazz_heels: p.sabe_jazz_heels, sabe_tecnica: p.sabe_tecnica, sabe_urbano: p.sabe_urbano }) }} className="p-1.5 text-gray-500 hover:text-white rounded-lg"><Pencil size={14} /></button>
                                         <button onClick={() => borrar(p.id)} className="p-1.5 text-gray-600 hover:text-red-400 rounded-lg"><Trash2 size={14} /></button>
