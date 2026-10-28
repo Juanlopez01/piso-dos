@@ -444,8 +444,12 @@ export default function ClaseDetallePage() {
 
             if (!alumnoIdFinal) {
                 nombreInvitadoStr = `${guestForm.nombre} ${guestForm.apellido}`.trim()
-                if (clase.es_audicion && guestForm.telefono) {
-                    nombreInvitadoStr += ` (${guestForm.telefono})`;
+                // Guardamos el teléfono del invitado (si lo cargaron) dentro del nombre,
+                // con la convención "Nombre (tel)" que ya usan las audiciones. Antes solo
+                // se guardaba en audiciones, así que en clases abiertas el teléfono se
+                // perdía; ahora queda registrado y se ve en la lista de asistentes.
+                if (guestForm.telefono?.trim()) {
+                    nombreInvitadoStr += ` (${guestForm.telefono.trim()})`;
                 }
             }
 

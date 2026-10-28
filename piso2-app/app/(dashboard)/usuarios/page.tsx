@@ -505,7 +505,8 @@ function UsuariosContent() {
             toast.error(response.error);
         }
 
-        if (selectedUser.rol === 'coordinador') {
+        // El llavero de coordinador también aplica a profes que además coordinan (ej. Cyntia).
+        if (selectedUser.rol === 'coordinador' || selectedUser.rol === 'profesor') {
             const { error: errUpdatePermisos } = await supabase.from('profiles').update({
                 permisos_grupos: editForm.llaves_acceso
             }).eq('id', selectedUser.id);
@@ -1012,14 +1013,14 @@ function UsuariosContent() {
                                 Rol: {selectedUser.rol}
                             </span>
 
-                            {/* PANEL LLAVERO DEL COORDINADOR */}
-                            {selectedUser.rol === 'coordinador' && (
+                            {/* PANEL LLAVERO DEL COORDINADOR (también para profes que coordinan, ej. Cyntia) */}
+                            {(selectedUser.rol === 'coordinador' || selectedUser.rol === 'profesor') && (
                                 <div className="w-full bg-[#09090b] border border-pink-500/20 rounded-2xl p-4 mb-6 relative overflow-hidden">
                                     <div className="absolute top-0 right-0 w-16 h-16 bg-pink-500/10 blur-xl rounded-full" />
                                     <h4 className="text-[10px] font-black text-pink-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                                        <KeyRound size={12} /> Permisos de Acceso
+                                        <KeyRound size={12} /> Permisos de Coordinación
                                     </h4>
-                                    <p className="text-[9px] text-gray-500 leading-tight mb-3">Tildá a qué grupos tiene permiso para gestionar este coordinador.</p>
+                                    <p className="text-[9px] text-gray-500 leading-tight mb-3">{selectedUser.rol === 'profesor' ? 'Si además coordina, tildá La Liga y/o los grupos que gestiona (opcional).' : 'Tildá a qué grupos tiene permiso para gestionar este coordinador.'}</p>
 
                                     <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar pr-1 relative z-10">
                                         <label className="flex items-center justify-between p-2 bg-[#111] rounded-lg border border-white/5 cursor-pointer hover:bg-white/5 transition-colors">

@@ -93,8 +93,11 @@ export function CashProvider({ children }: { children: ReactNode }) {
                         supabase.from('clases').select('id').eq('profesor_id', uid).not('compania_id', 'is', null).limit(1),
                         supabase.from('companias').select('id').eq('coordinador_id', uid).limit(1)
                     ])
-                    ligaAccess = !!(resLiga.data?.length)
-                    compAccess = !!(resComp.data?.length) || !!(resCoord.data?.length)
+                    // Un profe también puede ser coordinador (ej. Cyntia): además de sus
+                    // clases, le vale el llavero de coordinador (permisos_grupos) para
+                    // tener La Liga y/o Grupos como un coordinador más.
+                    ligaAccess = !!(resLiga.data?.length) || misPermisos.includes('liga')
+                    compAccess = !!(resComp.data?.length) || !!(resCoord.data?.length) || misPermisos.some(p => p !== 'liga')
                 }
 
                 setUserId(uid)
