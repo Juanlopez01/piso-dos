@@ -85,16 +85,17 @@ export default async function TalentHome() {
                     <a href="#obras" className="hover:text-black transition-colors">Obras</a>
                     <a href="#busquedas" className="hover:text-black transition-colors">Búsquedas</a>
                     <a href="#marcas" className="hover:text-black transition-colors">Con quién trabajamos</a>
-                    <Link href="/talent/postular" className="border border-neutral-900 px-4 py-2 hover:bg-neutral-900 hover:text-white transition-colors">Sumate</Link>
+                    <Link href="/talent/registro" className="border border-neutral-900 px-4 py-2 hover:bg-neutral-900 hover:text-white transition-colors">Sumate</Link>
                 </nav>
             </header>
 
             {/* CTA — Sumate (grande, debajo del título) */}
             <section className="pt-2 pb-14 text-center px-6">
-                <Link href="/talent/postular" className="inline-flex items-center justify-center gap-3 bg-neutral-900 text-white text-sm md:text-base font-semibold tracking-[0.18em] uppercase px-12 py-6 hover:bg-black transition-colors">
+                <Link href="/talent/registro" className="inline-flex items-center justify-center gap-3 bg-neutral-900 text-white text-sm md:text-base font-semibold tracking-[0.18em] uppercase px-12 py-6 hover:bg-black transition-colors">
                     Sumate como talento
                 </Link>
-                <p className="text-[10px] tracking-[0.3em] uppercase text-neutral-400 mt-5">Enviá tu perfil a Piso 2 Talent</p>
+                <p className="text-[10px] tracking-[0.3em] uppercase text-neutral-400 mt-5">Creá tu perfil en Piso 2 Talent</p>
+                <p className="text-xs text-neutral-500 mt-3">¿Ya tenés cuenta? <Link href="/talent/login" className="font-semibold text-neutral-900 underline underline-offset-2 hover:text-black">Iniciá sesión</Link></p>
             </section>
 
             {loading ? (
@@ -265,13 +266,13 @@ export default async function TalentHome() {
                                 </div>
                                 <div className="text-center mt-10">
                                     <p className="text-neutral-500 text-sm mb-4 max-w-md mx-auto">¿No hay una búsqueda para vos ahora? Sumate igual como talento de Piso 2 y te tenemos en cuenta para las próximas.</p>
-                                    <Link href="/talent/postular" className="inline-block text-[11px] font-semibold tracking-[0.2em] uppercase border border-neutral-900 px-8 py-3.5 hover:bg-neutral-900 hover:text-white transition-colors">Sumate como talento</Link>
+                                    <Link href="/talent/registro" className="inline-block text-[11px] font-semibold tracking-[0.2em] uppercase border border-neutral-900 px-8 py-3.5 hover:bg-neutral-900 hover:text-white transition-colors">Sumate como talento</Link>
                                 </div>
                             </>
                         ) : (
                             <div className="py-16 md:py-20 text-center border border-dashed border-neutral-200 rounded-2xl">
                                 <p className="text-neutral-400 text-xs md:text-sm uppercase tracking-[0.4em]">No hay búsquedas por ahora</p>
-                                <Link href="/talent/postular" className="inline-block mt-8 text-[11px] font-semibold tracking-[0.2em] uppercase border border-neutral-900 px-8 py-3.5 hover:bg-neutral-900 hover:text-white transition-colors">Sumate como talento</Link>
+                                <Link href="/talent/registro" className="inline-block mt-8 text-[11px] font-semibold tracking-[0.2em] uppercase border border-neutral-900 px-8 py-3.5 hover:bg-neutral-900 hover:text-white transition-colors">Sumate como talento</Link>
                             </div>
                         )}
                     </section>
