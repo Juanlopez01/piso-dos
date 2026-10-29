@@ -146,13 +146,12 @@ export default function MiPerfilPage() {
             if (up.error) throw up.error
             const firmaUrl = supabase.storage.from('talent').getPublicUrl(fpath).data.publicUrl
             const res = await firmarAcuerdoMiPerfilAction({
-                residenteArgentina: p.reside_argentina ?? true,
                 firmaUrl, firmaAclaracion: firmaDatos.aclaracion, firmaDni: firmaDatos.dni,
                 representanteNombre: firmaDatos.repNombre, representanteDni: firmaDatos.repDni, firmaUbicacion: firmaDatos.localidad,
             })
             if (!res.ok) throw new Error(res.error || 'No se pudo firmar')
             toast.success('Acuerdo firmado')
-            set({ acuerdo_aceptado: true, acuerdo_version: (p.reside_argentina ?? true) ? 'residente' : 'no_residente', firma_fecha: new Date().toISOString() })
+            set({ acuerdo_aceptado: true, acuerdo_version: 'inscripcion', firma_fecha: new Date().toISOString() })
             setMostrarFirma(false)
         } catch (e: any) {
             toast.error(e.message || 'No se pudo firmar')
@@ -345,22 +344,8 @@ export default function MiPerfilPage() {
                         </div>
                     ) : (
                         <>
-                            <div className="flex items-center gap-3 mb-3 mt-2">
-                                <span className="text-[11px] text-neutral-500">¿Residís en Argentina?</span>
-                                <div className="flex rounded-lg overflow-hidden border border-neutral-300">
-                                    <button type="button" onClick={() => set({ reside_argentina: true })} className={`px-4 py-1.5 text-[11px] font-semibold uppercase tracking-widest ${(p.reside_argentina ?? true) ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-500'}`}>Sí</button>
-                                    <button type="button" onClick={() => set({ reside_argentina: false })} className={`px-4 py-1.5 text-[11px] font-semibold uppercase tracking-widest ${p.reside_argentina === false ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-500'}`}>No</button>
-                                </div>
-                            </div>
-                            {(() => {
-                                const pdfUrl = (p.reside_argentina ?? true) ? '/acuerdos/acuerdo-residente-argentina.pdf' : '/acuerdos/acuerdo-no-residente.pdf'
-                                return (
-                                    <>
-                                        <p className="text-[11px] text-neutral-400 mb-2">Leé el acuerdo ({(p.reside_argentina ?? true) ? 'residente en Argentina' : 'no residente'}). <a href={pdfUrl} target="_blank" rel="noreferrer" className="underline text-neutral-700">Descargar / abrir PDF</a></p>
-                                        <iframe src={pdfUrl} className="w-full h-[55vh] border border-neutral-300 rounded-lg bg-neutral-50" title="Acuerdo" />
-                                    </>
-                                )
-                            })()}
+                            <p className="text-[11px] text-neutral-400 mb-2 mt-2">Leé el acuerdo de inscripción a PISO2 TALENT y firmalo abajo. <a href="/acuerdos/acuerdo-inscripcion-talent.pdf" target="_blank" rel="noreferrer" className="underline text-neutral-700">Descargar / abrir PDF</a></p>
+                            <iframe src="/acuerdos/acuerdo-inscripcion-talent.pdf" className="w-full h-[55vh] border border-neutral-300 rounded-lg bg-neutral-50" title="Acuerdo de inscripción" />
 
                             <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div><label className={labelCls}>Aclaración (nombre) *</label><input value={firmaDatos.aclaracion} onChange={e => setFirmaDatos(f => ({ ...f, aclaracion: e.target.value }))} className={inputCls} placeholder="Nombre y apellido" /></div>

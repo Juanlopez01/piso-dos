@@ -1224,7 +1224,7 @@ export default function TalentsAdminPage() {
                                         {/* Acuerdo firmado */}
                                         {perfilSel.acuerdo_aceptado ? (
                                             <div className="border border-neutral-200 rounded-lg p-3 mb-4">
-                                                <p className="text-[9px] font-bold tracking-[0.2em] uppercase text-neutral-400 mb-2 flex items-center gap-1.5"><FileSignature size={12} /> Acuerdo firmado ({perfilSel.acuerdo_version === 'no_residente' ? 'no residente' : 'residente'})</p>
+                                                <p className="text-[9px] font-bold tracking-[0.2em] uppercase text-neutral-400 mb-2 flex items-center gap-1.5"><FileSignature size={12} /> Acuerdo de inscripción firmado</p>
                                                 {perfilSel.firma_url && <a href={perfilSel.firma_url} target="_blank" rel="noreferrer"><img src={perfilSel.firma_url} alt="Firma" className="h-16 bg-white border border-neutral-200 rounded" /></a>}
                                                 <p className="text-[11px] text-neutral-600 mt-2">{perfilSel.firma_aclaracion || ''}{perfilSel.firma_dni ? ` · DNI ${perfilSel.firma_dni}` : ''}{perfilSel.firma_fecha ? ` · ${new Date(perfilSel.firma_fecha).toLocaleDateString('es-AR')}` : ''}</p>
                                             </div>

@@ -223,11 +223,10 @@ export async function guardarMiPerfilAction(payload: {
     return { ok: true }
 }
 
-// Firma digital del acuerdo (igual que en las búsquedas): la firma se dibuja y se
-// sube como PNG al bucket; acá guardamos la URL y los datos del firmante. La
-// versión del acuerdo depende de si reside en Argentina o no.
+// Firma digital del acuerdo único de inscripción a PISO2 TALENT: la firma se
+// dibuja y se sube como PNG al bucket; acá guardamos la URL y los datos del
+// firmante.
 export async function firmarAcuerdoMiPerfilAction(payload: {
-    residenteArgentina: boolean
     firmaUrl: string; firmaAclaracion: string; firmaDni: string
     representanteNombre?: string; representanteDni?: string; firmaUbicacion?: string
 }): Promise<{ ok: boolean; error?: string }> {
@@ -238,8 +237,7 @@ export async function firmarAcuerdoMiPerfilAction(payload: {
 
     const admin = getAdminClient()
     const { error } = await admin.from('talent_perfiles').update({
-        reside_argentina: payload.residenteArgentina,
-        acuerdo_version: payload.residenteArgentina ? 'residente' : 'no_residente',
+        acuerdo_version: 'inscripcion',
         acuerdo_aceptado: true,
         firma_url: payload.firmaUrl,
         firma_aclaracion: payload.firmaAclaracion.trim(),
