@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { hashPassword } from '@/lib/talent-session'
 
 const getAdminClient = () => createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -458,6 +459,46 @@ export async function listPerfilesConCuentaAction() {
         .not('password_hash', 'is', null)   // solo los que tienen cuenta
         .order('created_at', { ascending: false })
     return data || []
+}
+
+// Alta "a mano" de una cuenta de talento: el staff pone el email (y nombre si es
+// nuevo) y el sistema genera una contraseña para pasarle a la persona. Si ya hay
+// un perfil con ese email SIN cuenta (quedó de una postulación), lo reutiliza y
+// solo le suma la contraseña — así migra con sus fotos/datos ya cargados.
+function generarPasswordLegible(): string {
+    const alf = 'abcdefghijkmnpqrstuvwxyz23456789' // sin caracteres confusos
+    let s = ''
+    for (let i = 0; i < 8; i++) s += alf[Math.floor(Math.random() * alf.length)]
+    return s
+}
+
+export async function crearCuentaTalentoAdminAction(payload: { email: string; nombre?: string; apellido?: string }) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false as const, error: perm.error }
+    const email = (payload.email || '').trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { success: false as const, error: 'Poné un email válido.' }
+
+    const admin = getAdminClient()
+    const password = generarPasswordLegible()
+    const { data: existente } = await admin.from('talent_perfiles').select('id, password_hash').eq('email', email).maybeSingle()
+
+    if (existente?.id) {
+        if (existente.password_hash) return { success: false as const, error: 'Ya existe una cuenta con ese email.' }
+        const upd: any = { password_hash: hashPassword(password), updated_at: new Date().toISOString() }
+        if (payload.nombre?.trim()) upd.nombre = payload.nombre.trim()
+        if (payload.apellido?.trim()) upd.apellido = payload.apellido.trim()
+        const { error } = await admin.from('talent_perfiles').update(upd).eq('id', existente.id)
+        if (error) return { success: false as const, error: error.message }
+        return { success: true as const, email, password, reusado: true }
+    }
+
+    if (!payload.nombre?.trim()) return { success: false as const, error: 'Poné el nombre.' }
+    const { error } = await admin.from('talent_perfiles').insert({
+        email, password_hash: hashPassword(password),
+        nombre: payload.nombre.trim(), apellido: payload.apellido?.trim() || null,
+    })
+    if (error) return { success: false as const, error: error.message }
+    return { success: true as const, email, password, reusado: false }
 }
 
 export async function togglePerfilAceptadoAction(id: string, aceptado: boolean) {

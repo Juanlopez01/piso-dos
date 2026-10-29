@@ -14,7 +14,7 @@ import {
     getTalentDashboardDataAction, listTalentosParaBusquedaAction, agregarTalentoABusquedaAction, type TalentoParaBusqueda,
     listObrasAdminAction, upsertObraAction, toggleObraActivaAction, eliminarObraAction,
     listPostulacionesObraAction, cambiarEstadoPostObraAction, eliminarPostObraAction,
-    listPerfilesConCuentaAction, togglePerfilAceptadoAction, eliminarPerfilConCuentaAction,
+    listPerfilesConCuentaAction, togglePerfilAceptadoAction, eliminarPerfilConCuentaAction, crearCuentaTalentoAdminAction,
     acortarLinkAction
 } from '@/app/actions/talent'
 import { toast, Toaster } from 'sonner'
@@ -92,6 +92,26 @@ export default function TalentsAdminPage() {
     const [procesandoPerfil, setProcesandoPerfil] = useState(false)
     const cargarPerfiles = () => { listPerfilesConCuentaAction().then(d => setPerfiles(d)).catch(() => { }) }
     const sinPublicarCount = perfiles.filter(p => p.acuerdo_aceptado && !p.aceptado).length
+
+    // Crear cuenta de talento "a mano" (le generamos usuario y contraseña)
+    const [modalCrearCuenta, setModalCrearCuenta] = useState(false)
+    const [crearForm, setCrearForm] = useState({ email: '', nombre: '', apellido: '' })
+    const [creandoCuenta, setCreandoCuenta] = useState(false)
+    const [credsNuevas, setCredsNuevas] = useState<{ email: string; password: string; reusado: boolean } | null>(null)
+    const abrirCrearCuenta = () => { setCrearForm({ email: '', nombre: '', apellido: '' }); setCredsNuevas(null); setModalCrearCuenta(true) }
+    const handleCrearCuenta = async () => {
+        if (!crearForm.email.trim()) return toast.error('Poné el email.')
+        setCreandoCuenta(true)
+        const res = await crearCuentaTalentoAdminAction(crearForm)
+        setCreandoCuenta(false)
+        if (res.success) { setCredsNuevas({ email: res.email, password: res.password, reusado: res.reusado }); cargarPerfiles() }
+        else toast.error(res.error || 'No se pudo crear la cuenta')
+    }
+    const copiarCreds = () => {
+        if (!credsNuevas) return
+        const txt = `Tu acceso a PISO2 TALENT:\nUsuario (email): ${credsNuevas.email}\nContraseña: ${credsNuevas.password}\nEntrá en: ${location.origin}/talent/login`
+        navigator.clipboard?.writeText(txt).then(() => toast.success('Copiado')).catch(() => { })
+    }
 
     const handleToggleAceptado = async (p: any) => {
         setProcesandoPerfil(true)
@@ -717,8 +737,13 @@ export default function TalentsAdminPage() {
                 )}
 
                 {/* PERFILES CON CUENTA */}
-                {vista === 'perfiles' && (
-                    perfiles.length === 0 ? (
+                {vista === 'perfiles' && (<>
+                    <div className="flex justify-end mb-4">
+                        <button onClick={abrirCrearCuenta} className="bg-black text-white font-bold uppercase px-5 py-2.5 rounded text-[10px] tracking-widest hover:bg-neutral-800 transition-colors flex items-center gap-2">
+                            <Plus size={15} /> Crear cuenta
+                        </button>
+                    </div>
+                    {perfiles.length === 0 ? (
                         <div className="py-20 text-center border-2 border-dashed border-neutral-200 rounded-2xl">
                             <Users className="mx-auto mb-3 text-neutral-300" size={32} />
                             <p className="text-neutral-400 font-bold uppercase text-xs">Todavía no hay perfiles registrados.</p>
@@ -742,8 +767,8 @@ export default function TalentsAdminPage() {
                                 )
                             })}
                         </div>
-                    )
-                )}
+                    )}
+                </>)}
 
                 {/* BÚSQUEDAS PERSONALIZADAS */}
                 {vista === 'busquedas' && (
@@ -1246,6 +1271,45 @@ export default function TalentsAdminPage() {
                                 </>
                             )
                         })()}
+                    </div>
+                </div>
+            )}
+
+            {/* CREAR CUENTA DE TALENTO (a mano) */}
+            {modalCrearCuenta && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => !creandoCuenta && setModalCrearCuenta(false)}>
+                    <div className="bg-white w-full max-w-md rounded-2xl overflow-hidden relative p-7" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setModalCrearCuenta(false)} className="absolute top-4 right-4 text-neutral-400 hover:text-black"><X size={20} /></button>
+
+                        {credsNuevas ? (
+                            <div>
+                                <div className="flex items-center gap-2 mb-3"><Check size={20} className="text-emerald-600" /><h3 className={`${serif.className} text-xl tracking-wide`}>Cuenta creada</h3></div>
+                                {credsNuevas.reusado && <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-2.5 mb-3">Se reutilizó el perfil que ya existía con ese email (mantiene sus fotos y datos).</p>}
+                                <p className="text-xs text-neutral-500 mb-3">Pasale estos datos a la persona. <b>La contraseña no se vuelve a mostrar</b>, así que copiala ahora.</p>
+                                <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-4 text-sm space-y-1.5">
+                                    <p><span className="text-neutral-400 text-[11px] uppercase tracking-widest">Usuario</span><br /><b className="break-all">{credsNuevas.email}</b></p>
+                                    <p><span className="text-neutral-400 text-[11px] uppercase tracking-widest">Contraseña</span><br /><b className="font-mono text-base tracking-wider">{credsNuevas.password}</b></p>
+                                </div>
+                                <button onClick={copiarCreds} className="w-full mt-4 bg-neutral-900 text-white font-semibold uppercase tracking-[0.15em] text-xs py-3 hover:bg-black transition-colors flex items-center justify-center gap-2"><Copy size={14} /> Copiar para enviar</button>
+                                <button onClick={() => setModalCrearCuenta(false)} className="w-full mt-2 text-[11px] uppercase tracking-widest text-neutral-400 hover:text-black py-2">Cerrar</button>
+                            </div>
+                        ) : (
+                            <div>
+                                <h3 className={`${serif.className} text-xl tracking-wide mb-1`}>Crear cuenta de talento</h3>
+                                <p className="text-xs text-neutral-500 mb-5">Si la persona ya se postuló antes con este email, se reutiliza su perfil. Generamos una contraseña para pasarle.</p>
+                                <div className="space-y-3">
+                                    <div><label className="text-[10px] font-semibold tracking-[0.15em] uppercase text-neutral-500 block mb-1.5">Email *</label><input type="email" value={crearForm.email} onChange={e => setCrearForm(f => ({ ...f, email: e.target.value }))} className={inputCls} placeholder="persona@email.com" /></div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div><label className="text-[10px] font-semibold tracking-[0.15em] uppercase text-neutral-500 block mb-1.5">Nombre</label><input value={crearForm.nombre} onChange={e => setCrearForm(f => ({ ...f, nombre: e.target.value }))} className={inputCls} placeholder="Nombre" /></div>
+                                        <div><label className="text-[10px] font-semibold tracking-[0.15em] uppercase text-neutral-500 block mb-1.5">Apellido</label><input value={crearForm.apellido} onChange={e => setCrearForm(f => ({ ...f, apellido: e.target.value }))} className={inputCls} placeholder="Apellido" /></div>
+                                    </div>
+                                    <p className="text-[10px] text-neutral-400">El nombre es obligatorio para cuentas nuevas. Si se reutiliza un perfil existente, podés dejarlo vacío.</p>
+                                </div>
+                                <button onClick={handleCrearCuenta} disabled={creandoCuenta} className="w-full mt-5 bg-neutral-900 text-white font-semibold uppercase tracking-[0.15em] text-xs py-3.5 hover:bg-black transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                                    {creandoCuenta ? <Loader2 size={14} className="animate-spin" /> : <Plus size={15} />} Crear y generar contraseña
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
