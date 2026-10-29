@@ -73,21 +73,60 @@ export type TalentoPublico = {
     destacado: boolean
 }
 
-// Vitrina pública: solo talentos activos, ordenados (destacados primero).
+// Un perfil con cuenta (aceptado + con acuerdo firmado) se muestra en la vitrina
+// igual que un talento curado. El id lleva el prefijo "p:" para distinguirlo del
+// id de la tabla `talentos` al abrir la ficha.
+const PERFIL_VITRINA_COLS = 'id, nombre, sexo, talentos, disciplina, descripcion, foto_primer_plano, foto_cuerpo_entero, foto_plano_americano, foto_artistica, fotos_extra, videos'
+function perfilAVitrina(p: any): TalentoPublico {
+    const fotos = [p.foto_primer_plano, p.foto_cuerpo_entero, p.foto_plano_americano, p.foto_artistica, ...(p.fotos_extra || [])].filter(Boolean)
+    const videos = (p.videos || []).filter(Boolean)
+    const disciplina = (p.talentos && p.talentos.length) ? p.talentos.join(' · ') : (p.disciplina || null)
+    return {
+        id: `p:${p.id}`,
+        nombre: p.nombre,   // solo el nombre (el apellido es interno)
+        categoria: ['mujeres', 'varones'].includes(p.sexo) ? p.sexo : 'mujeres',
+        disciplina,
+        bio: p.descripcion || null,
+        fotos,
+        video_url: videos[0] || null,
+        videos,
+        destacado: false,
+    }
+}
+
+// Vitrina pública: talentos curados (destacados primero) + perfiles aceptados.
 export async function getTalentosPublicosAction(): Promise<TalentoPublico[]> {
     const admin = getAdminClient()
-    const { data } = await admin
-        .from('talentos')
-        .select('id, nombre, categoria, disciplina, bio, fotos, video_url, videos, destacado')
-        .eq('activo', true)
-        .order('destacado', { ascending: false })
-        .order('orden', { ascending: true })
-        .order('nombre', { ascending: true })
-    return (data || []) as TalentoPublico[]
+    const [tal, perf] = await Promise.all([
+        admin.from('talentos')
+            .select('id, nombre, categoria, disciplina, bio, fotos, video_url, videos, destacado')
+            .eq('activo', true)
+            .order('destacado', { ascending: false })
+            .order('orden', { ascending: true })
+            .order('nombre', { ascending: true }),
+        admin.from('talent_perfiles')
+            .select(PERFIL_VITRINA_COLS)
+            .eq('aceptado', true)
+            .eq('acuerdo_aceptado', true)
+            .order('nombre', { ascending: true }),
+    ])
+    const curados = (tal.data || []) as TalentoPublico[]
+    const perfiles = (perf.data || []).map(perfilAVitrina)
+    return [...curados, ...perfiles]
 }
 
 export async function getTalentoAction(id: string): Promise<TalentoPublico | null> {
     const admin = getAdminClient()
+    // Perfil con cuenta (id con prefijo "p:")
+    if (id.startsWith('p:')) {
+        const { data } = await admin.from('talent_perfiles')
+            .select(PERFIL_VITRINA_COLS)
+            .eq('id', id.slice(2))
+            .eq('aceptado', true)
+            .eq('acuerdo_aceptado', true)
+            .maybeSingle()
+        return data ? perfilAVitrina(data) : null
+    }
     const { data } = await admin
         .from('talentos')
         .select('id, nombre, categoria, disciplina, bio, fotos, video_url, videos, destacado')
@@ -402,6 +441,55 @@ export async function eliminarMarcaAction(id: string) {
     if (error) return { success: false, error: error.message }
     const path = m?.logo_url?.split('/talent/')[1]
     if (path) await admin.storage.from('talent').remove([decodeURIComponent(path)])
+    return { success: true }
+}
+
+// ============================================================================
+// ADMIN — PERFILES CON CUENTA (los que se registraron con usuario y contraseña)
+// El staff ve cada perfil con el indicador de contrato firmado o no, y decide si
+// lo publica en la vitrina (aceptado). Sin acuerdo firmado no puede publicarse.
+// ============================================================================
+export async function listPerfilesConCuentaAction() {
+    const perm = await requireAdmin()
+    if (!perm.ok) return []
+    const admin = getAdminClient()
+    const { data } = await admin.from('talent_perfiles')
+        .select('id, created_at, email, nombre, apellido, telefono, instagram, edad, altura, sexo, talentos, foto_primer_plano, foto_cuerpo_entero, foto_plano_americano, foto_artistica, fotos_extra, videos, acuerdo_aceptado, acuerdo_version, firma_url, firma_fecha, firma_aclaracion, firma_dni, completo, aceptado')
+        .not('password_hash', 'is', null)   // solo los que tienen cuenta
+        .order('created_at', { ascending: false })
+    return data || []
+}
+
+export async function togglePerfilAceptadoAction(id: string, aceptado: boolean) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+    if (aceptado) {
+        // No se publica sin el acuerdo firmado.
+        const { data } = await admin.from('talent_perfiles').select('acuerdo_aceptado').eq('id', id).maybeSingle()
+        if (!data?.acuerdo_aceptado) return { success: false, error: 'No se puede publicar: el talento todavía no firmó el acuerdo.' }
+    }
+    const { error } = await admin.from('talent_perfiles').update({ aceptado }).eq('id', id)
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+export async function eliminarPerfilConCuentaAction(id: string) {
+    const perm = await requireAdmin()
+    if (!perm.ok) return { success: false, error: perm.error }
+    const admin = getAdminClient()
+    const { data: p } = await admin.from('talent_perfiles')
+        .select('foto_primer_plano, foto_cuerpo_entero, foto_plano_americano, foto_artistica, fotos_extra, firma_url, videos')
+        .eq('id', id).maybeSingle()
+    const { error } = await admin.from('talent_perfiles').delete().eq('id', id)
+    if (error) return { success: false, error: error.message }
+    // Best-effort: borrar archivos del storage para no ocupar espacio.
+    const urls: string[] = [
+        p?.foto_primer_plano, p?.foto_cuerpo_entero, p?.foto_plano_americano, p?.foto_artistica, p?.firma_url,
+        ...((p?.fotos_extra as string[]) || []), ...((p?.videos as string[]) || []),
+    ].filter(Boolean) as string[]
+    const paths = [...new Set(urls)].map(u => u.split('/talent/')[1]).filter(Boolean).map((x: string) => decodeURIComponent(x))
+    if (paths.length) await admin.storage.from('talent').remove(paths)
     return { success: true }
 }
 

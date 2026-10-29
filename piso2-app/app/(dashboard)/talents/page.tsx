@@ -14,6 +14,7 @@ import {
     getTalentDashboardDataAction, listTalentosParaBusquedaAction, agregarTalentoABusquedaAction, type TalentoParaBusqueda,
     listObrasAdminAction, upsertObraAction, toggleObraActivaAction, eliminarObraAction,
     listPostulacionesObraAction, cambiarEstadoPostObraAction, eliminarPostObraAction,
+    listPerfilesConCuentaAction, togglePerfilAceptadoAction, eliminarPerfilConCuentaAction,
     acortarLinkAction
 } from '@/app/actions/talent'
 import { toast, Toaster } from 'sonner'
@@ -29,7 +30,7 @@ export default function TalentsAdminPage() {
     const [supabase] = useState(() => createClient())
     const { userRole, isLoading: loadingCtx } = useCash()
 
-    const [vista, setVista] = useState<'talentos' | 'marcas' | 'shows' | 'obras' | 'solicitudes' | 'busquedas'>('talentos')
+    const [vista, setVista] = useState<'talentos' | 'marcas' | 'shows' | 'obras' | 'solicitudes' | 'busquedas' | 'perfiles'>('talentos')
     const [talentos, setTalentos] = useState<Talento[]>([])
     const [loading, setLoading] = useState(true)
     const [modalOpen, setModalOpen] = useState(false)
@@ -84,6 +85,31 @@ export default function TalentsAdminPage() {
     const [procesandoPost, setProcesandoPost] = useState(false)
     const cargarPostulaciones = () => { listPostulacionesAction().then(d => setPostulaciones(d)).catch(() => { }) }
     const pendientesCount = postulaciones.filter(p => p.estado === 'pendiente').length
+
+    // Perfiles con cuenta (registrados con usuario y contraseña)
+    const [perfiles, setPerfiles] = useState<any[]>([])
+    const [perfilSel, setPerfilSel] = useState<any | null>(null)
+    const [procesandoPerfil, setProcesandoPerfil] = useState(false)
+    const cargarPerfiles = () => { listPerfilesConCuentaAction().then(d => setPerfiles(d)).catch(() => { }) }
+    const sinPublicarCount = perfiles.filter(p => p.acuerdo_aceptado && !p.aceptado).length
+
+    const handleToggleAceptado = async (p: any) => {
+        setProcesandoPerfil(true)
+        const res = await togglePerfilAceptadoAction(p.id, !p.aceptado)
+        setProcesandoPerfil(false)
+        if (res.success) {
+            toast.success(p.aceptado ? 'Oculto de la vitrina' : 'Publicado en la vitrina')
+            setPerfilSel((s: any) => s && s.id === p.id ? { ...s, aceptado: !p.aceptado } : s)
+            cargarPerfiles()
+        } else toast.error(res.error || 'Error')
+    }
+    const handleEliminarPerfil = async (id: string) => {
+        if (!confirm('¿Eliminar este perfil? Se borran también sus fotos y videos. No se puede deshacer.')) return
+        setProcesandoPerfil(true)
+        const res = await eliminarPerfilConCuentaAction(id)
+        setProcesandoPerfil(false)
+        if (res.success) { toast.success('Perfil eliminado'); setPerfilSel(null); cargarPerfiles() } else toast.error(res.error || 'Error')
+    }
 
     const handleAceptarPost = async (id: string) => {
         setProcesandoPost(true)
@@ -160,6 +186,7 @@ export default function TalentsAdminPage() {
             })
             .catch(() => {})
             .finally(() => setLoading(false))
+        cargarPerfiles()
     }, [userRole])
 
     const abrirNuevaBusqueda = () => { setBusquedaForm({ titulo: '', descripcion: '', requisitos: '', ubicacion: '', categoria: '', fecha_limite: '', activa: true }); setModalBusqueda(true) }
@@ -475,8 +502,12 @@ export default function TalentsAdminPage() {
                                 Busquedas
                                 {busquedas.filter(b => b.activa).length > 0 && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${vista === 'busquedas' ? 'bg-white text-black' : 'bg-black text-white'}`}>{busquedas.filter(b => b.activa).length}</span>}
                             </button>
+                            <button onClick={() => setVista('perfiles')} className={`px-4 py-2 rounded text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${vista === 'perfiles' ? 'bg-black text-white' : 'text-neutral-500 hover:text-black'}`}>
+                                Perfiles
+                                {sinPublicarCount > 0 && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${vista === 'perfiles' ? 'bg-white text-black' : 'bg-black text-white'}`}>{sinPublicarCount}</span>}
+                            </button>
                         </div>
-                        {vista !== 'solicitudes' && (
+                        {vista !== 'solicitudes' && vista !== 'perfiles' && (
                             <button onClick={() => vista === 'talentos' ? abrirNuevo() : vista === 'marcas' ? abrirNuevaMarca() : vista === 'shows' ? abrirNuevoShow() : vista === 'obras' ? abrirNuevaObra() : abrirNuevaBusqueda()} className="bg-black text-white font-bold uppercase px-5 py-3 text-xs tracking-widest hover:bg-neutral-800 transition-colors flex items-center gap-2">
                                 <Plus size={16} /> {vista === 'busquedas' ? 'Nueva busqueda' : vista === 'shows' ? 'Nuevo show' : vista === 'obras' ? 'Nueva obra' : 'Nuevo'}
                             </button>
@@ -681,6 +712,35 @@ export default function TalentsAdminPage() {
                                     {p.rubro && <p className="text-[9px] tracking-[0.2em] uppercase text-neutral-400 truncate">{p.rubro}</p>}
                                 </button>
                             ))}
+                        </div>
+                    )
+                )}
+
+                {/* PERFILES CON CUENTA */}
+                {vista === 'perfiles' && (
+                    perfiles.length === 0 ? (
+                        <div className="py-20 text-center border-2 border-dashed border-neutral-200 rounded-2xl">
+                            <Users className="mx-auto mb-3 text-neutral-300" size={32} />
+                            <p className="text-neutral-400 font-bold uppercase text-xs">Todavía no hay perfiles registrados.</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                            {perfiles.map(p => {
+                                const foto = p.foto_primer_plano || p.foto_cuerpo_entero || p.foto_plano_americano || p.foto_artistica || null
+                                return (
+                                    <button key={p.id} onClick={() => setPerfilSel(p)} className="group text-left">
+                                        <div className="aspect-[3/4] bg-neutral-100 relative overflow-hidden">
+                                            {foto
+                                                ? <img src={foto} alt={p.nombre} className="w-full h-full object-cover grayscale group-hover:grayscale-0 group-hover:scale-105 transition-all duration-700" />
+                                                : <div className="w-full h-full flex items-center justify-center text-neutral-300 text-[10px] uppercase tracking-widest">Sin foto</div>}
+                                            {p.aceptado && <span className="absolute top-2 left-2 bg-emerald-600/90 text-white text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1">En vitrina</span>}
+                                            <span className={`absolute top-2 right-2 text-white text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1 ${p.acuerdo_aceptado ? 'bg-black/80' : 'bg-amber-500/90'}`}>{p.acuerdo_aceptado ? 'Firmado' : 'Sin firmar'}</span>
+                                        </div>
+                                        <h3 className="mt-2.5 text-[11px] tracking-[0.15em] uppercase font-semibold truncate">{p.nombre} {p.apellido || ''}</h3>
+                                        {(p.talentos?.length) ? <p className="text-[9px] tracking-[0.2em] uppercase text-neutral-400 truncate">{p.talentos.join(' · ')}</p> : null}
+                                    </button>
+                                )
+                            })}
                         </div>
                     )
                 )}
@@ -1104,6 +1164,88 @@ export default function TalentsAdminPage() {
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* DETALLE DE PERFIL CON CUENTA */}
+            {perfilSel && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => !procesandoPerfil && setPerfilSel(null)}>
+                    <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden relative max-h-[90vh] flex flex-col md:flex-row" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => setPerfilSel(null)} className="absolute top-4 right-4 z-10 bg-white/80 rounded-full p-1 text-neutral-500 hover:text-black"><X size={20} /></button>
+
+                        {(() => {
+                            const fotosP: string[] = [perfilSel.foto_primer_plano, perfilSel.foto_cuerpo_entero, perfilSel.foto_plano_americano, perfilSel.foto_artistica, ...(perfilSel.fotos_extra || [])].filter(Boolean)
+                            const videos: string[] = (perfilSel.videos || []).filter(Boolean)
+                            return (
+                                <>
+                                    <div className="md:w-2/5 bg-neutral-100 shrink-0 flex flex-col">
+                                        {fotosP.length === 0
+                                            ? <div className="w-full h-56 md:h-full flex items-center justify-center text-neutral-300 text-xs uppercase tracking-widest">Sin foto</div>
+                                            : (<>
+                                                <a href={fotosP[0]} target="_blank" rel="noreferrer"><img src={fotosP[0]} alt={perfilSel.nombre} className="w-full h-56 md:flex-1 object-cover cursor-pointer hover:opacity-90 transition-opacity" title="Abrir" /></a>
+                                                {fotosP.length > 1 && (
+                                                    <div className="flex gap-1 p-1 bg-neutral-200">
+                                                        {fotosP.slice(1).map((u, i) => <a key={i} href={u} target="_blank" rel="noreferrer" className="flex-1"><img src={u} alt="" className="w-full h-16 object-cover cursor-pointer hover:opacity-80" title="Abrir" /></a>)}
+                                                    </div>
+                                                )}
+                                            </>)}
+                                    </div>
+
+                                    <div className="flex-1 p-6 md:p-8 overflow-y-auto">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className={`text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1 text-white ${perfilSel.acuerdo_aceptado ? 'bg-emerald-600' : 'bg-amber-500'}`}>{perfilSel.acuerdo_aceptado ? 'Contrato firmado' : 'Sin firmar'}</span>
+                                            {perfilSel.aceptado && <span className="text-[8px] font-bold uppercase tracking-[0.15em] px-2 py-1 bg-black text-white">En vitrina</span>}
+                                        </div>
+                                        <h3 className={`${serif.className} text-2xl md:text-3xl tracking-wide`}>{perfilSel.nombre} {perfilSel.apellido || ''}</h3>
+                                        <p className="text-xs text-neutral-400 mb-4">{perfilSel.email}</p>
+
+                                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-600 mb-4">
+                                            {perfilSel.sexo && <span><b className="text-neutral-900">{perfilSel.sexo === 'varones' ? 'Masculino' : 'Femenino'}</b></span>}
+                                            {perfilSel.edad != null && <span>Edad: <b className="text-neutral-900">{perfilSel.edad}</b></span>}
+                                            {perfilSel.altura && <span>Altura: <b className="text-neutral-900">{perfilSel.altura} cm</b></span>}
+                                            {perfilSel.instagram && <span>IG: <b className="text-neutral-900">{perfilSel.instagram}</b></span>}
+                                        </div>
+                                        {(perfilSel.talentos?.length) ? <p className="text-[11px] tracking-[0.15em] uppercase text-neutral-500 mb-3">{perfilSel.talentos.join(' · ')}</p> : null}
+
+                                        {perfilSel.telefono && (
+                                            <a href={`https://wa.me/${String(perfilSel.telefono).replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer"
+                                                className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition-colors mb-4">
+                                                <MessageCircle size={14} /> WhatsApp
+                                            </a>
+                                        )}
+
+                                        {videos.length > 0 && (
+                                            <div className="flex flex-wrap gap-2 mb-4">
+                                                {videos.map((v, i) => <a key={i} href={v} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.15em] uppercase border border-neutral-300 px-4 py-2 hover:border-black transition-colors"><Play size={13} /> Video {videos.length > 1 ? i + 1 : ''}</a>)}
+                                            </div>
+                                        )}
+
+                                        {/* Acuerdo firmado */}
+                                        {perfilSel.acuerdo_aceptado ? (
+                                            <div className="border border-neutral-200 rounded-lg p-3 mb-4">
+                                                <p className="text-[9px] font-bold tracking-[0.2em] uppercase text-neutral-400 mb-2 flex items-center gap-1.5"><FileSignature size={12} /> Acuerdo firmado ({perfilSel.acuerdo_version === 'no_residente' ? 'no residente' : 'residente'})</p>
+                                                {perfilSel.firma_url && <a href={perfilSel.firma_url} target="_blank" rel="noreferrer"><img src={perfilSel.firma_url} alt="Firma" className="h-16 bg-white border border-neutral-200 rounded" /></a>}
+                                                <p className="text-[11px] text-neutral-600 mt-2">{perfilSel.firma_aclaracion || ''}{perfilSel.firma_dni ? ` · DNI ${perfilSel.firma_dni}` : ''}{perfilSel.firma_fecha ? ` · ${new Date(perfilSel.firma_fecha).toLocaleDateString('es-AR')}` : ''}</p>
+                                            </div>
+                                        ) : (
+                                            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">El talento todavía no firmó el acuerdo. No se puede publicar en la vitrina hasta que firme.</p>
+                                        )}
+
+                                        <div className="flex flex-col gap-2 border-t border-neutral-200 pt-5 mt-2">
+                                            <button disabled={procesandoPerfil || !perfilSel.acuerdo_aceptado} onClick={() => handleToggleAceptado(perfilSel)}
+                                                className={`w-full font-semibold uppercase tracking-[0.15em] text-xs py-3 transition-colors disabled:opacity-40 flex items-center justify-center gap-2 ${perfilSel.aceptado ? 'border border-neutral-300 hover:border-black' : 'bg-neutral-900 text-white hover:bg-black'}`}>
+                                                {procesandoPerfil ? <Loader2 size={14} className="animate-spin" /> : (perfilSel.aceptado ? <EyeOff size={15} /> : <Eye size={15} />)}
+                                                {perfilSel.aceptado ? 'Ocultar de la vitrina' : 'Publicar en la vitrina'}
+                                            </button>
+                                            <button disabled={procesandoPerfil} onClick={() => handleEliminarPerfil(perfilSel.id)} className="w-full border border-neutral-300 hover:border-red-500 hover:text-red-500 py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                                                <Trash2 size={14} /> Eliminar perfil
+                                            </button>
+                                        </div>
+                                    </div>
+                                </>
+                            )
+                        })()}
                     </div>
                 </div>
             )}
