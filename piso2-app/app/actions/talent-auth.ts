@@ -17,7 +17,8 @@ const getAdminClient = () => createAdminClient(
 )
 
 // Catálogos cerrados (los valida el server, no confiamos en el form).
-const TALENTOS_VALIDOS = ['dancer', 'acrobata', 'actor', 'cantante', 'musico', 'modelo'] as const
+// Talentos = las mismas opciones que ya existían en el form de Talent.
+const TALENTOS_VALIDOS = ['Bailarín/a', 'Acróbata', 'Modelo', 'Cantante', 'Músico/a', 'Influencer', 'Actor/Actriz'] as const
 const TALLES = ['XS', 'S', 'M', 'L']
 
 const emailOk = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)
@@ -39,6 +40,7 @@ export type MiPerfil = {
     apellido: string | null
     fecha_nacimiento: string | null
     edad: number | null
+    sexo: string | null
     nacionalidad: string | null
     reside_argentina: boolean | null
     direccion: string | null
@@ -59,17 +61,19 @@ export type MiPerfil = {
     fotos_extra: string[]
     videos: string[]
     acuerdo_aceptado: boolean
+    acuerdo_version: string | null
+    firma_fecha: string | null
     contrato_adjunto_url: string | null
     aceptado: boolean
     completo: boolean
 }
 
-const CAMPOS = 'id, email, nombre, apellido, fecha_nacimiento, edad, nacionalidad, reside_argentina, direccion, instagram, telefono, altura, peso, idiomas, talle_remera, talle_pantalon, talle_calzado, talentos, descripcion, foto_primer_plano, foto_cuerpo_entero, foto_plano_americano, foto_artistica, fotos_extra, videos, acuerdo_aceptado, contrato_adjunto_url, aceptado, completo'
+const CAMPOS = 'id, email, nombre, apellido, fecha_nacimiento, edad, sexo, nacionalidad, reside_argentina, direccion, instagram, telefono, altura, peso, idiomas, talle_remera, talle_pantalon, talle_calzado, talentos, descripcion, foto_primer_plano, foto_cuerpo_entero, foto_plano_americano, foto_artistica, fotos_extra, videos, acuerdo_aceptado, acuerdo_version, firma_fecha, contrato_adjunto_url, aceptado, completo'
 
 function aMiPerfil(d: any): MiPerfil {
     return {
         id: d.id, email: d.email, nombre: d.nombre, apellido: d.apellido ?? null,
-        fecha_nacimiento: d.fecha_nacimiento ?? null, edad: d.edad ?? null,
+        fecha_nacimiento: d.fecha_nacimiento ?? null, edad: d.edad ?? null, sexo: d.sexo ?? null,
         nacionalidad: d.nacionalidad ?? null, reside_argentina: d.reside_argentina ?? null,
         direccion: d.direccion ?? null, instagram: d.instagram ?? null, telefono: d.telefono ?? null,
         altura: d.altura ?? null, peso: d.peso ?? null, idiomas: d.idiomas ?? null,
@@ -78,9 +82,22 @@ function aMiPerfil(d: any): MiPerfil {
         foto_primer_plano: d.foto_primer_plano ?? null, foto_cuerpo_entero: d.foto_cuerpo_entero ?? null,
         foto_plano_americano: d.foto_plano_americano ?? null, foto_artistica: d.foto_artistica ?? null,
         fotos_extra: d.fotos_extra || [], videos: d.videos || [],
-        acuerdo_aceptado: !!d.acuerdo_aceptado, contrato_adjunto_url: d.contrato_adjunto_url ?? null,
+        acuerdo_aceptado: !!d.acuerdo_aceptado, acuerdo_version: d.acuerdo_version ?? null,
+        firma_fecha: d.firma_fecha ?? null, contrato_adjunto_url: d.contrato_adjunto_url ?? null,
         aceptado: !!d.aceptado, completo: !!d.completo,
     }
+}
+
+// Un perfil está "completo" cuando tiene las 3 fotos base, 3 videos y el acuerdo
+// firmado. Lo recalculamos tras guardar datos o firmar.
+async function recomputarCompleto(admin: ReturnType<typeof getAdminClient>, perfilId: string) {
+    const { data: d } = await admin.from('talent_perfiles')
+        .select('foto_primer_plano, foto_cuerpo_entero, foto_plano_americano, videos, acuerdo_aceptado')
+        .eq('id', perfilId).maybeSingle()
+    if (!d) return
+    const videos = (d.videos || []).filter(Boolean)
+    const completo = !!d.foto_primer_plano && !!d.foto_cuerpo_entero && !!d.foto_plano_americano && videos.length >= 3 && !!d.acuerdo_aceptado
+    await admin.from('talent_perfiles').update({ completo }).eq('id', perfilId)
 }
 
 // ── Registro ────────────────────────────────────────────────────────────────
@@ -154,7 +171,7 @@ export async function getMiPerfilAction(): Promise<MiPerfil | null> {
 // Guarda los datos del perfil del talento logueado. No toca email ni contraseña.
 // La edad se recalcula de la fecha de nacimiento. El acuerdo/firma va aparte.
 export async function guardarMiPerfilAction(payload: {
-    nombre: string; apellido?: string; fecha_nacimiento?: string | null
+    nombre: string; apellido?: string; fecha_nacimiento?: string | null; sexo?: string
     nacionalidad?: string; residenteArgentina?: boolean; direccion?: string
     instagram?: string; telefono?: string; altura?: number; peso?: number; idiomas?: string
     talleRemera?: string; tallePantalon?: string; talleCalzado?: string
@@ -176,6 +193,7 @@ export async function guardarMiPerfilAction(payload: {
         apellido: payload.apellido?.trim() || null,
         fecha_nacimiento: fechaNac,
         edad: calcularEdad(fechaNac),
+        sexo: ['mujeres', 'varones'].includes(payload.sexo || '') ? payload.sexo : null,
         nacionalidad: payload.nacionalidad?.trim() || null,
         reside_argentina: payload.residenteArgentina ?? null,
         direccion: payload.direccion?.trim() || null,
@@ -201,5 +219,38 @@ export async function guardarMiPerfilAction(payload: {
     const admin = getAdminClient()
     const { error } = await admin.from('talent_perfiles').update(row).eq('id', perfilId)
     if (error) return { ok: false, error: error.message }
+    await recomputarCompleto(admin, perfilId)
+    return { ok: true }
+}
+
+// Firma digital del acuerdo (igual que en las búsquedas): la firma se dibuja y se
+// sube como PNG al bucket; acá guardamos la URL y los datos del firmante. La
+// versión del acuerdo depende de si reside en Argentina o no.
+export async function firmarAcuerdoMiPerfilAction(payload: {
+    residenteArgentina: boolean
+    firmaUrl: string; firmaAclaracion: string; firmaDni: string
+    representanteNombre?: string; representanteDni?: string; firmaUbicacion?: string
+}): Promise<{ ok: boolean; error?: string }> {
+    const perfilId = await leerSesionTalento()
+    if (!perfilId) return { ok: false, error: 'Tenés que iniciar sesión.' }
+    if (!payload.firmaUrl) return { ok: false, error: 'Falta tu firma.' }
+    if (!payload.firmaAclaracion?.trim() || !payload.firmaDni?.trim()) return { ok: false, error: 'Completá la aclaración (nombre) y el DNI de la firma.' }
+
+    const admin = getAdminClient()
+    const { error } = await admin.from('talent_perfiles').update({
+        reside_argentina: payload.residenteArgentina,
+        acuerdo_version: payload.residenteArgentina ? 'residente' : 'no_residente',
+        acuerdo_aceptado: true,
+        firma_url: payload.firmaUrl,
+        firma_aclaracion: payload.firmaAclaracion.trim(),
+        firma_dni: payload.firmaDni.trim(),
+        representante_nombre: payload.representanteNombre?.trim() || null,
+        representante_dni: payload.representanteDni?.trim() || null,
+        firma_fecha: new Date().toISOString(),
+        firma_ubicacion: payload.firmaUbicacion?.trim() || null,
+        updated_at: new Date().toISOString(),
+    }).eq('id', perfilId)
+    if (error) return { ok: false, error: error.message }
+    await recomputarCompleto(admin, perfilId)
     return { ok: true }
 }
