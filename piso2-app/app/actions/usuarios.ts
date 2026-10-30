@@ -377,8 +377,9 @@ export async function asignarPackAction(
     }
 }
 
-// Clases sueltas del alumno (packs de 1 clase, activos) que se pueden pasar a pack.
-export async function getSueltasAlumnoAction(userId: string) {
+// Packs activos del alumno que se pueden AMPLIAR (pasar a uno más grande del
+// mismo tipo). Incluye sueltas (1 clase) y packs (x4, x8, etc.).
+export async function getPacksAmpliablesAction(userId: string) {
     const supabase = await createClient()
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return []
@@ -386,15 +387,17 @@ export async function getSueltasAlumnoAction(userId: string) {
     const { data } = await admin.from('alumno_packs')
         .select('id, cantidad_inicial, creditos_restantes, monto_abonado, tipo_clase, estado, fecha_compra, producto:productos(nombre, tipo_clase, pase_referencia)')
         .eq('user_id', userId)
-        .eq('cantidad_inicial', 1)
         .eq('estado', 'activo')
+        .gte('cantidad_inicial', 1)
         .order('fecha_compra', { ascending: false })
     return data || []
 }
 
-// Convierte una clase suelta en un pack del mismo tipo cobrando solo la diferencia.
-// Mantiene los créditos ya usados: deja (créditos del pack − 1) de más.
-export async function convertirSueltaAPackAction(packId: string, nuevoProductoId: string, montoDiferencia: number, metodoPago: string) {
+// Amplía un pack (o una clase suelta) a uno más grande del mismo tipo cobrando
+// solo la diferencia. Mantiene los créditos ya usados: suma (créditos del pack
+// destino − créditos del pack actual) a lo que le quedaba. Ej: x4 con 2 usadas
+// → x8 ⇒ quedan 2 + (8−4) = 6 disponibles.
+export async function ampliarPackAction(packId: string, nuevoProductoId: string, montoDiferencia: number, metodoPago: string) {
     const supabase = await createClient()
     const supabaseAdmin = getAdminClient()
     try {
@@ -403,15 +406,15 @@ export async function convertirSueltaAPackAction(packId: string, nuevoProductoId
         const operadoraId = session.user.id
 
         const { data: packActual } = await supabaseAdmin.from('alumno_packs').select('*').eq('id', packId).single()
-        if (!packActual) throw new Error('No se encontró la clase suelta')
-        if (Number(packActual.cantidad_inicial) !== 1) throw new Error('Solo se puede convertir una clase suelta (1 clase)')
+        if (!packActual) throw new Error('No se encontró el pack')
+        if (packActual.estado !== 'activo') throw new Error('Solo se puede ampliar un pack activo')
 
         const { data: nuevoProd } = await supabaseAdmin.from('productos').select('id, nombre, tipo_clase, creditos, precio, pase_referencia').eq('id', nuevoProductoId).single()
         if (!nuevoProd) throw new Error('No se encontró el pack destino')
-        if (Number(nuevoProd.creditos) <= 1) throw new Error('El destino tiene que ser un pack (más de 1 clase)')
-        if (nuevoProd.tipo_clase !== packActual.tipo_clase) throw new Error('El pack tiene que ser del mismo tipo que la clase suelta')
+        if (nuevoProd.tipo_clase !== packActual.tipo_clase) throw new Error('El pack destino tiene que ser del mismo tipo que el actual')
+        if (Number(nuevoProd.creditos) <= Number(packActual.cantidad_inicial)) throw new Error(`El pack destino tiene que ser más grande que el actual (${packActual.cantidad_inicial} ${packActual.cantidad_inicial === 1 ? 'clase' : 'clases'}).`)
 
-        const delta = Number(nuevoProd.creditos) - 1
+        const delta = Number(nuevoProd.creditos) - Number(packActual.cantidad_inicial)
         const usuarioId = packActual.user_id
 
         const { data: perfil } = await supabaseAdmin.from('profiles').select('nombre, apellido, nombre_completo, creditos_regulares, creditos_especiales').eq('id', usuarioId).single()
@@ -425,13 +428,13 @@ export async function convertirSueltaAPackAction(packId: string, nuevoProductoId
             if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja para cobrar la diferencia.')
             const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
                 turno_id: turno.id, tipo: 'ingreso',
-                concepto: `Diferencia Suelta→Pack (${nuevoProd.nombre}) | Alumno: ${nombreAlumno}`,
+                concepto: `Ampliación de pack (${nuevoProd.nombre}) | Alumno: ${nombreAlumno}`,
                 monto: Number(montoDiferencia), metodo_pago: metodoPago, origen_referencia: 'manual'
             })
             if (errCaja) throw new Error('Error al registrar la diferencia en la caja')
         }
 
-        // Convertimos el pack: mismos créditos disponibles + los que agrega el pack
+        // Ampliamos el pack: créditos disponibles actuales + los que agrega el pack
         const { error: errPack } = await supabaseAdmin.from('alumno_packs').update({
             producto_id: nuevoProd.id,
             tipo_clase: nuevoProd.tipo_clase,
@@ -444,8 +447,7 @@ export async function convertirSueltaAPackAction(packId: string, nuevoProductoId
         if (errPack) throw new Error('Error al actualizar el pack')
 
         // Recalcular vigencia desde la clase MÁS ANTIGUA del pack (30 días desde
-        // la 1ª clase, tope compra+60). Al convertir una suelta ya usada, la
-        // vigencia debe contar desde esa primera clase, no desde la conversión.
+        // la 1ª clase, tope compra+60). La ampliación NO reinicia la vigencia.
         {
             const { data: inscP } = await supabaseAdmin.from('inscripciones').select('clase:clases(inicio)').eq('pack_usado_id', packId)
             const inicios = (inscP || []).map((i: any) => (Array.isArray(i.clase) ? i.clase[0] : i.clase)?.inicio).filter(Boolean).map((s: string) => new Date(s).getTime())
