@@ -9,6 +9,7 @@
 
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { hashPassword, verifyPassword, crearSesionTalento, leerSesionTalento, cerrarSesionTalento } from '@/lib/talent-session'
+import { postularConPerfilAction } from '@/app/actions/talent'
 
 const getAdminClient = () => createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -157,6 +158,16 @@ export async function loginTalentoAction(payload: { email: string; password: str
 export async function logoutTalentoAction(): Promise<{ ok: boolean }> {
     await cerrarSesionTalento()
     return { ok: true }
+}
+
+// ── Postularse a una búsqueda (requiere cuenta) ──────────────────────────────
+// El perfil sale de la sesión, nunca del cliente. Valida que el perfil esté
+// completo y con el acuerdo firmado (lo hace postularConPerfilAction).
+export async function postularABusquedaSesionAction(busquedaId: string): Promise<{ ok: boolean; error?: string }> {
+    const perfilId = await leerSesionTalento()
+    if (!perfilId) return { ok: false, error: 'Tenés que iniciar sesión.' }
+    const res = await postularConPerfilAction(busquedaId, perfilId)
+    return res.success ? { ok: true } : { ok: false, error: res.error }
 }
 
 // ── Mi perfil ───────────────────────────────────────────────────────────────

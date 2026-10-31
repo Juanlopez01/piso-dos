@@ -935,78 +935,11 @@ export async function toggleContactoLiberadoBusquedaAction(id: string, valor: bo
 }
 
 // ============================================================================
-// PERFIL DE TALENTO + firma del acuerdo (requisito para postularse a búsquedas)
+// POSTULACIÓN A BÚSQUEDAS — requiere cuenta de talento. El alta/edición del
+// perfil y la firma del acuerdo viven en /talent/mi-perfil (app/actions/talent-auth.ts).
+// Acá solo queda el insert de la postulación, que se llama desde la acción con
+// sesión (postularABusquedaSesionAction) con un perfilId ya validado.
 // ============================================================================
-export type PerfilEstado = { existe: boolean; id: string | null; nombre: string | null; completo: boolean }
-
-export async function getPerfilEstadoAction(email: string): Promise<PerfilEstado> {
-    const e = (email || '').trim().toLowerCase()
-    if (!e) return { existe: false, id: null, nombre: null, completo: false }
-    const admin = getAdminClient()
-    const { data } = await admin.from('talent_perfiles').select('id, nombre, completo').eq('email', e).maybeSingle()
-    if (!data) return { existe: false, id: null, nombre: null, completo: false }
-    return { existe: true, id: data.id, nombre: data.nombre, completo: !!data.completo }
-}
-
-const HOST_STREAMING = /(youtube\.com|youtu\.be|vimeo\.com|instagram\.com|tiktok\.com|facebook\.com|fb\.watch)/i
-function videoDescargable(url: string): boolean {
-    const u = (url || '').trim()
-    if (!u || HOST_STREAMING.test(u)) return false
-    return /^https?:\/\//i.test(u)
-}
-
-export async function guardarPerfilTalentoAction(payload: {
-    email: string; nombre: string; dni?: string; telefono?: string; disciplina?: string
-    sexo?: string; edad?: number; altura?: number; nacionalidad?: string
-    residenteArgentina: boolean; direccion?: string; descripcion?: string
-    fotoCuerpoEntero: string; fotoPrimerPlano: string; fotoPlanoAmericano: string; fotosExtra?: string[]
-    videos: string[]
-    acuerdoAceptado: boolean; firmaUrl: string; firmaAclaracion: string; firmaDni: string
-    representanteNombre?: string; representanteDni?: string; firmaUbicacion?: string
-}): Promise<{ success: boolean; id?: string; error?: string }> {
-    const admin = getAdminClient()
-    const email = (payload.email || '').trim().toLowerCase()
-    if (!email) return { success: false, error: 'Falta el email.' }
-    if (!payload.nombre?.trim()) return { success: false, error: 'Falta el nombre.' }
-    if (!payload.fotoCuerpoEntero || !payload.fotoPrimerPlano || !payload.fotoPlanoAmericano)
-        return { success: false, error: 'Faltan las 3 fotos requeridas (cuerpo entero, primer plano y plano americano).' }
-    const videos = (payload.videos || []).map(v => v.trim()).filter(Boolean)
-    if (videos.length < 3) return { success: false, error: 'Cargá 3 videos (links de Google Drive o archivos subidos).' }
-    if (videos.some(v => !videoDescargable(v))) return { success: false, error: 'Los videos deben ser descargables (Google Drive o archivo subido). No se aceptan links de YouTube ni de streaming.' }
-    if (!payload.acuerdoAceptado) return { success: false, error: 'Tenés que aceptar el acuerdo.' }
-    if (!payload.firmaUrl) return { success: false, error: 'Falta tu firma.' }
-    if (!payload.firmaAclaracion?.trim() || !payload.firmaDni?.trim()) return { success: false, error: 'Completá la aclaración (nombre) y el DNI de la firma.' }
-
-    const row: any = {
-        email, nombre: payload.nombre.trim(), dni: payload.dni?.trim() || null,
-        telefono: payload.telefono?.trim() || null, disciplina: payload.disciplina?.trim() || null,
-        sexo: payload.sexo || null, edad: payload.edad ?? null, altura: payload.altura ?? null,
-        nacionalidad: payload.nacionalidad?.trim() || (payload.residenteArgentina ? 'Argentina' : null),
-        reside_argentina: payload.residenteArgentina, direccion: payload.direccion?.trim() || null,
-        descripcion: payload.descripcion?.trim() || null,
-        foto_cuerpo_entero: payload.fotoCuerpoEntero, foto_primer_plano: payload.fotoPrimerPlano,
-        foto_plano_americano: payload.fotoPlanoAmericano, fotos_extra: payload.fotosExtra || [],
-        videos,
-        acuerdo_version: payload.residenteArgentina ? 'residente' : 'no_residente',
-        acuerdo_aceptado: true, firma_url: payload.firmaUrl,
-        firma_aclaracion: payload.firmaAclaracion.trim(), firma_dni: payload.firmaDni.trim(),
-        representante_nombre: payload.representanteNombre?.trim() || null,
-        representante_dni: payload.representanteDni?.trim() || null,
-        firma_fecha: new Date().toISOString(), firma_ubicacion: payload.firmaUbicacion?.trim() || null,
-        completo: true, updated_at: new Date().toISOString(),
-    }
-
-    const { data: existente } = await admin.from('talent_perfiles').select('id').eq('email', email).maybeSingle()
-    if (existente?.id) {
-        const { error } = await admin.from('talent_perfiles').update(row).eq('id', existente.id)
-        if (error) return { success: false, error: error.message }
-        return { success: true, id: existente.id }
-    }
-    const { data, error } = await admin.from('talent_perfiles').insert(row).select('id').single()
-    if (error) return { success: false, error: error.message }
-    return { success: true, id: data.id }
-}
-
 export async function postularConPerfilAction(busquedaId: string, perfilId: string): Promise<{ success: boolean; error?: string }> {
     const admin = getAdminClient()
     const { data: bus } = await admin.from('talent_busquedas').select('id, activa').eq('id', busquedaId).maybeSingle()

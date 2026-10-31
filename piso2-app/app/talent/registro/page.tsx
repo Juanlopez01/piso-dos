@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { registrarTalentoAction } from '@/app/actions/talent-auth'
 import { toast, Toaster } from 'sonner'
@@ -14,12 +14,19 @@ const sans = Montserrat({ subsets: ['latin'], weight: ['300', '400', '500', '600
 const inputCls = "w-full bg-white border border-neutral-300 rounded-lg px-4 py-3 text-sm text-neutral-900 outline-none focus:border-black transition-colors"
 const labelCls = "text-[10px] font-semibold tracking-[0.15em] uppercase text-neutral-500 block mb-1.5"
 
+// Solo permitimos volver a rutas internas de /talent (evita open redirect).
+const destinoSeguro = (n: string | null) => (n && n.startsWith('/talent/')) ? n : '/talent/mi-perfil'
+
 export default function RegistroTalentoPage() {
     const router = useRouter()
     const [form, setForm] = useState({ nombre: '', apellido: '', email: '', password: '', password2: '' })
     const [enviando, setEnviando] = useState(false)
+    const [next, setNext] = useState<string | null>(null)
+
+    useEffect(() => { setNext(new URLSearchParams(window.location.search).get('next')) }, [])
 
     const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }))
+    const qs = next ? `?next=${encodeURIComponent(next)}` : ''
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -29,7 +36,7 @@ export default function RegistroTalentoPage() {
         const res = await registrarTalentoAction({ email: form.email, password: form.password, nombre: form.nombre, apellido: form.apellido })
         if (res.ok) {
             toast.success('¡Cuenta creada!')
-            router.push('/talent/mi-perfil')
+            router.push(destinoSeguro(next))
         } else {
             toast.error(res.error || 'No se pudo crear la cuenta')
             setEnviando(false)
@@ -85,7 +92,7 @@ export default function RegistroTalentoPage() {
                 </button>
 
                 <p className="text-center text-xs text-neutral-500">
-                    ¿Ya tenés cuenta? <Link href="/talent/login" className="font-semibold text-neutral-900 underline underline-offset-2 hover:text-black">Iniciá sesión</Link>
+                    ¿Ya tenés cuenta? <Link href={`/talent/login${qs}`} className="font-semibold text-neutral-900 underline underline-offset-2 hover:text-black">Iniciá sesión</Link>
                 </p>
             </form>
         </div>

@@ -7,7 +7,7 @@ import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
 import { getMiPerfilAction, guardarMiPerfilAction, firmarAcuerdoMiPerfilAction, logoutTalentoAction, type MiPerfil } from '@/app/actions/talent-auth'
 import { toast, Toaster } from 'sonner'
-import { Loader2, Upload, X, LogOut, CheckCircle2, Clock, FileSignature, Eraser } from 'lucide-react'
+import { Loader2, Upload, X, LogOut, CheckCircle2, Clock, FileSignature, Eraser, ArrowRight } from 'lucide-react'
 import { Playfair_Display, Montserrat } from 'next/font/google'
 
 const serif = Playfair_Display({ subsets: ['latin'], weight: ['400', '500', '600', '700'] })
@@ -25,6 +25,9 @@ const FOTOS: { key: keyof MiPerfil; label: string }[] = [
     { key: 'foto_artistica', label: 'Artística' },
 ]
 
+// Solo volvemos a rutas internas de /talent (evita open redirect).
+const destinoSeguro = (n: string | null) => (n && n.startsWith('/talent/')) ? n : null
+
 export default function MiPerfilPage() {
     const router = useRouter()
     const [supabase] = useState(() => createClient())
@@ -32,6 +35,8 @@ export default function MiPerfilPage() {
     const [guardando, setGuardando] = useState(false)
     const [subiendo, setSubiendo] = useState<string | null>(null)
     const [p, setP] = useState<MiPerfil | null>(null)
+    // Si venimos de una búsqueda, acá guardamos a dónde volver a postularse.
+    const [next, setNext] = useState<string | null>(null)
 
     // Firma del acuerdo
     const [mostrarFirma, setMostrarFirma] = useState(false)
@@ -42,8 +47,15 @@ export default function MiPerfilPage() {
     const dibujando = useRef(false)
 
     useEffect(() => {
+        const n = new URLSearchParams(window.location.search).get('next')
+        setNext(n)
         getMiPerfilAction().then(res => {
-            if (!res) { router.replace('/talent/login'); return }
+            if (!res) {
+                // No logueado: mandamos al login conservando el destino (la búsqueda).
+                const dest = destinoSeguro(n)
+                router.replace(`/talent/login${dest ? `?next=${encodeURIComponent(dest)}` : ''}`)
+                return
+            }
             setP(res)
             setCargando(false)
         })
@@ -166,6 +178,10 @@ export default function MiPerfilPage() {
     )
 
     const contratoListo = p.acuerdo_aceptado || !!p.contrato_adjunto_url
+    // Mismo criterio que el server (recomputarCompleto): 3 fotos base + 3 videos + acuerdo.
+    const estaCompleto = !!p.foto_primer_plano && !!p.foto_cuerpo_entero && !!p.foto_plano_americano
+        && (p.videos || []).filter(Boolean).length >= 3 && p.acuerdo_aceptado
+    const volverA = destinoSeguro(next)
 
     return (
         <div className={`min-h-screen bg-white text-neutral-900 ${sans.className}`}>
@@ -185,6 +201,22 @@ export default function MiPerfilPage() {
                 <h1 className={`${serif.className} text-4xl md:text-5xl tracking-[0.15em] font-medium mt-1`}>MI PERFIL</h1>
                 <p className="text-neutral-500 text-sm mt-3">{p.email}</p>
             </header>
+
+            {/* Volver a la búsqueda (si venimos de postularnos) */}
+            {volverA && (
+                <div className="max-w-2xl mx-auto px-6 mb-4">
+                    {estaCompleto ? (
+                        <button onClick={() => router.push(volverA)}
+                            className="w-full bg-emerald-600 text-white font-semibold uppercase tracking-[0.18em] text-xs py-4 hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2">
+                            Tu perfil está completo — Volver y postularme <ArrowRight size={15} />
+                        </button>
+                    ) : (
+                        <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-xs text-neutral-600 leading-relaxed">
+                            Completá tu perfil para poder postularte: <b>3 fotos</b> (primer plano, plano completo y americano), <b>3 videos</b> y el <b>acuerdo firmado</b>. Cuando esté todo, acá te aparece el botón para volver a la búsqueda.
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Estado del contrato / vitrina */}
             <div className="max-w-2xl mx-auto px-6 mb-8">

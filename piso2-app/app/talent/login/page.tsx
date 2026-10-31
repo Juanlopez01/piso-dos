@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { loginTalentoAction } from '@/app/actions/talent-auth'
 import { toast, Toaster } from 'sonner'
@@ -14,16 +14,23 @@ const sans = Montserrat({ subsets: ['latin'], weight: ['300', '400', '500', '600
 const inputCls = "w-full bg-white border border-neutral-300 rounded-lg px-4 py-3 text-sm text-neutral-900 outline-none focus:border-black transition-colors"
 const labelCls = "text-[10px] font-semibold tracking-[0.15em] uppercase text-neutral-500 block mb-1.5"
 
+// Solo permitimos volver a rutas internas de /talent (evita open redirect).
+const destinoSeguro = (n: string | null) => (n && n.startsWith('/talent/')) ? n : '/talent/mi-perfil'
+
 export default function LoginTalentoPage() {
     const router = useRouter()
     const [form, setForm] = useState({ email: '', password: '' })
     const [enviando, setEnviando] = useState(false)
+    const [next, setNext] = useState<string | null>(null)
+
+    useEffect(() => { setNext(new URLSearchParams(window.location.search).get('next')) }, [])
+    const qs = next ? `?next=${encodeURIComponent(next)}` : ''
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         setEnviando(true)
         const res = await loginTalentoAction(form)
-        if (res.ok) router.push('/talent/mi-perfil')
+        if (res.ok) router.push(destinoSeguro(next))
         else { toast.error(res.error || 'No se pudo iniciar sesión'); setEnviando(false) }
     }
 
@@ -60,7 +67,7 @@ export default function LoginTalentoPage() {
                 </button>
 
                 <p className="text-center text-xs text-neutral-500">
-                    ¿No tenés cuenta? <Link href="/talent/registro" className="font-semibold text-neutral-900 underline underline-offset-2 hover:text-black">Creá tu perfil</Link>
+                    ¿No tenés cuenta? <Link href={`/talent/registro${qs}`} className="font-semibold text-neutral-900 underline underline-offset-2 hover:text-black">Creá tu perfil</Link>
                 </p>
             </form>
         </div>
