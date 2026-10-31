@@ -9,7 +9,7 @@ import {
     Search, Filter, User, Shield, Briefcase, GraduationCap,
     MessageSquare, Save, Loader2, Tag, X, Phone, UserPlus, Lock, ShieldAlert, CreditCard, Calendar,
     Wallet, Trophy, Star, Snowflake, UsersRound, Percent, Camera, IdCard, Mail, Activity, TrendingUp,
-    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2, Library, Repeat, Trash2, DollarSign, Theater
+    Eye, History, ShoppingCart, Smartphone, ChevronDown, ChevronUp, Package, KeyRound, Settings2, Library, Repeat, Trash2, DollarSign, Theater, Landmark
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { format } from 'date-fns'
@@ -595,7 +595,7 @@ function UsuariosContent() {
         setPackForm(prev => ({ ...prev, packId, monto: suggestedMonto }))
     }
 
-    const changePackMethod = (metodo: 'efectivo' | 'transferencia') => {
+    const changePackMethod = (metodo: 'efectivo' | 'transferencia' | 'tarjeta') => {
         setPackForm(prev => {
             let newMonto = prev.monto;
             const prod = productos.find(p => p.id === prev.packId);
@@ -1624,9 +1624,10 @@ function UsuariosContent() {
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Método de Pago</label>
-                                        <div className="grid grid-cols-2 gap-4">
+                                        <div className="grid grid-cols-3 gap-3">
                                             <button type="button" onClick={() => changePackMethod('efectivo')} className={`p-4 rounded-xl border flex items-center justify-center gap-2 transition-all ${packForm.metodo === 'efectivo' ? 'bg-[#D4E655] border-[#D4E655] text-black font-black' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}><Wallet size={16} /> Efectivo</button>
-                                            <button type="button" onClick={() => changePackMethod('transferencia')} className={`p-4 rounded-xl border flex items-center justify-center gap-2 transition-all ${packForm.metodo === 'transferencia' ? 'bg-[#D4E655] border-[#D4E655] text-black font-black' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}><CreditCard size={16} /> Transf.</button>
+                                            <button type="button" onClick={() => changePackMethod('transferencia')} className={`p-4 rounded-xl border flex items-center justify-center gap-2 transition-all ${packForm.metodo === 'transferencia' ? 'bg-[#D4E655] border-[#D4E655] text-black font-black' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}><Landmark size={16} /> Transf.</button>
+                                            <button type="button" onClick={() => changePackMethod('tarjeta')} className={`p-4 rounded-xl border flex items-center justify-center gap-2 transition-all ${packForm.metodo === 'tarjeta' ? 'bg-[#D4E655] border-[#D4E655] text-black font-black' : 'bg-transparent border-white/10 text-gray-500 hover:border-white/30'}`}><CreditCard size={16} /> Tarjeta</button>
                                         </div>
                                     </div>
                                 </div>
