@@ -844,38 +844,47 @@ export async function convertirAsistenteAPackAction(payload: {
             .select('nombre, apellido, nombre_completo, creditos_regulares, creditos_especiales').eq('id', userId).single()
         const nombreAlumno = perfil?.nombre_completo || [perfil?.nombre, perfil?.apellido].filter(Boolean).join(' ') || 'Alumno'
 
-        // 2. Cobro de la diferencia en la caja del turno abierto
+        const montoTotal = Number(payload.yaPago) + Number(payload.diferencia)
+        const ahora = new Date()
+
+        // 2. Validación: esta conversión es SOLO para quien tomó la clase como
+        //    suelta (sin pack, o con un pack de 1 clase). Si la clase ya está
+        //    cubierta por un pack de varias clases, NO aplica (antes caía en un
+        //    branch que no hacía nada: cobraba y no acreditaba). Validamos ANTES
+        //    de cobrar para no sacar plata sin dar créditos.
+        let packConvert: any = null
+        if (insc.pack_usado_id) {
+            const { data: packActual } = await admin.from('alumno_packs').select('*').eq('id', insc.pack_usado_id).single()
+            if (!packActual) throw new Error('No se encontró el pack de la inscripción.')
+            if (Number(packActual.cantidad_inicial) !== 1)
+                throw new Error(`Este asistente no tomó la clase como suelta: su clase está cubierta por un pack de ${packActual.cantidad_inicial} clases. Para venderle un pack nuevo usá "Cargar pack" desde su ficha.`)
+            packConvert = packActual
+        }
+
+        // 3. Chequeo de caja ANTES de tocar nada (si hay que cobrar): fallamos
+        //    temprano si está cerrada, así no creamos créditos sin registrar el cobro.
+        let turnoId: string | null = null
         if (Number(payload.diferencia) > 0) {
             const { data: turno } = await admin.from('caja_turnos').select('id')
                 .eq('usuario_id', operadoraId).eq('estado', 'abierta')
                 .order('fecha_apertura', { ascending: false }).limit(1).maybeSingle()
             if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja para cobrar la diferencia.')
-            const { error: errCaja } = await admin.from('caja_movimientos').insert({
-                turno_id: turno.id, tipo: 'ingreso',
-                concepto: `Diferencia Suelta→Pack (${prod.nombre}) | Alumno: ${nombreAlumno}`,
-                monto: Number(payload.diferencia), metodo_pago: payload.metodoPago, origen_referencia: 'manual'
-            })
-            if (errCaja) throw new Error('Error al registrar la diferencia en la caja')
+            turnoId = turno.id
         }
 
-        const montoTotal = Number(payload.yaPago) + Number(payload.diferencia)
-        const ahora = new Date()
-
-        // 3. Pack: si ya tenía un pack de 1 clase lo convertimos; si no, creamos uno nuevo
-        if (insc.pack_usado_id) {
-            const { data: packActual } = await admin.from('alumno_packs').select('*').eq('id', insc.pack_usado_id).single()
-            if (packActual && Number(packActual.cantidad_inicial) === 1) {
-                await admin.from('alumno_packs').update({
-                    producto_id: prod.id, tipo_clase: prod.tipo_clase,
-                    cantidad_inicial: Number(prod.creditos),
-                    creditos_restantes: Number(packActual.creditos_restantes) + delta,
-                    monto_abonado: Number(packActual.monto_abonado) + Number(payload.diferencia),
-                    precio_total: Number(prod.precio),
-                    estado: 'activo',
-                }).eq('id', packActual.id)
-            }
+        // 4. Pack: convertimos el de 1 clase o creamos uno nuevo.
+        if (packConvert) {
+            const { error: errUp } = await admin.from('alumno_packs').update({
+                producto_id: prod.id, tipo_clase: prod.tipo_clase,
+                cantidad_inicial: Number(prod.creditos),
+                creditos_restantes: Number(packConvert.creditos_restantes) + delta,
+                monto_abonado: Number(packConvert.monto_abonado) + Number(payload.diferencia),
+                precio_total: Number(prod.precio),
+                estado: 'activo',
+            }).eq('id', packConvert.id)
+            if (errUp) throw new Error('Error al convertir el pack: ' + errUp.message)
         } else {
-            const { data: nuevoPack } = await admin.from('alumno_packs').insert({
+            const { data: nuevoPack, error: errNew } = await admin.from('alumno_packs').insert({
                 user_id: userId, producto_id: prod.id, tipo_clase: prod.tipo_clase,
                 cantidad_inicial: Number(prod.creditos), creditos_restantes: delta,
                 monto_abonado: montoTotal, precio_total: Number(prod.precio),
@@ -885,15 +894,27 @@ export async function convertirAsistenteAPackAction(payload: {
                 fecha_primera_asistencia: ahora.toISOString(),
                 estado: 'activo'
             }).select('id').single()
-            if (nuevoPack?.id) await admin.from('inscripciones').update({ pack_usado_id: nuevoPack.id }).eq('id', insc.id)
+            if (errNew || !nuevoPack?.id) throw new Error('Error al crear el pack: ' + (errNew?.message || ''))
+            await admin.from('inscripciones').update({ pack_usado_id: nuevoPack.id }).eq('id', insc.id)
         }
 
-        // 4. Sumamos los créditos extra por el canal correcto
+        // 5. Sumamos los créditos extra por el canal correcto
         if (prod.tipo_clase === 'exclusivo') {
             await admin.rpc('cargar_pase_exclusivo_manual', { p_usuario_id: userId, p_referencia: prod.pase_referencia, p_cantidad: delta })
         } else {
             const campo = prod.tipo_clase === 'seminario' ? 'creditos_especiales' : 'creditos_regulares'
             await admin.from('profiles').update({ [campo]: (Number((perfil as any)?.[campo]) || 0) + delta }).eq('id', userId)
+        }
+
+        // 6. Cobro en caja AL FINAL: recién registramos la plata una vez que los
+        //    créditos ya están cargados (evita cobrar sin acreditar).
+        if (turnoId) {
+            const { error: errCaja } = await admin.from('caja_movimientos').insert({
+                turno_id: turnoId, tipo: 'ingreso',
+                concepto: `Diferencia Suelta→Pack (${prod.nombre}) | Alumno: ${nombreAlumno}`,
+                monto: Number(payload.diferencia), metodo_pago: payload.metodoPago, origen_referencia: 'manual'
+            })
+            if (errCaja) throw new Error('Error al registrar la diferencia en la caja')
         }
 
         // Reconciliar el contador del perfil con los packs (fuente de verdad).

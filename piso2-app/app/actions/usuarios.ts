@@ -420,18 +420,16 @@ export async function ampliarPackAction(packId: string, nuevoProductoId: string,
         const { data: perfil } = await supabaseAdmin.from('profiles').select('nombre, apellido, nombre_completo, creditos_regulares, creditos_especiales').eq('id', usuarioId).single()
         const nombreAlumno = getNombreSeguro(perfil)
 
-        // Cobro de la diferencia en la caja del turno abierto
+        // Chequeo de caja ANTES de aplicar (si hay que cobrar): fallamos temprano si
+        // está cerrada, así no ampliamos el pack sin registrar el cobro. El movimiento
+        // se inserta AL FINAL, recién cuando los créditos ya están cargados.
+        let turnoId: string | null = null
         if (Number(montoDiferencia) > 0) {
             const { data: turno } = await supabaseAdmin.from('caja_turnos').select('id')
                 .eq('usuario_id', operadoraId).eq('estado', 'abierta')
                 .order('fecha_apertura', { ascending: false }).limit(1).maybeSingle()
             if (!turno) throw new Error('¡Caja Cerrada! Abrí tu caja para cobrar la diferencia.')
-            const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
-                turno_id: turno.id, tipo: 'ingreso',
-                concepto: `Ampliación de pack (${nuevoProd.nombre}) | Alumno: ${nombreAlumno}`,
-                monto: Number(montoDiferencia), metodo_pago: metodoPago, origen_referencia: 'manual'
-            })
-            if (errCaja) throw new Error('Error al registrar la diferencia en la caja')
+            turnoId = turno.id
         }
 
         // Ampliamos el pack: créditos disponibles actuales + los que agrega el pack
@@ -474,6 +472,17 @@ export async function ampliarPackAction(packId: string, nuevoProductoId: string,
                 [campo]: (Number((perfil as any)?.[campo]) || 0) + delta
             }).eq('id', usuarioId)
             if (error) throw new Error('Error al sumar los créditos al perfil')
+        }
+
+        // Cobro en caja AL FINAL: recién registramos la plata una vez que el pack se
+        // amplió y los créditos ya están cargados (evita cobrar sin acreditar).
+        if (turnoId) {
+            const { error: errCaja } = await supabaseAdmin.from('caja_movimientos').insert({
+                turno_id: turnoId, tipo: 'ingreso',
+                concepto: `Ampliación de pack (${nuevoProd.nombre}) | Alumno: ${nombreAlumno}`,
+                monto: Number(montoDiferencia), metodo_pago: metodoPago, origen_referencia: 'manual'
+            })
+            if (errCaja) throw new Error('Error al registrar la diferencia en la caja')
         }
 
         // Reconciliar el contador del perfil con los packs (fuente de verdad).

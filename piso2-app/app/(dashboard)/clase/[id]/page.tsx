@@ -701,7 +701,8 @@ export default function ClaseDetallePage() {
                                                     <AlertTriangle size={12} /> Adeuda
                                                 </button>
                                             )}
-                                            {!esGrupoOFormacion && (!(insc as any).pack || Number((insc as any).pack?.cantidad_inicial) === 1) && (
+                                            {/* Solo si tomó la clase como suelta: sin pack (pack_usado_id vacío) o con un pack de 1 clase. Si está cubierta por un pack de varias, no se ofrece. */}
+                                            {!esGrupoOFormacion && (!(insc as any).pack_usado_id || Number((insc as any).pack?.cantidad_inicial) === 1) && (
                                                 <button
                                                     onClick={() => abrirConvertir(insc)}
                                                     className="bg-purple-500/80 text-white text-[9px] md:text-[10px] font-black uppercase px-2 py-1 rounded flex items-center gap-1 hover:bg-purple-500 transition-colors"
