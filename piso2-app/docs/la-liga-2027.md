@@ -1,184 +1,214 @@
-# Experiencia La Liga 2027 — Plan de implementación
+# LA LIGA 2027 — Programa de formación y desarrollo profesional
 
-> Spec organizado a partir del pedido de Santi (26/10/2026). Objetivo: dejarlo pensado para
-> que, cuando se construya, se avance rápido. **No implementado todavía.**
-
----
-
-## 1. Objetivo
-
-Un módulo para gestionar el programa **La Liga** de punta a punta:
-inscripción pública → aprobación → pago de matrícula/cuotas → perfil del alumno con
-seguimiento (disciplinas, notas A/B/C, promedio, exámenes, asistencia, beneficios),
-perfil docente y vista de coordinación. Con un **punto de entrada destacado** en el home
-cuando hay lanzamiento.
+> **Estado:** planificado, sin implementar. Este doc organiza el proyecto en **3 FASES** —cada una
+> con su entregable y pensada para cotizarse por separado— y deja las definiciones a cerrar con la
+> dirección antes de arrancar.
+>
+> **Origen:** pedido de Santi (26/10/2026) + conversación de referencia (perfil del alumno con 4
+> pestañas, régimen de asistencia y beneficios por categoría). Las maquetas son ideas de UI; acá
+> se construye con el diseño del sistema PISO2.
 
 ---
 
-## 2. Qué YA existe y se reutiliza (clave para ir rápido)
+## 1. Qué es
+
+Un módulo que gestiona **LA LIGA** de punta a punta:
+
+**inscripción pública 2027 → aprobación → pago de matrícula/cuotas → perfil del alumno con
+seguimiento académico (notas, asistencia, programa, beneficios) → portal docente → coordinación.**
+
+Con un **botón "Inscripciones 2027" destacado apenas entrás a la página**.
+
+El corazón es el **perfil del alumno**, con **4 pestañas**:
+
+1. **Evaluaciones** — notas A/B/C por disciplina + devolución del docente.
+2. **Asistencias** — presentes/ausentes + condición de regularidad (régimen de faltas).
+3. **Programa** — contenidos por bloque; el bloque 2 bloqueado hasta aprobar el 1.
+4. **Beneficios** — ventajas según la letra del promedio general (A/B/C).
+
+---
+
+## 2. Resumen de las 3 fases (para cotizar)
+
+| Fase | Qué incluye | Entregable (qué queda funcionando) | Precio |
+|---|---|---|---|
+| **FASE 1 — Inscripción + Pagos** | Landing con botón 2027, inscripción (3 CTAs), aprobación, perfil base, matrícula/cuotas + bloqueo por mora | PISO2 **lanza, inscribe y cobra** online. El alumno tiene su perfil y su estado de pago. | _a definir_ |
+| **FASE 2 — Seguimiento académico** | Evaluaciones A/B/C + devoluciones, **asistencias + régimen de regularidad**, programa por bloques, portal docente (cargas) | El alumno ve **notas, asistencia y programa**; los docentes cargan todo; el sistema detecta **libres** automáticamente. | _a definir_ |
+| **FASE 3 — Beneficios + Coordinación** | Beneficios por categoría A/B/C, vista de coordinación, alertas y gestión fina | El rendimiento **desbloquea beneficios**; coordinación ve todo (sin pagos); alertas automáticas. | _a definir_ |
+
+> Las fases son **incrementales**: con la Fase 1 ya se puede operar (inscribir y cobrar); las
+> Fases 2 y 3 agregan el seguimiento académico y la capa de beneficios/gobierno.
+
+---
+
+## 3. Qué YA existe y se reutiliza (clave para ir rápido y para justificar el precio)
 
 | Necesidad | Ya existe | Archivo |
 |---|---|---|
-| Postulación pública → crea perfil + lista para aprobar/rechazar | **Talent** (`talent_postulaciones`, `crearPostulacionTalentoAction`, `aceptar/standby/eliminarPostulacion`) | `app/actions/talent.ts`, `app/talent/*` |
-| Postulación "abierta" por fuera de convocatorias (CTA + form) | Convocatoria / ficha | `app/convocatoria/*` |
-| Notas por materia+cuatrimestre con profesor_id | `liga_evaluaciones` (`guardarEvaluacionAction`, `getNotasDeAlumnoAction`, `getEvaluacionesDeMateriaAction`) | `app/actions/liga.ts` |
+| Postulación pública → crea perfil + lista para aprobar/rechazar | **Talent** (perfiles con cuenta, aprobación, mensajes) | `app/actions/talent.ts`, `app/actions/talent-auth.ts`, `app/talent/*` |
+| Cuenta propia con login (email + contraseña) separada de alumnos | Talent login (cookie HMAC + scrypt) | `lib/talent-session.ts` |
+| Notas por materia+cuatrimestre con profesor_id | `liga_evaluaciones` | `app/actions/liga.ts` |
 | Asistencia de La Liga (staff) | `getAsistenciasRangoStaffAction`; inscripciones con `estado_asistencia`/`presente` | `app/actions/liga.ts`, `inscripciones` |
 | Niveles / becas / padrón / precios / cuotas por nivel-mes | `cambiarNivelLigaAction`, `asignarBecaAction`, `inscribirPadronLigaAction`, `getPreciosLigaAction`, `guardarCuotaLigaMesAction` | `app/actions/liga.ts` |
-| Pagos + link de pago MP | Ventas externas / MP (`crearOrden`, webhook) | `app/actions/ventas.ts`, `app/api/mercadopago/*` |
-| Subida de foto de perfil | `profiles.foto_url` + uploader (Talent/Perfil) | `app/(dashboard)/perfil`, bucket `talent` |
+| Pagos + link de pago MP + webhook por `metadata.tipo_pago` | Ventas externas / MP (ya tiene rama `cuota_liga`) | `app/actions/ventas.ts`, `app/api/mercadopago/*` |
+| Subida de foto de perfil | uploader + bucket `talent` | `app/(dashboard)/perfil`, `app/talent/mi-perfil` |
 | Mails (bienvenida, avisos) | `lib/mail.ts` (`enviarMail`, layout) | `lib/mail.ts` |
-| Cuenta de usuario (perfil navegable) | auth + `profiles` + rol | `utils/supabase`, `profiles` |
-| Home con botones 2M/2E/2S | `LandingClient` (menú interactivo) | `app/LandingClient.tsx` |
-| Acortador de links (para compartir) | `short_links` + `acortarLinkAction` | `app/actions/talent.ts` |
+| Home con botones 2M/2E/2S | `LandingClient` | `app/LandingClient.tsx` |
+| Acortador de links (compartir) | `short_links` + `acortarLinkAction` | `app/actions/talent.ts` |
+| Cobros/ajustes desde caja (matrícula presencial) | caja (apertura/cierre, movimientos) | panel caja |
+| Bloqueos/recálculos automáticos por fecha | patrón `pg_cron` / `after()` | migraciones SQL |
 
-**Idea rectora:** La Liga 2027 es "Talent para La Liga" + lo que ya tiene el módulo La Liga,
-unificado en un **perfil de alumno** con seguimiento y pagos.
-
----
-
-## 3. Flujo completo (los 3 pasos de Santi) + quién hace qué
-
-### Paso 1 — Info + postulación (crea perfil)
-- Página pública con **video explicativo** del programa + **formulario**.
-- 3 CTAs:
-  - **"Quiero que me llamen"** (deja tel)
-  - **"Quiero que me escriban"** (deja contacto)
-  - **"Quiero anotarme directamente"** (completa datos + foto → crea perfil postulado)
-- Se arma la **lista de perfiles postulados** (como Talent).
-- Recep/Coordinación: **aprobar / no aprobar**; **mensaje directo** para comunicarse y
-  enviar **link de pago de matrícula**.
-
-### Paso 2 — Perfil aprobado
-- Pagar **matrícula**.
-- **Planes de pago**: mensual / cuatrimestral (cuatrimestral: mantiene precio pagando 4
-  meses juntos, o una cuota por mes manteniendo el precio pactado).
-
-### Paso 3 — Perfil liberado en el programa
-- **Mensaje de bienvenida** (mail/WhatsApp).
-- Perfil muestra: datos del alumno + **foto** + **promedio general (letra A/B/C)**.
-- **Ficha completa** con el programa (disciplinas de los 2 años).
-- **Fechas de examen 1 y 2.**
-- **Segundo bloque bloqueado (gris)** hasta rendir el primero.
-- **Beneficios** según la letra.
-
-### Seguimiento del programa (perfil activo)
-- Disciplinas de **ambos años**.
-- **Puntaje A-B-C por disciplina** + **promedio general**.
-- Fechas de exámenes + **devoluciones** (feedback).
-- **Asistencia** propia (solapa aparte del alumno).
-
-### Pagos / bloqueo
-- Actualizaciones de pago.
-- Si al **día 10** de cada mes no está pago el arancel → **perfil bloqueado**
-  con cartel "Comunicate con el área administrativa".
-- **Beneficios por letra** (A/B/C): descuentos, audiciones, salas de ensayo.
+**Idea rectora:** LA LIGA 2027 ≈ "Talent (postulación + perfil con cuenta)" + lo que ya tiene el
+módulo La Liga (evaluaciones, asistencias, cuotas, becas, niveles), unificado en un **perfil de
+alumno** con seguimiento académico y pagos.
 
 ---
 
-## 4. Roles y permisos
+## 4. Roles
 
 | Rol | Puede |
 |---|---|
-| **Alumno La Liga** (perfil) | Ver su perfil, foto, datos, disciplinas, notas, promedio, exámenes, asistencia propia, beneficios, estado de pago. Aplicar a cosas de la página. |
-| **Docente La Liga** | Ver **solo los alumnos de SU disciplina**, con fechas de cada clase. **Obligatorio**: cargar el contenido de cada clase, el método de evaluación en cada fecha, puntuar A-B-C, observaciones de examen, **remplazo con contacto**, y **tomar presente en cada clase**. |
+| **Alumno La Liga** | Ver su perfil (4 pestañas), estado de pago, aplicar a cosas de la página. |
+| **Docente La Liga** | Ver **solo los alumnos de SU disciplina**. **Obligatorio por clase:** cargar contenido, método de evaluación, tomar presente; **por examen:** puntuar A/B/C + observaciones; informar **reemplazo con contacto**. |
 | **Coordinadora** | Ve **todo menos la info administrativa de pagos**. |
-| **Recep La Liga** | Lista de todos los perfiles; **toma asistencia**; aprobar postulaciones; enviar link de pago/mensajes. |
-| **Admin / Finanzas** | Todo + pagos, matrícula, planes, precios, bloqueos. |
+| **Recepción La Liga** | Lista de perfiles; toma asistencia; aprueba postulaciones; envía link de pago/mensajes. |
+| **Admin / Finanzas** | Todo + matrícula, planes, precios, bloqueos, gestión de libres. |
 
 > Roles existentes: `profesor`, `coordinador`, `recepcion`, `admin`, `alumno`.
-> Evaluar: queda definir si "docente La Liga" = `profesor` filtrado por su disciplina, o un
-> flag/rol propio. Coordinadora = `coordinador` (ya existe) con gate de "no ver pagos".
+> **A definir:** "docente La Liga" = `profesor` filtrado por disciplina, o flag/rol propio.
+> Coordinadora = `coordinador` con gate de "no ver pagos".
 
 ---
 
-## 5. Modelo de datos (nuevo / a extender)
+# FASE 1 — Inscripción + Pagos
+**Entregable:** PISO2 lanza el programa, inscribe online y cobra. El alumno tiene su perfil y ve su estado de pago.
 
-> Reusar `profiles` para el perfil del alumno (foto_url, datos). La Liga ya tiene tablas
-> (`liga_evaluaciones`, cuotas, becas). Lo nuevo:
+### Etapa 1.1 — Lanzamiento + landing "Inscripciones 2027"
+- Bloque/CTA destacado en `LandingClient` (apenas entrás a la página) cuando hay un lanzamiento activo.
+- Página pública del programa: **video explicativo** + descripción de las etapas del programa.
+- Panel para prender/apagar, cambiar video y textos (sirve para futuros lanzamientos).
 
-- **`liga_lanzamientos`** (el "lanzamiento" destacado del home)
-  `id, titulo, subtitulo, video_url, activo, orden, cta_texto, slug, creado_at`.
-  (Para poder prender/apagar el destacado y cambiar el video sin tocar código.)
-- **`liga_postulaciones`** (o reusar patrón Talent)
-  `id, nombre, email, telefono, instagram, edad/fecha_nac, ciudad, foto_url,
-   tipo_contacto ('llamar'|'escribir'|'anotarse'), nota, estado ('pendiente'|'aprobada'|'no'),
-   perfil_id (al aprobar), lanzamiento_id, creado_at`.
-- **`liga_inscripciones`** (alumno dentro del programa, "perfil aprobado")
-  `id, perfil_id, estado ('aprobado'|'bloqueado'), anio_ingreso, nivel/letra_actual,
-   promedio_letra, matricula_pagada (bool), plan ('mensual'|'cuatrimestral'),
-   bienvenida_enviada, creado_at`.
-- **`liga_disciplinas`** (catálogo de disciplinas por año/bloque)
-  `id, nombre, anio (1|2), bloque (1|2), docente_id, orden`.
-- **`liga_alumno_disciplina`** (nota por alumno+disciplina)
-  `inscripcion_id, disciplina_id, puntaje ('A'|'B'|'C'|null), observaciones, actualizado_at`.
-  *(o extender `liga_evaluaciones` que ya es por materia+cuatrimestre.)*
-- **`liga_examenes`** (fechas de examen 1 y 2 por disciplina/bloque)
-  `id, disciplina_id, numero (1|2), fecha, libera_bloque (bool)`.
-- **`liga_clases_contenido`** (lo que el docente DEBE cargar por clase)
-  `id, clase_id, contenido, metodo_evaluacion, remplazo_nombre, remplazo_contacto, cargado_por`.
-- **`liga_pagos`** (arancel mensual / matrícula)
-  `id, inscripcion_id, concepto ('matricula'|'cuota'), mes, anio, monto, estado, metodo, pagado_at, mp_ref`.
-- **`liga_beneficios`** (qué desbloquea cada letra)
-  `letra ('A'|'B'|'C'), beneficios (texto/jsonb: descuentos, audiciones, salas)`.
-- **Asistencia**: reusar `inscripciones` (es_la_liga) + `estado_asistencia`/`presente`, o una
-  `liga_asistencia (inscripcion_id, clase_id, presente, fecha)` si conviene separarlo.
+**Datos:** `liga_lanzamientos (id, titulo, subtitulo, video_url, cta_texto, slug, activo, orden, creado_at)`.
 
-> **Bloqueo por pago (día 10):** campo calculado o un cron (ya hay patrón pg_cron / `after()`):
-> si el día 10 no hay `liga_pagos` del mes → `liga_inscripciones.estado = 'bloqueado'`.
-> El perfil muestra el cartel y se limita a "Comunicate con administración".
+### Etapa 1.2 — Inscripción (postulación) + aprobación + link de pago
+- Form público con **3 CTAs**: "Quiero que me llamen" / "Quiero que me escriban" /
+  "Quiero anotarme directamente" (datos + foto → crea **perfil postulado con cuenta**).
+- Lista de **perfiles postulados** (como Talent): aprobar / no aprobar, **mensaje directo** y
+  **envío del link de pago de matrícula**.
 
----
+**Reutiliza:** flujo de perfiles con cuenta de Talent (registro/login, reclamo por email).
+**Datos:** `liga_postulaciones (id, nombre, email, telefono, instagram, fecha_nac, ciudad,
+foto_url, tipo_contacto ['llamar'|'escribir'|'anotarse'], nota, estado ['pendiente'|'aprobada'|'no'],
+perfil_id, lanzamiento_id, creado_at)`.
 
-## 6. Punto de entrada en el home (lanzamiento)
+### Etapa 1.3 — Perfil del alumno (base) + bienvenida
+- Perfil con **foto, datos, promedio general (letra A/B/C)** y las **4 pestañas** (shell).
+- Estado: `postulado` → `aprobado` → `bloqueado`.
+- **Mensaje de bienvenida** (mail / WhatsApp) al liberar el perfil.
 
-- En `LandingClient`, **debajo del menú 2M/2E/2S**, si hay un `liga_lanzamientos.activo`:
-  mostrar un **bloque destacado** ("La Liga 2027 — Inscripciones abiertas") que invite a verlo
-  (animación/CTA) y lleve a la página de inscripción (Paso 1).
-- Controlable desde un panel (prender/apagar, video, textos) para futuros lanzamientos.
+**Datos:** `liga_inscripciones (id, perfil_id, estado, anio_ingreso, letra_actual, promedio_letra,
+matricula_pagada, plan ['mensual'|'cuatrimestral'], bienvenida_enviada, creado_at)`.
+
+### Etapa 1.4 — Pagos (matrícula + cuotas + bloqueo por mora)
+- **Matrícula** (link MP y/o caja) y **planes**: mensual / cuatrimestral (cuatrimestral = mantiene
+  precio pagando los 4 meses juntos, o cuota por mes al precio pactado).
+- **Bloqueo por mora:** si al **día 10** del mes no está pago → perfil **bloqueado** con cartel
+  "Comunicate con el área administrativa". Se desbloquea al registrar el pago.
+
+**Reutiliza:** MP (`metadata.tipo_pago = 'cuota_liga'` ya existe), webhook, caja, `pg_cron`.
+**Datos:** `liga_pagos (id, inscripcion_id, concepto ['matricula'|'cuota'], mes, anio, monto,
+estado, metodo, pagado_at, mp_ref)`.
 
 ---
 
-## 7. Orden sugerido de implementación (para shippear por partes)
+# FASE 2 — Seguimiento académico
+**Entregable:** el alumno ve notas, asistencia y programa; los docentes cargan todo; el sistema detecta "libres" solo.
 
-1. **Lanzamiento + landing** (destacado on/off + página pública con video). *Rápido, visible.*
-2. **Paso 1: postulación** (3 CTAs) + lista de postulados + aprobar/rechazar + mensaje/link de pago. *Reusa Talent.*
-3. **Perfil del alumno (base)**: foto, datos, estado (postulado/aprobado/bloqueado), navegación/aplicar.
-4. **Pagos**: matrícula + planes + link MP + **bloqueo por día 10** + cartel.
-5. **Seguimiento académico**: disciplinas (2 años/bloques), notas A/B/C, promedio, exámenes 1 y 2, **bloqueo del 2º bloque** hasta aprobar el 1º, devoluciones. *Extiende `liga_evaluaciones`.*
-6. **Asistencia**: recep toma presente desde el listado; alumno la ve en su solapa. *Reusa asistencias.*
-7. **Perfil docente**: alumnos de su disciplina, fechas de clase, contenido obligatorio, método de evaluación, A-B-C, observaciones, remplazo, presente.
-8. **Coordinadora**: vista total sin pagos.
-9. **Beneficios por letra** (A/B/C): descuentos, audiciones, salas.
-10. **Bienvenida** (mail/WhatsApp) al aprobar/liberar.
+### Etapa 2.1 — Evaluaciones (notas A/B/C + devoluciones) · pestaña 1
+- **6 disciplinas**, **2 exámenes** por disciplina, nota **A/B/C** por examen.
+- Cada examen con **devolución escrita** del docente (desplegable en el perfil del alumno).
+- **Promedio general** → determina la **letra A/B/C** del alumno (alimenta la Fase 3).
+
+**Reutiliza/extiende:** `liga_evaluaciones` (ya es por materia+cuatrimestre con profesor_id).
+**Datos:** `liga_disciplinas (id, nombre, anio, bloque, docente_id, orden)`,
+`liga_examenes (id, disciplina_id, numero [1|2], fecha, libera_bloque)`,
+`liga_alumno_examen (inscripcion_id, examen_id, puntaje, observaciones, actualizado_at)`.
+
+### Etapa 2.2 — Asistencias + régimen de regularidad · pestaña 2  ⭐ (lo nuevo del pedido)
+Registrar asistencia y que el sistema detecte **automáticamente** cuándo un alumno queda libre,
+distinguiendo "libre del mes" de "libre del bloque".
+
+**Reglamento de asistencia:**
+
+| Situación | Consecuencia |
+|---|---|
+| 1 falta en el mes | **Permitida** |
+| 2 faltas en la **misma disciplina** en un mes | Queda **libre de esa disciplina ese mes** |
+| **+4 faltas** en una disciplina en el cuatrimestre | Queda **libre de esa disciplina todo el bloque** |
+| Alumno **libre del bloque** | Debe **rendir la disciplina en condición de libre** y **volver a pagar la matrícula** |
+
+- **Dos estados separados:** `libre_mes` (disciplina+mes) ≠ `libre_bloque` (disciplina+bloque).
+- El alumno ve, por disciplina: presentes, ausentes, **faltas acumuladas** y su **condición de regularidad**.
+- **Alertas** al alumno y a administración al acercarse/alcanzar un límite.
+- **Administración** puede: consultar los **libres**, gestionar **inscripción al examen libre +
+  nuevo pago de matrícula**, y **corregir asistencias / justificar excepciones** con **historial**.
+
+**Reutiliza:** asistencias actuales + pagos de la Fase 1 (para el examen libre).
+**Datos:** `liga_asistencia (id, inscripcion_id, disciplina_id, clase_fecha, presente, justificada,
+modificada_por, modificada_at)`; condición derivada (vista o cron al cierre de mes).
+
+> **Decisión clave:** "+4 faltas en el cuatrimestre" → **¿por disciplina o sumando todas?**
+> La maqueta lo tomó **por disciplina**. Confirmar antes de programar "libre del bloque".
+
+### Etapa 2.3 — Programa · pestaña 3 + portal docente (cargas)
+- Contenidos del **Bloque 01**; **Bloque 02 bloqueado (gris)** hasta que PISO2 confirme requisitos.
+- **Portal docente:** cada docente ve los alumnos de su disciplina y **carga por clase**
+  (contenido, método de evaluación, presente) y **por examen** (A/B/C, observaciones, reemplazo).
+
+**Datos:** `liga_clases_contenido (id, disciplina_id, clase_fecha, contenido, metodo_evaluacion,
+remplazo_nombre, remplazo_contacto, cargado_por)`.
 
 ---
 
-## 8. Decisiones abiertas (confirmar con Santi antes de construir)
+# FASE 3 — Beneficios + Coordinación
+**Entregable:** el rendimiento desbloquea beneficios; coordinación ve todo (sin pagos); alertas automáticas.
 
-1. **Letras A/B/C:** ¿son por disciplina (cada materia tiene su letra) y el promedio general
-   es el promedio de esas letras? ¿Cómo se promedia (A=3, B=2, C=1)? ¿Hay nota numérica detrás?
-2. **Bloques y "segundo bloque":** ¿el programa son 2 años con 2 bloques c/u? ¿El "segundo
-   bloque" que se libera al aprobar el primero es por año o del programa completo?
-3. **Matrícula y planes:** montos de matrícula y cuota; "cuatrimestral mantiene precio
-   pagando 4 meses de una" — ¿también aplica si paga una por mes? ¿Qué pasa si se atrasa en ese plan?
-4. **Bloqueo día 10:** ¿bloqueo total del perfil o solo el seguimiento (deja ver "estás al día"/no)?
-   ¿Se desbloquea solo al registrar el pago?
-5. **Disciplinas y docentes:** ¿lista fija de disciplinas 2027? ¿un docente por disciplina?
-   ¿"docente La Liga" es el rol `profesor` o uno nuevo?
-6. **Coordinadora:** ¿`coordinador` actual alcanza? ¿"todo menos pagos" incluye no ver aranceles
-   ni estado de pago de los alumnos?
-7. **Aplicar "a lo que quiera" con el perfil:** ¿a qué puede aplicar un perfil además de La Liga
-   (Talent, audiciones, grupos)? ¿se unifican las postulaciones bajo un mismo perfil?
-8. **Beneficios por letra:** lista concreta (qué descuento, qué audiciones, qué salas) y si es
-   texto informativo o acciones reales en el sistema.
+### Etapa 3.1 — Beneficios por categoría A/B/C · pestaña 4
+- Categoría **A/B/C automática** según el **promedio general** (no editable por el alumno).
+- El alumno **consulta las 3 categorías** pero solo tiene **activos los de su letra** (para que vea
+  qué puede alcanzar mejorando).
+- **Asignación al cierre de cada bloque** (no después de cada examen), para evitar cambios constantes.
+
+**Datos:** `liga_beneficios (letra ['A'|'B'|'C'], beneficios jsonb/texto)`.
+
+> **Decisión:** definir los **beneficios concretos** de A, B y C (descuentos, audiciones, salas,
+> becas, actividades, acceso a oportunidades…).
+
+### Etapa 3.2 — Coordinación + alertas
+- **Coordinadora:** vista total **sin** info de pagos.
+- **Alertas automáticas** (regularidad en riesgo, libres, mora) al alumno y a administración.
 
 ---
 
-## 9. Notas
+## 5. Decisiones abiertas (cerrar con Santi antes de construir)
 
-- Mucho se apoya en lo existente → la mayor parte del trabajo es **modelar el perfil del alumno
-  de La Liga** y **el seguimiento académico/pagos**, más el **punto de entrada** y el **perfil
-  docente** con cargas obligatorias.
-- Conviene construir con **migraciones por etapa** (como venimos: Juan corre la migración, después push).
-- Candidato a reutilizar fuerte: Talent (postulación/aprobación) y La Liga actual (evaluaciones,
-  asistencias, cuotas, becas, niveles).
+1. **Faltas del cuatrimestre:** ¿"+4 faltas" es **por disciplina** o **sumando las 6**? *(maqueta: por disciplina).* — **Fase 2**
+2. **Cálculo de la letra:** ¿del promedio de notas A/B/C (A=3, B=2, C=1)? ¿nota numérica detrás? ¿qué rango define cada letra? — **Fase 2/3**
+3. **Beneficios A/B/C:** lista concreta por letra, y si son **informativos** o **acciones reales**. — **Fase 3**
+4. **Bloques:** ¿2 años con 2 bloques c/u? ¿"bloque 2 bloqueado" por año o del programa completo? ¿"cuatrimestre" = "bloque"? — **Fase 2**
+5. **Matrícula y planes:** montos; en cuatrimestral pagando una por mes, ¿qué pasa si se atrasa? El "volver a pagar matrícula" del libre, ¿es matrícula completa? — **Fase 1/2**
+6. **Bloqueo día 10:** ¿bloqueo total del perfil o solo del seguimiento? ¿se desbloquea solo al registrar el pago? — **Fase 1**
+7. **Disciplinas y docentes 2027:** ¿lista fija de 6? ¿un docente por disciplina? ¿rol propio o `profesor` filtrado? — **Fase 2**
+8. **Examen libre:** ¿quién lo habilita, con qué fecha y cómo se cobra (MP/caja)? — **Fase 2**
+
+---
+
+## 6. Notas de implementación
+
+- La mayor parte del trabajo es **modelar el perfil del alumno (4 pestañas)** + el **seguimiento
+  académico/asistencia/pagos** + el **portal docente**; buena parte de la infraestructura ya existe.
+- Construir con **migraciones por etapa** (Juan corre la migración → push), como venimos trabajando.
+- Reutiliza fuerte: **Talent** (postulación + perfil con cuenta) y **La Liga actual** (evaluaciones,
+  asistencias, cuotas, becas, niveles) + **MP/caja** para pagos.
+- Las **dos decisiones que más condicionan el código** son el cálculo de "libre del bloque" (Fase 2)
+  y el de la letra del promedio (Fase 2/3): conviene cerrarlas antes de empezar esas fases.
