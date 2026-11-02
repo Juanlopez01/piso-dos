@@ -1,8 +1,21 @@
 # LA LIGA 2027 — Programa de formación y desarrollo profesional
 
-> **Estado:** planificado, sin implementar. Este doc organiza el proyecto en **3 FASES** —cada una
-> con su entregable y pensada para cotizarse por separado— y deja las definiciones a cerrar con la
-> dirección antes de arrancar.
+> **Estado:** **Fase 1 y Fase 2 implementadas** (código en `liga27_*`; migraciones
+> `sql/liga2027_fase1.sql` y `sql/liga2027_fase2.sql` — correr en Supabase en ese orden). Fase 3
+> pendiente. Este doc organiza el proyecto en **3 FASES** —cada una con su entregable y pensada para
+> cotizarse por separado— y deja las definiciones a cerrar con la dirección.
+>
+> **Implementado (resumen):** landing pública `/liga2027` + CTA en la home · inscripción con 3 CTAs +
+> cuenta propia del alumno (clon de Talent) · panel `/liga2027-admin` (postulaciones, inscripciones,
+> académico, libres, lanzamiento, precios) · pagos matrícula/cuota por link MP (`liga27-preference`
+> + rama en el webhook) o caja · bloqueo por mora día 10 (`liga27_bloquear_morosos` + pg_cron) ·
+> evaluaciones A/B/C + devoluciones · asistencias con detección automática de libres (mes/bloque) ·
+> programa por bloques + portal docente · perfil del alumno con las 4 pestañas con datos reales.
+>
+> **Decisiones que quedaron con default (confirmar con Santi):** "+4 faltas" = `>= 4` por disciplina
+> (const `UMBRAL_LIBRE_BLOQUE` en `app/actions/liga2027-academico.ts`); letra = promedio A=3/B=2/C=1
+> con cortes A≥2.5 / B≥1.5 / C; beneficios A/B/C son los textos placeholder de la pestaña (Fase 3
+> los define en serio).
 >
 > **Origen:** pedido de Santi (26/10/2026) + conversación de referencia (perfil del alumno con 4
 > pestañas, régimen de asistencia y beneficios por categoría). Las maquetas son ideas de UI; acá
@@ -32,8 +45,8 @@ El corazón es el **perfil del alumno**, con **4 pestañas**:
 
 | Fase | Qué incluye | Entregable (qué queda funcionando) | Precio |
 |---|---|---|---|
-| **FASE 1 — Inscripción + Pagos** | Landing con botón 2027, inscripción (3 CTAs), aprobación, perfil base, matrícula/cuotas + bloqueo por mora | PISO2 **lanza, inscribe y cobra** online. El alumno tiene su perfil y su estado de pago. | _a definir_ |
-| **FASE 2 — Seguimiento académico** | Evaluaciones A/B/C + devoluciones, **asistencias + régimen de regularidad**, programa por bloques, portal docente (cargas) | El alumno ve **notas, asistencia y programa**; los docentes cargan todo; el sistema detecta **libres** automáticamente. | _a definir_ |
+| **FASE 1 — Inscripción + Pagos** ✅ | Landing con botón 2027, inscripción (3 CTAs), aprobación, perfil base, matrícula/cuotas + bloqueo por mora | PISO2 **lanza, inscribe y cobra** online. El alumno tiene su perfil y su estado de pago. | _a definir_ |
+| **FASE 2 — Seguimiento académico** ✅ | Evaluaciones A/B/C + devoluciones, **asistencias + régimen de regularidad**, programa por bloques, portal docente (cargas) | El alumno ve **notas, asistencia y programa**; los docentes cargan todo; el sistema detecta **libres** automáticamente. | _a definir_ |
 | **FASE 3 — Beneficios + Coordinación** | Beneficios por categoría A/B/C, vista de coordinación, alertas y gestión fina | El rendimiento **desbloquea beneficios**; coordinación ve todo (sin pagos); alertas automáticas. | _a definir_ |
 
 > Las fases son **incrementales**: con la Fase 1 ya se puede operar (inscribir y cobrar); las
