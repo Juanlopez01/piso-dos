@@ -11,7 +11,7 @@ const montserrat = Montserrat({
   weight: ['400', '700', '900']
 })
 
-export default function LandingClient({ carteleraIniciales, ligaLanzamiento }: { carteleraIniciales: any[]; ligaLanzamiento?: { titulo: string; cta_texto?: string | null } | null }) {
+export default function LandingClient({ carteleraIniciales, ligaLanzamiento }: { carteleraIniciales: any[]; ligaLanzamiento?: { titulo: string; subtitulo?: string | null; cta_texto?: string | null } | null }) {
   const [activeSection, setActiveSection] = useState<'2m' | '2e' | '2s'>('2m')
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [loggedUser, setLoggedUser] = useState<any>(null)
@@ -71,19 +71,6 @@ export default function LandingClient({ carteleraIniciales, ligaLanzamiento }: {
 
   return (
     <div className={`bg-[#050505] text-white selection:bg-[#D4E655] selection:text-black w-full overflow-x-hidden ${montserrat.className}`}>
-
-      {/* CTA destacado de LA LIGA 2027 (apenas entrás), si hay un lanzamiento activo. */}
-      {ligaLanzamiento && (
-        <Link href="/liga2027" className="group block bg-[#D4E655] text-black">
-          <div className="max-w-7xl mx-auto px-5 py-2.5 flex items-center justify-center gap-3 text-center">
-            <span className="text-[10px] md:text-xs font-black tracking-[0.2em] uppercase">🏆 La Liga 2027</span>
-            <span className="hidden sm:inline text-xs font-semibold opacity-80">{ligaLanzamiento.titulo}</span>
-            <span className="inline-flex items-center gap-1 text-[11px] md:text-xs font-bold uppercase tracking-wider bg-black text-[#D4E655] px-3 py-1 rounded-full group-hover:scale-105 transition-transform">
-              {ligaLanzamiento.cta_texto || 'Inscripciones 2027'} <ArrowRight size={13} />
-            </span>
-          </div>
-        </Link>
-      )}
 
       {/* Estilos CSS inyectados para la Marquesina infinita */}
       <style dangerouslySetInnerHTML={{
@@ -242,8 +229,119 @@ export default function LandingClient({ carteleraIniciales, ligaLanzamiento }: {
       </section>
 
 
-      {/* --- SECCIÓN DÓNDE ENCONTRARNOS (Sin Correo) --- */}
-      {/* --- SECCIÓN DÓNDE ENCONTRARNOS --- */}
+      {/* --- LA LIGA 2027 (formación destacada de 2M; solo si hay lanzamiento activo) --- */}
+      {ligaLanzamiento && (
+        <section className="py-24 px-6 border-t border-white/5 relative overflow-hidden">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[360px] bg-[#D4E655]/10 rounded-full blur-[120px] pointer-events-none" />
+          <div className="max-w-5xl mx-auto relative z-10">
+            <Link href="/liga2027" className="group block bg-[#09090b]/60 backdrop-blur-md border border-[#D4E655]/30 hover:border-[#D4E655]/60 rounded-3xl p-10 md:p-16 transition-all duration-300 shadow-[0_0_40px_rgba(212,230,85,0.08)]">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="text-lg leading-none">🏆</span>
+                    <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">Formación · La Liga</span>
+                  </div>
+                  <h2 className="text-4xl md:text-6xl font-black uppercase tracking-tighter leading-[0.95] mb-4">{ligaLanzamiento.titulo}</h2>
+                  {ligaLanzamiento.subtitulo && <p className="text-gray-400 text-sm md:text-base max-w-lg leading-relaxed font-medium">{ligaLanzamiento.subtitulo}</p>}
+                </div>
+                <div className="shrink-0">
+                  <span className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl group-hover:bg-white transition-colors">
+                    {ligaLanzamiento.cta_texto || 'Inscripciones 2027'} <ArrowRight size={16} />
+                  </span>
+                </div>
+              </div>
+            </Link>
+          </div>
+        </section>
+      )}
+
+      {/* --- BANDA: CARTELERA ESCENA / OBRAS (2E) --- */}
+      <section className="py-20 px-6 border-t border-white/5 relative overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] bg-[#D4E655]/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="max-w-5xl mx-auto relative z-10">
+          <div className="flex items-center gap-2 mb-6">
+            <Ticket className="text-[#D4E655]" size={14} />
+            <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">2E · Escena — En cartelera</span>
+          </div>
+
+          {cartelera === null ? (
+            <div className="flex justify-center py-10"><Loader2 className="animate-spin text-[#D4E655]" /></div>
+          ) : cartelera.length === 0 ? (
+            <Link href="/escena" className="group block bg-[#09090b]/60 backdrop-blur-md border border-dashed border-white/15 hover:border-[#D4E655]/40 rounded-3xl p-10 md:p-14 text-center transition-all">
+              <Ticket className="mx-auto text-gray-600 mb-4" size={36} />
+              <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tighter text-gray-400">Próximamente</h2>
+              <p className="text-gray-500 text-sm mt-3">Muy pronto vas a poder comprar entradas para nuestras funciones.</p>
+            </Link>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {cartelera.slice(0, 4).map((c, i) => {
+                  const Inner = (
+                    <div className="group bg-[#09090b] border border-white/10 hover:border-[#D4E655]/40 rounded-2xl overflow-hidden transition-all h-full flex flex-col">
+                      <div className="relative aspect-[3/4] bg-zinc-900 overflow-hidden">
+                        {c.flyer ? <img src={c.flyer} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" /> : <div className="w-full h-full flex items-center justify-center text-gray-700"><Triangle size={48} strokeWidth={1.5} /></div>}
+                        {!c.comprable && <span className="absolute top-2 left-2 bg-black/70 text-[#D4E655] text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Próximamente</span>}
+                      </div>
+                      <div className="p-3">
+                        <h3 className="font-black uppercase tracking-tight text-sm leading-tight line-clamp-2">{c.titulo}</h3>
+                        {c.fecha && <p className="text-[10px] text-gray-500 mt-1.5 flex items-center gap-1 capitalize"><CalendarDays size={11} /> {new Date(c.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', timeZone: 'America/Buenos_Aires' })}</p>}
+                      </div>
+                    </div>
+                  )
+                  return c.href ? <Link key={i} href={c.href} className="block h-full">{Inner}</Link> : <div key={i} className="h-full">{Inner}</div>
+                })}
+              </div>
+              <div className="mt-8 text-center">
+                <Link href="/escena#cartelera" className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl hover:bg-white transition-colors">Ver toda la cartelera <ArrowRight size={16} /></Link>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+
+      {/* --- BANDA: SOS PROFE (Nueva Generación) + TODAS NUESTRAS CLASES (mitad y mitad) --- */}
+      <section className="py-20 px-6 border-t border-white/5 relative overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] bg-[#D4E655]/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="max-w-5xl mx-auto relative z-10 grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
+
+          {/* ¿Sos profe? — Nueva Generación */}
+          <Link href="/nueva-generacion" className="group flex flex-col bg-[#09090b]/60 backdrop-blur-md border border-white/10 hover:border-[#D4E655]/40 rounded-3xl p-8 md:p-10 transition-all duration-300">
+            <div className="flex items-center gap-2 mb-4">
+              <Triangle className="text-[#D4E655] fill-[#D4E655]" size={14} />
+              <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">Nueva Generación</span>
+            </div>
+            <h2 className="text-2xl md:text-4xl font-black uppercase tracking-tighter leading-[0.95] mb-4">
+              ¿Sos profe y querés <br /><span className="text-[#D4E655]">dar clases acá?</span>
+            </h2>
+            <p className="text-gray-400 text-sm leading-relaxed font-medium mb-8">
+              Mandanos tu propuesta de clase. Buscamos sumar nuevos talentos al espacio.
+            </p>
+            <span className="mt-auto self-start inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-7 py-3.5 text-xs tracking-[0.2em] rounded-xl group-hover:bg-white transition-colors">
+              Enviar propuesta <ArrowRight size={16} />
+            </span>
+          </Link>
+
+          {/* Todas nuestras clases — Cartelera */}
+          <Link href="/cartelera" className="group flex flex-col bg-[#09090b]/60 backdrop-blur-md border border-white/10 hover:border-[#D4E655]/40 rounded-3xl p-8 md:p-10 transition-all duration-300">
+            <div className="flex items-center gap-2 mb-4">
+              <Music className="text-[#D4E655]" size={14} />
+              <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">Cartelera</span>
+            </div>
+            <h2 className="text-2xl md:text-4xl font-black uppercase tracking-tighter leading-[0.95] mb-4">
+              Mirá todas <br /><span className="text-[#D4E655]">nuestras clases</span>
+            </h2>
+            <p className="text-gray-400 text-sm leading-relaxed font-medium mb-8">
+              Explorá la propuesta completa: ritmos, profes, días y horarios. Sin registrarte.
+            </p>
+            <span className="mt-auto self-start inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-7 py-3.5 text-xs tracking-[0.2em] rounded-xl group-hover:bg-white transition-colors">
+              Ver cartelera <ArrowRight size={16} />
+            </span>
+          </Link>
+
+        </div>
+      </section>
+
+      {/* --- SECCIÓN DÓNDE ENCONTRARNOS (al final del cuerpo) --- */}
       <section className="bg-[#111] py-24 px-6 border-t border-white/5">
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
 
@@ -321,106 +419,6 @@ export default function LandingClient({ carteleraIniciales, ligaLanzamiento }: {
 
           </div>
 
-        </div>
-      </section>
-
-      {/* --- BANDA: CARTELERA ESCENA / OBRAS (2E) --- */}
-      <section className="py-20 px-6 border-t border-white/5 relative overflow-hidden">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] bg-[#D4E655]/10 rounded-full blur-[120px] pointer-events-none" />
-        <div className="max-w-5xl mx-auto relative z-10">
-          <div className="flex items-center gap-2 mb-6">
-            <Ticket className="text-[#D4E655]" size={14} />
-            <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">2E · Escena — En cartelera</span>
-          </div>
-
-          {cartelera === null ? (
-            <div className="flex justify-center py-10"><Loader2 className="animate-spin text-[#D4E655]" /></div>
-          ) : cartelera.length === 0 ? (
-            <Link href="/escena" className="group block bg-[#09090b]/60 backdrop-blur-md border border-dashed border-white/15 hover:border-[#D4E655]/40 rounded-3xl p-10 md:p-14 text-center transition-all">
-              <Ticket className="mx-auto text-gray-600 mb-4" size={36} />
-              <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tighter text-gray-400">Próximamente</h2>
-              <p className="text-gray-500 text-sm mt-3">Muy pronto vas a poder comprar entradas para nuestras funciones.</p>
-            </Link>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {cartelera.slice(0, 4).map((c, i) => {
-                  const Inner = (
-                    <div className="group bg-[#09090b] border border-white/10 hover:border-[#D4E655]/40 rounded-2xl overflow-hidden transition-all h-full flex flex-col">
-                      <div className="relative aspect-[3/4] bg-zinc-900 overflow-hidden">
-                        {c.flyer ? <img src={c.flyer} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" /> : <div className="w-full h-full flex items-center justify-center text-gray-700"><Triangle size={48} strokeWidth={1.5} /></div>}
-                        {!c.comprable && <span className="absolute top-2 left-2 bg-black/70 text-[#D4E655] text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full">Próximamente</span>}
-                      </div>
-                      <div className="p-3">
-                        <h3 className="font-black uppercase tracking-tight text-sm leading-tight line-clamp-2">{c.titulo}</h3>
-                        {c.fecha && <p className="text-[10px] text-gray-500 mt-1.5 flex items-center gap-1 capitalize"><CalendarDays size={11} /> {new Date(c.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', timeZone: 'America/Buenos_Aires' })}</p>}
-                      </div>
-                    </div>
-                  )
-                  return c.href ? <Link key={i} href={c.href} className="block h-full">{Inner}</Link> : <div key={i} className="h-full">{Inner}</div>
-                })}
-              </div>
-              <div className="mt-8 text-center">
-                <Link href="/escena#cartelera" className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl hover:bg-white transition-colors">Ver toda la cartelera <ArrowRight size={16} /></Link>
-              </div>
-            </>
-          )}
-        </div>
-      </section>
-
-      {/* --- BANDA: CARTELERA / CLASES (ver la propuesta sin login) --- */}
-      <section className="py-20 px-6 border-t border-white/5 relative overflow-hidden">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] bg-[#D4E655]/10 rounded-full blur-[120px] pointer-events-none" />
-        <div className="max-w-5xl mx-auto relative z-10">
-          <Link href="/cartelera" className="group block bg-[#09090b]/60 backdrop-blur-md border border-white/10 hover:border-[#D4E655]/40 rounded-3xl p-10 md:p-14 transition-all duration-300">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
-              <div>
-                <div className="flex items-center gap-2 mb-4">
-                  <Music className="text-[#D4E655]" size={14} />
-                  <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">Cartelera</span>
-                </div>
-                <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tighter leading-[0.95] mb-4">
-                  Mirá todas <br /><span className="text-[#D4E655]">nuestras clases</span>
-                </h2>
-                <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed font-medium">
-                  Explorá la propuesta completa: ritmos, profes, días y horarios. Sin registrarte.
-                </p>
-              </div>
-              <div className="shrink-0">
-                <span className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl group-hover:bg-white transition-colors">
-                  Ver cartelera <ArrowRight size={16} />
-                </span>
-              </div>
-            </div>
-          </Link>
-        </div>
-      </section>
-
-      {/* --- BANDA: NUEVA GENERACIÓN (profes que quieren dar clases) --- */}
-      <section className="py-20 px-6 border-t border-white/5 relative overflow-hidden">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] bg-[#D4E655]/10 rounded-full blur-[120px] pointer-events-none" />
-        <div className="max-w-5xl mx-auto relative z-10">
-          <Link href="/nueva-generacion" className="group block bg-[#09090b]/60 backdrop-blur-md border border-white/10 hover:border-[#D4E655]/40 rounded-3xl p-10 md:p-14 transition-all duration-300">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
-              <div>
-                <div className="flex items-center gap-2 mb-4">
-                  <Triangle className="text-[#D4E655] fill-[#D4E655]" size={14} />
-                  <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">Nueva Generación</span>
-                </div>
-                <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tighter leading-[0.95] mb-4">
-                  ¿Sos profe y querés <br /><span className="text-[#D4E655]">dar clases acá?</span>
-                </h2>
-                <p className="text-gray-400 text-sm md:text-base max-w-md leading-relaxed font-medium">
-                  Mandanos tu propuesta de clase. Buscamos sumar nuevos talentos al espacio.
-                </p>
-              </div>
-              <div className="shrink-0">
-                <span className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl group-hover:bg-white transition-colors">
-                  Enviar propuesta <ArrowRight size={16} />
-                </span>
-              </div>
-            </div>
-          </Link>
         </div>
       </section>
 
