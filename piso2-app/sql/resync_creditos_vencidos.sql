@@ -39,6 +39,8 @@ $$ language plpgsql security definer;
 -- ============================================================================
 -- Programación diaria (requiere la extensión pg_cron habilitada en Supabase:
 -- Database → Extensions → pg_cron). Corre 06:00 UTC = 03:00 ART.
--- Si ya existía un job con ese nombre, primero: select cron.unschedule('resync-creditos-vencidos');
+-- Idempotente: desagenda el job si ya existía y lo vuelve a agendar.
 -- ============================================================================
--- select cron.schedule('resync-creditos-vencidos', '0 6 * * *', $$ select resync_creditos_vencidos(); $$);
+select cron.unschedule('resync-creditos-vencidos')
+ where exists (select 1 from cron.job where jobname = 'resync-creditos-vencidos');
+select cron.schedule('resync-creditos-vencidos', '0 6 * * *', $$ select resync_creditos_vencidos(); $$);
