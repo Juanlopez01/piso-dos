@@ -45,15 +45,21 @@ export default async function Liga2027Page() {
                 {lanz.subtitulo && <p className="text-neutral-500 text-base mt-4 max-w-xl mx-auto leading-relaxed">{lanz.subtitulo}</p>}
             </header>
 
-            {(embed || lanz.video_url) && (
+            {embed ? (
+                // YouTube (u otro embed): horizontal 16:9.
                 <div className="max-w-3xl mx-auto px-6 mb-10">
                     <div className="aspect-video w-full bg-black rounded-lg overflow-hidden">
-                        {embed
-                            ? <iframe src={embed} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
-                            : <video src={lanz.video_url!} controls className="w-full h-full object-contain" />}
+                        <iframe src={embed} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
                     </div>
                 </div>
-            )}
+            ) : lanz.video_url ? (
+                // Video propio (mp4): formato vertical 9:16, tipo celular, centrado.
+                <div className="mx-auto px-6 mb-10 w-full max-w-[380px]">
+                    <div className="aspect-[9/16] w-full bg-black rounded-xl overflow-hidden">
+                        <video src={lanz.video_url} controls playsInline className="w-full h-full object-contain" />
+                    </div>
+                </div>
+            ) : null}
 
             {lanz.descripcion && (
                 <section className="max-w-2xl mx-auto px-6 mb-14">
