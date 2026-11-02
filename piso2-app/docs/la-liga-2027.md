@@ -1,9 +1,16 @@
 # LA LIGA 2027 — Programa de formación y desarrollo profesional
 
-> **Estado:** **Fase 1 y Fase 2 implementadas** (código en `liga27_*`; migraciones
-> `sql/liga2027_fase1.sql` y `sql/liga2027_fase2.sql` — correr en Supabase en ese orden). Fase 3
-> pendiente. Este doc organiza el proyecto en **3 FASES** —cada una con su entregable y pensada para
+> **Estado:** **Fases 1, 2 y 3 implementadas** (código en `liga27_*`; migraciones
+> `sql/liga2027_fase1.sql`, `sql/liga2027_fase2.sql` y `sql/liga2027_fase3.sql` — correr en Supabase en
+> ese orden). Este doc organiza el proyecto en **3 FASES** —cada una con su entregable y pensada para
 > cotizarse por separado— y deja las definiciones a cerrar con la dirección.
+>
+> **Fase 3 (resumen):** beneficios A/B/C editables por la dirección (tabla `liga27_beneficios`,
+> pestaña "Beneficios" del panel) que el alumno ve en su perfil con solo su letra activa · vista de
+> **coordinación** = todo menos pagos (`coordinador` entra al panel con `esStaffGestion` pero sin
+> `puedePagos`) · **alertas** automáticas al staff+coordinación al caer libre del mes / del bloque
+> (notificaciones internas, idempotentes). **Beneficios concretos: siguen placeholder hasta que la
+> dirección los cargue.**
 >
 > **Implementado (resumen):** landing pública `/liga2027` + CTA en la home · inscripción con 3 CTAs +
 > cuenta propia del alumno (clon de Talent) · panel `/liga2027-admin` (postulaciones, inscripciones,
@@ -47,7 +54,7 @@ El corazón es el **perfil del alumno**, con **4 pestañas**:
 |---|---|---|---|
 | **FASE 1 — Inscripción + Pagos** ✅ | Landing con botón 2027, inscripción (3 CTAs), aprobación, perfil base, matrícula/cuotas + bloqueo por mora | PISO2 **lanza, inscribe y cobra** online. El alumno tiene su perfil y su estado de pago. | _a definir_ |
 | **FASE 2 — Seguimiento académico** ✅ | Evaluaciones A/B/C + devoluciones, **asistencias + régimen de regularidad**, programa por bloques, portal docente (cargas) | El alumno ve **notas, asistencia y programa**; los docentes cargan todo; el sistema detecta **libres** automáticamente. | _a definir_ |
-| **FASE 3 — Beneficios + Coordinación** | Beneficios por categoría A/B/C, vista de coordinación, alertas y gestión fina | El rendimiento **desbloquea beneficios**; coordinación ve todo (sin pagos); alertas automáticas. | _a definir_ |
+| **FASE 3 — Beneficios + Coordinación** ✅ | Beneficios por categoría A/B/C (editables), vista de coordinación, alertas | El rendimiento **desbloquea beneficios**; coordinación ve todo (sin pagos); alertas automáticas. | _a definir_ |
 
 > Las fases son **incrementales**: con la Fase 1 ya se puede operar (inscribir y cobrar); las
 > Fases 2 y 3 agregan el seguimiento académico y la capa de beneficios/gobierno.

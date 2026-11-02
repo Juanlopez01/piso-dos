@@ -38,7 +38,7 @@ const COND: Record<string, { txt: string; cls: string }> = {
     libre_mes: { txt: 'Libre del mes', cls: 'bg-amber-100 text-amber-800' },
     libre_bloque: { txt: 'Libre del bloque', cls: 'bg-red-100 text-red-800' },
 }
-const BENEFICIOS: Record<string, string[]> = {
+const BENEFICIOS_FALLBACK: Record<string, string[]> = {
     A: ['Prioridad en audiciones y castings', 'Acceso a salas para ensayar', 'Descuentos y becas', 'Acceso a oportunidades y actividades extra'],
     B: ['Acceso a salas para ensayar (con reserva)', 'Descuentos seleccionados', 'Participación en actividades'],
     C: ['Acompañamiento para mejorar tu promedio', 'Acceso a los contenidos del programa'],
@@ -132,12 +132,16 @@ function TabPrograma({ academico }: { academico: any }) {
 }
 
 // Tab de Beneficios
-function TabBeneficios({ letra }: { letra: string }) {
+function TabBeneficios({ letra, beneficios }: { letra: string; beneficios?: { letra: string; items: string[]; nota: string | null }[] }) {
+    const byLetra: Record<string, { items: string[]; nota: string | null }> = {}
+    for (const b of (beneficios || [])) byLetra[b.letra] = { items: b.items, nota: b.nota }
     return (
         <div className="p-4 space-y-3">
             <p className="text-sm text-neutral-500">Tus beneficios dependen de tu categoría general (promedio A/B/C). Hoy estás en <b className="text-neutral-900">{letra !== '—' ? letra : 'sin categoría aún'}</b>.</p>
             {(['A', 'B', 'C'] as const).map(l => {
                 const activo = letra === l
+                const items = byLetra[l]?.items?.length ? byLetra[l].items : BENEFICIOS_FALLBACK[l]
+                const nota = byLetra[l]?.nota
                 return (
                     <div key={l} className={`rounded-xl border p-4 ${activo ? 'border-black bg-neutral-50' : 'border-neutral-200 opacity-60'}`}>
                         <div className="flex items-center gap-2">
@@ -145,8 +149,9 @@ function TabBeneficios({ letra }: { letra: string }) {
                             {activo && <span className="text-[10px] font-semibold uppercase tracking-wider text-green-700">Tu categoría</span>}
                         </div>
                         <ul className="mt-2 space-y-1">
-                            {BENEFICIOS[l].map((b, i) => <li key={i} className="text-sm text-neutral-600 flex gap-2"><span>·</span>{b}</li>)}
+                            {items.map((b, i) => <li key={i} className="text-sm text-neutral-600 flex gap-2"><span>·</span>{b}</li>)}
                         </ul>
+                        {nota && <p className="text-[11px] text-neutral-400 mt-2">{nota}</p>}
                     </div>
                 )
             })}
@@ -241,7 +246,7 @@ export default function PerfilTabs({ data, academico }: { data: MiLiga27; academ
                     {tab === 'evaluaciones' && <TabEvaluaciones academico={academico} />}
                     {tab === 'asistencias' && <TabAsistencias academico={academico} />}
                     {tab === 'programa' && <TabPrograma academico={academico} />}
-                    {tab === 'beneficios' && <TabBeneficios letra={letra} />}
+                    {tab === 'beneficios' && <TabBeneficios letra={letra} beneficios={academico?.beneficios} />}
                 </div>
             </div>
         </div>

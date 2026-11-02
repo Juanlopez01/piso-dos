@@ -611,7 +611,7 @@ function LaLigaContent() {
                     <div className="-mx-4 md:-mx-8 -my-8 bg-[#050505] rounded-2xl overflow-hidden">
                         {userRole === 'profesor'
                             ? <DocentePanel />
-                            : <PanelLiga27 puedePagos={['admin', 'recepcion'].includes(userRole || '')} esStaffGestion={['admin', 'recepcion'].includes(userRole || '')} />}
+                            : <PanelLiga27 puedePagos={['admin', 'recepcion'].includes(userRole || '')} esStaffGestion={['admin', 'recepcion', 'coordinador'].includes(userRole || '')} />}
                     </div>
                 )}
 

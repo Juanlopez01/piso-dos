@@ -13,6 +13,7 @@ import {
     getExamenesDisciplinaLiga27Action, guardarExamenLiga27Action,
     getProgramaDisciplinaLiga27Action, guardarProgramaLiga27Action,
     getLibresLiga27Action, resolverLibreLiga27Action,
+    getBeneficiosLiga27Action, guardarBeneficiosLiga27Action,
 } from '@/app/actions/liga2027-academico'
 import { AsistenciaEditor, ClaseEditor, NotasEditor } from './editores'
 import { Loader2, Check, X, MessageSquare, Link2, Send, Plus } from 'lucide-react'
@@ -27,7 +28,7 @@ export default function PanelLiga27({ puedePagos, esStaffGestion }: { puedePagos
         'Postulaciones', 'Inscripciones',
         ...(esStaffGestion ? ['Académico', 'Libres'] : []),
         'Lanzamiento',
-        ...(puedePagos ? ['Precios'] : []),
+        ...(puedePagos ? ['Precios', 'Beneficios'] : []),
     ]
     const [tab, setTab] = useState('Postulaciones')
 
@@ -56,6 +57,44 @@ export default function PanelLiga27({ puedePagos, esStaffGestion }: { puedePagos
             {tab === 'Libres' && esStaffGestion && <Libres puedePagos={puedePagos} />}
             {tab === 'Lanzamiento' && <Lanzamiento />}
             {tab === 'Precios' && puedePagos && <Precios />}
+            {tab === 'Beneficios' && puedePagos && <Beneficios />}
+        </div>
+    )
+}
+
+// ── Beneficios por categoría A/B/C (Fase 3) ───────────────────────────────────
+function Beneficios() {
+    const [data, setData] = useState<{ letra: string; items: string[]; nota: string | null }[] | null>(null)
+    const [busy, setBusy] = useState<string | null>(null)
+    useEffect(() => { getBeneficiosLiga27Action().then(setData) }, [])
+
+    const guardar = async (letra: string, texto: string, nota: string) => {
+        setBusy(letra)
+        const items = texto.split('\n').map(s => s.trim()).filter(Boolean)
+        const r = await guardarBeneficiosLiga27Action({ letra: letra as 'A' | 'B' | 'C', items, nota })
+        if (r.ok) { toast.success(`Beneficios de ${letra} guardados.`); setData(await getBeneficiosLiga27Action()) } else toast.error(r.error || 'Error')
+        setBusy(null)
+    }
+    if (!data) return <Loader2 className="animate-spin text-white/40" />
+    const COLOR: Record<string, string> = { A: 'text-green-400', B: 'text-amber-400', C: 'text-red-400' }
+    return (
+        <div className="space-y-4">
+            <p className="text-sm text-white/60">Lo que ve el alumno en su pestaña <b>Beneficios</b> según la letra de su promedio general. Un beneficio por línea. Se asignan al cierre de cada bloque.</p>
+            <div className="grid md:grid-cols-3 gap-4">
+                {data.map(b => (
+                    <div key={b.letra} className={`${card} space-y-3`}>
+                        <h3 className={`font-black text-lg ${COLOR[b.letra]}`}>Categoría {b.letra}</h3>
+                        <div><label className="text-xs text-white/50">Beneficios (uno por línea)</label>
+                            <textarea defaultValue={b.items.join('\n')} id={`ben-${b.letra}`} className={input} rows={6} /></div>
+                        <div><label className="text-xs text-white/50">Nota (opcional)</label>
+                            <input defaultValue={b.nota || ''} id={`bennota-${b.letra}`} className={input} /></div>
+                        <button onClick={() => guardar(b.letra,
+                            (document.getElementById(`ben-${b.letra}`) as HTMLTextAreaElement)?.value || '',
+                            (document.getElementById(`bennota-${b.letra}`) as HTMLInputElement)?.value || '',
+                        )} disabled={busy === b.letra} className={`${btn} bg-[#D4E655] text-black`}>{busy === b.letra ? <Loader2 size={14} className="animate-spin" /> : 'Guardar'}</button>
+                    </div>
+                ))}
+            </div>
         </div>
     )
 }
@@ -242,7 +281,7 @@ function Libres({ puedePagos }: { puedePagos: boolean }) {
                     {l.tipo === 'bloque' && !l.resuelto && (
                         <div className="flex gap-2">
                             {puedePagos && <button onClick={() => linkExamenLibre(l.inscripcion_id)} disabled={busy === l.inscripcion_id} className={`${btn} bg-[#009ee3]/80 hover:bg-[#009ee3] text-white flex items-center gap-1`}><Link2 size={13} /> Link examen libre</button>}
-                            <button onClick={() => resolver(l.id)} disabled={busy === l.id} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70`}>Marcar resuelto</button>
+                            {puedePagos && <button onClick={() => resolver(l.id)} disabled={busy === l.id} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70`}>Marcar resuelto</button>}
                         </div>
                     )}
                 </div>

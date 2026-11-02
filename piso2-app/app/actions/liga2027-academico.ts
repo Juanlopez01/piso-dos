@@ -326,6 +326,7 @@ async function recomputarRegularidad(admin: ReturnType<typeof getAdminClient>, i
     // Libres del MES: upsert donde se superó el umbral; borrar donde ya no.
     const { data: libresMes } = await admin.from('liga27_libres').select('id, mes, anio').eq('inscripcion_id', inscripcionId).eq('disciplina_id', disciplinaId).eq('tipo', 'mes')
     const mesesLibre = new Set(Object.values(faltasPorMes).filter(m => m.n >= UMBRAL_LIBRE_MES).map(m => `${m.anio}-${m.mes}`))
+    const yaEraLibreMes = new Set((libresMes || []).map((l: any) => `${l.anio}-${l.mes}`))
     for (const m of Object.values(faltasPorMes)) {
         if (m.n >= UMBRAL_LIBRE_MES) {
             await admin.from('liga27_libres').upsert({
@@ -333,6 +334,17 @@ async function recomputarRegularidad(admin: ReturnType<typeof getAdminClient>, i
                 mes: m.mes, anio: m.anio, bloque, faltas: m.n,
                 motivo: `${m.n} faltas en ${disc?.nombre || 'la disciplina'} (${m.mes}/${m.anio})`,
             }, { onConflict: 'inscripcion_id,disciplina_id,tipo,mes,anio,bloque' })
+            // Alerta (solo la primera vez que cae libre ese mes, para no repetir).
+            if (!yaEraLibreMes.has(`${m.anio}-${m.mes}`)) {
+                try {
+                    const { data: staff } = await admin.from('profiles').select('id').in('rol', ['admin', 'recepcion', 'coordinador'])
+                    if (staff?.length) await admin.from('notificaciones').insert(staff.map((s: any) => ({
+                        usuario_id: s.id, titulo: '🟠 Libre del mes — La Liga 2027',
+                        mensaje: `Un alumno quedó libre de ${disc?.nombre || 'una disciplina'} en ${m.mes}/${m.anio} por ${m.n} faltas.`,
+                        link: '/liga2027-admin', leido: false,
+                    })))
+                } catch { /* best-effort */ }
+            }
         }
     }
     for (const l of (libresMes || [])) {
@@ -349,9 +361,9 @@ async function recomputarRegularidad(admin: ReturnType<typeof getAdminClient>, i
                 bloque, anio: anioBloque, faltas: faltasBloque,
                 motivo: `${faltasBloque} faltas en ${disc?.nombre || 'la disciplina'} en el cuatrimestre: queda libre del bloque (rinde libre + repaga matrícula).`,
             })
-            // Avisar al staff.
+            // Avisar al staff (incluye coordinación: ve todo menos pagos).
             try {
-                const { data: staff } = await admin.from('profiles').select('id').in('rol', ['admin', 'recepcion'])
+                const { data: staff } = await admin.from('profiles').select('id').in('rol', ['admin', 'recepcion', 'coordinador'])
                 if (staff?.length) await admin.from('notificaciones').insert(staff.map((s: any) => ({
                     usuario_id: s.id, titulo: '⚠️ Alumno libre del bloque — La Liga 2027',
                     mensaje: `Un alumno quedó libre de ${disc?.nombre || 'una disciplina'} por ${faltasBloque} faltas. Debe rendir libre y repagar matrícula.`,
@@ -365,6 +377,59 @@ async function recomputarRegularidad(admin: ReturnType<typeof getAdminClient>, i
         // Cayó por debajo del umbral (p. ej. se justificó una falta) → quitar.
         await admin.from('liga27_libres').delete().eq('id', libreBloque.id)
     }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// FASE 3 — BENEFICIOS POR CATEGORÍA A/B/C
+// Una fila por letra con una lista de beneficios. La dirección (admin/recepción)
+// edita; el alumno consulta las 3 categorías pero solo tiene activa la suya.
+// ════════════════════════════════════════════════════════════════════════════
+
+const BENEFICIOS_DEFAULT: Record<string, string[]> = {
+    A: ['Prioridad en audiciones y castings', 'Acceso a salas para ensayar', 'Descuentos y becas', 'Acceso a oportunidades y actividades extra'],
+    B: ['Acceso a salas para ensayar (con reserva)', 'Descuentos seleccionados', 'Participación en actividades'],
+    C: ['Acompañamiento para mejorar tu promedio', 'Acceso a los contenidos del programa'],
+}
+
+// Devuelve las 3 letras con sus items (fallback a los defaults si la tabla está
+// vacía). Lectura: cualquier staff (admin/recepción/coordinación).
+export async function getBeneficiosLiga27Action(): Promise<{ letra: string; items: string[]; nota: string | null }[]> {
+    const g = await gate(); if (!g.ok) return []
+    const admin = getAdminClient()
+    const { data } = await admin.from('liga27_beneficios').select('letra, items, nota')
+    const byLetra: Record<string, any> = {}; for (const r of (data || [])) byLetra[r.letra] = r
+    return (['A', 'B', 'C'] as const).map(l => ({
+        letra: l,
+        items: Array.isArray(byLetra[l]?.items) ? byLetra[l].items : BENEFICIOS_DEFAULT[l],
+        nota: byLetra[l]?.nota ?? null,
+    }))
+}
+
+export async function guardarBeneficiosLiga27Action(payload: {
+    letra: 'A' | 'B' | 'C'; items: string[]; nota?: string
+}): Promise<{ ok: boolean; error?: string }> {
+    const g = await gate(['admin', 'recepcion']); if (!g.ok) return { ok: false, error: g.error }
+    const items = (payload.items || []).map(s => s.trim()).filter(Boolean)
+    const admin = getAdminClient()
+    const { error } = await admin.from('liga27_beneficios').upsert({
+        letra: payload.letra, items, nota: payload.nota?.trim() || null,
+        actualizado_por: g.userId, actualizado_at: new Date().toISOString(),
+    }, { onConflict: 'letra' })
+    if (error) return { ok: false, error: error.message }
+    revalidatePath('/liga2027-admin'); revalidatePath('/liga2027/mi-perfil')
+    return { ok: true }
+}
+
+// Beneficios para el perfil del alumno (sin gate de staff; lo llama su propio
+// académico). Siempre devuelve las 3 letras.
+async function beneficiosParaAlumno(admin: ReturnType<typeof getAdminClient>): Promise<{ letra: string; items: string[]; nota: string | null }[]> {
+    const { data } = await admin.from('liga27_beneficios').select('letra, items, nota')
+    const byLetra: Record<string, any> = {}; for (const r of (data || [])) byLetra[r.letra] = r
+    return (['A', 'B', 'C'] as const).map(l => ({
+        letra: l,
+        items: Array.isArray(byLetra[l]?.items) ? byLetra[l].items : BENEFICIOS_DEFAULT[l],
+        nota: byLetra[l]?.nota ?? null,
+    }))
 }
 
 // Libres para administración (gestión). Con perfil + disciplina.
@@ -459,7 +524,7 @@ export async function getMiAcademicoLiga27Action(): Promise<any | null> {
     if (!perfilId) return null
     const admin = getAdminClient()
     const { data: ins } = await admin.from('liga27_inscripciones').select('id, letra_actual, promedio_letra').eq('perfil_id', perfilId).order('creado_at', { ascending: false }).limit(1).maybeSingle()
-    if (!ins) return { inscripcion: null, evaluaciones: [], asistencias: [], programa: [], libres: [] }
+    if (!ins) return { inscripcion: null, evaluaciones: [], asistencias: [], programa: [], beneficios: await beneficiosParaAlumno(admin) }
 
     const { data: disciplinas } = await admin.from('liga27_disciplinas').select('id, nombre, bloque, orden').eq('activa', true).order('orden', { ascending: true })
     const discIds = (disciplinas || []).map((d: any) => d.id)
@@ -503,5 +568,8 @@ export async function getMiAcademicoLiga27Action(): Promise<any | null> {
         items: (prog || []).filter((p: any) => p.disciplina_id === d.id),
     }))
 
-    return { inscripcion: ins, evaluaciones, asistencias, programa }
+    // Beneficios de las 3 categorías (la activa es la letra del alumno).
+    const beneficios = await beneficiosParaAlumno(admin)
+
+    return { inscripcion: ins, evaluaciones, asistencias, programa, beneficios }
 }
