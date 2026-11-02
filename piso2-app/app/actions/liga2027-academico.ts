@@ -13,7 +13,6 @@
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
-import { leerSesionLiga27 } from '@/lib/liga27-session'
 
 const getAdminClient = () => createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -147,13 +146,24 @@ export async function getAlumnosDisciplinaLiga27Action(disciplinaId: string) {
     const g = await gateDocenteODisciplina(disciplinaId); if (!g.ok) return []
     const admin = getAdminClient()
     // Todos los inscriptos activos del programa (no 'baja').
-    const { data: inss } = await admin.from('liga27_inscripciones').select('id, perfil_id, estado').neq('estado', 'baja').order('creado_at', { ascending: true })
+    const { data: inss } = await admin.from('liga27_inscripciones').select('id, profile_id, estado').neq('estado', 'baja').order('creado_at', { ascending: true })
     if (!inss?.length) return []
-    const perfilIds = [...new Set(inss.map((i: any) => i.perfil_id))]
-    const { data: perfiles } = await admin.from('liga27_perfiles').select('id, nombre, apellido, foto_url').in('id', perfilIds)
-    const pById: Record<string, any> = {}
-    for (const p of (perfiles || [])) pById[p.id] = p
-    return inss.map((i: any) => ({ inscripcion_id: i.id, estado: i.estado, perfil: pById[i.perfil_id] || null }))
+    const pById = await perfilesLiga27ByProfileId(admin, inss.map((i: any) => i.profile_id))
+    return inss.map((i: any) => ({ inscripcion_id: i.id, estado: i.estado, perfil: i.profile_id ? (pById[i.profile_id] || null) : null }))
+}
+
+// Datos de display del alumno (nombre/apellido) desde profiles, por profile_id.
+async function perfilesLiga27ByProfileId(admin: ReturnType<typeof getAdminClient>, ids: (string | null)[]): Promise<Record<string, any>> {
+    const profileIds = [...new Set(ids.filter(Boolean))] as string[]
+    const out: Record<string, any> = {}
+    if (!profileIds.length) return out
+    const { data: perfiles } = await admin.from('profiles').select('id, nombre, apellido, nombre_completo').in('id', profileIds)
+    for (const p of (perfiles || [])) {
+        const nombre = p.nombre || (p.nombre_completo || '').split(' ')[0] || ''
+        const apellido = p.apellido || (p.nombre_completo || '').split(' ').slice(1).join(' ') || ''
+        out[p.id] = { id: p.id, nombre, apellido, foto_url: null }
+    }
+    return out
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -440,16 +450,14 @@ export async function getLibresLiga27Action() {
     if (!libres?.length) return []
     const inscIds = [...new Set(libres.map((l: any) => l.inscripcion_id))]
     const discIds = [...new Set(libres.map((l: any) => l.disciplina_id))]
-    const { data: inss } = await admin.from('liga27_inscripciones').select('id, perfil_id').in('id', inscIds)
-    const perfilIds = [...new Set((inss || []).map((i: any) => i.perfil_id))]
-    const { data: perfiles } = await admin.from('liga27_perfiles').select('id, nombre, apellido').in('id', perfilIds)
+    const { data: inss } = await admin.from('liga27_inscripciones').select('id, profile_id').in('id', inscIds)
+    const perfById = await perfilesLiga27ByProfileId(admin, (inss || []).map((i: any) => i.profile_id))
     const { data: discs } = await admin.from('liga27_disciplinas').select('id, nombre').in('id', discIds)
     const insById: Record<string, any> = {}; for (const i of (inss || [])) insById[i.id] = i
-    const perfById: Record<string, any> = {}; for (const p of (perfiles || [])) perfById[p.id] = p
     const discById: Record<string, any> = {}; for (const d of (discs || [])) discById[d.id] = d
     return libres.map((l: any) => {
         const ins = insById[l.inscripcion_id]
-        const perf = ins ? perfById[ins.perfil_id] : null
+        const perf = ins?.profile_id ? perfById[ins.profile_id] : null
         return { ...l, alumno: perf ? `${perf.nombre} ${perf.apellido || ''}`.trim() : '—', disciplina: discById[l.disciplina_id]?.nombre || '—' }
     })
 }
@@ -520,10 +528,12 @@ export async function guardarClaseContenidoLiga27Action(payload: {
 // ════════════════════════════════════════════════════════════════════════════
 
 export async function getMiAcademicoLiga27Action(): Promise<any | null> {
-    const perfilId = await leerSesionLiga27()
-    if (!perfilId) return null
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    const uid = session?.user?.id
+    if (!uid) return null
     const admin = getAdminClient()
-    const { data: ins } = await admin.from('liga27_inscripciones').select('id, letra_actual, promedio_letra').eq('perfil_id', perfilId).order('creado_at', { ascending: false }).limit(1).maybeSingle()
+    const { data: ins } = await admin.from('liga27_inscripciones').select('id, letra_actual, promedio_letra').eq('profile_id', uid).order('creado_at', { ascending: false }).limit(1).maybeSingle()
     if (!ins) return { inscripcion: null, evaluaciones: [], asistencias: [], programa: [], beneficios: await beneficiosParaAlumno(admin) }
 
     const { data: disciplinas } = await admin.from('liga27_disciplinas').select('id, nombre, bloque, orden').eq('activa', true).order('orden', { ascending: true })

@@ -1,9 +1,16 @@
 # LA LIGA 2027 — Programa de formación y desarrollo profesional
 
-> **Estado:** **Fases 1, 2 y 3 implementadas** (código en `liga27_*`; migraciones
-> `sql/liga2027_fase1.sql`, `sql/liga2027_fase2.sql` y `sql/liga2027_fase3.sql` — correr en Supabase en
-> ese orden). Este doc organiza el proyecto en **3 FASES** —cada una con su entregable y pensada para
-> cotizarse por separado— y deja las definiciones a cerrar con la dirección.
+> **Estado:** **Fases 1, 2 y 3 implementadas + integración al login de 2M** (código en `liga27_*`;
+> migraciones `fase1` → `fase2` → `fase3` → `fase4_login`, correr en Supabase en ese orden). Este doc
+> organiza el proyecto en **3 FASES** —cada una con su entregable y pensada para cotizarse por
+> separado— y deja las definiciones a cerrar con la dirección.
+>
+> **Fase 4 (login integrado):** los alumnos de La Liga 2027 son **alumnos normales de 2M** (Supabase
+> auth, rol `alumno`) y entran por `/login`. La inscripción cuelga de `liga27_inscripciones.profile_id`.
+> La postulación pública (`/liga2027`, estilo 2M oscuro) es un lead; al aprobar se busca/crea el alumno
+> y se le manda bienvenida con link para definir su clave. El perfil (4 pestañas) vive en `/mi-liga`
+> (dashboard), con el menú gateado a quienes tienen inscripción. Se eliminó la cuenta propia (login/
+> registro/mi-perfil separados).
 >
 > **Fase 3 (resumen):** beneficios A/B/C editables por la dirección (tabla `liga27_beneficios`,
 > pestaña "Beneficios" del panel) que el alumno ve en su perfil con solo su letra activa · vista de

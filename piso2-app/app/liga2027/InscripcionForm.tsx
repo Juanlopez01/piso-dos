@@ -5,10 +5,9 @@ import { createClient } from '@/utils/supabase/client'
 import { postularLiga27Action } from '@/app/actions/liga2027'
 import { toast, Toaster } from 'sonner'
 import { Loader2, Phone, MessageCircle, CheckCircle2, UserPlus } from 'lucide-react'
-import Link from 'next/link'
 
-const inputCls = "w-full bg-white border border-neutral-300 rounded-lg px-4 py-3 text-sm text-neutral-900 outline-none focus:border-black transition-colors"
-const labelCls = "text-[10px] font-semibold tracking-[0.15em] uppercase text-neutral-500 block mb-1.5"
+const inputCls = "w-full bg-[#141417] border border-white/10 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-[#D4E655]/60 transition-colors placeholder:text-white/30 [color-scheme:dark]"
+const labelCls = "text-[10px] font-black tracking-[0.15em] uppercase text-white/50 block mb-1.5"
 
 type Contacto = 'llamar' | 'escribir' | 'anotarse'
 
@@ -59,26 +58,21 @@ export default function InscripcionForm({ lanzamientoId }: { lanzamientoId: stri
     if (listo) {
         return (
             <div className="text-center py-10">
-                <Toaster position="top-center" richColors />
-                <CheckCircle2 size={44} className="mx-auto text-green-600" />
-                <h3 className="text-xl font-semibold mt-4">¡Listo! Recibimos tu inscripción.</h3>
-                <p className="text-neutral-500 text-sm mt-2 max-w-sm mx-auto">
+                <Toaster position="top-center" richColors theme="dark" />
+                <CheckCircle2 size={44} className="mx-auto text-[#D4E655]" />
+                <h3 className="text-xl font-black uppercase tracking-tight mt-4 text-white">¡Listo! Recibimos tu inscripción.</h3>
+                <p className="text-gray-400 text-sm mt-2 max-w-sm mx-auto">
                     {tipo === 'anotarse'
-                        ? 'Creá tu cuenta con el mismo email para seguir tu inscripción y ver tu perfil.'
+                        ? 'Cuando aprobemos tu inscripción te vamos a crear tu cuenta de Piso 2 y te avisamos por mail para que entres a ver tu perfil.'
                         : 'Nos vamos a contactar con vos a la brevedad.'}
                 </p>
-                {tipo === 'anotarse' && (
-                    <Link href={`/liga2027/registro`} className="inline-block mt-6 bg-neutral-900 text-white font-semibold uppercase tracking-[0.2em] text-xs px-8 py-4 hover:bg-black transition-colors">
-                        Crear mi cuenta
-                    </Link>
-                )}
             </div>
         )
     }
 
     return (
         <div className="space-y-5">
-            <Toaster position="top-center" richColors />
+            <Toaster position="top-center" richColors theme="dark" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                 <div>
                     <label className={labelCls}>Nombre y apellido *</label>
@@ -109,7 +103,7 @@ export default function InscripcionForm({ lanzamientoId }: { lanzamientoId: stri
             <div>
                 <label className={labelCls}>Foto (opcional)</label>
                 <div className="flex items-center gap-3">
-                    <label className="cursor-pointer text-xs border border-neutral-300 rounded-lg px-4 py-2.5 hover:border-black transition-colors">
+                    <label className="cursor-pointer text-xs text-white/70 border border-white/10 rounded-lg px-4 py-2.5 hover:border-[#D4E655]/60 transition-colors">
                         {subiendo ? <Loader2 size={14} className="animate-spin inline" /> : 'Subir foto'}
                         <input type="file" accept="image/*" className="hidden" onChange={e => e.target.files?.[0] && subirFoto(e.target.files[0])} />
                     </label>
@@ -130,11 +124,11 @@ export default function InscripcionForm({ lanzamientoId }: { lanzamientoId: stri
                         const active = tipo === o.key
                         return (
                             <button key={o.key} type="button" onClick={() => setTipo(o.key)}
-                                className={`flex items-center gap-3 text-left border rounded-lg px-4 py-3 transition-colors ${active ? 'border-black bg-neutral-900 text-white' : 'border-neutral-300 hover:border-neutral-500'}`}>
-                                <Icon size={18} className={active ? 'text-white' : 'text-neutral-500'} />
+                                className={`flex items-center gap-3 text-left border rounded-lg px-4 py-3 transition-colors ${active ? 'border-[#D4E655] bg-[#D4E655]/10 text-white' : 'border-white/10 hover:border-white/30 text-white'}`}>
+                                <Icon size={18} className={active ? 'text-[#D4E655]' : 'text-white/40'} />
                                 <div>
                                     <div className="text-sm font-semibold">{o.label}</div>
-                                    <div className={`text-[11px] ${active ? 'text-white/70' : 'text-neutral-500'}`}>{o.desc}</div>
+                                    <div className={`text-[11px] ${active ? 'text-white/70' : 'text-white/40'}`}>{o.desc}</div>
                                 </div>
                             </button>
                         )
@@ -143,7 +137,7 @@ export default function InscripcionForm({ lanzamientoId }: { lanzamientoId: stri
             </div>
 
             <button onClick={enviar} disabled={enviando || subiendo}
-                className="w-full bg-neutral-900 text-white font-semibold uppercase tracking-[0.2em] text-xs py-4 hover:bg-black transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                className="w-full bg-[#D4E655] text-black font-black uppercase tracking-[0.2em] text-xs py-4 hover:bg-white transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
                 {enviando ? <Loader2 size={15} className="animate-spin" /> : null} Enviar inscripción
             </button>
         </div>

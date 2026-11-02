@@ -20,7 +20,7 @@ function SidebarContent() {
     const [unreadNotifs, setUnreadNotifs] = useState(0)
     const [consultasPend, setConsultasPend] = useState(0)
 
-    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, hasAccesoCuraduria, isLoading, userId } = useCash()
+    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, hasAccesoCuraduria, hasLiga27, isLoading, userId } = useCash()
 
     useEffect(() => {
         if (!isLoading && userId && userRole && userRole !== 'visitante') {
@@ -52,6 +52,7 @@ function SidebarContent() {
     const visibleItems = menuItems.filter(item => {
         // Validación de permisos estricta
         if (item.name === 'La Liga' && !hasLigaAccess) return false;
+        if (item.name === 'La Liga 2027' && !hasLiga27) return false;
         if (item.name === 'Grupos' && !hasCompaniaAccess) return false;
         // Libro de administración: SOLO usuarios con el flag (Nico/Santi), no por rol.
         if (item.name === 'Administración') return hasAdminFinanzas;

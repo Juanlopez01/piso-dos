@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useMemo, useCall
 import { createClient } from '@/utils/supabase/client'
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 import type { UserRole } from '@/types/database'
+import { tengoInscripcionLiga27Action } from '@/app/actions/liga2027'
 
 type CashContextType = {
     userId: string | null
@@ -17,6 +18,7 @@ type CashContextType = {
     hasCompaniaAccess: boolean
     hasAdminFinanzas: boolean
     hasAccesoCuraduria: boolean
+    hasLiga27: boolean
     permisosCoordinador: string[]
     checkStatus: () => Promise<void>
     isLoading: boolean
@@ -26,7 +28,7 @@ const CashContext = createContext<CashContextType>({
     userId: null, isBoxOpen: false, currentTurnoId: null, currentSedeId: null,
     userRole: null, userName: null, nivelLiga: null,
     hasLigaAccess: false, hasCompaniaAccess: false, hasAdminFinanzas: false, hasAccesoCuraduria: false,
-    permisosCoordinador: [], checkStatus: async () => { }, isLoading: true
+    hasLiga27: false, permisosCoordinador: [], checkStatus: async () => { }, isLoading: true
 })
 
 export const useCash = () => useContext(CashContext)
@@ -45,6 +47,7 @@ export function CashProvider({ children }: { children: ReactNode }) {
     const [hasCompaniaAccess, setHasCompaniaAccess] = useState(false)
     const [hasAdminFinanzas, setHasAdminFinanzas] = useState(false)
     const [hasAccesoCuraduria, setHasAccesoCuraduria] = useState(false)
+    const [hasLiga27, setHasLiga27] = useState(false)
     const [permisosCoordinador, setPermisosCoordinador] = useState<string[]>([])
     const [isLoading, setIsLoading] = useState(true)
 
@@ -68,6 +71,7 @@ export function CashProvider({ children }: { children: ReactNode }) {
                 const rolReal = (profile?.rol ?? 'alumno') as UserRole
                 let ligaAccess = false
                 let compAccess = false
+                let liga27Access = false
                 const misPermisos: string[] = (profile?.permisos_grupos as string[]) ?? []
 
                 if (rolReal === 'admin' || rolReal === 'recepcion') {
@@ -87,6 +91,8 @@ export function CashProvider({ children }: { children: ReactNode }) {
                         .eq('perfil_id', uid)
                         .limit(1)
                     compAccess = !!(comp && comp.length > 0)
+                    // La Liga 2027: ¿tiene inscripción? (server action, tablas con RLS sin policy)
+                    try { liga27Access = await tengoInscripcionLiga27Action() } catch { liga27Access = false }
                 } else if (rolReal === 'profesor') {
                     const [resLiga, resComp, resCoord] = await Promise.all([
                         supabase.from('clases').select('id').eq('profesor_id', uid).eq('es_la_liga', true).limit(1),
@@ -108,6 +114,7 @@ export function CashProvider({ children }: { children: ReactNode }) {
                 setHasCompaniaAccess(compAccess)
                 setHasAdminFinanzas(!!profile?.admin_finanzas)
                 setHasAccesoCuraduria(!!profile?.acceso_curaduria)
+                setHasLiga27(liga27Access)
                 setPermisosCoordinador(misPermisos)
 
                 if (rolReal === 'admin' || rolReal === 'recepcion' || rolReal === 'auxiliar') {
@@ -186,9 +193,9 @@ export function CashProvider({ children }: { children: ReactNode }) {
     const contextValue = useMemo(() => ({
         userId, isBoxOpen, currentTurnoId, currentSedeId,
         userRole, userName, nivelLiga,
-        hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, hasAccesoCuraduria, permisosCoordinador,
+        hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, hasAccesoCuraduria, hasLiga27, permisosCoordinador,
         checkStatus, isLoading
-    }), [userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, hasAccesoCuraduria, permisosCoordinador, checkStatus, isLoading])
+    }), [userId, isBoxOpen, currentTurnoId, currentSedeId, userRole, userName, nivelLiga, hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, hasAccesoCuraduria, hasLiga27, permisosCoordinador, checkStatus, isLoading])
 
     return <CashContext.Provider value={contextValue}>{children}</CashContext.Provider>
 }

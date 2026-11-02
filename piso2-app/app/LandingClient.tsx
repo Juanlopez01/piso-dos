@@ -159,26 +159,53 @@ export default function LandingClient({ carteleraIniciales, ligaLanzamiento }: {
 
           {/* MENÚ INTERACTIVO 2M 2E 2S */}
           <div id="ecosistema" className="flex flex-col md:flex-row justify-center items-center gap-12 md:gap-24">
-            <div className={getStyles('2m').container} onMouseEnter={() => setActiveSection('2m')} onClick={() => setActiveSection('2m')}>
+            <Link href="/cartelera" className={getStyles('2m').container} onMouseEnter={() => setActiveSection('2m')}>
               <div className={getStyles('2m').glow} />
               <img src='/2M-verde.png' className={getStyles('2m').head} />
               <div className={getStyles('2m').labelContainer}><span className={getStyles('2m').labelSweep}></span><span className={getStyles('2m').labelText}>Movimiento</span></div>
-            </div>
+            </Link>
 
-            <div className={getStyles('2e').container} onMouseEnter={() => setActiveSection('2e')} onClick={() => setActiveSection('2e')}>
+            <Link href="/escena" className={getStyles('2e').container} onMouseEnter={() => setActiveSection('2e')}>
               <div className={getStyles('2e').glow} />
               <img src='/2E-verde.png' className={getStyles('2e').head} />
               <div className={getStyles('2e').labelContainer}><span className={getStyles('2e').labelSweep}></span><span className={getStyles('2e').labelText}>Escena</span></div>
-            </div>
+            </Link>
 
-            <div className={getStyles('2s').container} onMouseEnter={() => setActiveSection('2s')} onClick={() => setActiveSection('2s')}>
+            <Link href="/streaming" className={getStyles('2s').container} onMouseEnter={() => setActiveSection('2s')}>
               <div className={getStyles('2s').glow} />
               <img src='/2S-verde.png' className={getStyles('2s').head} />
               <div className={getStyles('2s').labelContainer}><span className={getStyles('2s').labelSweep}></span><span className={getStyles('2s').labelText}>Streaming</span></div>
-            </div>
+            </Link>
           </div>
+
         </div>
       </section>
+
+      {/* --- LA LIGA 2027 (formación destacada, bien debajo de 2M/2E/2S; solo si hay lanzamiento activo) --- */}
+      {ligaLanzamiento && (
+        <section className="py-20 px-6 border-t border-white/5 relative overflow-hidden">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[360px] bg-[#D4E655]/10 rounded-full blur-[120px] pointer-events-none" />
+          <div className="max-w-5xl mx-auto relative z-10">
+            <Link href="/liga2027" className="group block bg-[#09090b]/60 backdrop-blur-md border border-[#D4E655]/30 hover:border-[#D4E655]/60 rounded-3xl p-10 md:p-16 transition-all duration-300 shadow-[0_0_40px_rgba(212,230,85,0.08)]">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
+                <div>
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="text-lg leading-none">🏆</span>
+                    <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">Formación · La Liga</span>
+                  </div>
+                  <h2 className="text-4xl md:text-6xl font-black uppercase tracking-tighter leading-[0.95] mb-4">{ligaLanzamiento.titulo}</h2>
+                  {ligaLanzamiento.subtitulo && <p className="text-gray-400 text-sm md:text-base max-w-lg leading-relaxed font-medium">{ligaLanzamiento.subtitulo}</p>}
+                </div>
+                <div className="shrink-0">
+                  <span className="inline-flex items-center gap-3 bg-[#FFD93D] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl group-hover:bg-[#FFE066] transition-colors">
+                    {ligaLanzamiento.cta_texto || 'Inscripciones 2027'} <ArrowRight size={16} />
+                  </span>
+                </div>
+              </div>
+            </Link>
+          </div>
+        </section>
+      )}
 
       {/* --- CONTENIDO DINÁMICO (Tus animaciones intactas) --- */}
       <section className="relative w-full border-t border-white/5 bg-[#080808]">
@@ -228,32 +255,6 @@ export default function LandingClient({ carteleraIniciales, ligaLanzamiento }: {
         </div>
       </section>
 
-
-      {/* --- LA LIGA 2027 (formación destacada de 2M; solo si hay lanzamiento activo) --- */}
-      {ligaLanzamiento && (
-        <section className="py-24 px-6 border-t border-white/5 relative overflow-hidden">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[360px] bg-[#D4E655]/10 rounded-full blur-[120px] pointer-events-none" />
-          <div className="max-w-5xl mx-auto relative z-10">
-            <Link href="/liga2027" className="group block bg-[#09090b]/60 backdrop-blur-md border border-[#D4E655]/30 hover:border-[#D4E655]/60 rounded-3xl p-10 md:p-16 transition-all duration-300 shadow-[0_0_40px_rgba(212,230,85,0.08)]">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
-                <div>
-                  <div className="flex items-center gap-2 mb-4">
-                    <span className="text-lg leading-none">🏆</span>
-                    <span className="text-[#D4E655] font-bold text-[10px] tracking-[0.4em] uppercase">Formación · La Liga</span>
-                  </div>
-                  <h2 className="text-4xl md:text-6xl font-black uppercase tracking-tighter leading-[0.95] mb-4">{ligaLanzamiento.titulo}</h2>
-                  {ligaLanzamiento.subtitulo && <p className="text-gray-400 text-sm md:text-base max-w-lg leading-relaxed font-medium">{ligaLanzamiento.subtitulo}</p>}
-                </div>
-                <div className="shrink-0">
-                  <span className="inline-flex items-center gap-3 bg-[#FFD93D] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl group-hover:bg-[#FFE066] transition-colors">
-                    {ligaLanzamiento.cta_texto || 'Inscripciones 2027'} <ArrowRight size={16} />
-                  </span>
-                </div>
-              </div>
-            </Link>
-          </div>
-        </section>
-      )}
 
       {/* --- BANDA: CARTELERA ESCENA / OBRAS (2E) --- */}
       <section className="py-20 px-6 border-t border-white/5 relative overflow-hidden">

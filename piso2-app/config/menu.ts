@@ -51,5 +51,7 @@ export const menuItems = [
     { name: 'Piso 2 On Tour', href: '/audiciones', icon: Sparkles, grupo: 'escuela', roles: ['admin', 'audiciones', 'recepcion'] },
     { name: 'Sumate a Talent', href: '/talent/postular', icon: Sparkles, grupo: 'miespacio', roles: ['alumno', 'profesor', 'coordinador'] },
     { name: 'La Liga', href: '/la-liga', icon: GraduationCap, grupo: 'escuela', roles: ['admin', 'profesor', 'coordinador', 'alumno', 'auxiliar'] },
+    // Perfil de La Liga 2027 del alumno (entra con su cuenta normal de 2M). Se muestra solo si tiene inscripción (gate hasLiga27 en el Sidebar).
+    { name: 'La Liga 2027', href: '/mi-liga', icon: GraduationCap, grupo: 'miespacio', roles: ['alumno'] },
     { name: 'Alquilar sala', href: '/alquilar-sala', icon: ShoppingBagIcon, grupo: 'miespacio', roles: ['admin', 'profesor', 'coordinador', 'alumno'] },
 ]

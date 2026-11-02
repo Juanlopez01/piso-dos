@@ -1,23 +1,21 @@
 'use server'
 
 // ============================================================================
-// LA LIGA 2027 — Server actions (FASE 1: Inscripción + Pagos).
+// LA LIGA 2027 — Server actions (Inscripción + Pagos).
 //
-// Módulo namespaced `liga27_*`. La cuenta del alumno es propia (email+contraseña,
-// cookie HMAC en lib/liga27-session.ts), igual que Talent: todo pasa por el admin
-// client (service role) porque las tablas tienen RLS sin policy.
+// Módulo namespaced `liga27_*`. Los alumnos de La Liga 2027 son alumnos NORMALES
+// de 2M (auth user / profiles, rol 'alumno') y entran por /login como todos: la
+// inscripción cuelga del profiles.id (liga27_inscripciones.profile_id). La
+// postulación pública es solo un lead; al aprobar se crea/vincula el alumno.
 //
-// El staff (recepción/admin) se autentica con la sesión de Supabase (profiles.rol).
+// Todo pasa por el admin client (service role) porque las tablas liga27_* tienen
+// RLS sin policy. El staff se autentica con la sesión de Supabase (profiles.rol).
 // ============================================================================
 
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
 import crypto from 'crypto'
-import {
-    hashPassword, verifyPassword,
-    crearSesionLiga27, leerSesionLiga27, cerrarSesionLiga27,
-} from '@/lib/liga27-session'
 import { aplicarEfectoPagoLiga27 } from '@/app/actions/_liga27-pago'
 
 const getAdminClient = () => createAdminClient(
@@ -44,66 +42,15 @@ async function gateStaff(roles: string[] = STAFF_GESTION): Promise<{ ok: boolean
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// CUENTA DEL ALUMNO (registro / login / sesión)
+// ALUMNO LOGUEADO (sesión normal de 2M / Supabase) — su perfil de La Liga 2027
 // ════════════════════════════════════════════════════════════════════════════
 
-export async function registrarAlumnoLiga27Action(payload: {
-    email: string; password: string; nombre: string; apellido?: string
-}): Promise<{ ok: boolean; error?: string }> {
-    const email = (payload.email || '').trim().toLowerCase()
-    const password = payload.password || ''
-    if (!emailOk(email)) return { ok: false, error: 'Poné un email válido.' }
-    if (password.length < 6) return { ok: false, error: 'La contraseña tiene que tener al menos 6 caracteres.' }
-    if (!payload.nombre?.trim()) return { ok: false, error: 'Poné tu nombre.' }
-
-    const admin = getAdminClient()
-    const { data: existente } = await admin.from('liga27_perfiles').select('id, password_hash').eq('email', email).maybeSingle()
-
-    if (existente?.id) {
-        if (existente.password_hash) return { ok: false, error: 'Ya existe una cuenta con ese email. Iniciá sesión.' }
-        // Perfil creado por una postulación previa (sin cuenta) → lo reclama.
-        const { error } = await admin.from('liga27_perfiles').update({
-            password_hash: hashPassword(password),
-            nombre: payload.nombre.trim(),
-            apellido: payload.apellido?.trim() || null,
-            updated_at: new Date().toISOString(),
-        }).eq('id', existente.id)
-        if (error) return { ok: false, error: error.message }
-        await crearSesionLiga27(existente.id)
-        return { ok: true }
-    }
-
-    const { data, error } = await admin.from('liga27_perfiles').insert({
-        email,
-        password_hash: hashPassword(password),
-        nombre: payload.nombre.trim(),
-        apellido: payload.apellido?.trim() || null,
-    }).select('id').single()
-    if (error) return { ok: false, error: error.message }
-    await crearSesionLiga27(data.id)
-    return { ok: true }
+// Id del alumno logueado por el login de 2M (Supabase auth). null si no hay sesión.
+async function authUserId(): Promise<string | null> {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    return session?.user?.id || null
 }
-
-export async function loginAlumnoLiga27Action(payload: { email: string; password: string }): Promise<{ ok: boolean; error?: string }> {
-    const email = (payload.email || '').trim().toLowerCase()
-    if (!email || !payload.password) return { ok: false, error: 'Completá email y contraseña.' }
-    const admin = getAdminClient()
-    const { data } = await admin.from('liga27_perfiles').select('id, password_hash').eq('email', email).maybeSingle()
-    if (!data?.password_hash || !verifyPassword(payload.password, data.password_hash)) {
-        return { ok: false, error: 'Email o contraseña incorrectos.' }
-    }
-    await crearSesionLiga27(data.id)
-    return { ok: true }
-}
-
-export async function logoutAlumnoLiga27Action(): Promise<{ ok: boolean }> {
-    await cerrarSesionLiga27()
-    return { ok: true }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// MI PERFIL (vista del alumno logueado) — perfil + inscripción + estado de pago
-// ════════════════════════════════════════════════════════════════════════════
 
 export type MiLiga27 = {
     perfil: any
@@ -112,16 +59,17 @@ export type MiLiga27 = {
     bloqueado: boolean
 }
 
+// Perfil + inscripción + estado de pago del alumno logueado (por su profiles.id).
 export async function getMiLiga27Action(): Promise<MiLiga27 | null> {
-    const perfilId = await leerSesionLiga27()
-    if (!perfilId) return null
+    const uid = await authUserId()
+    if (!uid) return null
     const admin = getAdminClient()
-    const { data: perfil } = await admin.from('liga27_perfiles')
-        .select('id, email, nombre, apellido, telefono, instagram, fecha_nac, ciudad, foto_url, dni')
-        .eq('id', perfilId).maybeSingle()
-    if (!perfil) return null
+    const { data: prof } = await admin.from('profiles')
+        .select('id, nombre, apellido, nombre_completo, email, telefono')
+        .eq('id', uid).maybeSingle()
+    if (!prof) return null
     const { data: inscripcion } = await admin.from('liga27_inscripciones')
-        .select('*').eq('perfil_id', perfilId).order('creado_at', { ascending: false }).limit(1).maybeSingle()
+        .select('*').eq('profile_id', uid).order('creado_at', { ascending: false }).limit(1).maybeSingle()
     let pagos: any[] = []
     if (inscripcion) {
         const { data: ps } = await admin.from('liga27_pagos')
@@ -129,30 +77,55 @@ export async function getMiLiga27Action(): Promise<MiLiga27 | null> {
             .eq('inscripcion_id', inscripcion.id).order('creado_at', { ascending: false })
         pagos = ps || []
     }
+    const nombre = prof.nombre || (prof.nombre_completo || '').split(' ')[0] || 'Alumno/a'
+    const apellido = prof.apellido || (prof.nombre_completo || '').split(' ').slice(1).join(' ') || ''
+    const perfil = { id: prof.id, email: prof.email, nombre, apellido, telefono: prof.telefono, foto_url: null }
     return { perfil, inscripcion, pagos, bloqueado: inscripcion?.estado === 'bloqueado' }
 }
 
-export async function guardarMiPerfilLiga27Action(payload: {
-    nombre: string; apellido?: string; telefono?: string; instagram?: string
-    fecha_nac?: string | null; ciudad?: string; foto_url?: string; dni?: string
-}): Promise<{ ok: boolean; error?: string }> {
-    const perfilId = await leerSesionLiga27()
-    if (!perfilId) return { ok: false, error: 'Tenés que iniciar sesión.' }
-    if (!payload.nombre?.trim()) return { ok: false, error: 'El nombre no puede quedar vacío.' }
+// ¿El alumno logueado tiene inscripción a La Liga 2027? (para mostrar el menú).
+export async function tengoInscripcionLiga27Action(): Promise<boolean> {
+    const uid = await authUserId()
+    if (!uid) return false
     const admin = getAdminClient()
-    const { error } = await admin.from('liga27_perfiles').update({
-        nombre: payload.nombre.trim(),
-        apellido: payload.apellido?.trim() || null,
-        telefono: payload.telefono?.trim() || null,
-        instagram: payload.instagram?.trim() || null,
-        fecha_nac: payload.fecha_nac || null,
-        ciudad: payload.ciudad?.trim() || null,
-        foto_url: payload.foto_url || undefined,
-        dni: payload.dni?.trim() || null,
-        updated_at: new Date().toISOString(),
-    }).eq('id', perfilId)
-    if (error) return { ok: false, error: error.message }
-    return { ok: true }
+    const { data } = await admin.from('liga27_inscripciones').select('id').eq('profile_id', uid).limit(1).maybeSingle()
+    return !!data
+}
+
+// Busca un alumno de 2M por email; si no existe, lo crea (rol 'alumno'). Devuelve
+// su profiles.id. El profiles se crea solo por trigger desde user_metadata.
+async function buscarOCrearAlumno(admin: ReturnType<typeof getAdminClient>, datos: {
+    email: string; nombre?: string; apellido?: string; telefono?: string
+}): Promise<{ ok: boolean; profileId?: string; creado?: boolean; error?: string }> {
+    const email = (datos.email || '').trim().toLowerCase()
+    if (!emailOk(email)) return { ok: false, error: 'La postulación no tiene un email válido.' }
+
+    const { data: existente } = await admin.from('profiles').select('id').eq('email', email).maybeSingle()
+    if (existente?.id) return { ok: true, profileId: existente.id, creado: false }
+
+    // Cuenta nueva: contraseña aleatoria; el alumno la define con el link de
+    // recuperación que va en la bienvenida.
+    const nombre = (datos.nombre || '').trim()
+    const apellido = (datos.apellido || '').trim()
+    const { data, error } = await admin.auth.admin.createUser({
+        email,
+        password: crypto.randomBytes(12).toString('hex'),
+        email_confirm: true,
+        user_metadata: {
+            nombre, apellido,
+            nombre_completo: `${nombre} ${apellido}`.trim() || nombre,
+            telefono: datos.telefono?.trim() || null,
+            rol: 'alumno',
+        },
+    })
+    if (error) {
+        if (error.message.includes('already registered')) {
+            const { data: ex2 } = await admin.from('profiles').select('id').eq('email', email).maybeSingle()
+            if (ex2?.id) return { ok: true, profileId: ex2.id, creado: false }
+        }
+        return { ok: false, error: error.message }
+    }
+    return { ok: true, profileId: data.user.id, creado: true }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -221,15 +194,14 @@ export async function guardarLanzamientoAction(payload: {
 // POSTULACIÓN PÚBLICA (3 CTAs) + aprobación
 // ════════════════════════════════════════════════════════════════════════════
 
-// Crea/reclama el perfil (por email) y registra la postulación. Para "anotarse"
-// pedimos cuenta: si viene con sesión la usamos; si no, creamos el perfil sin
-// contraseña (se reclama después con el registro por email).
+// Registra la postulación como LEAD (sin crear cuenta). La cuenta de alumno de 2M
+// se crea/vincula recién al aprobar (aprobarPostulacionLiga27Action).
 export async function postularLiga27Action(payload: {
     nombre: string; email: string; telefono?: string; instagram?: string
     fecha_nac?: string | null; ciudad?: string; foto_url?: string
     tipo_contacto: 'llamar' | 'escribir' | 'anotarse'; nota?: string
     lanzamiento_id?: string
-}): Promise<{ ok: boolean; error?: string; perfilId?: string }> {
+}): Promise<{ ok: boolean; error?: string }> {
     const email = (payload.email || '').trim().toLowerCase()
     if (!payload.nombre?.trim()) return { ok: false, error: 'Poné tu nombre.' }
     if (!emailOk(email)) return { ok: false, error: 'Poné un email válido.' }
@@ -237,38 +209,7 @@ export async function postularLiga27Action(payload: {
 
     const admin = getAdminClient()
 
-    // Perfil por sesión o por email (reclamo).
-    let perfilId = await leerSesionLiga27()
-    if (!perfilId) {
-        const { data: ex } = await admin.from('liga27_perfiles').select('id').eq('email', email).maybeSingle()
-        if (ex?.id) {
-            perfilId = ex.id
-            await admin.from('liga27_perfiles').update({
-                nombre: payload.nombre.trim(),
-                telefono: payload.telefono?.trim() || null,
-                instagram: payload.instagram?.trim() || null,
-                fecha_nac: payload.fecha_nac || null,
-                ciudad: payload.ciudad?.trim() || null,
-                foto_url: payload.foto_url || undefined,
-                updated_at: new Date().toISOString(),
-            }).eq('id', ex.id)
-        } else {
-            const { data: nuevo, error: e1 } = await admin.from('liga27_perfiles').insert({
-                email,
-                nombre: payload.nombre.trim(),
-                telefono: payload.telefono?.trim() || null,
-                instagram: payload.instagram?.trim() || null,
-                fecha_nac: payload.fecha_nac || null,
-                ciudad: payload.ciudad?.trim() || null,
-                foto_url: payload.foto_url || null,
-            }).select('id').single()
-            if (e1) return { ok: false, error: e1.message }
-            perfilId = nuevo.id
-        }
-    }
-
     const { error } = await admin.from('liga27_postulaciones').insert({
-        perfil_id: perfilId,
         lanzamiento_id: payload.lanzamiento_id || null,
         nombre: payload.nombre.trim(),
         email,
@@ -296,7 +237,7 @@ export async function postularLiga27Action(payload: {
     } catch { /* best-effort */ }
 
     revalidatePath('/liga2027-admin')
-    return { ok: true, perfilId: perfilId || undefined }
+    return { ok: true }
 }
 
 export async function listPostulacionesLiga27Action(estado?: string) {
@@ -308,24 +249,32 @@ export async function listPostulacionesLiga27Action(estado?: string) {
     return data || []
 }
 
-// Aprobar: marca la postulación 'aprobada' y crea/activa la inscripción del
-// perfil (estado 'aprobado'). No cobra: la matrícula va por link de pago (1.4).
-export async function aprobarPostulacionLiga27Action(postulacionId: string, plan?: 'mensual' | 'cuatrimestral'): Promise<{ ok: boolean; error?: string; inscripcionId?: string }> {
+// Aprobar: crea/vincula el alumno de 2M (por email) y crea/activa su inscripción
+// (estado 'aprobado'). No cobra: la matrícula va por link de pago. El alumno entra
+// por /login normal; si la cuenta es nueva, define su clave con la bienvenida.
+export async function aprobarPostulacionLiga27Action(postulacionId: string, plan?: 'mensual' | 'cuatrimestral'): Promise<{ ok: boolean; error?: string; inscripcionId?: string; cuentaCreada?: boolean }> {
     const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
     const admin = getAdminClient()
     const { data: post } = await admin.from('liga27_postulaciones').select('*').eq('id', postulacionId).maybeSingle()
     if (!post) return { ok: false, error: 'Postulación no encontrada' }
-    if (!post.perfil_id) return { ok: false, error: 'La postulación no tiene perfil asociado' }
 
-    // Inscripción (upsert por perfil+lanzamiento).
+    // Alumno de 2M (existente por email, o nuevo).
+    const [nombre, ...rest] = (post.nombre || '').trim().split(' ')
+    const cuenta = await buscarOCrearAlumno(admin, {
+        email: post.email, nombre, apellido: rest.join(' '), telefono: post.telefono,
+    })
+    if (!cuenta.ok || !cuenta.profileId) return { ok: false, error: cuenta.error || 'No se pudo crear la cuenta del alumno.' }
+    const profileId = cuenta.profileId
+
+    // Inscripción (una por alumno+lanzamiento).
     const { data: existente } = await admin.from('liga27_inscripciones')
-        .select('id').eq('perfil_id', post.perfil_id).eq('lanzamiento_id', post.lanzamiento_id).maybeSingle()
+        .select('id').eq('profile_id', profileId).eq('lanzamiento_id', post.lanzamiento_id).maybeSingle()
     let inscripcionId = existente?.id
     if (inscripcionId) {
         await admin.from('liga27_inscripciones').update({ estado: 'aprobado', plan: plan || null }).eq('id', inscripcionId)
     } else {
         const { data: ins, error } = await admin.from('liga27_inscripciones').insert({
-            perfil_id: post.perfil_id,
+            profile_id: profileId,
             lanzamiento_id: post.lanzamiento_id,
             estado: 'aprobado',
             plan: plan || null,
@@ -336,7 +285,7 @@ export async function aprobarPostulacionLiga27Action(postulacionId: string, plan
 
     await admin.from('liga27_postulaciones').update({ estado: 'aprobada' }).eq('id', postulacionId)
     revalidatePath('/liga2027-admin')
-    return { ok: true, inscripcionId }
+    return { ok: true, inscripcionId, cuentaCreada: cuenta.creado }
 }
 
 export async function rechazarPostulacionLiga27Action(postulacionId: string): Promise<{ ok: boolean; error?: string }> {
@@ -376,28 +325,46 @@ export async function getInscripcionesLiga27Action() {
     const admin = getAdminClient()
     const { data: inss } = await admin.from('liga27_inscripciones').select('*').order('creado_at', { ascending: false })
     if (!inss?.length) return []
-    const perfilIds = [...new Set(inss.map((i: any) => i.perfil_id))]
-    const { data: perfiles } = await admin.from('liga27_perfiles')
-        .select('id, nombre, apellido, email, telefono, instagram, foto_url, ciudad').in('id', perfilIds)
+    const profileIds = [...new Set(inss.map((i: any) => i.profile_id).filter(Boolean))]
     const pById: Record<string, any> = {}
-    for (const p of (perfiles || [])) pById[p.id] = p
-    return inss.map((i: any) => ({ ...i, perfil: pById[i.perfil_id] || null }))
+    if (profileIds.length) {
+        const { data: perfiles } = await admin.from('profiles')
+            .select('id, nombre, apellido, nombre_completo, email, telefono').in('id', profileIds)
+        for (const p of (perfiles || [])) {
+            const nombre = p.nombre || (p.nombre_completo || '').split(' ')[0] || ''
+            const apellido = p.apellido || (p.nombre_completo || '').split(' ').slice(1).join(' ') || ''
+            pById[p.id] = { id: p.id, nombre, apellido, email: p.email, telefono: p.telefono, foto_url: null }
+        }
+    }
+    return inss.map((i: any) => ({ ...i, perfil: i.profile_id ? (pById[i.profile_id] || null) : null }))
 }
 
 export async function enviarBienvenidaLiga27Action(inscripcionId: string): Promise<{ ok: boolean; error?: string }> {
     const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
     const admin = getAdminClient()
-    const { data: ins } = await admin.from('liga27_inscripciones').select('id, perfil_id, bienvenida_enviada').eq('id', inscripcionId).maybeSingle()
+    const { data: ins } = await admin.from('liga27_inscripciones').select('id, profile_id, bienvenida_enviada').eq('id', inscripcionId).maybeSingle()
     if (!ins) return { ok: false, error: 'Inscripción no encontrada' }
-    const { data: perfil } = await admin.from('liga27_perfiles').select('email, nombre').eq('id', ins.perfil_id).maybeSingle()
-    if (!perfil?.email) return { ok: false, error: 'El perfil no tiene email.' }
+    if (!ins.profile_id) return { ok: false, error: 'La inscripción no tiene alumno vinculado.' }
+    const { data: perfil } = await admin.from('profiles').select('email, nombre, nombre_completo').eq('id', ins.profile_id).maybeSingle()
+    if (!perfil?.email) return { ok: false, error: 'El alumno no tiene email cargado.' }
+
+    // Link para que el alumno defina su contraseña (entra por /login de 2M).
+    let linkClave = ''
+    try {
+        const { data: link } = await admin.auth.admin.generateLink({
+            type: 'recovery', email: perfil.email, options: { redirectTo: `${SITE()}/act-password` },
+        })
+        const url = (link as any)?.properties?.action_link
+        if (url) linkClave = `\n\nDefiní tu contraseña acá: ${url}`
+    } catch { /* best-effort */ }
+
     try {
         const { enviarMail } = await import('@/lib/mail')
         await enviarMail({
             to: perfil.email,
             subject: '¡Bienvenid@ a La Liga 2027! · Piso 2',
-            html: mailSimpleHTML(perfil.nombre || '',
-                'Tu lugar en La Liga 2027 quedó confirmado. Entrá a tu perfil para ver tu estado, tus notas y tu asistencia a medida que arranque el programa.\n\nCreá o reclamá tu cuenta con este mismo email en: ' + SITE() + '/liga2027/login'),
+            html: mailSimpleHTML(perfil.nombre || perfil.nombre_completo || '',
+                'Tu lugar en La Liga 2027 quedó confirmado. Vas a ver tu perfil (notas, asistencia y pagos) ingresando con tu cuenta de Piso 2 en: ' + SITE() + '/login' + linkClave),
         })
     } catch { /* best-effort */ }
     await admin.from('liga27_inscripciones').update({ bienvenida_enviada: true }).eq('id', inscripcionId)
