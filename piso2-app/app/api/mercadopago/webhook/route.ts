@@ -134,6 +134,28 @@ export async function POST(request: Request) {
                 return NextResponse.json({ success: true }, { status: 200 });
             }
 
+            // ===== LA LIGA 2027: confirmar pago (matrícula/cuota) + desbloquear =====
+            // Standalone (el alumno no es auth.users). Idempotente por estado 'pendiente'.
+            if (metadata.tipo_pago === 'liga27' && metadata.liga27_pago_id) {
+                const { data: pagoL27 } = await supabase.from('liga27_pagos')
+                    .update({ estado: 'pagado', pagado_at: new Date().toISOString(), mp_ref: paymentIdToProcess.toString() })
+                    .eq('id', metadata.liga27_pago_id).eq('estado', 'pendiente')
+                    .select('id, inscripcion_id, concepto').maybeSingle();
+                if (pagoL27) {
+                    const { aplicarEfectoPagoLiga27 } = await import('@/app/actions/_liga27-pago');
+                    await aplicarEfectoPagoLiga27(supabase, (pagoL27 as any).inscripcion_id, (pagoL27 as any).concepto);
+                    try {
+                        const { data: staffL27 } = await supabase.from('profiles').select('id').in('rol', ['admin', 'recepcion']);
+                        if (staffL27?.length) await supabase.from('notificaciones').insert(staffL27.map((s: any) => ({
+                            usuario_id: s.id, titulo: '🏆 Pago La Liga 2027',
+                            mensaje: `Se registró un pago de ${(pagoL27 as any).concepto} por $${Number(payment.transaction_amount).toLocaleString('es-AR')}.`,
+                            link: '/liga2027-admin', leido: false,
+                        })));
+                    } catch { /* notif best-effort */ }
+                }
+                return NextResponse.json({ success: true }, { status: 200 });
+            }
+
             const mpPaymentIdStr = paymentIdToProcess.toString();
             const montoAbonado = payment.transaction_amount;
             const userIdFinal = metadata.usuario_id || metadata.user_id;

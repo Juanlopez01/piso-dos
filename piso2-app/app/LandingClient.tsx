@@ -11,7 +11,7 @@ const montserrat = Montserrat({
   weight: ['400', '700', '900']
 })
 
-export default function LandingClient({ carteleraIniciales }: { carteleraIniciales: any[] }) {
+export default function LandingClient({ carteleraIniciales, ligaLanzamiento }: { carteleraIniciales: any[]; ligaLanzamiento?: { titulo: string; cta_texto?: string | null } | null }) {
   const [activeSection, setActiveSection] = useState<'2m' | '2e' | '2s'>('2m')
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [loggedUser, setLoggedUser] = useState<any>(null)
@@ -71,6 +71,19 @@ export default function LandingClient({ carteleraIniciales }: { carteleraInicial
 
   return (
     <div className={`bg-[#050505] text-white selection:bg-[#D4E655] selection:text-black w-full overflow-x-hidden ${montserrat.className}`}>
+
+      {/* CTA destacado de LA LIGA 2027 (apenas entrás), si hay un lanzamiento activo. */}
+      {ligaLanzamiento && (
+        <Link href="/liga2027" className="group block bg-[#D4E655] text-black">
+          <div className="max-w-7xl mx-auto px-5 py-2.5 flex items-center justify-center gap-3 text-center">
+            <span className="text-[10px] md:text-xs font-black tracking-[0.2em] uppercase">🏆 La Liga 2027</span>
+            <span className="hidden sm:inline text-xs font-semibold opacity-80">{ligaLanzamiento.titulo}</span>
+            <span className="inline-flex items-center gap-1 text-[11px] md:text-xs font-bold uppercase tracking-wider bg-black text-[#D4E655] px-3 py-1 rounded-full group-hover:scale-105 transition-transform">
+              {ligaLanzamiento.cta_texto || 'Inscripciones 2027'} <ArrowRight size={13} />
+            </span>
+          </div>
+        </Link>
+      )}
 
       {/* Estilos CSS inyectados para la Marquesina infinita */}
       <style dangerouslySetInnerHTML={{

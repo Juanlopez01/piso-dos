@@ -51,5 +51,6 @@ export const menuItems = [
     { name: 'Piso 2 On Tour', href: '/audiciones', icon: Sparkles, grupo: 'escuela', roles: ['admin', 'audiciones', 'recepcion'] },
     { name: 'Sumate a Talent', href: '/talent/postular', icon: Sparkles, grupo: 'miespacio', roles: ['alumno', 'profesor', 'coordinador'] },
     { name: 'La Liga', href: '/la-liga', icon: GraduationCap, grupo: 'escuela', roles: ['admin', 'profesor', 'coordinador', 'alumno', 'auxiliar'] },
+    { name: 'La Liga 2027', href: '/liga2027-admin', icon: GraduationCap, grupo: 'escuela', roles: ['admin', 'recepcion', 'coordinador'] },
     { name: 'Alquilar sala', href: '/alquilar-sala', icon: ShoppingBagIcon, grupo: 'miespacio', roles: ['admin', 'profesor', 'coordinador', 'alumno'] },
 ]

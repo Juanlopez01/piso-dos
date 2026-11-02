@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { getCarteleraEscenaAction } from '@/app/actions/eventos'
+import { getLanzamientoActivoAction } from '@/app/actions/liga2027'
 import LandingClient from './LandingClient'
 
 export const dynamic = 'force-dynamic'
@@ -16,5 +17,6 @@ export const metadata: Metadata = {
 
 export default async function LandingPage() {
   const cartelera = await getCarteleraEscenaAction().then(r => r.cards).catch(() => [])
-  return <LandingClient carteleraIniciales={cartelera} />
+  const ligaLanz = await getLanzamientoActivoAction().catch(() => null)
+  return <LandingClient carteleraIniciales={cartelera} ligaLanzamiento={ligaLanz} />
 }
