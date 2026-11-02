@@ -245,7 +245,7 @@ export default function LandingClient({ carteleraIniciales, ligaLanzamiento }: {
                   {ligaLanzamiento.subtitulo && <p className="text-gray-400 text-sm md:text-base max-w-lg leading-relaxed font-medium">{ligaLanzamiento.subtitulo}</p>}
                 </div>
                 <div className="shrink-0">
-                  <span className="inline-flex items-center gap-3 bg-[#D4E655] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl group-hover:bg-white transition-colors">
+                  <span className="inline-flex items-center gap-3 bg-[#FFD93D] text-black font-black uppercase px-8 py-4 text-xs tracking-[0.2em] rounded-xl group-hover:bg-[#FFE066] transition-colors">
                     {ligaLanzamiento.cta_texto || 'Inscripciones 2027'} <ArrowRight size={16} />
                   </span>
                 </div>
