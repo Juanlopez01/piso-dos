@@ -63,16 +63,16 @@ function SidebarContent() {
         if ((userRole === 'alumno' || userRole === 'profesor') && item.name === 'Agenda') return false;
 
         // Vistas base por rol
-        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'La Liga 2027', 'Grupos', 'Talents', 'Asistente', 'Consultas', 'Resumen Clases', 'Fotos de clases', 'Eventos', 'Cartelera', 'Curaduría', 'Piso 2 On Tour', 'Caja', 'Liquidaciones', 'Pagos La Liga', 'Remarketing', 'Métricas', 'Ventas', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
+        if (userRole === 'admin') return ['Inicio', 'Agenda', 'Alquileres', 'Explorar', 'Alumnos / Profes', 'Staff / Equipo', 'Productos', 'La Liga', 'Grupos', 'Talents', 'Asistente', 'Consultas', 'Resumen Clases', 'Fotos de clases', 'Eventos', 'Cartelera', 'Curaduría', 'Piso 2 On Tour', 'Caja', 'Liquidaciones', 'Pagos La Liga', 'Remarketing', 'Métricas', 'Ventas', 'Sedes', 'Notificaciones', 'Mi Perfil'].includes(item.name)
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         if (userRole === 'profesor') {
-            return ['Inicio', 'Mis Clases', 'Mis Pagos', 'Grupos', 'La Liga', 'La Liga 2027', 'Notificaciones', 'Mi Perfil', 'Sumate a Talent'].includes(item.name)
+            return ['Inicio', 'Mis Clases', 'Mis Pagos', 'Grupos', 'La Liga', 'Notificaciones', 'Mi Perfil', 'Sumate a Talent'].includes(item.name)
         }
 
         if (userRole === 'recepcion') {
-            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'La Liga 2027', 'Pagos La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Fotos de clases', 'Eventos', 'Cartelera', 'Curaduría', 'Piso 2 On Tour'].includes(item.name)
-            return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Pagos La Liga', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'La Liga 2027', 'Grupos', 'Consultas', 'Resumen Clases', 'Fotos de clases', 'Eventos', 'Cartelera', 'Curaduría', 'Piso 2 On Tour'].includes(item.name)
+            if (!isBoxOpen) return ['Inicio', 'Agenda', 'Caja', 'Mi Perfil', 'Explorar', 'Notificaciones', 'La Liga', 'Pagos La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Fotos de clases', 'Eventos', 'Cartelera', 'Curaduría', 'Piso 2 On Tour'].includes(item.name)
+            return ['Inicio', 'Agenda', 'Explorar', 'Alumnos / Profes', 'Alquileres', 'Productos', 'Caja', 'Liquidaciones', 'Pagos La Liga', 'Remarketing', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Consultas', 'Resumen Clases', 'Fotos de clases', 'Eventos', 'Cartelera', 'Curaduría', 'Piso 2 On Tour'].includes(item.name)
         }
 
         // 🚀 ROL AUXILIAR: Ve Grupos y Alquileres, pero NUNCA La Liga.
@@ -83,7 +83,7 @@ function SidebarContent() {
 
         // 🚀 ROL COORDINADOR: Ve La Liga y Grupos (sujetos a su llavero que ya validamos arriba en `hasLigaAccess/hasCompaniaAccess`), y su perfil. No ve caja ni agenda de recepcion.
         if (userRole === 'coordinador') {
-            return ['Inicio', 'Explorar', 'Notificaciones', 'Mi Perfil', 'La Liga', 'La Liga 2027', 'Grupos', 'Sumate a Talent'].includes(item.name)
+            return ['Inicio', 'Explorar', 'Notificaciones', 'Mi Perfil', 'La Liga', 'Grupos', 'Sumate a Talent'].includes(item.name)
         }
 
         // 🎭 ROL CURADOR (Chifle): Curaduría (ve postulaciones y elige) + Eventos + básicos.

@@ -39,6 +39,8 @@ import {
 } from '@/app/actions/usuarios'
 
 import MaterialesPanel from '@/components/MaterialesPanel'
+import PanelLiga27 from '../liga2027-admin/PanelLiga27'
+import DocentePanel from '../liga2027-admin/DocentePanel'
 
 import { parseSafeDate, cuatriDe, labelCuatri, boundsDelMes, fetcherLiga, fetcherAsistenciasRango, type Estadisticas } from './fetchers'
 function LaLigaContent() {
@@ -60,7 +62,7 @@ function LaLigaContent() {
 
     const pagoNotificado = useRef(false)
     const [procesandoPago, setProcesandoPago] = useState(false)
-    const [adminTab, setAdminTab] = useState<'evaluaciones' | 'notas' | 'gestion' | 'comunicados' | 'precios' | 'clases' | 'estadisticas'>('evaluaciones')
+    const [adminTab, setAdminTab] = useState<'evaluaciones' | 'notas' | 'gestion' | 'comunicados' | 'precios' | 'clases' | 'estadisticas' | 'liga2027'>('evaluaciones')
     // Pestaña "Notas" (staff): boletín por alumno
     const [notasAlumnoSel, setNotasAlumnoSel] = useState<any>(null)
     const [notasDeAlumno, setNotasDeAlumno] = useState<any[]>([])
@@ -591,12 +593,27 @@ function LaLigaContent() {
                                     </button>
                                 </>
                             )}
+                            {/* Nuevo formato 2027 (reemplaza a esta Liga el año que viene). */}
+                            {['admin', 'recepcion', 'coordinador', 'profesor'].includes(userRole || '') && (
+                                <button onClick={() => setAdminTab('liga2027')} className={`pb-4 px-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex items-center gap-2 ${adminTab === 'liga2027' ? 'text-[#D4E655] border-b-2 border-[#D4E655]' : 'text-gray-500 hover:text-white'}`}>
+                                    <Star size={14} /> Liga 2027
+                                </button>
+                            )}
                         </div>
                     )}
                 </div>
             </div>
 
             <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
+
+                {/* --- LA LIGA 2027 (nuevo formato) embebida dentro de la formación La Liga --- */}
+                {adminTab === 'liga2027' && ['admin', 'recepcion', 'coordinador', 'profesor'].includes(userRole || '') && (
+                    <div className="-mx-4 md:-mx-8 -my-8 bg-[#050505] rounded-2xl overflow-hidden">
+                        {userRole === 'profesor'
+                            ? <DocentePanel />
+                            : <PanelLiga27 puedePagos={['admin', 'recepcion'].includes(userRole || '')} esStaffGestion={['admin', 'recepcion'].includes(userRole || '')} />}
+                    </div>
+                )}
 
                 {/* CARTEL ROJO DEL ALUMNO */}
                 {!isStaff && (deudaCuota) && (
