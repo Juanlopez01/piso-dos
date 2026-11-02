@@ -8,15 +8,27 @@ import {
     generarLinkPagoLiga27Action, registrarPagoLiga27Action, getLanzamientosAdminAction,
     guardarLanzamientoAction, getPreciosLiga27Action, guardarPreciosLiga27Action,
 } from '@/app/actions/liga2027'
-import { Loader2, Check, X, MessageSquare, Link2, Send, Copy, Plus } from 'lucide-react'
+import {
+    getDisciplinasLiga27Action, getDocentesLiga27Action, guardarDisciplinaLiga27Action,
+    getExamenesDisciplinaLiga27Action, guardarExamenLiga27Action,
+    getProgramaDisciplinaLiga27Action, guardarProgramaLiga27Action,
+    getLibresLiga27Action, resolverLibreLiga27Action,
+} from '@/app/actions/liga2027-academico'
+import { AsistenciaEditor, ClaseEditor, NotasEditor } from './editores'
+import { Loader2, Check, X, MessageSquare, Link2, Send, Plus } from 'lucide-react'
 
 const card = "bg-[#111113] border border-white/10 rounded-xl p-5"
 const btn = "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
 const input = "bg-[#1a1a1d] border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-[#D4E655]/50 w-full"
 const MESES = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 
-export default function PanelLiga27({ puedePagos }: { puedePagos: boolean }) {
-    const tabs = ['Postulaciones', 'Inscripciones', 'Lanzamiento', ...(puedePagos ? ['Precios'] : [])]
+export default function PanelLiga27({ puedePagos, esStaffGestion }: { puedePagos: boolean; esStaffGestion?: boolean }) {
+    const tabs = [
+        'Postulaciones', 'Inscripciones',
+        ...(esStaffGestion ? ['Académico', 'Libres'] : []),
+        'Lanzamiento',
+        ...(puedePagos ? ['Precios'] : []),
+    ]
     const [tab, setTab] = useState('Postulaciones')
 
     return (
@@ -40,8 +52,201 @@ export default function PanelLiga27({ puedePagos }: { puedePagos: boolean }) {
 
             {tab === 'Postulaciones' && <Postulaciones />}
             {tab === 'Inscripciones' && <Inscripciones puedePagos={puedePagos} />}
+            {tab === 'Académico' && esStaffGestion && <Academico />}
+            {tab === 'Libres' && esStaffGestion && <Libres puedePagos={puedePagos} />}
             {tab === 'Lanzamiento' && <Lanzamiento />}
             {tab === 'Precios' && puedePagos && <Precios />}
+        </div>
+    )
+}
+
+// ── Académico (disciplinas + docentes + exámenes + programa + cargas) ─────────
+function Academico() {
+    const [discs, setDiscs] = useState<any[]>([])
+    const [docentes, setDocentes] = useState<any[]>([])
+    const [cargando, setCargando] = useState(true)
+    const [edit, setEdit] = useState<any | null>(null)
+    const [sel, setSel] = useState<string>('')
+    const [sub, setSub] = useState<'examenes' | 'programa' | 'asistencia' | 'clase' | 'notas'>('examenes')
+    const [busy, setBusy] = useState(false)
+
+    const cargar = async () => { setCargando(true); const [d, dc] = await Promise.all([getDisciplinasLiga27Action(), getDocentesLiga27Action()]); setDiscs(d); setDocentes(dc); setCargando(false) }
+    useEffect(() => { cargar() }, [])
+
+    const guardar = async () => {
+        if (!edit?.nombre?.trim()) return toast.error('Poné un nombre.')
+        setBusy(true)
+        const r = await guardarDisciplinaLiga27Action({ id: edit.id, nombre: edit.nombre, bloque: Number(edit.bloque) || 1, docente_id: edit.docente_id || null, orden: Number(edit.orden) || 0, activa: edit.activa ?? true })
+        if (r.ok) { toast.success('Guardado.'); setEdit(null); cargar() } else toast.error(r.error || 'Error')
+        setBusy(false)
+    }
+
+    if (cargando) return <Loader2 className="animate-spin text-white/40" />
+    return (
+        <div className="grid md:grid-cols-[320px_1fr] gap-5">
+            <div className="space-y-3">
+                {!edit && <button onClick={() => setEdit({ nombre: '', bloque: 1, orden: discs.length, activa: true })} className={`${btn} bg-[#D4E655] text-black flex items-center gap-1`}><Plus size={14} /> Nueva disciplina</button>}
+                {edit && (
+                    <div className={`${card} space-y-3`}>
+                        <h3 className="font-semibold text-sm">{edit.id ? 'Editar' : 'Nueva'} disciplina</h3>
+                        <div><label className="text-xs text-white/50">Nombre</label><input value={edit.nombre || ''} onChange={e => setEdit({ ...edit, nombre: e.target.value })} className={input} /></div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div><label className="text-xs text-white/50">Bloque</label><select value={edit.bloque ?? 1} onChange={e => setEdit({ ...edit, bloque: Number(e.target.value) })} className={input}><option value={1}>1</option><option value={2}>2</option></select></div>
+                            <div><label className="text-xs text-white/50">Orden</label><input type="number" value={edit.orden ?? 0} onChange={e => setEdit({ ...edit, orden: e.target.value })} className={input} /></div>
+                        </div>
+                        <div><label className="text-xs text-white/50">Docente</label>
+                            <select value={edit.docente_id || ''} onChange={e => setEdit({ ...edit, docente_id: e.target.value || null })} className={input}>
+                                <option value="">— Sin asignar —</option>
+                                {docentes.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+                            </select></div>
+                        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={edit.activa ?? true} onChange={e => setEdit({ ...edit, activa: e.target.checked })} /> Activa</label>
+                        <div className="flex gap-2"><button onClick={guardar} disabled={busy} className={`${btn} bg-[#D4E655] text-black`}>{busy ? <Loader2 size={14} className="animate-spin" /> : 'Guardar'}</button><button onClick={() => setEdit(null)} className={`${btn} bg-white/5 text-white/60`}>Cancelar</button></div>
+                    </div>
+                )}
+                <div className="space-y-1.5">
+                    {discs.map(d => (
+                        <div key={d.id} className={`rounded-lg px-3 py-2 cursor-pointer ${sel === d.id ? 'bg-[#D4E655]/15 border border-[#D4E655]/30' : 'bg-white/5 hover:bg-white/10'}`} onClick={() => setSel(d.id)}>
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium">{d.nombre}</span>
+                                <button onClick={e => { e.stopPropagation(); setEdit(d) }} className="text-[11px] text-white/40 hover:text-white">editar</button>
+                            </div>
+                            <p className="text-[11px] text-white/40">Bloque {d.bloque} · {d.docente_nombre || 'sin docente'}{d.activa ? '' : ' · inactiva'}</p>
+                        </div>
+                    ))}
+                    {discs.length === 0 && <p className="text-white/40 text-sm">No hay disciplinas. Creá la primera.</p>}
+                </div>
+            </div>
+
+            <div>
+                {!sel ? <p className="text-white/40 text-sm">Elegí una disciplina para ver exámenes, programa y cargar asistencia/notas.</p> : (
+                    <>
+                        <div className="flex gap-1 border-b border-white/10 mb-5 overflow-x-auto">
+                            {([['examenes', 'Exámenes'], ['programa', 'Programa'], ['asistencia', 'Asistencia'], ['clase', 'Clase'], ['notas', 'Notas']] as const).map(([k, l]) => (
+                                <button key={k} onClick={() => setSub(k)} className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${sub === k ? 'border-[#D4E655] text-white font-semibold' : 'border-transparent text-white/40 hover:text-white/70'}`}>{l}</button>
+                            ))}
+                        </div>
+                        {sub === 'examenes' && <Examenes disciplinaId={sel} key={sel + 'e'} />}
+                        {sub === 'programa' && <Programa disciplinaId={sel} key={sel + 'p'} />}
+                        {sub === 'asistencia' && <AsistenciaEditor disciplinaId={sel} key={sel + 'a'} />}
+                        {sub === 'clase' && <ClaseEditor disciplinaId={sel} key={sel + 'c'} />}
+                        {sub === 'notas' && <NotasEditor disciplinaId={sel} key={sel + 'n'} />}
+                    </>
+                )}
+            </div>
+        </div>
+    )
+}
+
+function Examenes({ disciplinaId }: { disciplinaId: string }) {
+    const [exs, setExs] = useState<any[]>([])
+    const [cargando, setCargando] = useState(true)
+    const cargar = async () => { setCargando(true); setExs(await getExamenesDisciplinaLiga27Action(disciplinaId)); setCargando(false) }
+    useEffect(() => { cargar() }, [disciplinaId])
+    const guardar = async (numero: 1 | 2, fecha: string, libera: boolean) => {
+        const r = await guardarExamenLiga27Action({ disciplina_id: disciplinaId, numero, fecha: fecha || null, libera_bloque: libera })
+        if (r.ok) { toast.success('Examen guardado.'); cargar() } else toast.error(r.error || 'Error')
+    }
+    if (cargando) return <Loader2 className="animate-spin text-white/40" />
+    return (
+        <div className="space-y-3">
+            {[1, 2].map(n => {
+                const e = exs.find(x => x.numero === n)
+                return (
+                    <div key={n} className={`${card} flex items-center gap-3 flex-wrap`}>
+                        <span className="text-sm font-semibold w-24">Examen {n}</span>
+                        <input type="date" defaultValue={e?.fecha || ''} id={`ex-${disciplinaId}-${n}`} className={`${input} w-auto`} />
+                        <label className="flex items-center gap-2 text-xs text-white/60"><input type="checkbox" defaultChecked={!!e?.libera_bloque} id={`lib-${disciplinaId}-${n}`} /> Libera el bloque 2</label>
+                        <button onClick={() => {
+                            const f = (document.getElementById(`ex-${disciplinaId}-${n}`) as HTMLInputElement)?.value
+                            const l = (document.getElementById(`lib-${disciplinaId}-${n}`) as HTMLInputElement)?.checked
+                            guardar(n as 1 | 2, f, l)
+                        }} className={`${btn} bg-[#D4E655] text-black`}>{e ? 'Actualizar' : 'Crear'}</button>
+                    </div>
+                )
+            })}
+        </div>
+    )
+}
+
+function Programa({ disciplinaId }: { disciplinaId: string }) {
+    const [items, setItems] = useState<any[]>([])
+    const [cargando, setCargando] = useState(true)
+    const [edit, setEdit] = useState<any | null>(null)
+    const cargar = async () => { setCargando(true); setItems(await getProgramaDisciplinaLiga27Action(disciplinaId)); setCargando(false) }
+    useEffect(() => { cargar() }, [disciplinaId])
+    const guardar = async () => {
+        const r = await guardarProgramaLiga27Action({ id: edit.id, disciplina_id: disciplinaId, bloque: Number(edit.bloque) || 1, titulo: edit.titulo, contenido: edit.contenido, bloqueado: !!edit.bloqueado, orden: Number(edit.orden) || 0 })
+        if (r.ok) { toast.success('Guardado.'); setEdit(null); cargar() } else toast.error(r.error || 'Error')
+    }
+    if (cargando) return <Loader2 className="animate-spin text-white/40" />
+    return (
+        <div className="space-y-3">
+            {!edit && <button onClick={() => setEdit({ bloque: 1, orden: items.length })} className={`${btn} bg-[#D4E655] text-black flex items-center gap-1`}><Plus size={14} /> Agregar ítem al programa</button>}
+            {edit && (
+                <div className={`${card} space-y-3`}>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div><label className="text-xs text-white/50">Bloque</label><select value={edit.bloque ?? 1} onChange={e => setEdit({ ...edit, bloque: Number(e.target.value) })} className={input}><option value={1}>1</option><option value={2}>2</option></select></div>
+                        <div><label className="text-xs text-white/50">Orden</label><input type="number" value={edit.orden ?? 0} onChange={e => setEdit({ ...edit, orden: e.target.value })} className={input} /></div>
+                    </div>
+                    <div><label className="text-xs text-white/50">Título</label><input value={edit.titulo || ''} onChange={e => setEdit({ ...edit, titulo: e.target.value })} className={input} /></div>
+                    <div><label className="text-xs text-white/50">Contenido</label><textarea value={edit.contenido || ''} onChange={e => setEdit({ ...edit, contenido: e.target.value })} className={input} rows={4} /></div>
+                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!edit.bloqueado} onChange={e => setEdit({ ...edit, bloqueado: e.target.checked })} /> Bloqueado (gris para el alumno hasta liberar)</label>
+                    <div className="flex gap-2"><button onClick={guardar} className={`${btn} bg-[#D4E655] text-black`}>Guardar</button><button onClick={() => setEdit(null)} className={`${btn} bg-white/5 text-white/60`}>Cancelar</button></div>
+                </div>
+            )}
+            {items.map(it => (
+                <div key={it.id} className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2">
+                    <span className="text-sm">Bloque {it.bloque}{it.titulo ? ` · ${it.titulo}` : ''} {it.bloqueado && <span className="text-[11px] text-white/40">(bloqueado)</span>}</span>
+                    <button onClick={() => setEdit(it)} className="text-[11px] text-white/40 hover:text-white">editar</button>
+                </div>
+            ))}
+        </div>
+    )
+}
+
+// ── Libres (régimen de regularidad) ───────────────────────────────────────────
+function Libres({ puedePagos }: { puedePagos: boolean }) {
+    const [items, setItems] = useState<any[]>([])
+    const [cargando, setCargando] = useState(true)
+    const [busy, setBusy] = useState<string | null>(null)
+    const cargar = async () => { setCargando(true); setItems(await getLibresLiga27Action()); setCargando(false) }
+    useEffect(() => { cargar() }, [])
+
+    const resolver = async (id: string) => {
+        setBusy(id); const r = await resolverLibreLiga27Action(id)
+        if (r.ok) { toast.success('Marcado como resuelto.'); cargar() } else toast.error(r.error || 'Error'); setBusy(null)
+    }
+    const linkExamenLibre = async (inscripcionId: string) => {
+        setBusy(inscripcionId)
+        const r = await generarLinkPagoLiga27Action({ inscripcionId, concepto: 'examen_libre' })
+        if (r.ok && r.url) { try { await navigator.clipboard.writeText(r.url) } catch { }; toast.success('Link de matrícula (examen libre) copiado.', { description: r.url, duration: 8000 }) }
+        else toast.error(r.error || 'Error')
+        setBusy(null)
+    }
+
+    if (cargando) return <Loader2 className="animate-spin text-white/40" />
+    if (!items.length) return <p className="text-white/40 text-sm">No hay alumnos libres. El sistema los detecta solo al cargar asistencia.</p>
+    return (
+        <div className="space-y-2">
+            {items.map(l => (
+                <div key={l.id} className={`${card} flex items-start justify-between gap-3 flex-wrap ${l.tipo === 'bloque' ? 'border-red-500/30' : ''}`}>
+                    <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-sm">{l.alumno}</span>
+                            <span className="text-white/50 text-sm">· {l.disciplina}</span>
+                            <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded ${l.tipo === 'bloque' ? 'bg-red-500/20 text-red-300' : 'bg-amber-500/20 text-amber-300'}`}>{l.tipo === 'bloque' ? 'Libre del bloque' : `Libre del mes ${l.mes}/${l.anio}`}</span>
+                            {l.resuelto && <span className="text-[10px] px-2 py-0.5 rounded bg-green-500/20 text-green-300">Resuelto</span>}
+                        </div>
+                        <p className="text-xs text-white/50 mt-1">{l.motivo} · {l.faltas} faltas</p>
+                    </div>
+                    {l.tipo === 'bloque' && !l.resuelto && (
+                        <div className="flex gap-2">
+                            {puedePagos && <button onClick={() => linkExamenLibre(l.inscripcion_id)} disabled={busy === l.inscripcion_id} className={`${btn} bg-[#009ee3]/80 hover:bg-[#009ee3] text-white flex items-center gap-1`}><Link2 size={13} /> Link examen libre</button>}
+                            <button onClick={() => resolver(l.id)} disabled={busy === l.id} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70`}>Marcar resuelto</button>
+                        </div>
+                    )}
+                </div>
+            ))}
         </div>
     )
 }

@@ -67,7 +67,7 @@ function SidebarContent() {
         if (userRole === 'visitante') return ['Inicio', 'Explorar'].includes(item.name)
 
         if (userRole === 'profesor') {
-            return ['Inicio', 'Mis Clases', 'Mis Pagos', 'Grupos', 'La Liga', 'Notificaciones', 'Mi Perfil', 'Sumate a Talent'].includes(item.name)
+            return ['Inicio', 'Mis Clases', 'Mis Pagos', 'Grupos', 'La Liga', 'La Liga 2027', 'Notificaciones', 'Mi Perfil', 'Sumate a Talent'].includes(item.name)
         }
 
         if (userRole === 'recepcion') {

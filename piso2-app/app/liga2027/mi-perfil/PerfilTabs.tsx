@@ -32,7 +32,130 @@ function Proximamente({ texto }: { texto: string }) {
     )
 }
 
-export default function PerfilTabs({ data }: { data: MiLiga27 }) {
+const NOTA_CLS: Record<string, string> = { A: 'bg-green-100 text-green-800', B: 'bg-amber-100 text-amber-800', C: 'bg-red-100 text-red-800' }
+const COND: Record<string, { txt: string; cls: string }> = {
+    regular: { txt: 'Regular', cls: 'bg-green-100 text-green-800' },
+    libre_mes: { txt: 'Libre del mes', cls: 'bg-amber-100 text-amber-800' },
+    libre_bloque: { txt: 'Libre del bloque', cls: 'bg-red-100 text-red-800' },
+}
+const BENEFICIOS: Record<string, string[]> = {
+    A: ['Prioridad en audiciones y castings', 'Acceso a salas para ensayar', 'Descuentos y becas', 'Acceso a oportunidades y actividades extra'],
+    B: ['Acceso a salas para ensayar (con reserva)', 'Descuentos seleccionados', 'Participación en actividades'],
+    C: ['Acompañamiento para mejorar tu promedio', 'Acceso a los contenidos del programa'],
+}
+
+// Tab de Evaluaciones
+function TabEvaluaciones({ academico }: { academico: any }) {
+    const evs = academico?.evaluaciones || []
+    if (!evs.length) return <Proximamente texto="Todavía no hay disciplinas cargadas." />
+    return (
+        <div className="divide-y divide-neutral-100">
+            {evs.map((d: any, i: number) => (
+                <div key={i} className="p-4">
+                    <div className="flex items-center justify-between">
+                        <span className="font-semibold text-sm">{d.disciplina}</span>
+                        <span className="text-[11px] text-neutral-400">Bloque {d.bloque}</span>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                        {d.examenes.map((e: any, j: number) => (
+                            <div key={j} className="flex items-start gap-3 text-sm">
+                                <span className="text-neutral-400 w-20 shrink-0">Examen {e.numero}</span>
+                                {e.puntaje
+                                    ? <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${NOTA_CLS[e.puntaje]}`}>{e.puntaje}</span>
+                                    : <span className="text-[11px] text-neutral-300">sin nota</span>}
+                                {e.observaciones && <span className="text-neutral-500 text-xs flex-1">{e.observaciones}</span>}
+                            </div>
+                        ))}
+                        {d.examenes.length === 0 && <p className="text-xs text-neutral-300">Sin exámenes aún.</p>}
+                    </div>
+                </div>
+            ))}
+        </div>
+    )
+}
+
+// Tab de Asistencias
+function TabAsistencias({ academico }: { academico: any }) {
+    const asis = academico?.asistencias || []
+    if (!asis.length) return <Proximamente texto="Todavía no hay asistencia registrada." />
+    return (
+        <div className="divide-y divide-neutral-100">
+            {asis.map((d: any, i: number) => {
+                const c = COND[d.condicion] || COND.regular
+                return (
+                    <div key={i} className="p-4">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                            <span className="font-semibold text-sm">{d.disciplina}</span>
+                            <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded ${c.cls}`}>{c.txt}</span>
+                        </div>
+                        <div className="flex gap-4 mt-2 text-xs text-neutral-600">
+                            <span>Presentes: <b>{d.presentes}</b></span>
+                            <span>Faltas: <b className={d.faltas > 0 ? 'text-red-600' : ''}>{d.faltas}</b></span>
+                            {d.justificadas > 0 && <span>Justificadas: <b>{d.justificadas}</b></span>}
+                        </div>
+                        {d.libre_bloque_motivo && <p className="text-xs text-red-600 mt-2 bg-red-50 rounded p-2">{d.libre_bloque_motivo}</p>}
+                        {d.condicion === 'libre_mes' && <p className="text-xs text-amber-700 mt-2">Quedaste libre de esta disciplina en el mes por acumular 2 faltas.</p>}
+                    </div>
+                )
+            })}
+        </div>
+    )
+}
+
+// Tab de Programa
+function TabPrograma({ academico }: { academico: any }) {
+    const prog = academico?.programa || []
+    const hayItems = prog.some((p: any) => p.items.length)
+    if (!hayItems) return <Proximamente texto="El programa y los contenidos por bloque van a aparecer acá." />
+    return (
+        <div className="divide-y divide-neutral-100">
+            {prog.map((d: any, i: number) => d.items.length > 0 && (
+                <div key={i} className="p-4">
+                    <span className="font-semibold text-sm">{d.disciplina}</span>
+                    <div className="mt-2 space-y-2">
+                        {d.items.map((it: any, j: number) => (
+                            <div key={j} className={`rounded-lg p-3 ${it.bloqueado ? 'bg-neutral-100 text-neutral-400' : 'bg-neutral-50'}`}>
+                                <div className="flex items-center gap-2">
+                                    {it.bloqueado && <Lock size={13} />}
+                                    <span className="text-sm font-medium">Bloque {it.bloque}{it.titulo ? ` · ${it.titulo}` : ''}</span>
+                                </div>
+                                {it.bloqueado
+                                    ? <p className="text-xs mt-1">Se desbloquea al aprobar el bloque anterior.</p>
+                                    : it.contenido && <p className="text-sm mt-1 whitespace-pre-line text-neutral-600">{it.contenido}</p>}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ))}
+        </div>
+    )
+}
+
+// Tab de Beneficios
+function TabBeneficios({ letra }: { letra: string }) {
+    return (
+        <div className="p-4 space-y-3">
+            <p className="text-sm text-neutral-500">Tus beneficios dependen de tu categoría general (promedio A/B/C). Hoy estás en <b className="text-neutral-900">{letra !== '—' ? letra : 'sin categoría aún'}</b>.</p>
+            {(['A', 'B', 'C'] as const).map(l => {
+                const activo = letra === l
+                return (
+                    <div key={l} className={`rounded-xl border p-4 ${activo ? 'border-black bg-neutral-50' : 'border-neutral-200 opacity-60'}`}>
+                        <div className="flex items-center gap-2">
+                            <span className={`text-sm font-bold px-2 py-0.5 rounded ${NOTA_CLS[l]}`}>{l}</span>
+                            {activo && <span className="text-[10px] font-semibold uppercase tracking-wider text-green-700">Tu categoría</span>}
+                        </div>
+                        <ul className="mt-2 space-y-1">
+                            {BENEFICIOS[l].map((b, i) => <li key={i} className="text-sm text-neutral-600 flex gap-2"><span>·</span>{b}</li>)}
+                        </ul>
+                    </div>
+                )
+            })}
+            <p className="text-[11px] text-neutral-400">Los beneficios se asignan al cierre de cada bloque. La lista final la define la dirección.</p>
+        </div>
+    )
+}
+
+export default function PerfilTabs({ data, academico }: { data: MiLiga27; academico?: any }) {
     const router = useRouter()
     const [tab, setTab] = useState('evaluaciones')
     const { perfil, inscripcion, pagos, bloqueado } = data
@@ -115,10 +238,10 @@ export default function PerfilTabs({ data }: { data: MiLiga27 }) {
                 </div>
 
                 <div className="bg-white border border-neutral-200 border-t-0 rounded-b-xl">
-                    {tab === 'evaluaciones' && <Proximamente texto="Tus notas por disciplina van a aparecer acá cuando arranque el programa." />}
-                    {tab === 'asistencias' && <Proximamente texto="Tu asistencia y tu condición de regularidad van a aparecer acá." />}
-                    {tab === 'programa' && <Proximamente texto="El programa y los contenidos por bloque van a aparecer acá." />}
-                    {tab === 'beneficios' && <Proximamente texto="Tus beneficios según tu categoría van a aparecer acá." />}
+                    {tab === 'evaluaciones' && <TabEvaluaciones academico={academico} />}
+                    {tab === 'asistencias' && <TabAsistencias academico={academico} />}
+                    {tab === 'programa' && <TabPrograma academico={academico} />}
+                    {tab === 'beneficios' && <TabBeneficios letra={letra} />}
                 </div>
             </div>
         </div>
