@@ -13,6 +13,7 @@
 import { createClient } from '@/utils/supabase/server-helper'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { montoAlquiler, senaDe } from '@/lib/alquiler-tarifa'
+import crypto from 'crypto'
 
 const getAdminClient = () => createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -82,62 +83,88 @@ export async function getOcupacionAlquilerAction(salaId: string, fecha: string):
 
 const toMin = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + (m || 0) }
 
-// Crea la reserva en estado 'pendiente' con hold de 15 min y devuelve la seña.
-// Revalida disponibilidad y recalcula el monto en el server (no confía en el cliente).
-export async function crearReservaAlquilerAction(payload: {
-    salaId: string; tipoUso: string; fecha: string; horaInicio: string; horaFin: string; personas?: number
-}): Promise<{ ok: boolean; error?: string; alquilerId?: string; sena?: number; monto?: number }> {
-    const u = await usuario()
-    if (!u) return { ok: false, error: 'Tenés que iniciar sesión.' }
-    const { salaId, tipoUso, fecha, horaInicio, horaFin } = payload
-    if (!salaId || !fecha || !horaInicio || !horaFin) return { ok: false, error: 'Faltan datos de la reserva.' }
-    if (!TIPOS_USO.includes(tipoUso)) return { ok: false, error: 'Actividad inválida.' }
+type SlotInput = { salaId: string; tipoUso: string; fecha: string; horaInicio: string; horaFin: string; personas?: number }
+type UsuarioRow = NonNullable<Awaited<ReturnType<typeof usuario>>>
 
-    const ini = toMin(horaInicio), fin = toMin(horaFin)
-    if (fin - ini < 60) return { ok: false, error: 'El mínimo es 1 hora.' }
-    if (ini % 30 !== 0 || fin % 30 !== 0) return { ok: false, error: 'Los bloques son de 30 minutos.' }
-    // No permitir fechas pasadas, ni horarios ya pasados si la fecha es hoy.
+// Valida un slot y arma la fila de insert (sin group_id/reservado_hasta, que se setean afuera).
+// `otros` = slots ya aceptados en el MISMO batch, para detectar superposición intra-reserva.
+async function prepararSlot(admin: ReturnType<typeof getAdminClient>, u: UsuarioRow, s: SlotInput, otros: { salaId: string; fecha: string; ini: number; fin: number }[]): Promise<
+    { ok: true; row: Record<string, any>; sena: number; monto: number; ini: number; fin: number } | { ok: false; error: string }
+> {
+    if (!s.salaId || !s.fecha || !s.horaInicio || !s.horaFin) return { ok: false, error: 'Faltan datos de la reserva.' }
+    if (!TIPOS_USO.includes(s.tipoUso)) return { ok: false, error: 'Actividad inválida.' }
+    const ini = toMin(s.horaInicio), fin = toMin(s.horaFin)
+    const etq = `(${s.fecha} ${s.horaInicio}) `
+    if (fin - ini < 60) return { ok: false, error: etq + 'El mínimo es 1 hora.' }
+    if (ini % 30 !== 0 || fin % 30 !== 0) return { ok: false, error: etq + 'Los bloques son de 30 minutos.' }
     const hoy = fmtFechaHoy()
-    if (fecha < hoy) return { ok: false, error: 'Elegí una fecha futura.' }
-    if (fecha === hoy && ini <= ahoraMinAR()) return { ok: false, error: 'Ese horario ya pasó. Elegí uno más tarde.' }
+    if (s.fecha < hoy) return { ok: false, error: etq + 'Elegí una fecha futura.' }
+    if (s.fecha === hoy && ini <= ahoraMinAR()) return { ok: false, error: etq + 'Ese horario ya pasó.' }
 
-    const admin = getAdminClient()
-    const { data: sala } = await admin.from('salas').select('*').eq('id', salaId).maybeSingle()
+    const { data: sala } = await admin.from('salas').select('*').eq('id', s.salaId).maybeSingle()
     if (!sala) return { ok: false, error: 'Sala no encontrada.' }
-
-    const monto = montoAlquiler(sala, tipoUso, fecha, horaInicio, horaFin)
-    if (monto <= 0) return { ok: false, error: 'No se pudo calcular la tarifa de esta sala.' }
+    const monto = montoAlquiler(sala, s.tipoUso, s.fecha, s.horaInicio, s.horaFin)
+    if (monto <= 0) return { ok: false, error: etq + 'No se pudo calcular la tarifa de esta sala.' }
     const sena = senaDe(monto)
 
-    // Re-chequeo de disponibilidad (por si tomaron el slot mientras elegía).
-    const ocup = await getOcupacionAlquilerAction(salaId, fecha)
-    const pisa = ocup.some(o => ini < toMin(o.fin) && fin > toMin(o.ini))
-    if (pisa) return { ok: false, error: 'Ese horario ya no está disponible. Elegí otro.' }
+    // Choque contra la DB.
+    const ocup = await getOcupacionAlquilerAction(s.salaId, s.fecha)
+    if (ocup.some(o => ini < toMin(o.fin) && fin > toMin(o.ini))) return { ok: false, error: etq + 'Ese horario ya no está disponible.' }
+    // Choque contra otros slots del mismo batch (misma sala + fecha).
+    if (otros.some(o => o.salaId === s.salaId && o.fecha === s.fecha && ini < o.fin && fin > o.ini)) return { ok: false, error: etq + 'Se superpone con otra fecha que agregaste.' }
+
+    const row: Record<string, any> = {
+        sala_id: s.salaId, fecha: s.fecha, hora_inicio: s.horaInicio, hora_fin: s.horaFin,
+        tipo_uso: s.tipoUso,
+        cantidad_personas: s.personas && s.personas > 0 ? Math.floor(s.personas) : 1,
+        monto_total: monto, monto_pagado: 0, sena_monto: sena,
+        estado: 'pendiente', estado_pago: 'pendiente',
+        user_id: u.id, cliente_nombre: u.nombre, cliente_email: u.email,
+        cliente_telefono: u.telefono, cliente_contacto: u.telefono || u.email,
+        origen: 'online',
+    }
+    return { ok: true, row, sena, monto, ini, fin }
+}
+
+// Crea 1..N reservas (multi-día) en estado 'pendiente' con hold de 15 min. Si son
+// varias comparten group_id. Valida y recalcula todo en el server; si algún slot
+// falla, NO inserta nada (todo o nada). Devuelve la seña total a pagar por MP.
+export async function crearReservasAlquilerGrupoAction(slots: SlotInput[]): Promise<{
+    ok: boolean; error?: string; groupId?: string; alquilerIds?: string[]; sena?: number; monto?: number; count?: number
+}> {
+    const u = await usuario()
+    if (!u) return { ok: false, error: 'Tenés que iniciar sesión.' }
+    if (!Array.isArray(slots) || slots.length === 0) return { ok: false, error: 'Agregá al menos una fecha.' }
+    if (slots.length > 12) return { ok: false, error: 'Máximo 12 reservas por operación.' }
+
+    const admin = getAdminClient()
+    const aceptados: { salaId: string; fecha: string; ini: number; fin: number }[] = []
+    const filas: Record<string, any>[] = []
+    let totalSena = 0, totalMonto = 0
+    for (const s of slots) {
+        const r = await prepararSlot(admin, u, s, aceptados)
+        if (!r.ok) return { ok: false, error: r.error }
+        aceptados.push({ salaId: s.salaId, fecha: s.fecha, ini: r.ini, fin: r.fin })
+        filas.push(r.row)
+        totalSena += r.sena
+        totalMonto += r.monto
+    }
 
     const reservadoHasta = new Date(Date.now() + HOLD_MIN * 60 * 1000).toISOString()
-    const { data: ins, error } = await admin.from('alquileres').insert({
-        sala_id: salaId,
-        fecha,
-        hora_inicio: horaInicio,
-        hora_fin: horaFin,
-        tipo_uso: tipoUso,
-        cantidad_personas: payload.personas && payload.personas > 0 ? Math.floor(payload.personas) : 1,
-        monto_total: monto,
-        monto_pagado: 0,
-        sena_monto: sena,
-        estado: 'pendiente',
-        estado_pago: 'pendiente',
-        user_id: u.id,
-        cliente_nombre: u.nombre,
-        cliente_email: u.email,
-        cliente_telefono: u.telefono,
-        cliente_contacto: u.telefono || u.email,
-        origen: 'online',
-        reservado_hasta: reservadoHasta,
-    }).select('id').single()
+    const groupId = filas.length > 1 ? crypto.randomUUID() : null
+    for (const f of filas) { f.reservado_hasta = reservadoHasta; if (groupId) f.group_id = groupId }
+
+    const { data: ins, error } = await admin.from('alquileres').insert(filas).select('id')
     if (error) return { ok: false, error: error.message }
 
-    return { ok: true, alquilerId: ins.id, sena, monto }
+    return { ok: true, groupId: groupId || undefined, alquilerIds: (ins || []).map((r: any) => r.id), sena: totalSena, monto: totalMonto, count: filas.length }
+}
+
+// Compat: reserva de un solo slot (usa el flujo de grupo con 1 elemento).
+export async function crearReservaAlquilerAction(payload: SlotInput): Promise<{ ok: boolean; error?: string; alquilerId?: string; sena?: number; monto?: number }> {
+    const r = await crearReservasAlquilerGrupoAction([payload])
+    if (!r.ok) return { ok: false, error: r.error }
+    return { ok: true, alquilerId: r.alquilerIds?.[0], sena: r.sena, monto: r.monto }
 }
 
 function fmtFechaHoy(): string {
@@ -158,8 +185,91 @@ export async function getMiReservaAlquilerAction(alquilerId: string) {
     if (!u || !alquilerId) return null
     const admin = getAdminClient()
     const { data } = await admin.from('alquileres')
-        .select('id, fecha, hora_inicio, hora_fin, monto_total, monto_pagado, sena_monto, estado, estado_pago, user_id, sala:salas(nombre, sede:sedes(nombre))')
+        .select('id, fecha, hora_inicio, hora_fin, monto_total, monto_pagado, sena_monto, estado, estado_pago, user_id, group_id, sala:salas(nombre, sede:sedes(nombre))')
         .eq('id', alquilerId).maybeSingle()
     if (!data || data.user_id !== u.id) return null
     return data
+}
+
+// ── FASE 2: Mis reservas + cancelación (política 48hs) + saldo ────────────────
+
+// Horas (AR) desde ahora hasta el inicio de una reserva. Negativo = ya pasó.
+function horasHastaAR(fecha: string, horaInicio: string): number {
+    const inicio = new Date(`${fecha}T${(horaInicio || '00:00').slice(0, 5)}:00-03:00`).getTime()
+    return (inicio - Date.now()) / 3_600_000
+}
+
+export type MiReservaAlquiler = {
+    id: string; fecha: string; hora_inicio: string; hora_fin: string; tipo_uso: string | null
+    monto_total: number; monto_pagado: number; sena_monto: number; estado: string; estado_pago: string
+    group_id: string | null; sala: any
+    saldo: number; horasHasta: number; puedeCancelar: boolean; puedePagarSaldo: boolean; senaSeDevuelve: boolean
+}
+
+// Reservas del usuario logueado (sin las canceladas), próximas primero, con los
+// flags de acción ya calculados (pagar saldo / cancelar / si la seña se devuelve).
+export async function getMisReservasAlquilerAction(): Promise<MiReservaAlquiler[]> {
+    const u = await usuario()
+    if (!u) return []
+    const admin = getAdminClient()
+    const { data } = await admin.from('alquileres')
+        .select('id, fecha, hora_inicio, hora_fin, tipo_uso, monto_total, monto_pagado, sena_monto, estado, estado_pago, group_id, sala:salas(nombre, sede:sedes(nombre))')
+        .eq('user_id', u.id).neq('estado', 'cancelado')
+        .order('fecha', { ascending: true }).order('hora_inicio', { ascending: true })
+    return (data || []).map((r: any) => {
+        const saldo = Math.max(0, Number(r.monto_total || 0) - Number(r.monto_pagado || 0))
+        const horasHasta = horasHastaAR(r.fecha, r.hora_inicio)
+        const activa = r.estado !== 'cancelado' && horasHasta > 0
+        return {
+            ...r,
+            saldo,
+            horasHasta,
+            puedeCancelar: activa,
+            // Puede pagar saldo online si ya confirmó (pagó seña) y le falta plata.
+            puedePagarSaldo: activa && saldo > 0 && r.estado_pago === 'seña_pagada',
+            senaSeDevuelve: horasHasta >= 48,
+        }
+    })
+}
+
+// Cancela una reserva del usuario. Política: con 48hs+ de anticipación la seña
+// queda a favor (la devolución la coordina recepción); dentro de 48hs se pierde.
+// La reserva pasa a 'cancelado' y libera el horario automáticamente.
+export async function cancelarReservaAlquilerAction(alquilerId: string): Promise<{ ok: boolean; error?: string; senaSeDevuelve?: boolean }> {
+    const u = await usuario()
+    if (!u || !alquilerId) return { ok: false, error: 'Iniciá sesión.' }
+    const admin = getAdminClient()
+    const { data: alq } = await admin.from('alquileres')
+        .select('id, user_id, fecha, hora_inicio, estado, sena_monto, notas, cliente_nombre, sala:salas(nombre)')
+        .eq('id', alquilerId).maybeSingle()
+    if (!alq || alq.user_id !== u.id) return { ok: false, error: 'Reserva no encontrada.' }
+    if (alq.estado === 'cancelado') return { ok: false, error: 'La reserva ya está cancelada.' }
+
+    const horasHasta = horasHastaAR(alq.fecha, alq.hora_inicio)
+    if (horasHasta <= 0) return { ok: false, error: 'La reserva ya pasó, no se puede cancelar.' }
+    const senaSeDevuelve = horasHasta >= 48
+
+    const hoyAR = new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date())
+    const nota = `[Cancelado por el usuario ${hoyAR}] Seña: ${senaSeDevuelve ? 'a favor (coordinar devolución)' : 'perdida (<48hs)'}.`
+    const { error } = await admin.from('alquileres').update({
+        estado: 'cancelado',
+        reservado_hasta: null,
+        notas: alq.notas ? `${alq.notas}\n${nota}` : nota,
+    }).eq('id', alquilerId)
+    if (error) return { ok: false, error: error.message }
+
+    // Avisar a recepción/admin (para gestionar la devolución si corresponde).
+    try {
+        const salaNombre = (alq as any).sala?.nombre || 'sala'
+        const { data: staff } = await admin.from('profiles').select('id').in('rol', ['admin', 'recepcion'])
+        if (staff?.length) await admin.from('notificaciones').insert(staff.map((s: any) => ({
+            usuario_id: s.id,
+            titulo: '🏠 Alquiler cancelado',
+            mensaje: `${alq.cliente_nombre || 'Un usuario'} canceló su alquiler (${salaNombre}, ${alq.fecha}). Seña: ${senaSeDevuelve ? 'a favor' : 'perdida'}.`,
+            link: '/alquileres',
+            leido: false,
+        })))
+    } catch { /* best-effort */ }
+
+    return { ok: true, senaSeDevuelve }
 }

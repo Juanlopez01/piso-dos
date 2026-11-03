@@ -158,16 +158,32 @@ export async function POST(request: Request) {
 
             // ===== ALQUILER de sala: confirmar seña/saldo + asentar en el pozo =====
             // Idempotente por estado dentro del helper. Cae en caja sin turno (pozo).
-            if (metadata.tipo_pago === 'alquiler' && metadata.alquiler_id) {
+            if (metadata.tipo_pago === 'alquiler' && (metadata.alquiler_id || metadata.group_id)) {
                 const { aplicarEfectoPagoAlquiler } = await import('@/app/actions/_alquiler-pago');
-                const concepto = metadata.concepto === 'saldo' ? 'saldo' : 'sena';
-                const r = await aplicarEfectoPagoAlquiler(supabase, metadata.alquiler_id, concepto, Number(payment.transaction_amount) || 0);
-                if (r.ok && !r.yaAplicado) {
+                const totalPagado = Number(payment.transaction_amount) || 0;
+                let aplicado = false;
+                let detalle = '';
+                if (metadata.group_id) {
+                    // Multi-día: la seña de cada reserva del grupo (su propio sena_monto).
+                    const { data: alqs } = await supabase.from('alquileres')
+                        .select('id, sena_monto, estado_pago').eq('group_id', metadata.group_id);
+                    for (const a of (alqs || [])) {
+                        const r = await aplicarEfectoPagoAlquiler(supabase, a.id, 'sena', Number(a.sena_monto) || 0);
+                        if (r.ok && !r.yaAplicado) aplicado = true;
+                    }
+                    detalle = `Se reservaron ${(alqs || []).length} salas con seña por $${totalPagado.toLocaleString('es-AR')}.`;
+                } else {
+                    const concepto = metadata.concepto === 'saldo' ? 'saldo' : 'sena';
+                    const r = await aplicarEfectoPagoAlquiler(supabase, metadata.alquiler_id, concepto, totalPagado);
+                    aplicado = r.ok && !r.yaAplicado;
+                    detalle = `Se ${concepto === 'sena' ? 'reservó una sala con seña' : 'pagó el saldo de un alquiler'} por $${totalPagado.toLocaleString('es-AR')}.`;
+                }
+                if (aplicado) {
                     try {
                         const { data: staffAlq } = await supabase.from('profiles').select('id').in('rol', ['admin', 'recepcion']);
                         if (staffAlq?.length) await supabase.from('notificaciones').insert(staffAlq.map((s: any) => ({
                             usuario_id: s.id, titulo: '🏠 Alquiler de sala',
-                            mensaje: `Se ${concepto === 'sena' ? 'reservó una sala con seña' : 'pagó el saldo de un alquiler'} por $${Number(payment.transaction_amount).toLocaleString('es-AR')}.`,
+                            mensaje: detalle,
                             link: '/alquileres', leido: false,
                         })));
                     } catch { /* notif best-effort */ }
