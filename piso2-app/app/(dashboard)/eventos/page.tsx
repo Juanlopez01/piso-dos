@@ -491,22 +491,26 @@ const agregarEntrada = async () => {
 
     // --- edición de datos de la función (nombre, fecha, lugar, descripción) ---
     const [editInfo, setEditInfo] = useState(false)
-    const [infoVals, setInfoVals] = useState({ nombre: '', fecha: '', lugar: '', descripcion: '' })
+    const [infoVals, setInfoVals] = useState({ nombre: '', fecha: '', fechaFin: '', salaId: '', lugar: '', descripcion: '' })
+    const [salasEv, setSalasEv] = useState<any[]>([])
     const [guardandoInfo, setGuardandoInfo] = useState(false)
     const abrirEditInfo = () => {
         if (!evento) return
         setInfoVals({
             nombre: evento.nombre || '',
             fecha: toLocalArg(evento.fecha), // ISO -> hora de pared en Argentina para el datetime-local
+            fechaFin: toLocalArg((evento as any).fecha_fin), // hora de fin (bloquea la sala al alquilar)
+            salaId: (evento as any).sala_id || '',
             lugar: evento.lugar || '',
             descripcion: evento.descripcion || '',
         })
+        if (!salasEv.length) getSalasAlquilerAction().then(setSalasEv).catch(() => { })
         setEditInfo(true)
     }
     const guardarInfo = async () => {
         if (!infoVals.nombre.trim()) return toast.error('Poné un nombre a la función.')
         setGuardandoInfo(true)
-        const patch = { nombre: infoVals.nombre.trim(), fecha: infoVals.fecha || null, lugar: infoVals.lugar.trim(), descripcion: infoVals.descripcion.trim() }
+        const patch = { nombre: infoVals.nombre.trim(), fecha: infoVals.fecha || null, fecha_fin: infoVals.fechaFin || null, sala_id: infoVals.salaId || null, lugar: infoVals.lugar.trim(), descripcion: infoVals.descripcion.trim() }
         const r = await editarEventoAction(eventoId, patch)
         if (r.ok) { setEvento(ev => ev ? { ...ev, ...patch } as any : ev); setEditInfo(false); toast.success('Función actualizada') }
         else toast.error((r as any).error || 'Error')
@@ -734,6 +738,15 @@ const agregarEntrada = async () => {
                     <div className="grid md:grid-cols-2 gap-3">
                         <div><label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Fecha y hora</label><input type="datetime-local" value={infoVals.fecha} onChange={e => setInfoVals(v => ({ ...v, fecha: e.target.value }))} className="inp w-full" /></div>
                         <div><label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Lugar</label><input value={infoVals.lugar} onChange={e => setInfoVals(v => ({ ...v, lugar: e.target.value }))} placeholder="Teatro / Sede…" className="inp w-full" /></div>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-3">
+                        <div><label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Hora de fin (para que bloquee la sala al alquilar)</label><input type="datetime-local" value={infoVals.fechaFin} onChange={e => setInfoVals(v => ({ ...v, fechaFin: e.target.value }))} className="inp w-full" /></div>
+                        <div><label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Sala (opcional)</label>
+                            <select value={infoVals.salaId} onChange={e => setInfoVals(v => ({ ...v, salaId: e.target.value }))} className="inp w-full">
+                                <option value="">Sin sala asignada</option>
+                                {salasEv.map((s: any) => <option key={s.id} value={s.id}>{s.nombre}{s.sede?.nombre ? ` · ${s.sede.nombre}` : ''}</option>)}
+                            </select>
+                        </div>
                     </div>
                     <div><label className="text-[10px] uppercase tracking-widest text-gray-500 font-bold block mb-1">Descripción</label><textarea value={infoVals.descripcion} onChange={e => setInfoVals(v => ({ ...v, descripcion: e.target.value }))} rows={3} className="inp w-full resize-none" /></div>
                     <div className="flex justify-end gap-2">
