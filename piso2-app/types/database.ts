@@ -501,6 +501,11 @@ export type Database = {
                     notas_recepcion: string | null
                     cantidad_personas: number | null
                     group_id: string | null
+                    user_id: string | null
+                    sena_monto: number | null
+                    reservado_hasta: string | null
+                    mp_ref: string | null
+                    origen: string | null
                 }
                 Insert: any
                 Update: any

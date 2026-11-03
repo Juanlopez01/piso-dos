@@ -1,299 +1,261 @@
 'use client'
 
-import { createClient } from '@/utils/supabase/client'
-import { useEffect, useState, Suspense } from 'react'
-import { format, startOfDay, endOfDay, isBefore, startOfToday } from 'date-fns'
-import { es } from 'date-fns/locale'
-import { Calendar, Clock, MapPin, Loader2, Music, AlertCircle, MessageCircle, Info, CheckCircle } from 'lucide-react'
+// Alquiler de sala — AUTOSERVICIO para el usuario logueado de 2M.
+// Wizard 3 pasos (Sala/fecha → Horario → Confirmar), disponibilidad en vivo
+// (clases + alquileres + obras) y pago de la SEÑA (50%) por MP que guarda la sala.
+
+import { useEffect, useMemo, useState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Toaster, toast } from 'sonner'
+import { Loader2, Calendar, Clock, MapPin, CheckCircle2, ArrowRight, ArrowLeft, Users } from 'lucide-react'
+import { getSalasAlquilerAction, getOcupacionAlquilerAction, crearReservaAlquilerAction, getMiReservaAlquilerAction } from '@/app/actions/alquileres-online'
+import { montoAlquiler, senaDe } from '@/lib/alquiler-tarifa'
 
-type Sala = { id: string; nombre: string; sede_id: string; sede: { nombre: string } }
-type Ocupacion = { inicio: Date; fin: Date; motivo: string }
+type Sala = any
+const ACTIVIDADES = [{ k: 'ensayo', l: 'Ensayo' }, { k: 'clase', l: 'Clase' }, { k: 'produccion', l: 'Producción' }]
+const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0) }
+const toHHMM = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+const APERTURA = 8 * 60, CIERRE = 23 * 60 // 08:00–23:00, bloques de 30'
 
-// 👇 1. Le sacamos el export default y lo renombramos a Content
-function PublicAlquilerContent() {
-    const [supabase] = useState(() => createClient())
-    const [loading, setLoading] = useState(true)
+function hoyAR(): string {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+}
 
-    // Datos
+// Minutos del día actual en hora AR (para no ofrecer horarios ya pasados si la fecha es hoy).
+function ahoraMinAR(): number {
+    const [h, m] = new Intl.DateTimeFormat('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()).split(':').map(Number)
+    return h * 60 + (m || 0)
+}
+
+function AlquilarContent() {
+    const params = useSearchParams()
     const [salas, setSalas] = useState<Sala[]>([])
-    const [ocupaciones, setOcupaciones] = useState<Ocupacion[]>([])
+    const [loading, setLoading] = useState(true)
+    const [step, setStep] = useState(1)
 
-    // Formulario
-    const [selectedSalaId, setSelectedSalaId] = useState('')
-    const [selectedDate, setSelectedDate] = useState<string>('')
-    const [horaInicio, setHoraInicio] = useState('10:00')
-    const [horaFin, setHoraFin] = useState('12:00')
+    const [salaId, setSalaId] = useState('')
+    const [tipoUso, setTipoUso] = useState('ensayo')
+    const [fecha, setFecha] = useState('')
+    const [personas, setPersonas] = useState(1)
+    const [horaInicio, setHoraInicio] = useState('')
+    const [duracion, setDuracion] = useState(60) // minutos
+    const [ocup, setOcup] = useState<{ ini: string; fin: string; motivo: string }[]>([])
+    const [creando, setCreando] = useState(false)
 
-    const numeroWhatsApp = '5491171190301' // Línea de alquileres de Piso 2
+    // Resultado de MP al volver (?pago=ok&id=)
+    const [reservaOk, setReservaOk] = useState<any | null>(null)
 
+    const sala = useMemo(() => salas.find(s => s.id === salaId), [salas, salaId])
+
+    useEffect(() => { (async () => { setSalas(await getSalasAlquilerAction()); setLoading(false) })() }, [])
+
+    // Volvió del pago: mostrar confirmación / aviso.
     useEffect(() => {
-        fetchSalas()
-    }, [])
+        const pago = params.get('pago'); const id = params.get('id')
+        if (!pago || !id) return
+        if (pago === 'ok') { getMiReservaAlquilerAction(id).then(r => { if (r) setReservaOk(r) }) }
+        else if (pago === 'pendiente') toast.info('Tu pago quedó pendiente. Cuando se acredite, te guardamos la sala.')
+        else if (pago === 'error') toast.error('El pago no se completó. Probá de nuevo.')
+    }, [params])
 
+    // Traer ocupación al elegir sala + fecha.
     useEffect(() => {
-        if (selectedSalaId && selectedDate) {
-            fetchOcupaciones(selectedSalaId, selectedDate)
-        } else {
-            setOcupaciones([])
-        }
-    }, [selectedSalaId, selectedDate])
+        if (!salaId || !fecha) { setOcup([]); return }
+        getOcupacionAlquilerAction(salaId, fecha).then(setOcup)
+        setHoraInicio('')
+    }, [salaId, fecha])
 
-    const fetchSalas = async () => {
-        setLoading(true)
-        const { data } = await supabase.from('salas').select('id, nombre, sede_id, sede:sedes(nombre)').order('nombre')
-        if (data) setSalas(data as any)
-        setLoading(false)
-    }
+    const ocupMin = useMemo(() => ocup.map(o => ({ ini: toMin(o.ini), fin: toMin(o.fin), motivo: o.motivo })), [ocup])
+    const libre = (ini: number, fin: number) => !ocupMin.some(o => ini < o.fin && fin > o.ini)
 
-    const fetchOcupaciones = async (salaId: string, fechaStr: string) => {
-        // Desarmamos la fecha para forzar la zona horaria local (Argentina)
-        const [year, month, day] = fechaStr.split('-').map(Number)
-        const startOfDayObj = new Date(year, month - 1, day, 0, 0, 0)
-        const endOfDayObj = new Date(year, month - 1, day, 23, 59, 59)
+    // Horas de inicio posibles (con al menos 1h libre por delante).
+    // Si la fecha es hoy, no ofrecer horarios que ya pasaron (mín. 1h de anticipación).
+    const inicios = useMemo(() => {
+        const minDesde = fecha === hoyAR() ? ahoraMinAR() + 60 : 0
+        const arr: string[] = []
+        for (let m = APERTURA; m <= CIERRE - 60; m += 30) if (m >= minDesde && libre(m, m + 60)) arr.push(toHHMM(m))
+        return arr
+    }, [ocupMin, fecha])
 
-        // Traer clases (que usan timestamp)
-        const { data: clases } = await supabase
-            .from('clases')
-            .select('inicio, fin, nombre')
-            .eq('sala_id', salaId)
-            .neq('estado', 'cancelada')
-            .gte('inicio', startOfDayObj.toISOString())
-            .lte('fin', endOfDayObj.toISOString())
+    // Duraciones posibles desde la hora de inicio elegida.
+    const duraciones = useMemo(() => {
+        if (!horaInicio) return []
+        const start = toMin(horaInicio); const out: number[] = []
+        for (let d = 60; start + d <= CIERRE; d += 30) { if (libre(start, start + d)) out.push(d); else break }
+        return out
+    }, [horaInicio, ocupMin])
 
-        // Traer alquileres (que usan fecha YYYY-MM-DD y horas separadas)
-        const { data: alquileres } = await supabase
-            .from('alquileres')
-            .select('fecha, hora_inicio, hora_fin')
-            .eq('sala_id', salaId)
-            .eq('fecha', fechaStr)
-            .in('estado', ['confirmado', 'pagado', 'pendiente']) // Pendiente bloquea para que no pidan 2 veces lo mismo
+    const horaFin = horaInicio ? toHHMM(toMin(horaInicio) + duracion) : ''
+    const monto = sala && fecha && horaInicio ? montoAlquiler(sala, tipoUso, fecha, horaInicio, horaFin) : 0
+    const sena = senaDe(monto)
+    const durLabel = (d: number) => d % 60 === 0 ? `${d / 60}h` : `${Math.floor(d / 60)}h 30min`
 
-        const ocupacionesDia: Ocupacion[] = []
-
-        if (clases) {
-            clases.forEach((c: any) => ocupacionesDia.push({
-                inicio: new Date(c.inicio),
-                fin: new Date(c.fin),
-                motivo: 'Clase'
-            }))
-        }
-
-        if (alquileres) {
-            alquileres.forEach((a: any) => {
-                // Reconstruimos la fecha/hora de inicio y fin localmente
-                const [hIni, mIni] = a.hora_inicio.split(':').map(Number)
-                const [hFin, mFin] = a.hora_fin.split(':').map(Number)
-
-                ocupacionesDia.push({
-                    inicio: new Date(year, month - 1, day, hIni, mIni),
-                    fin: new Date(year, month - 1, day, hFin, mFin),
-                    motivo: 'Ocupado'
-                })
+    const reservarYPagar = async () => {
+        if (!salaId || !fecha || !horaInicio) return toast.error('Completá la reserva.')
+        setCreando(true)
+        const r = await crearReservaAlquilerAction({ salaId, tipoUso, fecha, horaInicio, horaFin, personas })
+        if (!r.ok || !r.alquilerId) { toast.error(r.error || 'No se pudo crear la reserva.'); setCreando(false); return }
+        try {
+            const resp = await fetch('/api/mercadopago/alquiler-preference', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ alquilerId: r.alquilerId, concepto: 'sena' }),
             })
-        }
-
-        // Ordenar cronológicamente
-        ocupacionesDia.sort((a, b) => a.inicio.getTime() - b.inicio.getTime())
-        setOcupaciones(ocupacionesDia)
+            const data = await resp.json()
+            if (data.url) { window.location.href = data.url; return }
+            toast.error(data.error || 'No se pudo iniciar el pago.')
+        } catch { toast.error('No se pudo iniciar el pago.') }
+        setCreando(false)
     }
 
-    const checkDisponibilidad = () => {
-        if (!selectedDate || !horaInicio || !horaFin) return true
+    if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-white/40" /></div>
 
-        const dateObj = new Date(selectedDate + 'T00:00:00')
-        const [hStart, mStart] = horaInicio.split(':').map(Number)
-        const [hEnd, mEnd] = horaFin.split(':').map(Number)
-
-        const reqStart = new Date(dateObj)
-        reqStart.setHours(hStart, mStart, 0, 0)
-
-        const reqEnd = new Date(dateObj)
-        reqEnd.setHours(hEnd, mEnd, 0, 0)
-
-        if (reqEnd <= reqStart) {
-            toast.error("La hora de fin debe ser mayor a la de inicio")
-            return false
-        }
-
-        // Verificar si es en el pasado
-        if (reqStart < new Date()) {
-            toast.error("No podés reservar en un horario pasado")
-            return false
-        }
-
-        // Verificar superposición
-        const isConflict = ocupaciones.some(oc => {
-            return (reqStart < oc.fin && reqEnd > oc.inicio)
-        })
-
-        if (isConflict) {
-            toast.error("¡El horario seleccionado se pisa con otra actividad!")
-            return false
-        }
-
-        return true
+    // Pantalla de éxito tras pagar la seña.
+    if (reservaOk) {
+        const s = Array.isArray(reservaOk.sala) ? reservaOk.sala[0] : reservaOk.sala
+        const saldo = Number(reservaOk.monto_total || 0) - Number(reservaOk.monto_pagado || 0)
+        return (
+            <div className="min-h-screen bg-[#09090b] text-white flex flex-col items-center justify-center px-6 text-center">
+                <CheckCircle2 size={48} className="text-[#D4E655]" />
+                <h1 className="text-2xl font-black uppercase tracking-tight mt-4">¡Sala reservada!</h1>
+                <p className="text-white/60 text-sm mt-2 max-w-sm">
+                    {s?.nombre}{s?.sede?.nombre ? ` · ${s.sede.nombre}` : ''} · {reservaOk.fecha} · {String(reservaOk.hora_inicio).slice(0, 5)}–{String(reservaOk.hora_fin).slice(0, 5)}.
+                </p>
+                <p className="text-white/60 text-sm mt-1">Seña pagada: <b className="text-white">${Number(reservaOk.monto_pagado).toLocaleString('es-AR')}</b>{saldo > 0 && <> · Saldo: <b className="text-white">${saldo.toLocaleString('es-AR')}</b> (lo pagás online o en el lugar).</>}</p>
+                <a href="/alquilar-sala" className="mt-8 bg-[#D4E655] text-black font-black uppercase tracking-[0.2em] text-xs px-6 py-3 rounded-xl">Reservar otra</a>
+            </div>
+        )
     }
 
-    const handleSolicitar = () => {
-        if (!selectedSalaId || !selectedDate) {
-            return toast.error("Completá todos los campos")
-        }
-
-        if (!checkDisponibilidad()) return
-
-        const sala = salas.find(s => s.id === selectedSalaId)
-        const dateObj = new Date(selectedDate + 'T00:00:00')
-        const fechaFormateada = format(dateObj, "EEEE d 'de' MMMM", { locale: es })
-
-        const mensaje = `¡Hola! 👋 Quería consultar el presupuesto para alquilar una sala.\n\n` +
-            `🏢 *Sala:* ${sala?.nombre} (${sala?.sede?.nombre})\n` +
-            `📅 *Fecha:* ${fechaFormateada}\n` +
-            `⏰ *Horario:* ${horaInicio} a ${horaFin} hs\n\n` +
-            `¿Me confirman disponibilidad y tarifas? ¡Gracias!`
-
-        const url = `https://wa.me/${numeroWhatsApp}?text=${encodeURIComponent(mensaje)}`
-        window.open(url, '_blank')
-    }
-
-    if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
-
-    // Agrupar salas por sede para el select
-    const sedesUnicas = Array.from(new Set(salas.map(s => s.sede.nombre)))
+    const Paso = ({ n, label }: { n: number; label: string }) => (
+        <div className={`flex items-center gap-2 text-[11px] font-black uppercase tracking-widest ${step === n ? 'text-[#D4E655]' : step > n ? 'text-white/60' : 'text-white/30'}`}>
+            <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${step >= n ? 'bg-[#D4E655] text-black' : 'bg-white/10'}`}>{n}</span>{label}
+        </div>
+    )
 
     return (
-        <div className="p-4 md:p-8 min-h-screen bg-[#050505] text-white pb-32 animate-in fade-in">
+        <div className="min-h-screen bg-[#09090b] text-white">
             <Toaster position="top-center" richColors theme="dark" />
+            <div className="max-w-2xl mx-auto px-5 py-8">
+                <h1 className="text-3xl font-black uppercase tracking-tighter mb-1">Reservá la sala</h1>
+                <p className="text-white/40 text-sm mb-6">Elegí sala y horario, y guardás tu lugar con una seña del 50%.</p>
 
-            <div className="max-w-3xl mx-auto">
-                {/* HEADER */}
-                <div className="text-center mb-10">
-                    <div className="w-16 h-16 bg-[#D4E655]/10 rounded-full flex items-center justify-center mx-auto mb-4 text-[#D4E655]">
-                        <Music size={32} />
-                    </div>
-                    <h1 className="text-3xl md:text-5xl font-black uppercase tracking-tighter text-white mb-2">
-                        Alquilar Sala
-                    </h1>
-                    <p className="text-gray-400 text-sm font-medium">
-                        Consultá disponibilidad y pedí tu presupuesto por WhatsApp.
-                    </p>
+                <div className="flex items-center gap-4 mb-8">
+                    <Paso n={1} label="Sala y fecha" /><div className="flex-1 h-px bg-white/10" />
+                    <Paso n={2} label="Horario" /><div className="flex-1 h-px bg-white/10" />
+                    <Paso n={3} label="Confirmar" />
                 </div>
 
-                <div className="bg-[#09090b] border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl space-y-8">
-
-                    {/* PASO 1: SALA Y FECHA */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                            <label className="text-[10px] font-black text-[#D4E655] uppercase tracking-widest flex items-center gap-2"><MapPin size={14} /> 1. Elegí la Sala</label>
-                            <select
-                                value={selectedSalaId}
-                                onChange={e => setSelectedSalaId(e.target.value)}
-                                className="w-full bg-[#111] border border-white/20 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors"
-                            >
-                                <option value="">Seleccionar sala...</option>
-                                {sedesUnicas.map(sedeNombre => (
-                                    <optgroup key={sedeNombre} label={`Sede ${sedeNombre}`} className="bg-black text-gray-400">
-                                        {salas.filter(s => s.sede.nombre === sedeNombre).map(sala => (
-                                            <option key={sala.id} value={sala.id} className="text-white">{sala.nombre}</option>
-                                        ))}
-                                    </optgroup>
+                {/* PASO 1 */}
+                {step === 1 && (
+                    <div className="space-y-5">
+                        <div>
+                            <label className="text-[10px] font-black tracking-widest uppercase text-white/50 block mb-2"><MapPin size={12} className="inline mr-1" /> Sala</label>
+                            <div className="grid sm:grid-cols-2 gap-2">
+                                {salas.map(s => (
+                                    <button key={s.id} onClick={() => setSalaId(s.id)} className={`text-left border rounded-xl px-4 py-3 transition-colors ${salaId === s.id ? 'border-[#D4E655] bg-[#D4E655]/10' : 'border-white/10 hover:border-white/30'}`}>
+                                        <div className="text-sm font-semibold">{s.nombre}</div>
+                                        <div className="text-[11px] text-white/40">{s.sede?.nombre || ''}</div>
+                                    </button>
                                 ))}
-                            </select>
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-[10px] font-black text-[#D4E655] uppercase tracking-widest flex items-center gap-2"><Calendar size={14} /> 2. ¿Qué día?</label>
-                            <input
-                                type="date"
-                                min={format(new Date(), 'yyyy-MM-dd')}
-                                value={selectedDate}
-                                onChange={e => setSelectedDate(e.target.value)}
-                                className="w-full bg-[#111] border border-white/20 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors [color-scheme:dark]"
-                            />
-                        </div>
-                    </div>
-
-                    {/* VISTA DE DISPONIBILIDAD (Aparece al elegir sala y día) */}
-                    {selectedSalaId && selectedDate && (
-                        <div className="animate-in fade-in slide-in-from-bottom-4 border-t border-white/10 pt-8">
-                            <div className="mb-6">
-                                <h3 className="text-sm font-black text-white uppercase tracking-widest mb-4">Disponibilidad del Día</h3>
-
-                                {ocupaciones.length > 0 ? (
-                                    <div className="space-y-2 bg-[#111] p-4 rounded-xl border border-white/5">
-                                        <p className="text-[10px] text-gray-500 uppercase font-bold mb-3 flex items-center gap-1"><AlertCircle size={12} /> Horarios ya ocupados:</p>
-                                        <div className="flex flex-wrap gap-2">
-                                            {ocupaciones.map((oc, idx) => (
-                                                <div key={idx} className="bg-white/5 border border-white/10 px-3 py-2 rounded-lg flex items-center gap-2">
-                                                    <span className="text-xs font-mono text-gray-300">
-                                                        {format(oc.inicio, 'HH:mm')} a {format(oc.fin, 'HH:mm')}
-                                                    </span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="bg-green-500/10 border border-green-500/20 p-4 rounded-xl text-green-400 text-xs font-bold uppercase flex items-center gap-2">
-                                        <CheckCircle size={16} /> La sala está completamente libre este día.
-                                    </div>
-                                )}
                             </div>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black tracking-widest uppercase text-white/50 block mb-2">Actividad</label>
+                            <div className="flex gap-2">
+                                {ACTIVIDADES.map(a => (
+                                    <button key={a.k} onClick={() => setTipoUso(a.k)} className={`px-4 py-2 rounded-lg text-sm transition-colors ${tipoUso === a.k ? 'bg-[#D4E655] text-black font-bold' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}>{a.l}</button>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black tracking-widest uppercase text-white/50 block mb-2"><Calendar size={12} className="inline mr-1" /> Fecha</label>
+                            <input type="date" min={hoyAR()} value={fecha} onChange={e => setFecha(e.target.value)} className="bg-[#141417] border border-white/10 rounded-lg px-4 py-3 text-sm text-white outline-none focus:border-[#D4E655]/60 [color-scheme:dark]" />
+                        </div>
+                        <button disabled={!salaId || !fecha} onClick={() => setStep(2)} className="w-full bg-[#D4E655] text-black font-black uppercase tracking-[0.2em] text-xs py-4 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">Continuar <ArrowRight size={16} /></button>
+                    </div>
+                )}
 
-                            {/* PASO 3: ELEGIR HORARIO */}
-                            <div className="space-y-4">
-                                <label className="text-[10px] font-black text-[#D4E655] uppercase tracking-widest flex items-center gap-2"><Clock size={14} /> 3. Horario Deseado</label>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] text-gray-500 uppercase font-bold ml-1">Desde</label>
-                                        <input
-                                            type="time"
-                                            value={horaInicio}
-                                            onChange={e => setHoraInicio(e.target.value)}
-                                            className="w-full bg-[#111] border border-white/20 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors"
-                                        />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[10px] text-gray-500 uppercase font-bold ml-1">Hasta</label>
-                                        <input
-                                            type="time"
-                                            value={horaFin}
-                                            onChange={e => setHoraFin(e.target.value)}
-                                            className="w-full bg-[#111] border border-white/20 rounded-xl p-4 text-white font-bold outline-none focus:border-[#D4E655] transition-colors"
-                                        />
-                                    </div>
+                {/* PASO 2 */}
+                {step === 2 && (
+                    <div className="space-y-5">
+                        <button onClick={() => setStep(1)} className="text-white/50 text-xs flex items-center gap-1 hover:text-white"><ArrowLeft size={13} /> Cambiar sala/fecha</button>
+                        <div className="text-sm text-white/70">{sala?.nombre} · {fecha}</div>
+
+                        <div>
+                            <label className="text-[10px] font-black tracking-widest uppercase text-white/50 block mb-2"><Users size={12} className="inline mr-1" /> Personas</label>
+                            <input type="number" min={1} max={50} value={personas} onChange={e => setPersonas(Math.max(1, Number(e.target.value) || 1))} className="bg-[#141417] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white w-24 outline-none focus:border-[#D4E655]/60" />
+                        </div>
+
+                        <div>
+                            <label className="text-[10px] font-black tracking-widest uppercase text-white/50 block mb-2"><Clock size={12} className="inline mr-1" /> Hora de inicio</label>
+                            {inicios.length === 0 ? <p className="text-sm text-white/40">No hay horarios libres ese día. Probá otra fecha o sala.</p> : (
+                                <div className="flex flex-wrap gap-2">
+                                    {inicios.map(h => (
+                                        <button key={h} onClick={() => { setHoraInicio(h); setDuracion(60) }} className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${horaInicio === h ? 'bg-[#D4E655] text-black font-bold' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}>{h}</button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {horaInicio && (
+                            <div>
+                                <label className="text-[10px] font-black tracking-widest uppercase text-white/50 block mb-2">Duración</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {duraciones.map(d => (
+                                        <button key={d} onClick={() => setDuracion(d)} className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${duracion === d ? 'bg-[#D4E655] text-black font-bold' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}>
+                                            {durLabel(d)} <span className="opacity-60">· {toHHMM(toMin(horaInicio))}–{toHHMM(toMin(horaInicio) + d)}</span>
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
+                        )}
 
-                            {/* BOTÓN WHATSAPP */}
-                            <div className="pt-8">
-                                <button
-                                    onClick={handleSolicitar}
-                                    className="w-full bg-[#25D366] hover:bg-[#1DA851] text-black font-black uppercase tracking-widest py-5 rounded-xl shadow-[0_0_20px_rgba(37,211,102,0.3)] transition-all hover:scale-[1.02] flex items-center justify-center gap-3"
-                                >
-                                    <MessageCircle size={20} />
-                                    Pedir Presupuesto
-                                </button>
-                                <p className="text-center text-[10px] text-gray-500 mt-3 font-medium">
-                                    Serás redirigido a WhatsApp para confirmar la disponibilidad y tarifario con recepción.
-                                </p>
+                        {ocup.length > 0 && (
+                            <p className="text-[11px] text-white/40">Ocupado ese día: {ocup.map(o => `${o.ini}–${o.fin} (${o.motivo})`).join(' · ')}</p>
+                        )}
+
+                        {monto > 0 && (
+                            <div className="bg-[#111113] border border-white/10 rounded-xl p-4 flex items-center justify-between">
+                                <div><div className="text-sm">{durLabel(duracion)} · {toHHMM(toMin(horaInicio))}–{horaFin}</div><div className="text-[11px] text-white/40">Total ${monto.toLocaleString('es-AR')} · Seña 50%</div></div>
+                                <div className="text-right"><div className="text-[10px] uppercase tracking-widest text-white/40">Seña</div><div className="text-xl font-black text-[#D4E655]">${sena.toLocaleString('es-AR')}</div></div>
                             </div>
+                        )}
+
+                        <button disabled={!horaInicio || monto <= 0} onClick={() => setStep(3)} className="w-full bg-[#D4E655] text-black font-black uppercase tracking-[0.2em] text-xs py-4 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">Continuar <ArrowRight size={16} /></button>
+                    </div>
+                )}
+
+                {/* PASO 3 */}
+                {step === 3 && (
+                    <div className="space-y-5">
+                        <button onClick={() => setStep(2)} className="text-white/50 text-xs flex items-center gap-1 hover:text-white"><ArrowLeft size={13} /> Cambiar horario</button>
+                        <div className="bg-[#111113] border border-white/10 rounded-xl p-5 space-y-2">
+                            <h2 className="text-sm font-black uppercase tracking-wider text-white/50 mb-2">Tu reserva</h2>
+                            <Row k="Sala" v={`${sala?.nombre}${sala?.sede?.nombre ? ' · ' + sala.sede.nombre : ''}`} />
+                            <Row k="Actividad" v={ACTIVIDADES.find(a => a.k === tipoUso)?.l || tipoUso} />
+                            <Row k="Fecha" v={fecha} />
+                            <Row k="Horario" v={`${toHHMM(toMin(horaInicio))}–${horaFin} (${durLabel(duracion)})`} />
+                            <Row k="Personas" v={String(personas)} />
+                            <div className="h-px bg-white/10 my-2" />
+                            <Row k="Total" v={`$${monto.toLocaleString('es-AR')}`} />
+                            <Row k="Seña a pagar ahora (50%)" v={`$${sena.toLocaleString('es-AR')}`} strong />
+                            <Row k="Saldo" v={`$${(monto - sena).toLocaleString('es-AR')} (online o en el lugar)`} />
                         </div>
-                    )}
-                </div>
+                        <p className="text-[11px] text-white/40">Al pagar la seña te guardamos la sala. Cancelación gratis hasta 48hs antes; dentro de las 48hs la seña no se devuelve.</p>
+                        <button disabled={creando} onClick={reservarYPagar} className="w-full bg-[#D4E655] text-black font-black uppercase tracking-[0.2em] text-xs py-4 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">
+                            {creando ? <Loader2 size={15} className="animate-spin" /> : null} Pagar seña y reservar
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     )
 }
 
-// 👇 2. Creamos el nuevo componente exportado por defecto con el escudo Suspense
-export default function PublicAlquilerPage() {
-    return (
-        <Suspense fallback={
-            <div className="min-h-screen bg-[#050505] flex items-center justify-center">
-                <Loader2 className="animate-spin text-[#D4E655]" />
-            </div>
-        }>
-            <PublicAlquilerContent />
-        </Suspense>
-    )
+function Row({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
+    return <div className="flex items-center justify-between text-sm"><span className="text-white/50">{k}</span><span className={strong ? 'font-black text-[#D4E655]' : 'text-white/90'}>{v}</span></div>
+}
+
+export default function AlquilarSalaPage() {
+    return <Suspense fallback={<div className="p-10 flex justify-center"><Loader2 className="animate-spin text-white/40" /></div>}><AlquilarContent /></Suspense>
 }

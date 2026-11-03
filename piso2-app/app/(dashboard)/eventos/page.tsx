@@ -22,6 +22,7 @@ import {
     getLinkPuertaAction, getFechasHermanasAction, traspasarVentaAction,
     getResenasAction, enviarEncuestaEventoAction, reenviarEntradasEventoAction,
 } from '@/app/actions/eventos'
+import { getSalasAlquilerAction } from '@/app/actions/alquileres-online'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
 type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number; oculta?: boolean; codigo_promo?: string | null; obra_id?: string | null }
@@ -177,6 +178,8 @@ function FlyerUploader({ value, onChange, label }: { value: string; onChange: (u
 function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
     const [nombre, setNombre] = useState('')
     const [fecha, setFecha] = useState('')
+    const [fechaFin, setFechaFin] = useState('')
+    const [salaId, setSalaId] = useState('')
     const [lugar, setLugar] = useState('')
     const [descripcion, setDescripcion] = useState('')
     const [aforo, setAforo] = useState('')
@@ -184,11 +187,13 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
     const [saving, setSaving] = useState(false)
     // Obras aceptadas y libres (sin función) para sumar a esta función.
     const [obrasLibres, setObrasLibres] = useState<any[]>([])
+    const [salasEv, setSalasEv] = useState<any[]>([])
     const [sel, setSel] = useState<Set<string>>(new Set())
     useEffect(() => {
         (async () => {
             const r = await getObrasAceptadasDisponiblesAction('')
             if (r.ok) setObrasLibres(r.obras)
+            setSalasEv(await getSalasAlquilerAction())
         })()
     }, [])
     const toggleObra = (id: string) => setSel(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -196,7 +201,7 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
     const crear = async () => {
         if (!nombre.trim()) return toast.error('Poné un nombre')
         setSaving(true)
-        const r = await crearEventoAction({ nombre, fecha: fecha || null, lugar, descripcion, flyer_url: flyer, obra_ids: [...sel], aforo: aforo.trim() === '' ? null : Number(aforo) })
+        const r = await crearEventoAction({ nombre, fecha: fecha || null, fecha_fin: fechaFin || null, sala_id: salaId || null, lugar, descripcion, flyer_url: flyer, obra_ids: [...sel], aforo: aforo.trim() === '' ? null : Number(aforo) })
         if (r.ok) { toast.success('Evento creado'); onCreated(r.id) }
         else { toast.error(r.error || 'Error'); setSaving(false) }
     }
@@ -210,7 +215,14 @@ function ModalNuevo({ onClose, onCreated }: { onClose: () => void; onCreated: (i
                 </div>
                 <div className="space-y-3">
                     <Campo label="Nombre"><input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Muestra de fin de año" className="inp w-full" /></Campo>
-                    <Campo label="Fecha y hora"><input type="datetime-local" value={fecha} onChange={e => setFecha(e.target.value)} className="inp w-full" /></Campo>
+                    <Campo label="Fecha y hora (inicio)"><input type="datetime-local" value={fecha} onChange={e => setFecha(e.target.value)} className="inp w-full" /></Campo>
+                    <Campo label="Hora de fin (para que bloquee la sala al alquilar)"><input type="datetime-local" value={fechaFin} onChange={e => setFechaFin(e.target.value)} className="inp w-full" /></Campo>
+                    <Campo label="Sala (opcional — para que no se pueda alquilar mientras hay función)">
+                        <select value={salaId} onChange={e => setSalaId(e.target.value)} className="inp w-full">
+                            <option value="">— Sin sala —</option>
+                            {salasEv.map((s: any) => <option key={s.id} value={s.id}>{s.nombre}{s.sede?.nombre ? ` · ${s.sede.nombre}` : ''}</option>)}
+                        </select>
+                    </Campo>
                     <Campo label="Lugar"><input value={lugar} onChange={e => setLugar(e.target.value)} placeholder="Teatro / Sede Obelisco…" className="inp w-full" /></Campo>
                     <Campo label="Aforo total (opcional)"><input type="number" min={0} value={aforo} onChange={e => setAforo(e.target.value)} placeholder="Ej: 90 (cupo total del evento)" className="inp w-full" /></Campo>
                     <Campo label="Descripción (opcional)"><textarea value={descripcion} onChange={e => setDescripcion(e.target.value)} rows={2} className="inp w-full resize-none" /></Campo>

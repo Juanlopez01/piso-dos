@@ -249,7 +249,7 @@ function fechaArg(f?: string | null): string | null {
     return base + '-03:00'
 }
 
-export async function crearEventoAction(data: { nombre: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string; obra_ids?: string[]; aforo?: number | null }) {
+export async function crearEventoAction(data: { nombre: string; descripcion?: string; fecha?: string | null; fecha_fin?: string | null; sala_id?: string | null; lugar?: string; flyer_url?: string; obra_ids?: string[]; aforo?: number | null }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     if (!data.nombre?.trim()) return { ok: false as const, error: 'Poné un nombre al evento.' }
@@ -258,6 +258,8 @@ export async function crearEventoAction(data: { nombre: string; descripcion?: st
         nombre: data.nombre.trim(),
         descripcion: data.descripcion?.trim() || null,
         fecha: fechaArg(data.fecha),
+        fecha_fin: fechaArg(data.fecha_fin),
+        sala_id: data.sala_id || null,
         lugar: data.lugar?.trim() || null,
         flyer_url: data.flyer_url?.trim() || null,
         aforo: (data.aforo == null || Number(data.aforo) <= 0) ? null : Math.floor(Number(data.aforo)),
@@ -273,7 +275,7 @@ export async function crearEventoAction(data: { nombre: string; descripcion?: st
     return { ok: true as const, id: ev.id }
 }
 
-export async function editarEventoAction(eventoId: string, patch: { nombre?: string; descripcion?: string; fecha?: string | null; lugar?: string; flyer_url?: string | null; aforo?: number | null }) {
+export async function editarEventoAction(eventoId: string, patch: { nombre?: string; descripcion?: string; fecha?: string | null; fecha_fin?: string | null; sala_id?: string | null; lugar?: string; flyer_url?: string | null; aforo?: number | null }) {
     const perm = await requireStaff()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
@@ -281,6 +283,8 @@ export async function editarEventoAction(eventoId: string, patch: { nombre?: str
     if (patch.nombre !== undefined) upd.nombre = patch.nombre.trim()
     if (patch.descripcion !== undefined) upd.descripcion = patch.descripcion?.trim() || null
     if (patch.fecha !== undefined) upd.fecha = fechaArg(patch.fecha)
+    if (patch.fecha_fin !== undefined) upd.fecha_fin = fechaArg(patch.fecha_fin)
+    if (patch.sala_id !== undefined) upd.sala_id = patch.sala_id || null
     if (patch.lugar !== undefined) upd.lugar = patch.lugar?.trim() || null
     if (patch.flyer_url !== undefined) upd.flyer_url = patch.flyer_url || null
     if (patch.aforo !== undefined) upd.aforo = (patch.aforo == null || Number(patch.aforo) <= 0) ? null : Math.floor(Number(patch.aforo))

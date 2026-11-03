@@ -149,7 +149,26 @@ export async function POST(request: Request) {
                         if (staffL27?.length) await supabase.from('notificaciones').insert(staffL27.map((s: any) => ({
                             usuario_id: s.id, titulo: '🏆 Pago La Liga 2027',
                             mensaje: `Se registró un pago de ${(pagoL27 as any).concepto} por $${Number(payment.transaction_amount).toLocaleString('es-AR')}.`,
-                            link: '/liga2027-admin', leido: false,
+                            link: '/la-liga?tab=liga2027', leido: false,
+                        })));
+                    } catch { /* notif best-effort */ }
+                }
+                return NextResponse.json({ success: true }, { status: 200 });
+            }
+
+            // ===== ALQUILER de sala: confirmar seña/saldo + asentar en el pozo =====
+            // Idempotente por estado dentro del helper. Cae en caja sin turno (pozo).
+            if (metadata.tipo_pago === 'alquiler' && metadata.alquiler_id) {
+                const { aplicarEfectoPagoAlquiler } = await import('@/app/actions/_alquiler-pago');
+                const concepto = metadata.concepto === 'saldo' ? 'saldo' : 'sena';
+                const r = await aplicarEfectoPagoAlquiler(supabase, metadata.alquiler_id, concepto, Number(payment.transaction_amount) || 0);
+                if (r.ok && !r.yaAplicado) {
+                    try {
+                        const { data: staffAlq } = await supabase.from('profiles').select('id').in('rol', ['admin', 'recepcion']);
+                        if (staffAlq?.length) await supabase.from('notificaciones').insert(staffAlq.map((s: any) => ({
+                            usuario_id: s.id, titulo: '🏠 Alquiler de sala',
+                            mensaje: `Se ${concepto === 'sena' ? 'reservó una sala con seña' : 'pagó el saldo de un alquiler'} por $${Number(payment.transaction_amount).toLocaleString('es-AR')}.`,
+                            link: '/alquileres', leido: false,
                         })));
                     } catch { /* notif best-effort */ }
                 }
