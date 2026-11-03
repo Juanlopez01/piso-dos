@@ -51,8 +51,8 @@ function SidebarContent() {
 
     const visibleItems = menuItems.filter(item => {
         // Validación de permisos estricta
-        if (item.name === 'La Liga' && !hasLigaAccess) return false;
-        if (item.name === 'La Liga 2027' && !hasLiga27) return false;
+        // "La Liga" (/la-liga) la ve quien tiene la formación actual O inscripción a La Liga 2027.
+        if (item.name === 'La Liga' && !(hasLigaAccess || hasLiga27)) return false;
         if (item.name === 'Grupos' && !hasCompaniaAccess) return false;
         // Libro de administración: SOLO usuarios con el flag (Nico/Santi), no por rol.
         if (item.name === 'Administración') return hasAdminFinanzas;

@@ -108,12 +108,12 @@ export async function guardarDisciplinaLiga27Action(payload: {
     if (payload.id) {
         const { error } = await admin.from('liga27_disciplinas').update(row).eq('id', payload.id)
         if (error) return { ok: false, error: error.message }
-        revalidatePath('/liga2027-admin')
+        revalidatePath('/la-liga')
         return { ok: true, id: payload.id }
     }
     const { data, error } = await admin.from('liga27_disciplinas').insert(row).select('id').single()
     if (error) return { ok: false, error: error.message }
-    revalidatePath('/liga2027-admin')
+    revalidatePath('/la-liga')
     return { ok: true, id: data.id }
 }
 
@@ -134,7 +134,7 @@ export async function guardarExamenLiga27Action(payload: {
         ? await admin.from('liga27_examenes').update(row).eq('id', payload.id)
         : await admin.from('liga27_examenes').upsert(row, { onConflict: 'disciplina_id,numero' })
     if (error) return { ok: false, error: error.message }
-    revalidatePath('/liga2027-admin')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -193,7 +193,7 @@ export async function guardarNotaExamenLiga27Action(payload: {
 
     // Avisar al alumno (notificación interna del alumno de La Liga no existe;
     // dejamos revalidate para que su perfil se actualice al entrar).
-    revalidatePath('/liga2027-admin'); revalidatePath('/liga2027/mi-perfil')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -281,7 +281,7 @@ export async function tomarAsistenciaLiga27Action(payload: {
     // Recalcular regularidad de cada alumno marcado.
     for (const m of payload.marcas) await recomputarRegularidad(admin, m.inscripcionId, payload.disciplinaId)
 
-    revalidatePath('/liga2027-admin'); revalidatePath('/liga2027/mi-perfil')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -308,7 +308,7 @@ export async function corregirAsistenciaLiga27Action(payload: {
         autor_id: g.userId,
     })
     await recomputarRegularidad(admin, payload.inscripcionId, payload.disciplinaId)
-    revalidatePath('/liga2027-admin'); revalidatePath('/liga2027/mi-perfil')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -351,7 +351,7 @@ async function recomputarRegularidad(admin: ReturnType<typeof getAdminClient>, i
                     if (staff?.length) await admin.from('notificaciones').insert(staff.map((s: any) => ({
                         usuario_id: s.id, titulo: '🟠 Libre del mes — La Liga 2027',
                         mensaje: `Un alumno quedó libre de ${disc?.nombre || 'una disciplina'} en ${m.mes}/${m.anio} por ${m.n} faltas.`,
-                        link: '/liga2027-admin', leido: false,
+                        link: '/la-liga?tab=liga2027', leido: false,
                     })))
                 } catch { /* best-effort */ }
             }
@@ -377,7 +377,7 @@ async function recomputarRegularidad(admin: ReturnType<typeof getAdminClient>, i
                 if (staff?.length) await admin.from('notificaciones').insert(staff.map((s: any) => ({
                     usuario_id: s.id, titulo: '⚠️ Alumno libre del bloque — La Liga 2027',
                     mensaje: `Un alumno quedó libre de ${disc?.nombre || 'una disciplina'} por ${faltasBloque} faltas. Debe rendir libre y repagar matrícula.`,
-                    link: '/liga2027-admin', leido: false,
+                    link: '/la-liga?tab=liga2027', leido: false,
                 })))
             } catch { /* best-effort */ }
         } else if (!libreBloque.resuelto) {
@@ -426,7 +426,7 @@ export async function guardarBeneficiosLiga27Action(payload: {
         actualizado_por: g.userId, actualizado_at: new Date().toISOString(),
     }, { onConflict: 'letra' })
     if (error) return { ok: false, error: error.message }
-    revalidatePath('/liga2027-admin'); revalidatePath('/liga2027/mi-perfil')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -467,7 +467,7 @@ export async function resolverLibreLiga27Action(libreId: string): Promise<{ ok: 
     const admin = getAdminClient()
     const { error } = await admin.from('liga27_libres').update({ resuelto: true }).eq('id', libreId)
     if (error) return { ok: false, error: error.message }
-    revalidatePath('/liga2027-admin')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -495,7 +495,7 @@ export async function guardarProgramaLiga27Action(payload: {
         ? await admin.from('liga27_programa').update(row).eq('id', payload.id)
         : await admin.from('liga27_programa').insert(row)
     if (error) return { ok: false, error: error.message }
-    revalidatePath('/liga2027-admin'); revalidatePath('/liga2027/mi-perfil')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -519,7 +519,7 @@ export async function guardarClaseContenidoLiga27Action(payload: {
         cargado_por: g.userId, creado_at: new Date().toISOString(),
     }, { onConflict: 'disciplina_id,clase_fecha' })
     if (error) return { ok: false, error: error.message }
-    revalidatePath('/liga2027-admin'); revalidatePath('/liga2027/mi-perfil')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 

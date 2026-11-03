@@ -1,6 +1,7 @@
 import { MercadoPagoConfig, Preference } from 'mercadopago'
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { cuotasHabilitadas, CUOTAS_DESDE_LABEL } from '@/lib/liga27'
 
 // ============================================================================
 // Preferencia de MercadoPago para un pago de LA LIGA 2027 (matrícula / cuota /
@@ -32,6 +33,10 @@ export async function POST(request: Request) {
         if (!pago || pago.token !== token) return NextResponse.json({ error: 'Pago no encontrado' }, { status: 404 })
         if (pago.estado === 'pagado') return NextResponse.json({ error: 'Este pago ya fue registrado' }, { status: 400 })
         if (pago.estado === 'anulado') return NextResponse.json({ error: 'Este pago fue anulado' }, { status: 400 })
+        // Las cuotas recién se pagan a partir de enero 2027.
+        if (pago.concepto === 'cuota' && !cuotasHabilitadas()) {
+            return NextResponse.json({ error: `Las cuotas se pagan a partir de ${CUOTAS_DESDE_LABEL}.` }, { status: 400 })
+        }
 
         const label = CONCEPTO_LABEL[pago.concepto] || 'Pago La Liga 2027'
         const title = pago.concepto === 'cuota' && pago.mes

@@ -19,7 +19,7 @@ function MobileNavContent() {
     const [isLoggingOut, setIsLoggingOut] = useState(false)
 
     const [supabase] = useState(() => createClient())
-    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, hasAccesoCuraduria, isLoading, userId } = useCash()
+    const { userRole, isBoxOpen, hasLigaAccess, hasCompaniaAccess, hasAdminFinanzas, hasAccesoCuraduria, hasLiga27, isLoading, userId } = useCash()
 
     useEffect(() => {
         setIsOpen(false)
@@ -54,7 +54,7 @@ function MobileNavContent() {
 
     const visibleItems = menuItems.filter(item => {
         // Validación de permisos estricta
-        if (item.name === 'La Liga' && !hasLigaAccess) return false;
+        if (item.name === 'La Liga' && !(hasLigaAccess || hasLiga27)) return false;
         if (item.name === 'Grupos' && !hasCompaniaAccess && userRole !== 'profesor') return false;
         // Libro de administración: SOLO usuarios con el flag (Nico/Santi), no por rol.
         if (item.name === 'Administración') return hasAdminFinanzas;

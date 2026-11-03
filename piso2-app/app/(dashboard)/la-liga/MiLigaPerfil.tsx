@@ -4,8 +4,10 @@
 // Estilo 2M (oscuro), dentro del dashboard (el sidebar ya tiene el logout).
 
 import { useState } from 'react'
-import { type MiLiga27 } from '@/app/actions/liga2027'
-import { GraduationCap, CalendarCheck, BookOpen, Gift, AlertTriangle, Lock } from 'lucide-react'
+import { type MiLiga27, generarMiPagoLiga27Action, urlPagoMiLiga27Action } from '@/app/actions/liga2027'
+import { GraduationCap, CalendarCheck, BookOpen, Gift, AlertTriangle, Lock, Loader2 } from 'lucide-react'
+import { toast, Toaster } from 'sonner'
+import { cuotasHabilitadas, CUOTAS_DESDE_LABEL } from '@/lib/liga27'
 
 const TABS = [
     { key: 'evaluaciones', label: 'Evaluaciones', icon: GraduationCap },
@@ -156,13 +158,28 @@ function TabBeneficios({ letra, beneficios }: { letra: string; beneficios?: { le
 
 export default function MiLigaPerfil({ data, academico }: { data: MiLiga27; academico?: any }) {
     const [tab, setTab] = useState('evaluaciones')
+    const [pagando, setPagando] = useState<string | null>(null)
     const { perfil, inscripcion, pagos, bloqueado } = data
     const letra = inscripcion?.letra_actual || inscripcion?.promedio_letra || '—'
     const estado = inscripcion?.estado || 'postulado'
     const estInfo = ESTADO_LABEL[estado] || ESTADO_LABEL.postulado
 
+    // Mes/año actual (AR) para el botón de cuota.
+    const [mesAhora] = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires', month: '2-digit' }).format(new Date()).split('-').map(Number)
+    // Las cuotas recién se pagan a partir de enero 2027.
+    const hayCuotas = cuotasHabilitadas()
+
+    const irAPagar = async (key: string, run: () => Promise<{ ok: boolean; error?: string; url?: string }>) => {
+        setPagando(key)
+        const r = await run()
+        if (r.ok && r.url) { window.location.href = r.url; return }
+        toast.error(r.error || 'No se pudo iniciar el pago.')
+        setPagando(null)
+    }
+
     return (
         <div className="min-h-screen bg-[#09090b] text-white">
+            <Toaster position="top-center" richColors theme="dark" />
             <div className="max-w-3xl mx-auto px-5 py-8">
                 <p className="text-[10px] font-black tracking-[0.3em] uppercase text-[#D4E655] mb-5">🏆 La Liga 2027</p>
 
@@ -197,6 +214,26 @@ export default function MiLigaPerfil({ data, academico }: { data: MiLiga27; acad
                         <h2 className="text-sm font-black uppercase tracking-wider text-white/50">Estado de pago</h2>
                         <span className="text-xs text-white/60">Matrícula: <b className={inscripcion?.matricula_pagada ? 'text-green-400' : 'text-amber-400'}>{inscripcion?.matricula_pagada ? 'Pagada' : 'Pendiente'}</b></span>
                     </div>
+
+                    {/* Botones de autopago (el alumno paga su matrícula / cuota por MP) */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                        {!inscripcion?.matricula_pagada && (
+                            <button onClick={() => irAPagar('matricula', () => generarMiPagoLiga27Action({ concepto: 'matricula' }))}
+                                disabled={!!pagando}
+                                className="bg-[#009ee3] hover:brightness-110 text-white font-semibold uppercase tracking-[0.12em] text-[11px] px-4 py-2.5 rounded-lg disabled:opacity-50 flex items-center gap-2 transition">
+                                {pagando === 'matricula' ? <Loader2 size={13} className="animate-spin" /> : null} Pagar matrícula
+                            </button>
+                        )}
+                        {hayCuotas && (
+                            <button onClick={() => irAPagar('cuota', () => generarMiPagoLiga27Action({ concepto: 'cuota' }))}
+                                disabled={!!pagando}
+                                className="bg-[#009ee3]/80 hover:brightness-110 text-white font-semibold uppercase tracking-[0.12em] text-[11px] px-4 py-2.5 rounded-lg disabled:opacity-50 flex items-center gap-2 transition">
+                                {pagando === 'cuota' ? <Loader2 size={13} className="animate-spin" /> : null} Pagar cuota {String(mesAhora).padStart(2, '0')}
+                            </button>
+                        )}
+                    </div>
+                    {!hayCuotas && <p className="text-[11px] text-white/35 mb-4 -mt-2">Las cuotas se empiezan a pagar a partir de {CUOTAS_DESDE_LABEL}.</p>}
+
                     {pagos.length === 0
                         ? <p className="text-sm text-white/30">Todavía no hay pagos registrados.</p>
                         : (
@@ -206,7 +243,14 @@ export default function MiLigaPerfil({ data, academico }: { data: MiLiga27; acad
                                         <span className="capitalize text-white/80">{p.concepto}{p.mes ? ` · ${p.mes}/${p.anio}` : ''}</span>
                                         <span className="flex items-center gap-3">
                                             <span className="text-white/50">${Number(p.monto).toLocaleString('es-AR')}</span>
-                                            <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded ${p.estado === 'pagado' ? 'bg-green-500/20 text-green-300' : p.estado === 'pendiente' ? 'bg-amber-500/20 text-amber-300' : 'bg-white/10 text-white/50'}`}>{p.estado}</span>
+                                            {p.estado === 'pendiente'
+                                                ? (p.concepto === 'cuota' && !hayCuotas)
+                                                    ? <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-white/10 text-white/50">Desde {CUOTAS_DESDE_LABEL}</span>
+                                                    : <button onClick={() => irAPagar('row-' + p.id, () => urlPagoMiLiga27Action(p.id))} disabled={!!pagando}
+                                                        className="bg-[#009ee3] hover:brightness-110 text-white font-semibold uppercase tracking-wider text-[10px] px-3 py-1 rounded disabled:opacity-50 flex items-center gap-1.5 transition">
+                                                        {pagando === 'row-' + p.id ? <Loader2 size={11} className="animate-spin" /> : null} Pagar
+                                                    </button>
+                                                : <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded ${p.estado === 'pagado' ? 'bg-green-500/20 text-green-300' : 'bg-white/10 text-white/50'}`}>{p.estado}</span>}
                                         </span>
                                     </div>
                                 ))}

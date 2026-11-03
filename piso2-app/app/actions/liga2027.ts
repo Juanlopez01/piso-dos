@@ -17,6 +17,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
 import crypto from 'crypto'
 import { aplicarEfectoPagoLiga27 } from '@/app/actions/_liga27-pago'
+import { cuotasHabilitadas, CUOTAS_DESDE_LABEL } from '@/lib/liga27'
 
 const getAdminClient = () => createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -90,6 +91,81 @@ export async function tengoInscripcionLiga27Action(): Promise<boolean> {
     const admin = getAdminClient()
     const { data } = await admin.from('liga27_inscripciones').select('id').eq('profile_id', uid).limit(1).maybeSingle()
     return !!data
+}
+
+// Mes/año actual en hora AR.
+function mesAnioAR(): { mes: number; anio: number } {
+    const [y, m] = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit' }).format(new Date()).split('-').map(Number)
+    return { mes: m, anio: y }
+}
+
+// AUTOPAGO del alumno logueado: genera (o reusa) un pago pendiente de su propia
+// inscripción (matrícula o cuota del mes) y devuelve el link público para pagar.
+// Reusa un pendiente existente para no duplicar, y no deja pagar lo ya saldado.
+export async function generarMiPagoLiga27Action(payload: {
+    concepto: 'matricula' | 'cuota'; mes?: number; anio?: number
+}): Promise<{ ok: boolean; error?: string; url?: string }> {
+    const uid = await authUserId()
+    if (!uid) return { ok: false, error: 'Iniciá sesión.' }
+    if (payload.concepto !== 'matricula' && payload.concepto !== 'cuota') return { ok: false, error: 'Concepto inválido.' }
+    if (payload.concepto === 'cuota' && !cuotasHabilitadas()) return { ok: false, error: `Las cuotas se pagan a partir de ${CUOTAS_DESDE_LABEL}.` }
+    const admin = getAdminClient()
+
+    const { data: ins } = await admin.from('liga27_inscripciones')
+        .select('id, plan, matricula_pagada')
+        .eq('profile_id', uid).order('creado_at', { ascending: false }).limit(1).maybeSingle()
+    if (!ins) return { ok: false, error: 'No tenés inscripción a La Liga 2027.' }
+
+    if (payload.concepto === 'matricula' && ins.matricula_pagada) return { ok: false, error: 'Tu matrícula ya está paga.' }
+
+    const { mes: mesAhora, anio: anioAhora } = mesAnioAR()
+    const mes = payload.concepto === 'cuota' ? (payload.mes ?? mesAhora) : null
+    const anio = payload.concepto === 'cuota' ? (payload.anio ?? anioAhora) : null
+
+    // Cuota ya saldada de ese mes → no volver a cobrar.
+    if (payload.concepto === 'cuota') {
+        const { data: yaPaga } = await admin.from('liga27_pagos').select('id')
+            .eq('inscripcion_id', ins.id).eq('concepto', 'cuota').eq('mes', mes).eq('anio', anio).eq('estado', 'pagado').maybeSingle()
+        if (yaPaga) return { ok: false, error: `La cuota de ${mes}/${anio} ya está paga.` }
+    }
+
+    // ¿Hay un pendiente que sirva? → reusar su link (evita duplicados).
+    let qPend = admin.from('liga27_pagos').select('id, token')
+        .eq('inscripcion_id', ins.id).eq('concepto', payload.concepto).eq('estado', 'pendiente')
+    if (payload.concepto === 'cuota') qPend = qPend.eq('mes', mes).eq('anio', anio)
+    const { data: pend } = await qPend.order('creado_at', { ascending: false }).limit(1).maybeSingle()
+    if (pend?.id && pend.token) return { ok: true, url: `${SITE()}/liga2027/pagar/${pend.id}?t=${pend.token}` }
+
+    // Monto según concepto/plan.
+    const precios = await getPreciosLiga27Action()
+    const monto = payload.concepto === 'matricula'
+        ? precios.liga27_matricula
+        : (ins.plan === 'cuatrimestral' ? precios.liga27_cuota_cuatrimestral : precios.liga27_cuota_mensual)
+    if (!monto || monto <= 0) return { ok: false, error: 'El monto todavía no está configurado. Escribile a administración.' }
+
+    const token = crypto.randomBytes(12).toString('hex')
+    const { data, error } = await admin.from('liga27_pagos').insert({
+        inscripcion_id: ins.id, concepto: payload.concepto, mes, anio, monto,
+        estado: 'pendiente', metodo: 'mercadopago', token,
+    }).select('id').single()
+    if (error) return { ok: false, error: error.message }
+    return { ok: true, url: `${SITE()}/liga2027/pagar/${data.id}?t=${token}` }
+}
+
+// Link para pagar un pago PENDIENTE existente que pertenece al alumno logueado
+// (p. ej. una cuota que generó recepción). Valida la titularidad.
+export async function urlPagoMiLiga27Action(pagoId: string): Promise<{ ok: boolean; error?: string; url?: string }> {
+    const uid = await authUserId()
+    if (!uid || !pagoId) return { ok: false, error: 'Iniciá sesión.' }
+    const admin = getAdminClient()
+    const { data: pago } = await admin.from('liga27_pagos')
+        .select('id, token, estado, inscripcion_id, concepto').eq('id', pagoId).maybeSingle()
+    if (!pago) return { ok: false, error: 'Pago no encontrado.' }
+    if (pago.estado === 'pagado') return { ok: false, error: 'Ese pago ya está saldado.' }
+    if (pago.concepto === 'cuota' && !cuotasHabilitadas()) return { ok: false, error: `Las cuotas se pagan a partir de ${CUOTAS_DESDE_LABEL}.` }
+    const { data: ins } = await admin.from('liga27_inscripciones').select('profile_id').eq('id', pago.inscripcion_id).maybeSingle()
+    if (!ins || ins.profile_id !== uid) return { ok: false, error: 'No autorizado.' }
+    return { ok: true, url: `${SITE()}/liga2027/pagar/${pago.id}?t=${pago.token}` }
 }
 
 // Busca un alumno de 2M por email; si no existe, lo crea (rol 'alumno'). Devuelve
@@ -231,12 +307,12 @@ export async function postularLiga27Action(payload: {
             usuario_id: s.id,
             titulo: '🏆 Nueva postulación La Liga 2027',
             mensaje: `${payload.nombre.trim()} se postuló (${payload.tipo_contacto}).`,
-            link: '/liga2027-admin',
+            link: '/la-liga?tab=liga2027',
             leido: false,
         })))
     } catch { /* best-effort */ }
 
-    revalidatePath('/liga2027-admin')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -284,7 +360,7 @@ export async function aprobarPostulacionLiga27Action(postulacionId: string, plan
     }
 
     await admin.from('liga27_postulaciones').update({ estado: 'aprobada' }).eq('id', postulacionId)
-    revalidatePath('/liga2027-admin')
+    revalidatePath('/la-liga')
     return { ok: true, inscripcionId, cuentaCreada: cuenta.creado }
 }
 
@@ -293,7 +369,7 @@ export async function rechazarPostulacionLiga27Action(postulacionId: string): Pr
     const admin = getAdminClient()
     const { error } = await admin.from('liga27_postulaciones').update({ estado: 'no' }).eq('id', postulacionId)
     if (error) return { ok: false, error: error.message }
-    revalidatePath('/liga2027-admin')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -368,7 +444,7 @@ export async function enviarBienvenidaLiga27Action(inscripcionId: string): Promi
         })
     } catch { /* best-effort */ }
     await admin.from('liga27_inscripciones').update({ bienvenida_enviada: true }).eq('id', inscripcionId)
-    revalidatePath('/liga2027-admin')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -394,7 +470,7 @@ export async function guardarPreciosLiga27Action(precios: { liga27_matricula?: n
     if (!filas.length) return { ok: true }
     const { error } = await admin.from('configuraciones').upsert(filas, { onConflict: 'clave' })
     if (error) return { ok: false, error: error.message }
-    revalidatePath('/liga2027-admin')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -405,6 +481,7 @@ export async function registrarPagoLiga27Action(payload: {
     mes?: number; anio?: number; monto: number; metodo: string
 }): Promise<{ ok: boolean; error?: string }> {
     const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
+    if (payload.concepto === 'cuota' && !cuotasHabilitadas()) return { ok: false, error: `Las cuotas se cobran a partir de ${CUOTAS_DESDE_LABEL}.` }
     const admin = getAdminClient()
     const { error } = await admin.from('liga27_pagos').insert({
         inscripcion_id: payload.inscripcionId,
@@ -418,7 +495,7 @@ export async function registrarPagoLiga27Action(payload: {
     })
     if (error) return { ok: false, error: error.message }
     await aplicarEfectoPagoLiga27(admin, payload.inscripcionId, payload.concepto)
-    revalidatePath('/liga2027-admin')
+    revalidatePath('/la-liga')
     return { ok: true }
 }
 
@@ -441,6 +518,7 @@ export async function generarLinkPagoLiga27Action(payload: {
     mes?: number; anio?: number; monto?: number
 }): Promise<{ ok: boolean; error?: string; url?: string }> {
     const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
+    if (payload.concepto === 'cuota' && !cuotasHabilitadas()) return { ok: false, error: `Las cuotas se cobran a partir de ${CUOTAS_DESDE_LABEL}.` }
     const admin = getAdminClient()
 
     // Monto: el pasado, o el configurado según concepto/plan.

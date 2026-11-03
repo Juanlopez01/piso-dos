@@ -17,6 +17,7 @@ import {
 } from '@/app/actions/liga2027-academico'
 import { AsistenciaEditor, ClaseEditor, NotasEditor } from './editores'
 import { Loader2, Check, X, MessageSquare, Link2, Send, Plus } from 'lucide-react'
+import { cuotasHabilitadas, CUOTAS_DESDE_LABEL } from '@/lib/liga27'
 
 const card = "bg-[#111113] border border-white/10 rounded-xl p-5"
 const btn = "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
@@ -376,6 +377,7 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
     const [cargando, setCargando] = useState(true)
     const [busy, setBusy] = useState<string | null>(null)
     const hoy = new Date()
+    const hayCuotas = cuotasHabilitadas() // cuotas recién desde enero 2027
 
     const cargar = async () => { setCargando(true); setItems(await getInscripcionesLiga27Action()); setCargando(false) }
     useEffect(() => { cargar() }, [])
@@ -394,6 +396,31 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
             toast.success('Link copiado. Pegalo en WhatsApp/mail.', { description: r.url, duration: 8000 })
         } else toast.error(r.error || 'Error')
         setBusy(null)
+    }
+    // Normaliza un teléfono AR a formato wa.me (solo dígitos, con prefijo 54 9).
+    const telWa = (tel?: string | null) => {
+        let d = (tel || '').replace(/\D/g, '')
+        if (!d) return ''
+        if (d.startsWith('54')) d = d.slice(2)
+        if (d.startsWith('0')) d = d.slice(1)
+        if (d.startsWith('9')) d = d.slice(1)
+        // quitar el "15" de celular si quedó al inicio del número local
+        d = d.replace(/^(\d{2,4})15/, '$1')
+        return '549' + d
+    }
+    // Genera el link de pago y abre WhatsApp con el mensaje ya armado.
+    const whatsappPago = async (i: any, concepto: 'matricula' | 'cuota') => {
+        setBusy(i.id)
+        const r = await generarLinkPagoLiga27Action(concepto === 'cuota'
+            ? { inscripcionId: i.id, concepto, mes: hoy.getMonth() + 1, anio: hoy.getFullYear() }
+            : { inscripcionId: i.id, concepto })
+        setBusy(null)
+        if (!r.ok || !r.url) return toast.error(r.error || 'No se pudo generar el link.')
+        const nombre = (i.perfil?.nombre || '').split(' ')[0] || ''
+        const quePaga = concepto === 'cuota' ? `la cuota de ${MESES[hoy.getMonth() + 1]}` : 'la matrícula'
+        const msg = `Hola${nombre ? ' ' + nombre : ''}! Te paso el link para pagar ${quePaga} de La Liga 2027 (Piso 2): ${r.url}`
+        const tel = telWa(i.perfil?.telefono)
+        window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`, '_blank')
     }
     const pagoManual = async (insId: string, concepto: 'matricula' | 'cuota') => {
         const montoStr = window.prompt(`Monto del pago (${concepto}) en efectivo/transferencia:`)
@@ -430,10 +457,14 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
                                 {!i.bienvenida_enviada && <button onClick={() => bienvenida(i.id)} disabled={busy === i.id} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70`}>Enviar bienvenida</button>}
                                 {puedePagos && <>
-                                    <button onClick={() => linkPago(i.id, 'matricula')} disabled={busy === i.id} className={`${btn} bg-[#009ee3]/80 hover:bg-[#009ee3] text-white flex items-center gap-1`}><Link2 size={13} /> Link matrícula</button>
-                                    <button onClick={() => linkPago(i.id, 'cuota')} disabled={busy === i.id} className={`${btn} bg-[#009ee3]/60 hover:bg-[#009ee3] text-white flex items-center gap-1`}><Link2 size={13} /> Link cuota {MESES[hoy.getMonth() + 1]}</button>
+                                    <button onClick={() => whatsappPago(i, 'matricula')} disabled={busy === i.id} className={`${btn} bg-[#25D366]/90 hover:bg-[#25D366] text-black font-bold flex items-center gap-1`}><MessageSquare size={13} /> WhatsApp matrícula</button>
+                                    <button onClick={() => linkPago(i.id, 'matricula')} disabled={busy === i.id} className={`${btn} bg-[#009ee3]/80 hover:bg-[#009ee3] text-white flex items-center gap-1`}><Link2 size={13} /> Copiar link matrícula</button>
                                     <button onClick={() => pagoManual(i.id, 'matricula')} disabled={busy === i.id} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70`}>+ Pago matrícula</button>
-                                    <button onClick={() => pagoManual(i.id, 'cuota')} disabled={busy === i.id} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70`}>+ Pago cuota</button>
+                                    {hayCuotas ? <>
+                                        <button onClick={() => whatsappPago(i, 'cuota')} disabled={busy === i.id} className={`${btn} bg-[#25D366]/70 hover:bg-[#25D366] text-black font-bold flex items-center gap-1`}><MessageSquare size={13} /> WhatsApp cuota {MESES[hoy.getMonth() + 1]}</button>
+                                        <button onClick={() => linkPago(i.id, 'cuota')} disabled={busy === i.id} className={`${btn} bg-[#009ee3]/60 hover:bg-[#009ee3] text-white flex items-center gap-1`}><Link2 size={13} /> Copiar link cuota</button>
+                                        <button onClick={() => pagoManual(i.id, 'cuota')} disabled={busy === i.id} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70`}>+ Pago cuota</button>
+                                    </> : <span className="text-[10px] text-white/30 self-center">Cuotas desde {CUOTAS_DESDE_LABEL}</span>}
                                 </>}
                             </div>
                         </div>

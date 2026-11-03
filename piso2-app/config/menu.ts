@@ -50,8 +50,8 @@ export const menuItems = [
     { name: 'Curaduría', href: '/curaduria', icon: Theater, grupo: 'piso2e', roles: ['admin', 'recepcion', 'curador'] },
     { name: 'Piso 2 On Tour', href: '/audiciones', icon: Sparkles, grupo: 'escuela', roles: ['admin', 'audiciones', 'recepcion'] },
     { name: 'Sumate a Talent', href: '/talent/postular', icon: Sparkles, grupo: 'miespacio', roles: ['alumno', 'profesor', 'coordinador'] },
+    // Único ítem de La Liga (/la-liga). El alumno inscripto a La Liga 2027 ve su perfil 2027
+    // acá mismo (diferenciación por rol/inscripción dentro de la página). Ver gate en el Sidebar.
     { name: 'La Liga', href: '/la-liga', icon: GraduationCap, grupo: 'escuela', roles: ['admin', 'profesor', 'coordinador', 'alumno', 'auxiliar'] },
-    // Perfil de La Liga 2027 del alumno (entra con su cuenta normal de 2M). Se muestra solo si tiene inscripción (gate hasLiga27 en el Sidebar).
-    { name: 'La Liga 2027', href: '/mi-liga', icon: GraduationCap, grupo: 'miespacio', roles: ['alumno'] },
     { name: 'Alquilar sala', href: '/alquilar-sala', icon: ShoppingBagIcon, grupo: 'miespacio', roles: ['admin', 'profesor', 'coordinador', 'alumno'] },
 ]

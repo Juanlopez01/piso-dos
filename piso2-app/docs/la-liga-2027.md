@@ -8,8 +8,8 @@
 > **Fase 4 (login integrado):** los alumnos de La Liga 2027 son **alumnos normales de 2M** (Supabase
 > auth, rol `alumno`) y entran por `/login`. La inscripción cuelga de `liga27_inscripciones.profile_id`.
 > La postulación pública (`/liga2027`, estilo 2M oscuro) es un lead; al aprobar se busca/crea el alumno
-> y se le manda bienvenida con link para definir su clave. El perfil (4 pestañas) vive en `/mi-liga`
-> (dashboard), con el menú gateado a quienes tienen inscripción. Se eliminó la cuenta propia (login/
+> y se le manda bienvenida con link para definir su clave. El perfil (4 pestañas) vive DENTRO de `/la-liga`
+> (el alumno inscripto lo ve ahí, diferenciado por rol; ya no hay `/mi-liga`). Se eliminó la cuenta propia (login/
 > registro/mi-perfil separados).
 >
 > **Fase 3 (resumen):** beneficios A/B/C editables por la dirección (tabla `liga27_beneficios`,
@@ -20,7 +20,7 @@
 > dirección los cargue.**
 >
 > **Implementado (resumen):** landing pública `/liga2027` + CTA en la home · inscripción con 3 CTAs +
-> cuenta propia del alumno (clon de Talent) · panel `/liga2027-admin` (postulaciones, inscripciones,
+> el alumno es cuenta normal de 2M (entra por `/login`, perfil DENTRO de `/la-liga`) · panel también en `/la-liga` → pestaña "Liga 2027" (postulaciones, inscripciones,
 > académico, libres, lanzamiento, precios) · pagos matrícula/cuota por link MP (`liga27-preference`
 > + rama en el webhook) o caja · bloqueo por mora día 10 (`liga27_bloquear_morosos` + pg_cron) ·
 > evaluaciones A/B/C + devoluciones · asistencias con detección automática de libres (mes/bloque) ·

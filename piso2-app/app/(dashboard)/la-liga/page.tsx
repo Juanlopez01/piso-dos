@@ -39,8 +39,11 @@ import {
 } from '@/app/actions/usuarios'
 
 import MaterialesPanel from '@/components/MaterialesPanel'
-import PanelLiga27 from '../liga2027-admin/PanelLiga27'
-import DocentePanel from '../liga2027-admin/DocentePanel'
+import PanelLiga27 from './PanelLiga27'
+import DocentePanel from './DocentePanel'
+import MiLigaPerfil from './MiLigaPerfil'
+import { getMiLiga27Action, type MiLiga27 } from '@/app/actions/liga2027'
+import { getMiAcademicoLiga27Action } from '@/app/actions/liga2027-academico'
 
 import { parseSafeDate, cuatriDe, labelCuatri, boundsDelMes, fetcherLiga, fetcherAsistenciasRango, type Estadisticas } from './fetchers'
 function LaLigaContent() {
@@ -49,7 +52,17 @@ function LaLigaContent() {
     const [supabase] = useState(() => createClient())
 
     // 🚀 OBTENEMOS LOS ROLES Y PERMISOS DESDE EL CONTEXTO
-    const { userId, isLoading: loadingContext, userRole, hasLigaAccess } = useCash()
+    const { userId, isLoading: loadingContext, userRole, hasLigaAccess, hasLiga27 } = useCash()
+
+    // La Liga 2027: el alumno inscripto ve su perfil 2027 acá mismo (ya no en /mi-liga).
+    const esAlumno2027 = !loadingContext && userRole === 'alumno' && hasLiga27
+    const [liga27Data, setLiga27Data] = useState<MiLiga27 | null | undefined>(undefined)
+    const [liga27Acad, setLiga27Acad] = useState<any>(null)
+    useEffect(() => {
+        if (!esAlumno2027) return
+        getMiLiga27Action().then(setLiga27Data).catch(() => setLiga27Data(null))
+        getMiAcademicoLiga27Action().then(setLiga27Acad).catch(() => { })
+    }, [esAlumno2027])
 
     const [mesDashboard, setMesDashboard] = useState(new Date().getMonth() + 1)
     const [anioDashboard, setAnioDashboard] = useState(new Date().getFullYear())
@@ -150,6 +163,12 @@ function LaLigaContent() {
             router.replace('/la-liga', { scroll: false })
         }
     }, [searchParams, mutate, router])
+
+    // Deep-link: /la-liga?tab=liga2027 abre directo la pestaña de La Liga 2027
+    // (lo usan las notificaciones de postulaciones/pagos del staff).
+    useEffect(() => {
+        if (searchParams.get('tab') === 'liga2027') setAdminTab('liga2027')
+    }, [searchParams])
 
     useEffect(() => {
         if (data?.preciosLiga) {
@@ -435,7 +454,31 @@ function LaLigaContent() {
         return (suma / valores.length).toFixed(2)
     }
 
-    if (loadingSWR || loadingContext) {
+    if (loadingContext) {
+        return (
+            <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center">
+                <Loader2 className="animate-spin text-[#D4E655] w-12 h-12 mb-4" />
+                <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">Cargando La Liga...</p>
+            </div>
+        )
+    }
+
+    // 🏆 Alumno de La Liga 2027: su perfil (evaluaciones/asistencias/programa/beneficios +
+    // pagos) vive acá, con sus diferenciaciones. No pasa por la formación vieja.
+    if (esAlumno2027) {
+        if (liga27Data === undefined) {
+            return (
+                <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center">
+                    <Loader2 className="animate-spin text-[#D4E655] w-12 h-12 mb-4" />
+                    <p className="text-[#D4E655] text-xs font-bold uppercase tracking-widest animate-pulse">Cargando La Liga 2027...</p>
+                </div>
+            )
+        }
+        if (liga27Data) return <MiLigaPerfil data={liga27Data} academico={liga27Acad} />
+        // Si por algo no cargó la inscripción, cae a la vista de formación de abajo.
+    }
+
+    if (loadingSWR) {
         return (
             <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center">
                 <Loader2 className="animate-spin text-[#D4E655] w-12 h-12 mb-4" />

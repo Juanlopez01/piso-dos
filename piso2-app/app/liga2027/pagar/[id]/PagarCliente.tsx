@@ -26,7 +26,7 @@ export default function PagarCliente({ pagoId, token }: { pagoId: string; token:
 
     return (
         <>
-            <Toaster position="top-center" richColors />
+            <Toaster position="top-center" richColors theme="dark" />
             <button onClick={pagar} disabled={cargando}
                 className="w-full mt-8 bg-[#009ee3] text-white font-semibold uppercase tracking-[0.15em] text-sm py-4 rounded-lg hover:brightness-110 transition disabled:opacity-50 flex items-center justify-center gap-2">
                 {cargando ? <Loader2 size={16} className="animate-spin" /> : null} Pagar con Mercado Pago
