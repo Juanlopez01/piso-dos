@@ -26,7 +26,7 @@ import { getSalasAlquilerAction } from '@/app/actions/alquileres-online'
 
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
 type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number; oculta?: boolean; codigo_promo?: string | null; obra_id?: string | null }
-type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; canal?: string | null; reembolsada?: boolean; reembolso_ref?: string | null; reembolso_at?: string | null; created_at: string; items: { nombre: string; cantidad: number; precio_unit: number }[] }
+type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; canal?: string | null; reembolsada?: boolean; reembolso_ref?: string | null; reembolso_at?: string | null; created_at: string; token?: string | null; items: { nombre: string; cantidad: number; precio_unit: number }[] }
 type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean; cancelado?: boolean; ciclo_id?: string | null; ciclo?: { nombre: string; slug: string } | null }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
@@ -1239,7 +1239,13 @@ const agregarEntrada = async () => {
                                     </div>
                                     <div className="text-right shrink-0">
                                         {verDinero && <p className="font-black text-[#D4E655]">{pesos(v.total)}</p>}
-                                        {!soloLectura && v.estado === 'confirmada' && <div className="flex gap-2 justify-end">
+                                        {v.estado === 'confirmada' && v.token && (
+                                            <div className="flex gap-2 justify-end mt-1">
+                                                <a href={`/entradas/${v.id}?t=${v.token}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-white/5 hover:bg-white/10 text-gray-300 px-2.5 py-1.5 rounded-lg" title="Ver las entradas / QR"><Ticket size={12} /> Ver QR</a>
+                                                <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/entradas/${v.id}?t=${v.token}`); toast.success('Link del QR copiado — mandáselo al comprador') }} className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-[#D4E655]/15 text-[#D4E655] hover:bg-[#D4E655]/25 px-2.5 py-1.5 rounded-lg" title="Copiar el link del QR para enviárselo"><Copy size={12} /> Copiar QR</button>
+                                            </div>
+                                        )}
+                                        {!soloLectura && v.estado === 'confirmada' && <div className="flex gap-2 justify-end mt-1">
                                             {fechasHermanas.length > 0 && <button onClick={() => setTraspasando(traspasando === v.id ? null : v.id)} className="text-[10px] text-gray-500 hover:text-blue-400 uppercase font-semibold">Traspasar</button>}
                                             <button onClick={() => reembolsar(v)} className="text-[10px] text-gray-500 hover:text-amber-400 uppercase font-semibold">Reembolsar</button>
                                         </div>}
