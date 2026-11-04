@@ -539,15 +539,16 @@ export default function ConsultasPage() {
                                                 </div>
                                                 <p className="text-[10px] text-gray-600 mt-2">La respuesta le llega a su {c.canal === 'instagram' ? 'Instagram' : 'WhatsApp'} (dentro de las 24hs del último mensaje).</p>
 
-                                                <div className="mt-3 flex items-center gap-4 flex-wrap">
+                                                <div className="mt-4 pt-3 border-t border-white/10 flex items-center gap-2 flex-wrap">
                                                     {c.estado !== 'resuelta' && (
-                                                        <button onClick={() => resolver(c)} className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 hover:text-green-400 flex items-center gap-1.5">
-                                                            <Check size={13} /> Marcar como resuelta
+                                                        <button onClick={() => resolver(c)}
+                                                            className="flex-1 min-w-[150px] justify-center text-xs font-bold uppercase tracking-wide py-3 rounded-xl flex items-center gap-2 bg-green-500/20 text-green-300 border border-green-500/40 hover:bg-green-500/30 transition-colors">
+                                                            <Check size={16} /> Marcar como resuelta
                                                         </button>
                                                     )}
                                                     <button onClick={() => togglePausa(c)} disabled={pausandoId === c.id}
-                                                        className={`text-[11px] font-semibold uppercase tracking-wide flex items-center gap-1.5 disabled:opacity-50 ${c.pausado ? 'text-amber-400 hover:text-amber-300' : 'text-gray-400 hover:text-white'}`}>
-                                                        {pausandoId === c.id ? <Loader2 size={13} className="animate-spin" /> : c.pausado ? <PlayCircle size={13} /> : <PauseCircle size={13} />}
+                                                        className={`flex-1 min-w-[150px] justify-center text-xs font-bold uppercase tracking-wide py-3 rounded-xl flex items-center gap-2 border transition-colors disabled:opacity-50 ${c.pausado ? 'bg-amber-500/25 text-amber-200 border-amber-500/50 hover:bg-amber-500/35' : 'bg-white/5 text-gray-200 border-white/15 hover:bg-white/10'}`}>
+                                                        {pausandoId === c.id ? <Loader2 size={16} className="animate-spin" /> : c.pausado ? <PlayCircle size={16} /> : <PauseCircle size={16} />}
                                                         {c.pausado ? 'Reactivar bot' : 'Pausar bot (respondo yo)'}
                                                     </button>
                                                 </div>
