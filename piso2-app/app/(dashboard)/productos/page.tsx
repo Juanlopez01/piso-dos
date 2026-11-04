@@ -58,6 +58,7 @@ type Cupon = {
     porcentaje: number
     activo: boolean
     created_at: string
+    producto_ids?: string[] | null
 }
 
 type ClaseExclusiva = {
@@ -200,6 +201,7 @@ export default function TiendaConfigPage() {
     const [isCuponModalOpen, setIsCuponModalOpen] = useState(false)
     const [formCuponCodigo, setFormCuponCodigo] = useState('')
     const [formCuponPorcentaje, setFormCuponPorcentaje] = useState('')
+    const [formCuponProductos, setFormCuponProductos] = useState<string[]>([]) // vacío = todos
 
     // ==========================================
     // LÓGICA PRODUCTOS
@@ -333,13 +335,14 @@ export default function TiendaConfigPage() {
         const codigoLimpio = formCuponCodigo.trim().toUpperCase()
         setSaving(true)
 
-        const response = await guardarCuponAction(codigoLimpio, Number(formCuponPorcentaje))
+        const response = await guardarCuponAction(codigoLimpio, Number(formCuponPorcentaje), formCuponProductos)
 
         if (response.success) {
             toast.success('Cupón creado con éxito')
             setIsCuponModalOpen(false)
             setFormCuponCodigo('')
             setFormCuponPorcentaje('')
+            setFormCuponProductos([])
             router.refresh()
             setTimeout(() => mutate(), 500)
         } else {
@@ -571,6 +574,7 @@ export default function TiendaConfigPage() {
                                             <tr>
                                                 <th className="p-5">Código</th>
                                                 <th className="p-5 text-center">Descuento</th>
+                                                <th className="p-5">Aplica a</th>
                                                 <th className="p-5">Creación</th>
                                                 <th className="p-5 text-center">Estado</th>
                                                 <th className="p-5 text-right">Acciones</th>
@@ -583,6 +587,14 @@ export default function TiendaConfigPage() {
                                                         <span className="bg-white/10 px-3 py-1.5 rounded-lg border border-white/5">{cupon.codigo}</span>
                                                     </td>
                                                     <td className="p-5 text-center font-black text-[#D4E655] text-lg">-{cupon.porcentaje}%</td>
+                                                    <td className="p-5 text-xs">
+                                                        {(() => {
+                                                            const ids = cupon.producto_ids || []
+                                                            if (!ids.length) return <span className="text-gray-500">Todos</span>
+                                                            const nombres = ids.map(id => productos.find(p => p.id === id)?.nombre).filter(Boolean) as string[]
+                                                            return <span className="text-gray-300" title={nombres.join(', ')}>{nombres.length <= 2 ? nombres.join(', ') : `${nombres.slice(0, 2).join(', ')} +${nombres.length - 2}`}</span>
+                                                        })()}
+                                                    </td>
                                                     <td className="p-5 text-xs text-gray-400 font-medium">{format(new Date(cupon.created_at), "dd MMM yyyy", { locale: es })}</td>
                                                     <td className="p-5 text-center">
                                                         <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${cupon.activo ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
@@ -598,7 +610,7 @@ export default function TiendaConfigPage() {
                                                 </tr>
                                             ))}
                                             {cupones.length === 0 && (
-                                                <tr><td colSpan={5} className="p-10 text-center text-gray-500 font-bold uppercase text-xs">No tenés códigos de descuento creados.</td></tr>
+                                                <tr><td colSpan={6} className="p-10 text-center text-gray-500 font-bold uppercase text-xs">No tenés códigos de descuento creados.</td></tr>
                                             )}
                                         </tbody>
                                     </table>
@@ -790,6 +802,31 @@ export default function TiendaConfigPage() {
                                     <span className="absolute left-4 top-4 text-gray-500 font-black">%</span>
                                     <input required type="number" min="1" max="100" placeholder="20" value={formCuponPorcentaje} onChange={e => setFormCuponPorcentaje(e.target.value)} className="w-full bg-black border border-white/10 rounded-2xl p-4 pl-10 text-[#D4E655] font-black text-xl outline-none focus:border-[#D4E655] transition-colors" />
                                 </div>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] uppercase font-bold text-gray-500 tracking-widest pl-1">Aplica a</label>
+                                <div className="flex items-center justify-between px-1">
+                                    <span className="text-[11px] text-gray-400">{formCuponProductos.length === 0 ? 'Todos los productos' : `${formCuponProductos.length} producto(s) seleccionado(s)`}</span>
+                                    {formCuponProductos.length > 0 && <button type="button" onClick={() => setFormCuponProductos([])} className="text-[10px] font-bold uppercase text-gray-500 hover:text-white">Limpiar</button>}
+                                </div>
+                                <div className="max-h-44 overflow-y-auto bg-black border border-white/10 rounded-2xl p-2 space-y-1">
+                                    {productos.length === 0 && <p className="text-[11px] text-gray-600 p-2">No hay productos cargados.</p>}
+                                    {productos.map(p => {
+                                        const sel = formCuponProductos.includes(p.id)
+                                        return (
+                                            <button type="button" key={p.id}
+                                                onClick={() => setFormCuponProductos(prev => sel ? prev.filter(x => x !== p.id) : [...prev, p.id])}
+                                                className={`w-full flex items-center gap-3 text-left px-3 py-2 rounded-xl transition-colors ${sel ? 'bg-[#D4E655]/15 border border-[#D4E655]/40' : 'border border-transparent hover:bg-white/5'}`}>
+                                                <span className={`w-4 h-4 rounded flex items-center justify-center text-[10px] shrink-0 ${sel ? 'bg-[#D4E655] text-black' : 'border border-white/20'}`}>{sel ? '✓' : ''}</span>
+                                                <span className="flex-1 min-w-0">
+                                                    <span className="block text-xs text-white truncate">{p.nombre}</span>
+                                                    <span className="block text-[10px] text-gray-500 capitalize">{p.tipo_clase}{p.categoria ? ` · ${p.categoria}` : ''}</span>
+                                                </span>
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                                <p className="text-[10px] text-gray-500 pl-1">Dejalo sin marcar para que el cupón sirva para cualquier producto.</p>
                             </div>
                             <p className="text-[10px] text-gray-500 text-center leading-relaxed px-4 pt-2">
                                 El cupón podrá ser utilizado 1 sola vez por usuario en su próxima compra.

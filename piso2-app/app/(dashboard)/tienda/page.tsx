@@ -28,6 +28,7 @@ type Cupon = {
     id: string
     codigo: string
     porcentaje: number
+    producto_ids?: string[] | null
 }
 
 type TiendaData = {
@@ -161,6 +162,13 @@ function TiendaContent() {
             if (uso) {
                 setValidandoCupon(false)
                 return toast.error('Ya utilizaste este cupón anteriormente')
+            }
+
+            // Cupón restringido a ciertos productos: debe incluir el que se está comprando.
+            const idsRestrict: string[] = cupon.producto_ids || []
+            if (idsRestrict.length && selectedPack && !idsRestrict.includes(selectedPack.id)) {
+                setValidandoCupon(false)
+                return toast.error('Este cupón no aplica a este producto.')
             }
 
             setCuponAplicado(cupon)

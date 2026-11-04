@@ -324,6 +324,7 @@ export type Database = {
                     codigo: string
                     porcentaje: number
                     activo: boolean | null
+                    producto_ids: string[] | null
                 }
                 Insert: any
                 Update: any

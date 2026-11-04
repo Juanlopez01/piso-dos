@@ -213,6 +213,12 @@ export async function POST(request: Request) {
                     return NextResponse.json({ error: "El cupón es inválido, venció o no existe." }, { status: 400 })
                 }
 
+                // Cupón restringido a ciertos productos: debe aplicar al que se compra.
+                const cuponProductos: string[] = cuponDb.producto_ids || []
+                if (cuponProductos.length && !cuponProductos.includes(String(productoId))) {
+                    return NextResponse.json({ error: "Este cupón no aplica a este producto." }, { status: 400 })
+                }
+
                 // 2. Verificamos que el usuario no lo haya usado ya
                 // (Asumo que tenés una tabla 'cupones_usados', ajustalo a tu estructura)
                 const { data: yaUsado } = await supabase

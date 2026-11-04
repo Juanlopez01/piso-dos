@@ -70,7 +70,7 @@ export async function toggleProductoAction(id: string, currentStatus: boolean) {
 
 // --- ACCIONES PARA CUPONES ---
 
-export async function guardarCuponAction(codigo: string, porcentaje: number) {
+export async function guardarCuponAction(codigo: string, porcentaje: number, productoIds: string[] = []) {
     const supabase = await createClient()
     try {
         const { data: { session } } = await supabase.auth.getSession()
@@ -79,7 +79,9 @@ export async function guardarCuponAction(codigo: string, porcentaje: number) {
         const { error } = await supabase.from('cupones').insert({
             codigo,
             porcentaje,
-            activo: true
+            activo: true,
+            // Vacío = aplica a todos los productos; con ids = solo a esos.
+            producto_ids: Array.isArray(productoIds) ? productoIds : [],
         })
 
         if (error) {
