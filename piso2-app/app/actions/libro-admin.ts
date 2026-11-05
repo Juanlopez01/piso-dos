@@ -62,22 +62,29 @@ export async function getLibroAdminAction(anio: number, mes: number) {
 
     // --- CAJAS del mes (automático), agrupadas por día + sede ---
     const { data: cajaMovs } = await admin.from('caja_movimientos')
-        .select('tipo, metodo_pago, monto, created_at, turno:caja_turnos(sede_id)')
+        .select('tipo, metodo_pago, monto, created_at, origen_referencia, turno:caja_turnos(sede_id)')
         .gte('created_at', desdeISO).lt('created_at', hastaISO)
 
     // key = `${dia}|${sedeId ?? 'pozo'}`
     const cajaAgrup = new Map<string, Buckets>()
+    const bucket = (key: string) => { if (!cajaAgrup.has(key)) cajaAgrup.set(key, cero()); return cajaAgrup.get(key)! }
     for (const m of (cajaMovs || []) as any[]) {
         const dia = diaART(m.created_at)
         const turno = Array.isArray(m.turno) ? m.turno[0] : m.turno
         const sedeId = turno?.sede_id ?? 'pozo'
-        const key = `${dia}|${sedeId}`
-        if (!cajaAgrup.has(key)) cajaAgrup.set(key, cero())
-        const b = cajaAgrup.get(key)!
+        const b = bucket(`${dia}|${sedeId}`)
         const esEfvo = (m.metodo_pago || 'efectivo') === 'efectivo'
         const monto = Number(m.monto || 0)
         if (m.tipo === 'egreso') { if (esEfvo) b.ef_egr += monto; else b.tr_egr += monto }
         else { if (esEfvo) b.ef_ing += monto; else b.tr_ing += monto }
+
+        // "Admin retira → Pozo": la plata sale del cajón de la sede (egreso de arriba)
+        // Y ENTRA al pozo de administración. Espejamos ese ingreso en la fila del pozo
+        // para que a los admins les figure como ingreso propio (si no, se perdía).
+        if (m.origen_referencia === 'retiro_pozo_liq' && m.tipo === 'egreso' && sedeId !== 'pozo') {
+            const bp = bucket(`${dia}|pozo`)
+            if (esEfvo) bp.ef_ing += monto; else bp.tr_ing += monto
+        }
     }
 
     // --- Overrides de caja (correcciones manuales de las líneas automáticas) ---
