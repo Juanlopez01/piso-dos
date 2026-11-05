@@ -142,6 +142,6 @@ begin
        );
 end $$;
 
--- Programar con pg_cron (Juan lo corre si está disponible): todos los días 10 a
--- las 9:00. Descomentar si pg_cron está habilitado:
+-- Programar con pg_cron (todos los días 10 a las 9:00): se agenda, idempotente,
+-- en la migración aparte `sql/liga27_cron_mora.sql` (correrla con pg_cron habilitado).
 -- select cron.schedule('liga27_bloqueo_mora', '0 9 10 * *', $$ select public.liga27_bloquear_morosos(); $$);

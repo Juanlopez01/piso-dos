@@ -52,10 +52,13 @@ export async function POST(request: Request) {
                     failure: `${baseUrl}/liga2027/pagar/${pago.id}?t=${token}&pago=error`,
                     pending: `${baseUrl}/liga2027/pagar/${pago.id}?t=${token}&pago=pendiente`,
                 },
-                auto_return: 'approved',
             },
         }
-        if (!baseUrl.includes('localhost')) mpPayload.body.notification_url = `${baseUrl}/api/mercadopago/webhook`
+        // auto_return + webhook solo con URL pública (MP rechaza auto_return con back_urls localhost).
+        if (!baseUrl.includes('localhost')) {
+            mpPayload.body.auto_return = 'approved'
+            mpPayload.body.notification_url = `${baseUrl}/api/mercadopago/webhook`
+        }
 
         const preference = new Preference(client)
         const result = await preference.create(mpPayload)
