@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, Plus, MapPin, CalendarDays, Users, Copy, Trash2, Power, Search, ArrowLeft, Download, Pencil, Check, Instagram, MessageCircle, ChevronDown } from 'lucide-react'
+import { Loader2, Plus, MapPin, CalendarDays, Users, Copy, Trash2, Power, Search, ArrowLeft, Download, Pencil, Check, Instagram, MessageCircle, ChevronDown, ClipboardList, Printer, X } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
     getAudicionesAction, crearAudicionAction, getAudicionAction, agregarParticipanteAction,
@@ -159,6 +159,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
     const [filtroAplica, setFiltroAplica] = useState<'todas' | 'la_liga' | 'casting'>('todas')
     // Filtro por lo que SE SELECCIONÓ (resultado). 'todos' = sin filtro; 'pendiente' = sin marcar.
     const [filtroResultado, setFiltroResultado] = useState<string>('todos')
+    const [listaOpen, setListaOpen] = useState(false) // modal "Lista para publicar"
     const [nuevo, setNuevo] = useState({ nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '', altura: '', aplica_a: 'ambas' })
     const [guardando, setGuardando] = useState(false)
     const [editId, setEditId] = useState<string | null>(null)
@@ -228,6 +229,32 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
         const a = document.createElement('a'); a.href = url; a.download = `audicion-${audicion.ciudad}.csv`.replace(/[^\w.-]+/g, '_'); a.click(); URL.revokeObjectURL(url)
     }
 
+    // Lista para publicar: solo los SELECCIONADOS (con algún resultado positivo, sin
+    // los "No" ni pendientes), nombre + qué quedó. Ordenada por nombre.
+    const seleccionados = useMemo(() => parts
+        .map(p => ({ nombre: p.nombre, marcas: parseResultados(p.resultado).filter(r => r !== 'no') }))
+        .filter(p => p.marcas.length > 0)
+        .sort((a, b) => a.nombre.localeCompare(b.nombre)), [parts])
+    const textoLista = () => [
+        `Seleccionados — ${audicion?.ciudad || ''}`.trim(),
+        ...seleccionados.map(p => `• ${p.nombre} — ${p.marcas.map(m => resultadoInfo(m).label).join(' + ')}`),
+    ].join('\n')
+    const copiarLista = () => { navigator.clipboard.writeText(textoLista()); toast.success('Lista copiada') }
+    const imprimirLista = () => {
+        const filas = seleccionados.map(p => `<tr><td>${p.nombre.replace(/</g, '&lt;')}</td><td>${p.marcas.map(m => resultadoInfo(m).label).join(' + ')}</td></tr>`).join('')
+        const w = window.open('', '_blank', 'width=820,height=1000')
+        if (!w) { toast.error('Permití las ventanas emergentes para imprimir.'); return }
+        w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Seleccionados ${audicion?.ciudad || ''}</title>
+            <style>body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:40px}h1{font-size:22px;margin:0 0 4px}p.sub{color:#666;margin:0 0 20px;font-size:13px}
+            table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #ddd;font-size:15px}th{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#888}
+            .foot{margin-top:24px;color:#999;font-size:11px}</style></head>
+            <body><h1>Seleccionados — ${(audicion?.ciudad || '').replace(/</g, '&lt;')}</h1>
+            <p class="sub">Piso 2 On Tour${audicion?.fecha ? ' · ' + fmtFecha(audicion.fecha) : ''} · ${seleccionados.length} seleccionados</p>
+            <table><thead><tr><th>Nombre</th><th>Resultado</th></tr></thead><tbody>${filas}</tbody></table>
+            <p class="foot">Generado desde el sistema de Piso 2.</p></body></html>`)
+        w.document.close(); w.focus(); setTimeout(() => { try { w.print() } catch { } }, 300)
+    }
+
     const visibles = useMemo(() => {
         const q = busca.trim().toLowerCase()
         let base = parts
@@ -259,6 +286,7 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
             <div className="flex flex-wrap gap-2 mb-5">
                 <button onClick={copiarLink} className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide bg-[#111] border border-white/10 text-gray-200 px-3 py-2 rounded-lg hover:border-[#D4E655]/50"><Copy size={13} /> Link de inscripción</button>
                 <button onClick={exportarCSV} className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide bg-[#111] border border-white/10 text-gray-200 px-3 py-2 rounded-lg hover:border-white/30"><Download size={13} /> Excel</button>
+                <button onClick={() => setListaOpen(true)} className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide bg-[#D4E655] text-black border border-[#D4E655] px-3 py-2 rounded-lg hover:bg-white"><ClipboardList size={13} /> Lista para publicar</button>
                 <button onClick={toggleEstado} className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide bg-[#111] border border-white/10 text-gray-300 px-3 py-2 rounded-lg hover:border-white/30"><Power size={13} /> {audicion.estado === 'abierta' ? 'Cerrar' : 'Reabrir'}</button>
                 <button onClick={borrarAudicion} className="ml-auto text-gray-600 hover:text-red-400 p-2"><Trash2 size={15} /></button>
             </div>
@@ -390,6 +418,39 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                             )}
                         </div>
                     ))}
+                </div>
+            )}
+
+            {/* Modal: lista para publicar (nombre + resultado de los seleccionados) */}
+            {listaOpen && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end md:items-center justify-center p-0 md:p-4" onClick={() => setListaOpen(false)}>
+                    <div className="bg-white text-neutral-900 rounded-t-2xl md:rounded-2xl w-full max-w-md max-h-[88vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-neutral-200 flex items-start justify-between gap-3">
+                            <div>
+                                <h3 className="font-black text-lg leading-tight">Seleccionados — <span className="capitalize">{audicion?.ciudad}</span></h3>
+                                <p className="text-[11px] text-neutral-500">{seleccionados.length} seleccionado{seleccionados.length === 1 ? '' : 's'} · lista para publicar</p>
+                            </div>
+                            <button onClick={() => setListaOpen(false)} className="p-2 text-neutral-400 hover:text-neutral-900"><X size={18} /></button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto">
+                            {seleccionados.length === 0 ? (
+                                <p className="text-sm text-neutral-500 text-center py-10 px-4">Todavía no hay seleccionados. Marcá el resultado de los participantes y volvé a abrir esta lista.</p>
+                            ) : (
+                                <ul className="divide-y divide-neutral-100">
+                                    {seleccionados.map((p, i) => (
+                                        <li key={i} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                                            <span className="font-semibold text-sm">{p.nombre}</span>
+                                            <span className="text-xs font-bold text-right text-neutral-600 shrink-0">{p.marcas.map(m => resultadoInfo(m).label).join(' + ')}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                        <div className="p-3 border-t border-neutral-200 flex gap-2">
+                            <button onClick={copiarLista} disabled={!seleccionados.length} className="flex-1 flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wide bg-neutral-100 hover:bg-neutral-200 text-neutral-800 py-2.5 rounded-xl disabled:opacity-40"><Copy size={14} /> Copiar</button>
+                            <button onClick={imprimirLista} disabled={!seleccionados.length} className="flex-1 flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wide bg-neutral-900 hover:bg-black text-white py-2.5 rounded-xl disabled:opacity-40"><Printer size={14} /> Imprimir / PDF</button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
