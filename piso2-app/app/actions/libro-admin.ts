@@ -44,8 +44,12 @@ export async function getLibroAdminAction(anio: number, mes: number) {
     if (!perm.ok) return { success: false as const, error: perm.error }
     const admin = getAdminClient()
 
-    const desdeISO = new Date(anio, mes - 1, 1).toISOString()
-    const hastaISO = new Date(anio, mes, 1).toISOString()
+    // Ventana del mes en hora ARGENTINA (UTC-3), igual que el etiquetado del día
+    // (diaART). Si se calcula en hora del server (UTC en Vercel), los movimientos de
+    // las últimas 3hs del mes anterior (noche AR) se colaban en este mes como "día 31".
+    // 00:00 AR = 03:00 UTC → se arma el límite en UTC con +3hs.
+    const desdeISO = new Date(Date.UTC(anio, mes - 1, 1, 3, 0, 0)).toISOString()
+    const hastaISO = new Date(Date.UTC(anio, mes, 1, 3, 0, 0)).toISOString()
     const desdeFecha = `${anio}-${String(mes).padStart(2, '0')}-01`
 
     // --- Sedes (para nombrar las cajas) ---
@@ -62,12 +66,16 @@ export async function getLibroAdminAction(anio: number, mes: number) {
 
     // --- CAJAS del mes (automático), agrupadas por día + sede ---
     const { data: cajaMovs } = await admin.from('caja_movimientos')
-        .select('tipo, metodo_pago, monto, created_at, origen_referencia, turno:caja_turnos(sede_id)')
+        .select('id, tipo, metodo_pago, monto, concepto, created_at, origen_referencia, turno:caja_turnos(sede_id)')
         .gte('created_at', desdeISO).lt('created_at', hastaISO)
 
     // key = `${dia}|${sedeId ?? 'pozo'}`
     const cajaAgrup = new Map<string, Buckets>()
     const bucket = (key: string) => { if (!cajaAgrup.has(key)) cajaAgrup.set(key, cero()); return cajaAgrup.get(key)! }
+    // "Admin retira → Pozo": cada retiro se muestra como LÍNEA PROPIA (ingreso al pozo),
+    // diferenciada, en vez de sumarse al total del día. El egreso sí queda en la caja
+    // de la sede (la plata salió de ese cajón).
+    const retirosItems: { id: string; dia: number; concepto: string; monto: number; esEfvo: boolean; created_at: string }[] = []
     for (const m of (cajaMovs || []) as any[]) {
         const dia = diaART(m.created_at)
         const turno = Array.isArray(m.turno) ? m.turno[0] : m.turno
@@ -78,12 +86,8 @@ export async function getLibroAdminAction(anio: number, mes: number) {
         if (m.tipo === 'egreso') { if (esEfvo) b.ef_egr += monto; else b.tr_egr += monto }
         else { if (esEfvo) b.ef_ing += monto; else b.tr_ing += monto }
 
-        // "Admin retira → Pozo": la plata sale del cajón de la sede (egreso de arriba)
-        // Y ENTRA al pozo de administración. Espejamos ese ingreso en la fila del pozo
-        // para que a los admins les figure como ingreso propio (si no, se perdía).
         if (m.origen_referencia === 'retiro_pozo_liq' && m.tipo === 'egreso' && sedeId !== 'pozo') {
-            const bp = bucket(`${dia}|pozo`)
-            if (esEfvo) bp.ef_ing += monto; else bp.tr_ing += monto
+            retirosItems.push({ id: m.id, dia, concepto: m.concepto || 'Retiro → Pozo', monto, esEfvo, created_at: m.created_at })
         }
     }
 
@@ -155,6 +159,18 @@ export async function getLibroAdminAction(anio: number, mes: number) {
             autor: autorNombre.get(m.created_by) || '—',
             hora: new Date(new Date(m.created_at).getTime() - 3 * 3600_000).toISOString().slice(11, 16),
             fecha: m.fecha, tipoMov: m.tipo, metodoMov: m.metodo, montoMov: monto,
+            ...b,
+        })
+    }
+
+    // Retiros al pozo: una línea por cada uno (ingreso de administración), diferenciada.
+    for (const r of retirosItems) {
+        const b = cero()
+        if (r.esEfvo) b.ef_ing = r.monto; else b.tr_ing = r.monto
+        push(r.dia, {
+            key: `retiro-${r.id}`, auto: false, concepto: r.concepto, // sin id → no editable/borrable
+            autor: 'Retiro de caja',
+            hora: new Date(new Date(r.created_at).getTime() - 3 * 3600_000).toISOString().slice(11, 16),
             ...b,
         })
     }
