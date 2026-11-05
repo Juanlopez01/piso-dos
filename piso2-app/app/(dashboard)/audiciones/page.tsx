@@ -157,6 +157,8 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
     const [loading, setLoading] = useState(true)
     const [busca, setBusca] = useState('')
     const [filtroAplica, setFiltroAplica] = useState<'todas' | 'la_liga' | 'casting'>('todas')
+    // Filtro por lo que SE SELECCIONÓ (resultado). 'todos' = sin filtro; 'pendiente' = sin marcar.
+    const [filtroResultado, setFiltroResultado] = useState<string>('todos')
     const [nuevo, setNuevo] = useState({ nombre: '', instagram: '', telefono: '', mail: '', fecha_nacimiento: '', ciudad_origen: '', altura: '', aplica_a: 'ambas' })
     const [guardando, setGuardando] = useState(false)
     const [editId, setEditId] = useState<string | null>(null)
@@ -232,9 +234,12 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
         // "La Liga" y "Casting" muestran a los de esa opción + los que eligieron "las dos".
         if (filtroAplica === 'la_liga') base = base.filter(p => p.aplica_a === 'la_liga' || p.aplica_a === 'ambas')
         else if (filtroAplica === 'casting') base = base.filter(p => p.aplica_a === 'casting' || p.aplica_a === 'ambas')
+        // Filtro por resultado seleccionado (una marca puntual, o "pendiente" = sin marcar).
+        if (filtroResultado === 'pendiente') base = base.filter(p => parseResultados(p.resultado).length === 0)
+        else if (filtroResultado !== 'todos') base = base.filter(p => parseResultados(p.resultado).includes(filtroResultado))
         if (!q) return base
         return base.filter(p => [p.nombre, p.instagram, p.telefono, p.ciudad_origen, String(p.numero)].filter(Boolean).some(x => String(x).toLowerCase().includes(q)))
-    }, [parts, busca, filtroAplica])
+    }, [parts, busca, filtroAplica, filtroResultado])
 
     if (loading) return <div className="min-h-[50vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#D4E655]" /></div>
     if (!audicion) return null
@@ -290,6 +295,15 @@ function Detalle({ audicionId, onBack }: { audicionId: string; onBack: () => voi
                     <button key={v} onClick={() => setFiltroAplica(v)} className={`text-[11px] font-bold uppercase tracking-wide rounded-lg px-3 py-1.5 border transition-colors ${filtroAplica === v ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/10 hover:border-white/30'}`}>{label}</button>
                 ))}
                 <span className="text-[11px] text-gray-600 ml-1">{visibles.length}</span>
+            </div>
+
+            {/* Filtro por lo SELECCIONADO (resultado). Útil para armar la lista de elegidos. */}
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <span className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mr-1">Seleccionados:</span>
+                <button onClick={() => setFiltroResultado('todos')} className={`text-[11px] font-bold uppercase tracking-wide rounded-lg px-3 py-1.5 border transition-colors ${filtroResultado === 'todos' ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/10 hover:border-white/30'}`}>Todos</button>
+                {RESULTADOS.map(r => (
+                    <button key={r.v} onClick={() => setFiltroResultado(r.v)} className={`text-[11px] font-bold uppercase tracking-wide rounded-lg px-3 py-1.5 border transition-colors ${filtroResultado === r.v ? 'bg-[#D4E655] text-black border-[#D4E655]' : 'bg-[#111] text-gray-400 border-white/10 hover:border-white/30'}`}>{r.label}</button>
+                ))}
             </div>
 
             {/* Buscador */}
