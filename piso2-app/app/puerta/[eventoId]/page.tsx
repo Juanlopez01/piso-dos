@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
-import { Loader2, ScanLine, Check, X, AlertTriangle, Undo2, Camera, Ticket, Minus, Plus } from 'lucide-react'
+import { Loader2, ScanLine, Check, X, AlertTriangle, Undo2, Camera, Ticket, Minus, Plus, Search, UserCheck } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
-import { getPuertaDataAction, validarTicketPuertaAction, registrarVentaPuertaAction } from '@/app/actions/eventos'
+import { getPuertaDataAction, validarTicketPuertaAction, registrarVentaPuertaAction, getPuertaStatsAction, desmarcarTicketPuertaAction, buscarEntradasPuertaAction } from '@/app/actions/eventos'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 
 type Resultado = { estado: string; msg: string; entrada?: string; comprador?: string; usadoAt?: string | null }
@@ -39,8 +39,34 @@ export default function PuertaPage() {
     const [res, setRes] = useState<Resultado | null>(null)
     const [manual, setManual] = useState('')
     const [camError, setCamError] = useState(false)
+    const [ultimoOk, setUltimoOk] = useState<{ codigo: string; comprador?: string } | null>(null) // último válido → permite deshacer
+    const [deshaciendo, setDeshaciendo] = useState(false)
+    // Buscar por nombre (para quien llega sin el QR)
+    const [busq, setBusq] = useState('')
+    const [resultados, setResultados] = useState<any[]>([])
+    const [buscando, setBuscando] = useState(false)
     const lastRef = useRef<{ code: string; at: number }>({ code: '', at: 0 })
     const lockRef = useRef(false)
+    const audioRef = useRef<AudioContext | null>(null)
+
+    // Sonido corto: agudo = ok, grave doble = error. Así el staff no mira la pantalla.
+    const beep = (ok: boolean) => {
+        try {
+            const AC = (window.AudioContext || (window as any).webkitAudioContext); if (!AC) return
+            const ctx = audioRef.current || (audioRef.current = new AC())
+            if (ctx.state === 'suspended') ctx.resume().catch(() => { })
+            const tono = (freq: number, start: number, dur: number) => {
+                const o = ctx.createOscillator(), g = ctx.createGain()
+                o.connect(g); g.connect(ctx.destination); o.type = 'square'; o.frequency.value = freq
+                g.gain.setValueAtTime(0.0001, ctx.currentTime + start)
+                g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + start + 0.01)
+                g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur)
+                o.start(ctx.currentTime + start); o.stop(ctx.currentTime + start + dur + 0.02)
+            }
+            if (ok) tono(1320, 0, 0.14)
+            else { tono(300, 0, 0.16); tono(300, 0.2, 0.16) }
+        } catch { }
+    }
 
     const validar = async (codigo: string) => {
         const cod = (codigo || '').trim()
@@ -49,12 +75,60 @@ export default function PuertaPage() {
         lastRef.current = { code: cod, at: Date.now() }
         lockRef.current = true
         try {
-            const r = await validarTicketPuertaAction(eventoId, token, cod)
-            setRes(r as Resultado)
-            if ((r as any).estado === 'valida' && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(120)
-            cargar()
-        } catch { setRes({ estado: 'error', msg: 'No se pudo validar' }) }
+            const r = await validarTicketPuertaAction(eventoId, token, cod) as Resultado
+            setRes(r)
+            const okValida = r.estado === 'valida'
+            beep(okValida)
+            if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(okValida ? 120 : [80, 60, 80])
+            if (okValida) {
+                // Conteo instantáneo (sin recargar toda la data): +1 ingresado.
+                setData((d: any) => d ? { ...d, stats: { ...d.stats, usados: (d.stats?.usados || 0) + 1 } } : d)
+                setUltimoOk({ codigo: cod, comprador: r.comprador })
+            }
+        } catch { setRes({ estado: 'error', msg: 'No se pudo validar' }); beep(false) }
         setTimeout(() => { lockRef.current = false }, 900)
+    }
+
+    // Deshacer el último check-in válido (por si escanearon de más).
+    const deshacer = async () => {
+        if (!ultimoOk) return
+        setDeshaciendo(true)
+        const r = await desmarcarTicketPuertaAction(eventoId, token, ultimoOk.codigo)
+        if (r.ok) {
+            toast.success('Check-in deshecho')
+            setData((d: any) => d ? { ...d, stats: { ...d.stats, usados: Math.max(0, (d.stats?.usados || 0) - 1) } } : d)
+            setUltimoOk(null); setRes(null); lastRef.current = { code: '', at: 0 }
+        } else toast.error((r as any).error || 'No se pudo deshacer')
+        setDeshaciendo(false)
+    }
+
+    // Refresco liviano del contador cada 15s (reconcilia si hay varios dispositivos).
+    useEffect(() => {
+        if (!data || data.error || tab !== 'checkin') return
+        const id = setInterval(async () => {
+            const r = await getPuertaStatsAction(eventoId, token)
+            if (r.ok) setData((d: any) => d ? { ...d, stats: { total: r.total, usados: r.usados } } : d)
+        }, 15000)
+        return () => clearInterval(id)
+    }, [data?.error, tab, eventoId, token])
+
+    // Búsqueda por nombre con debounce.
+    useEffect(() => {
+        const term = busq.trim()
+        if (term.length < 2) { setResultados([]); return }
+        setBuscando(true)
+        const id = setTimeout(async () => {
+            const r = await buscarEntradasPuertaAction(eventoId, token, term)
+            setResultados(r.ok ? r.resultados : [])
+            setBuscando(false)
+        }, 300)
+        return () => clearTimeout(id)
+    }, [busq, eventoId, token])
+
+    // Ingresar una entrada encontrada por nombre (marca usada + actualiza la lista).
+    const ingresarPorNombre = async (codigo: string) => {
+        await validar(codigo)
+        setResultados(rs => rs.map(r => ({ ...r, tickets: r.tickets.map((t: any) => t.codigo === codigo ? { ...t, usado: true } : t) })))
     }
 
     useEffect(() => {
@@ -127,6 +201,11 @@ export default function PuertaPage() {
                                 {(res.entrada || res.comprador) && <p className="text-sm mt-1 opacity-90">{res.comprador} · {res.entrada}</p>}
                             </div>
                         )}
+                        {ultimoOk && (
+                            <button onClick={deshacer} disabled={deshaciendo} className="mt-3 w-full flex items-center justify-center gap-2 bg-[#111] border border-white/10 text-gray-300 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wide disabled:opacity-40 hover:text-white">
+                                {deshaciendo ? <Loader2 size={13} className="animate-spin" /> : <Undo2 size={13} />} Deshacer último{ultimoOk.comprador ? ` (${ultimoOk.comprador})` : ''}
+                            </button>
+                        )}
                         <div className="mt-4 bg-[#09090b] border border-white/10 rounded-2xl overflow-hidden">
                             <div id="reader" className="w-full" />
                             {camError && <div className="p-6 text-center text-gray-400 text-sm flex flex-col items-center gap-2"><Camera size={26} className="opacity-40" /> No se pudo abrir la cámara. Usá el código manual.</div>}
@@ -137,6 +216,39 @@ export default function PuertaPage() {
                             <div className="flex gap-2">
                                 <input value={manual} onChange={e => setManual(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { validar(manual); setManual('') } }} placeholder="E-XXXXXXXX-XXXXXX" className="flex-1 bg-[#111] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-[#D4E655] font-mono" />
                                 <button onClick={() => { validar(manual); setManual('') }} disabled={!manual.trim()} className="bg-[#D4E655] text-black font-bold px-4 rounded-xl text-xs uppercase tracking-wide disabled:opacity-40">Validar</button>
+                            </div>
+                        </div>
+
+                        {/* Buscar por nombre: para quien llega sin el QR */}
+                        <div className="mt-4">
+                            <p className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-1.5">Buscar por nombre (sin QR)</p>
+                            <div className="relative">
+                                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                                <input value={busq} onChange={e => setBusq(e.target.value)} placeholder="Nombre, mail o teléfono…" className="w-full bg-[#111] border border-white/10 rounded-xl pl-9 pr-8 py-2.5 text-sm text-white outline-none focus:border-[#D4E655]" />
+                                {busq && <button onClick={() => setBusq('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"><X size={14} /></button>}
+                            </div>
+                            {buscando && <div className="flex justify-center py-3"><Loader2 size={15} className="animate-spin text-gray-500" /></div>}
+                            {!buscando && busq.trim().length >= 2 && resultados.length === 0 && (
+                                <p className="text-[11px] text-gray-500 italic px-1 mt-2">Sin resultados. Probá con otro dato.</p>
+                            )}
+                            <div className="mt-2 space-y-2">
+                                {resultados.map((r: any) => (
+                                    <div key={r.ventaId} className="bg-[#09090b] border border-white/10 rounded-xl p-3">
+                                        <p className="font-bold text-sm truncate mb-1.5">{r.comprador}</p>
+                                        <div className="space-y-1.5">
+                                            {r.tickets.map((t: any, i: number) => (
+                                                <div key={i} className="flex items-center justify-between gap-2">
+                                                    <span className="text-[12px] text-gray-300 truncate">{t.entrada}</span>
+                                                    {t.usado ? (
+                                                        <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-amber-400 flex items-center gap-1"><Check size={12} /> Ya ingresó</span>
+                                                    ) : (
+                                                        <button onClick={() => ingresarPorNombre(t.codigo)} className="shrink-0 bg-emerald-500 text-black font-bold text-[10px] uppercase tracking-wide px-3 py-1.5 rounded-lg flex items-center gap-1"><UserCheck size={12} /> Ingresar</button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     </>

@@ -1464,6 +1464,55 @@ export async function validarTicketPuertaAction(eventoId: string, token: string,
     return await validarTicketConAdmin(admin, eventoId, codigo)
 }
 
+// Progreso de check-in para la puerta (solo total/usados). Liviano: lo usa el
+// refresco periódico para reconciliar el contador entre varios dispositivos.
+export async function getPuertaStatsAction(eventoId: string, token: string) {
+    const admin = getAdminClient()
+    if (!(await puertaAutorizada(admin, eventoId, token))) return { ok: false as const }
+    const { data: ventas } = await admin.from('evento_ventas').select('id').eq('evento_id', eventoId).eq('estado', 'confirmada')
+    const ids = (ventas || []).map((v: any) => v.id)
+    if (!ids.length) return { ok: true as const, total: 0, usados: 0 }
+    const { data: tks } = await admin.from('evento_tickets').select('usado').in('venta_id', ids)
+    return { ok: true as const, total: (tks || []).length, usados: (tks || []).filter((t: any) => t.usado).length }
+}
+
+// Buscar compradores por nombre/email/contacto para ingresar sin escanear (ej.
+// perdió el QR). Devuelve sus entradas con el estado de uso de cada una.
+export async function buscarEntradasPuertaAction(eventoId: string, token: string, q: string) {
+    const admin = getAdminClient()
+    if (!(await puertaAutorizada(admin, eventoId, token))) return { ok: false as const, error: 'Link inválido', resultados: [] }
+    const term = (q || '').trim()
+    if (term.length < 2) return { ok: true as const, resultados: [] }
+    const like = `%${term}%`
+    const { data: ventas } = await admin.from('evento_ventas')
+        .select('id, comprador_nombre, comprador_email, comprador_contacto')
+        .eq('evento_id', eventoId).eq('estado', 'confirmada')
+        .or(`comprador_nombre.ilike.${like},comprador_email.ilike.${like},comprador_contacto.ilike.${like}`)
+        .order('created_at', { ascending: false }).limit(15)
+    const ids = (ventas || []).map((v: any) => v.id)
+    if (!ids.length) return { ok: true as const, resultados: [] }
+    const { data: tks } = await admin.from('evento_tickets').select('codigo, entrada_id, usado, venta_id').in('venta_id', ids)
+    const entIds = [...new Set((tks || []).map((t: any) => t.entrada_id))]
+    const entNom: Record<string, string> = {}
+    if (entIds.length) { const { data: ents } = await admin.from('evento_entradas').select('id, nombre').in('id', entIds); for (const e of (ents || []) as any[]) entNom[e.id] = e.nombre }
+    const porVenta: Record<string, any[]> = {}
+    for (const t of (tks || []) as any[]) (porVenta[t.venta_id] ||= []).push({ codigo: t.codigo, entrada: entNom[t.entrada_id] || 'Entrada', usado: !!t.usado })
+    const resultados = (ventas || []).map((v: any) => ({
+        ventaId: v.id, comprador: v.comprador_nombre || v.comprador_email || v.comprador_contacto || 'Sin nombre',
+        tickets: (porVenta[v.id] || []),
+    })).filter((r: any) => r.tickets.length)
+    return { ok: true as const, resultados }
+}
+
+// Deshace el último check-in desde la puerta (por si escanearon de más).
+export async function desmarcarTicketPuertaAction(eventoId: string, token: string, codigo: string) {
+    const admin = getAdminClient()
+    if (!(await puertaAutorizada(admin, eventoId, token))) return { ok: false as const, error: 'Link inválido' }
+    const { error } = await admin.from('evento_tickets').update({ usado: false, usado_at: null }).eq('codigo', (codigo || '').trim())
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
 export async function registrarVentaPuertaAction(payload: { eventoId: string; token: string; comprador_nombre?: string; medio_pago?: string; items: { entrada_id: string; cantidad: number }[] }) {
     const admin = getAdminClient()
     if (!(await puertaAutorizada(admin, payload.eventoId, payload.token))) return { ok: false as const, error: 'Link inválido' }
