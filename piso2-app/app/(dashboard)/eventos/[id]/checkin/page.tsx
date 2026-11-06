@@ -80,7 +80,7 @@ export default function CheckinPage() {
     return (
         <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8 pb-24">
             <Toaster position="top-center" richColors theme="dark" />
-            <Link href="/eventos" className="text-gray-400 hover:text-white flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide mb-4"><ArrowLeft size={15} /> Volver a eventos</Link>
+            <Link href={`/eventos?ev=${eventoId}`} className="text-gray-400 hover:text-white flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide mb-4"><ArrowLeft size={15} /> Volver a la obra</Link>
 
             <div className="max-w-md mx-auto">
                 <h1 className="text-2xl font-black tracking-tight flex items-center gap-2"><ScanLine className="text-[#D4E655]" size={24} /> Check-in</h1>

@@ -94,7 +94,7 @@ export default function EventosPage() {
             <Toaster position="top-center" richColors theme="dark" />
 
             {sel ? (
-                <Detalle eventoId={sel} soloLectura={soloLectura} verDinero={verDinero} verVentas={verVentas} onBack={() => { setSel(null); cargar() }} onDuplicated={(id) => setSel(id)} />
+                <Detalle eventoId={sel} soloLectura={soloLectura} verDinero={verDinero} verVentas={verVentas} onBack={() => { setSel(null); cargar(); try { window.history.replaceState(null, '', '/eventos') } catch { } }} onDuplicated={(id) => setSel(id)} />
             ) : (
                 <>
                     <div className="flex items-end justify-between gap-3 mb-6">
