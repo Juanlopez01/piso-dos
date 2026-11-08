@@ -35,6 +35,21 @@ async function requireStaff(soloLectura = false) {
     return { ok: true as const, userId: session.user.id, rol: perfil!.rol as string, finanzas: !!perfil!.admin_finanzas }
 }
 
+// Control de puerta (check-in): escanear entradas y deshacer un check-in.
+// NO es "editar el evento" (precios, entradas, etc.): es operar la puerta.
+// Lo pueden hacer el staff de escritura + quien tenga el flag acceso_curaduria
+// (p. ej. una alumna a cargo de controlar las entradas de una obra), sin
+// necesidad de ser recepción.
+async function requireCheckin() {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { ok: false as const, error: 'No autorizado' }
+    const { data: perfil } = await supabase.from('profiles').select('rol, acceso_curaduria').eq('id', session.user.id).single()
+    const ok = perfil && (ROLES_WRITE.includes(perfil.rol) || perfil.acceso_curaduria)
+    if (!ok) return { ok: false as const, error: 'Sin permisos' }
+    return { ok: true as const, userId: session.user.id }
+}
+
 // Escritura de la ficha técnica: además del staff de escritura, las TÉCNICAS.
 // (El curador queda en solo lectura, como hasta ahora.)
 async function requireFichaWrite() {
@@ -731,7 +746,7 @@ async function validarTicketConAdmin(admin: any, eventoId: string, codigo: strin
 // Valida un ticket por su código (lo que trae el QR) para un evento dado.
 // Si es válido y no usado, lo marca usado. Devuelve el resultado para la UI.
 export async function validarTicketAction(eventoId: string, codigo: string) {
-    const perm = await requireStaff()
+    const perm = await requireCheckin()
     if (!perm.ok) return { estado: 'error' as const, msg: perm.error || 'Sin permisos' }
     const admin = getAdminClient()
     return await validarTicketConAdmin(admin, eventoId, codigo)
@@ -739,7 +754,7 @@ export async function validarTicketAction(eventoId: string, codigo: string) {
 
 // Deshace un check-in (por si escanearon de más).
 export async function desmarcarTicketAction(codigo: string) {
-    const perm = await requireStaff()
+    const perm = await requireCheckin()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
     const { error } = await admin.from('evento_tickets').update({ usado: false, usado_at: null }).eq('codigo', (codigo || '').trim())
