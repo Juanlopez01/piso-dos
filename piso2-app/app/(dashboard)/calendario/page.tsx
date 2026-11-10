@@ -25,6 +25,7 @@ import Image from 'next/image'
 import { Toaster, toast } from 'sonner'
 import { useCash } from '@/context/CashContext'
 import MultiDatePicker from '@/components/MultiDatePicker'
+import ClasesEnAlertaPanel from '@/components/ClasesEnAlertaPanel'
 
 // --- TIPOS ESTRICTOS ---
 type EventoAgenda = {
@@ -287,6 +288,9 @@ export default function CalendarioPage() {
     const endDateStr = format(endOfWeek(endOfMonth(currentDate)), 'yyyy-MM-dd')
 
     const { userRole } = useCash()
+    // Agenda = info operativa: la alarma, los alquileres y las obras son solo para
+    // admin, recepción y auxiliar. Profes/coordinador/visitante ven solo clases.
+    const esStaffOperativo = ['admin', 'recepcion', 'auxiliar'].includes(userRole || '')
 
     const { data, error, isLoading, mutate } = useSWR(
         ['agenda', startIso, endIso, startDateStr, endDateStr],
@@ -302,7 +306,7 @@ export default function CalendarioPage() {
     // Clases "en alerta" del mes mostrado (menos de 5 alumnos pagos): para marcar
     // cada sesión con un badge rojo. Se recalcula al cambiar de mes.
     const { data: alertaData } = useSWR(
-        ['alertas-clases', currentDate.getFullYear(), currentDate.getMonth() + 1],
+        esStaffOperativo ? ['alertas-clases', currentDate.getFullYear(), currentDate.getMonth() + 1] : null,
         ([, a, m]) => getClasesEnAlertaAction(a as number, m as number),
         { revalidateOnFocus: false, dedupingInterval: 60000 }
     )
@@ -556,8 +560,13 @@ export default function CalendarioPage() {
         }
     }
 
-    // Las obras no están atadas a una sede del estudio: se muestran siempre.
-    const eventosFiltrados = eventos.filter(e => e.tipo === 'Obra' || sedeFiltro === 'todas' || e.sede_id === sedeFiltro)
+    const eventosFiltrados = eventos.filter(e => {
+        // Profes/coordinador/visitante: solo clases (ni alquileres ni obras).
+        if (!esStaffOperativo && e.tipo !== 'Clase') return false
+        // Las obras no están atadas a una sede del estudio: se muestran siempre.
+        if (e.tipo === 'Obra') return true
+        return sedeFiltro === 'todas' || e.sede_id === sedeFiltro
+    })
     const salasDisponibles = sedes.find(s => s.id === form.sedeId)?.salas || []
     const dayStrSelected = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''
     const eventosDelDia = dayStrSelected ? eventosFiltrados.filter(e => e.fecha_render === dayStrSelected) : []
@@ -565,6 +574,8 @@ export default function CalendarioPage() {
     return (
         <div className="h-full flex flex-col pb-24 md:pb-10 px-2 pt-2">
             <Toaster position="top-center" richColors theme="dark" />
+
+            {esStaffOperativo && <ClasesEnAlertaPanel />}
 
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 md:gap-0">
                 <div className="flex items-center gap-3">

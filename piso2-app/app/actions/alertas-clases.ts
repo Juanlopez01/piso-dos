@@ -14,7 +14,7 @@ async function requireStaff() {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return { ok: false as const, error: 'No autorizado' }
     const { data: p } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
-    if (!['admin', 'recepcion'].includes(p?.rol || '')) return { ok: false as const, error: 'Sin permisos' }
+    if (!['admin', 'recepcion', 'auxiliar'].includes(p?.rol || '')) return { ok: false as const, error: 'Sin permisos' }
     return { ok: true as const }
 }
 

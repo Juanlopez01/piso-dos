@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 import { Loader2, Calendar, CheckSquare, BarChart3, Clock, MapPin, Package, Star, Users } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { generarReporteMensualAction } from '@/app/actions/reportes'
-import ClasesEnAlertaPanel from './_components/ClasesEnAlertaPanel'
+import ClasesEnAlertaPanel from '@/components/ClasesEnAlertaPanel'
 
 function AdminContent() {
     const { userRole, isLoading: loadingContext } = useCash()

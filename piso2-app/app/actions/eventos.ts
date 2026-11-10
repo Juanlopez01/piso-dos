@@ -122,8 +122,16 @@ export async function getEventosAction() {
 // Obras (funciones) para la Agenda general: cada evento con fecha dentro de la
 // ventana, no borrador y no cancelado. Se muestran junto a clases y alquileres.
 export async function getObrasAgendaAction(startISO: string, endISO: string) {
-    const perm = await requireStaff(true)
-    if (!perm.ok) return { ok: false as const, error: perm.error, obras: [] as any[] }
+    // La Agenda es info operativa del estudio: las obras ahí las ven admin,
+    // recepción y auxiliar (no profes/visitantes, ni el staff de 2E, que las ve
+    // en /eventos).
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return { ok: false as const, error: 'No autorizado', obras: [] as any[] }
+    const { data: perfil } = await supabase.from('profiles').select('rol').eq('id', session.user.id).single()
+    if (!['admin', 'recepcion', 'auxiliar'].includes(perfil?.rol || '')) {
+        return { ok: false as const, error: 'Sin permisos', obras: [] as any[] }
+    }
     const admin = getAdminClient()
     const { data } = await admin.from('eventos')
         .select('id, nombre, fecha, lugar, estado, cancelado')
