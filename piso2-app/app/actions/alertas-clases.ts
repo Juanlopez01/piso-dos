@@ -33,6 +33,7 @@ export type ClaseAlerta = {
     nSesiones: number
     receps: string[]       // quién estaba en caja (cubrió) en las sesiones del mes
     proximaSesion: string | null
+    claseIds: string[]     // ids de las sesiones del mes (para marcar en el calendario)
 }
 
 // Clases (agrupadas por serie) que en el mes tuvieron MENOS de UMBRAL alumnos
@@ -140,6 +141,7 @@ export async function getClasesEnAlertaAction(anio: number, mes: number, umbral:
                 sedeNombre: g.sedeId ? (sedeNombre.get(g.sedeId) || '—') : '—',
                 nPagos: pagos.size, nInscriptos: inscriptos.size, nSesiones: g.sesiones.length,
                 receps: [...receps], proximaSesion: proxima,
+                claseIds: g.sesiones.map(s => s.id),
             })
         }
     }

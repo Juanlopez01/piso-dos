@@ -3,6 +3,7 @@
 import { createClient } from '@/utils/supabase/client'
 import { useState, useEffect } from 'react'
 import { crearClasesAction, duplicarMesAction, cancelarClaseAction } from '@/app/actions/clases'
+import { getClasesEnAlertaAction } from '@/app/actions/alertas-clases'
 import { optimizeImage } from '@/utils/optimizeImage'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
@@ -267,6 +268,16 @@ export default function CalendarioPage() {
             dedupingInterval: 5000
         }
     )
+
+    // Clases "en alerta" del mes mostrado (menos de 5 alumnos pagos): para marcar
+    // cada sesión con un badge rojo. Se recalcula al cambiar de mes.
+    const { data: alertaData } = useSWR(
+        ['alertas-clases', currentDate.getFullYear(), currentDate.getMonth() + 1],
+        ([, a, m]) => getClasesEnAlertaAction(a as number, m as number),
+        { revalidateOnFocus: false, dedupingInterval: 60000 }
+    )
+    const alertaIds = new Set<string>()
+    if (alertaData?.ok) for (const al of alertaData.alertas) for (const id of al.claseIds) alertaIds.add(id)
 
     const handleDuplicarMes = async () => {
         const mesActualStr = format(new Date(), "yyyy-MM")
@@ -650,8 +661,9 @@ export default function CalendarioPage() {
                                     {eventosDelDia.length > 0 ? (
                                         eventosDelDia.map((evt) => {
                                             const style = getEventStyle(evt)
+                                            const enAlerta = evt.tipo === 'Clase' && alertaIds.has(evt.id)
                                             return (
-                                                <div key={evt.id} className={`flex flex-row bg-[#111] border rounded-xl overflow-hidden group transition-all relative ${style.border} border-l-[6px]`}>
+                                                <div key={evt.id} className={`flex flex-row bg-[#111] border rounded-xl overflow-hidden group transition-all relative ${style.border} border-l-[6px] ${enAlerta ? 'ring-1 ring-red-500/50' : ''}`}>
                                                     <div className="relative w-24 md:w-32 flex-shrink-0 bg-white/5 flex flex-col">
                                                         {evt.tipo === 'Clase' && evt.clase_data?.imagen_url ? (<Image src={evt.clase_data.imagen_url} alt={evt.titulo} fill className="object-cover" />) : (<div className="w-full h-full flex flex-col items-center justify-center text-white/10 p-2">{evt.tipo === 'Alquiler' ? <Music size={24} className="opacity-50" /> : <ImageIcon size={24} />}<span className="text-[8px] font-bold uppercase mt-1 opacity-50 text-center">{evt.tipo === 'Alquiler' ? 'Externo' : 'Sin Flyer'}</span></div>)}
                                                         {/* 🚀 FIX: ACÁ SE MUESTRA LA HORA RENDERIZADA */}
@@ -674,6 +686,7 @@ export default function CalendarioPage() {
                                                                         {evt.clase_data?.profesor_2_nombre ? ` & ${evt.clase_data.profesor_2_nombre}` : ''}
                                                                     </span>
                                                                     <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><GraduationCap size={10} /> {evt.clase_data?.nivel}</span>
+                                                                            {enAlerta && <span className="flex items-center gap-1 bg-red-500/10 text-red-400 border border-red-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><ShieldAlert size={10} className="text-red-500" /> Pocos alumnos</span>}
                                                                     {evt.clase_data?.es_audicion && <span className="flex items-center gap-1 bg-pink-500/10 text-pink-400 border border-pink-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Sparkles size={10} className="text-pink-500" /> Audición</span>}
                                                                     {evt.clase_data?.es_la_liga && <span className="flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})</span>}
                                                                     {evt.clase_data?.compania_nombre && <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><UsersRound size={10} className="text-blue-500" /> {evt.clase_data.compania_nombre}</span>}
