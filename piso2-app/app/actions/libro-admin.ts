@@ -76,13 +76,25 @@ export async function getLibroAdminAction(anio: number, mes: number) {
     // diferenciada, en vez de sumarse al total del día. El egreso sí queda en la caja
     // de la sede (la plata salió de ese cajón).
     const retirosItems: { id: string; dia: number; concepto: string; monto: number; esEfvo: boolean; created_at: string }[] = []
+    // Egresos del pozo (pagos que hace administración: profes, staff, etc.): se
+    // muestran DETALLADOS, un movimiento por línea, en vez de sumarse al total de
+    // "Administración (pozo)". Así Santi/Nico ven cada pago (ej. "Liq Admin: Paola
+    // Castro") por separado. Los INGRESOS del pozo (ventas online, etc.) siguen
+    // agrupados en la línea de Administración.
+    const pozoEgresos: { id: string; dia: number; concepto: string; monto: number; esEfvo: boolean; created_at: string }[] = []
     for (const m of (cajaMovs || []) as any[]) {
         const dia = diaART(m.created_at)
         const turno = Array.isArray(m.turno) ? m.turno[0] : m.turno
         const sedeId = turno?.sede_id ?? 'pozo'
-        const b = bucket(`${dia}|${sedeId}`)
         const esEfvo = (m.metodo_pago || 'efectivo') === 'efectivo'
         const monto = Number(m.monto || 0)
+
+        if (sedeId === 'pozo' && m.tipo === 'egreso') {
+            pozoEgresos.push({ id: m.id, dia, concepto: m.concepto || 'Pago', monto, esEfvo, created_at: m.created_at })
+            continue  // no se suma al agregado del pozo: va como línea propia
+        }
+
+        const b = bucket(`${dia}|${sedeId}`)
         if (m.tipo === 'egreso') { if (esEfvo) b.ef_egr += monto; else b.tr_egr += monto }
         else { if (esEfvo) b.ef_ing += monto; else b.tr_ing += monto }
 
@@ -171,6 +183,18 @@ export async function getLibroAdminAction(anio: number, mes: number) {
             key: `retiro-${r.id}`, auto: false, concepto: r.concepto, // sin id → no editable/borrable
             autor: 'Retiro de caja',
             hora: new Date(new Date(r.created_at).getTime() - 3 * 3600_000).toISOString().slice(11, 16),
+            ...b,
+        })
+    }
+
+    // Pagos del pozo (profes / staff liquidados por administración): una línea por cada uno.
+    for (const p of pozoEgresos) {
+        const b = cero()
+        if (p.esEfvo) b.ef_egr = p.monto; else b.tr_egr = p.monto
+        push(p.dia, {
+            key: `pozoegr-${p.id}`, auto: false, concepto: p.concepto, // sin id → no editable/borrable
+            autor: 'Administración',
+            hora: new Date(new Date(p.created_at).getTime() - 3 * 3600_000).toISOString().slice(11, 16),
             ...b,
         })
     }
