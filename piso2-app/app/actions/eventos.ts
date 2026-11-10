@@ -119,6 +119,21 @@ export async function getEventosAction() {
     return { ok: true as const, eventos: conStats, finanzas: perm.finanzas }
 }
 
+// Obras (funciones) para la Agenda general: cada evento con fecha dentro de la
+// ventana, no borrador y no cancelado. Se muestran junto a clases y alquileres.
+export async function getObrasAgendaAction(startISO: string, endISO: string) {
+    const perm = await requireStaff(true)
+    if (!perm.ok) return { ok: false as const, error: perm.error, obras: [] as any[] }
+    const admin = getAdminClient()
+    const { data } = await admin.from('eventos')
+        .select('id, nombre, fecha, lugar, estado, cancelado')
+        .gte('fecha', startISO).lte('fecha', endISO)
+        .neq('estado', 'borrador').eq('cancelado', false)
+        .order('fecha', { ascending: true })
+    const obras = (data || []).filter((e: any) => e.fecha)
+    return { ok: true as const, obras }
+}
+
 export async function getEventoAction(eventoId: string) {
     const perm = await requireStaff(true)
     if (!perm.ok) return { ok: false as const, error: perm.error }

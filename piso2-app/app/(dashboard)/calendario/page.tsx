@@ -4,6 +4,7 @@ import { createClient } from '@/utils/supabase/client'
 import { useState, useEffect } from 'react'
 import { crearClasesAction, duplicarMesAction, cancelarClaseAction } from '@/app/actions/clases'
 import { getClasesEnAlertaAction } from '@/app/actions/alertas-clases'
+import { getObrasAgendaAction } from '@/app/actions/eventos'
 import { optimizeImage } from '@/utils/optimizeImage'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
@@ -17,7 +18,7 @@ import {
     ChevronLeft, ChevronRight, X, Plus, MapPin, Trash2, Loader2,
     Info, DollarSign, Image as ImageIcon, Briefcase, GraduationCap,
     Music, User, AlertCircle, CalendarDays, Star, UsersRound, Building2, Sparkles, Pencil,
-    CopyPlus, ShieldAlert
+    CopyPlus, ShieldAlert, Theater
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import Image from 'next/image'
@@ -28,7 +29,7 @@ import MultiDatePicker from '@/components/MultiDatePicker'
 // --- TIPOS ESTRICTOS ---
 type EventoAgenda = {
     id: string
-    tipo: 'Clase' | 'Alquiler'
+    tipo: 'Clase' | 'Alquiler' | 'Obra'
     titulo: string
     subtitulo: string
     inicio: string
@@ -64,6 +65,10 @@ type EventoAgenda = {
         telefono: string
         monto: number
         estado: string
+    }
+    obra_data?: {
+        estado: string
+        lugar: string | null
     }
 }
 
@@ -212,6 +217,31 @@ const fetcher = async ([key, startIso, endIso, startDateStr, endDateStr]: string
             });
         });
     }
+
+    // Obras (funciones PISO2E) dentro de la ventana. Se traen por server action
+    // (respeta permisos). No están atadas a una sede del estudio: se muestran siempre.
+    try {
+        const resObras = await getObrasAgendaAction(startIso, endIso)
+        if (resObras.ok) {
+            for (const o of resObras.obras) {
+                const d = new Date(o.fecha)
+                agenda.push({
+                    id: o.id,
+                    tipo: 'Obra',
+                    titulo: o.nombre,
+                    subtitulo: 'Obra',
+                    inicio: o.fecha,
+                    fin: o.fecha,
+                    hora_render: format(d, 'HH:mm'),
+                    fecha_render: format(d, 'yyyy-MM-dd'),
+                    sala_nombre: o.lugar || 'PISO 2E',
+                    sala_sede: 'PISO 2E',
+                    sede_id: 'obra',
+                    obra_data: { estado: o.estado, lugar: o.lugar || null },
+                })
+            }
+        }
+    } catch { /* si falla, la agenda igual muestra clases y alquileres */ }
 
     agenda.sort((a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime())
 
@@ -511,6 +541,7 @@ export default function CalendarioPage() {
     }
 
     const getEventStyle = (evt: EventoAgenda) => {
+        if (evt.tipo === 'Obra') return { border: 'border-cyan-500', text: 'text-cyan-400', bg: 'bg-cyan-500' }
         if (evt.tipo === 'Alquiler') return { border: 'border-purple-500', text: 'text-purple-500', bg: 'bg-purple-500' }
         if (evt.clase_data?.es_audicion) return { border: 'border-pink-500', text: 'text-pink-500', bg: 'bg-pink-500' }
         if (evt.clase_data?.es_la_liga) return { border: 'border-yellow-500', text: 'text-yellow-500', bg: 'bg-yellow-500' }
@@ -525,7 +556,8 @@ export default function CalendarioPage() {
         }
     }
 
-    const eventosFiltrados = eventos.filter(e => sedeFiltro === 'todas' || e.sede_id === sedeFiltro)
+    // Las obras no están atadas a una sede del estudio: se muestran siempre.
+    const eventosFiltrados = eventos.filter(e => e.tipo === 'Obra' || sedeFiltro === 'todas' || e.sede_id === sedeFiltro)
     const salasDisponibles = sedes.find(s => s.id === form.sedeId)?.salas || []
     const dayStrSelected = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : ''
     const eventosDelDia = dayStrSelected ? eventosFiltrados.filter(e => e.fecha_render === dayStrSelected) : []
@@ -665,7 +697,7 @@ export default function CalendarioPage() {
                                             return (
                                                 <div key={evt.id} className={`flex flex-row bg-[#111] border rounded-xl overflow-hidden group transition-all relative ${style.border} border-l-[6px] ${enAlerta ? 'ring-1 ring-red-500/50' : ''}`}>
                                                     <div className="relative w-24 md:w-32 flex-shrink-0 bg-white/5 flex flex-col">
-                                                        {evt.tipo === 'Clase' && evt.clase_data?.imagen_url ? (<Image src={evt.clase_data.imagen_url} alt={evt.titulo} fill className="object-cover" />) : (<div className="w-full h-full flex flex-col items-center justify-center text-white/10 p-2">{evt.tipo === 'Alquiler' ? <Music size={24} className="opacity-50" /> : <ImageIcon size={24} />}<span className="text-[8px] font-bold uppercase mt-1 opacity-50 text-center">{evt.tipo === 'Alquiler' ? 'Externo' : 'Sin Flyer'}</span></div>)}
+                                                        {evt.tipo === 'Clase' && evt.clase_data?.imagen_url ? (<Image src={evt.clase_data.imagen_url} alt={evt.titulo} fill className="object-cover" />) : (<div className="w-full h-full flex flex-col items-center justify-center text-white/10 p-2">{evt.tipo === 'Alquiler' ? <Music size={24} className="opacity-50" /> : evt.tipo === 'Obra' ? <Theater size={24} className="opacity-50" /> : <ImageIcon size={24} />}<span className="text-[8px] font-bold uppercase mt-1 opacity-50 text-center">{evt.tipo === 'Alquiler' ? 'Externo' : evt.tipo === 'Obra' ? 'Obra 2E' : 'Sin Flyer'}</span></div>)}
                                                         {/* 🚀 FIX: ACÁ SE MUESTRA LA HORA RENDERIZADA */}
                                                         <div className="absolute inset-x-0 bottom-0 bg-black/80 backdrop-blur-sm p-1 text-center border-t border-white/10 z-10"><span className="text-sm font-black text-white leading-none block">{evt.hora_render}</span><span className="text-[8px] uppercase font-bold text-gray-400 block">{evt.sala_nombre} ({evt.sala_sede})</span></div>
                                                     </div>
@@ -691,6 +723,12 @@ export default function CalendarioPage() {
                                                                     {evt.clase_data?.es_la_liga && <span className="flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Star size={10} className="fill-purple-500/50" /> La Liga (Nivel {evt.clase_data.liga_nivel})</span>}
                                                                     {evt.clase_data?.compania_nombre && <span className="flex items-center gap-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><UsersRound size={10} className="text-blue-500" /> {evt.clase_data.compania_nombre}</span>}
                                                                 </>
+                                                            ) : evt.tipo === 'Obra' ? (
+                                                                <>
+                                                                    <span className="flex items-center gap-1 bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded font-black uppercase tracking-widest text-[9px]"><Theater size={10} /> Obra · PISO 2E</span>
+                                                                    {evt.obra_data?.lugar && <span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><MapPin size={10} /> {evt.obra_data.lugar}</span>}
+                                                                    {evt.obra_data?.estado === 'finalizado' && <span className="flex items-center gap-1 bg-white/5 text-gray-400 px-2 py-0.5 rounded uppercase text-[9px] font-bold">Finalizada</span>}
+                                                                </>
                                                             ) : (<span className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded"><User size={10} /> Cliente Externo</span>)}
                                                         </div>
                                                         <div className="flex items-end justify-between border-t border-white/5 pt-2 mt-auto gap-2">
@@ -700,6 +738,8 @@ export default function CalendarioPage() {
                                                                     <a href={`/clase/${evt.id}`} className="flex-1 bg-[#D4E655] text-black text-[10px] font-black uppercase py-2 rounded hover:bg-white transition-colors text-center shadow-[0_0_10px_rgba(212,230,85,0.2)]">Gestionar / Lista</a>
                                                                     <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget({ id: evt.id, serieId: evt.clase_data?.serie_id || null }) }} className="text-gray-500 hover:text-red-500 p-2 bg-white/5 rounded hover:bg-red-500/10 transition-colors ml-1"><Trash2 size={14} /></button>
                                                                 </>
+                                                            ) : evt.tipo === 'Obra' ? (
+                                                                <div className="flex gap-2 w-full"><div className="flex-1 text-[10px] text-cyan-500/70 italic flex items-center"><Theater size={12} className="mr-1" /> Función PISO 2E</div><a href={`/eventos?ev=${evt.id}`} className="px-3 py-2 bg-cyan-500/15 text-cyan-300 rounded text-[10px] font-bold uppercase hover:bg-cyan-500/25">Ver obra</a></div>
                                                             ) : (<div className="flex gap-2 w-full"><div className="flex-1 text-[10px] text-gray-500 italic flex items-center"><Info size={12} className="mr-1" /> Alquiler externo</div><a href="/alquileres" className="px-3 py-2 bg-white/10 text-white rounded text-[10px] font-bold uppercase hover:bg-white/20">Ver Alquileres</a></div>)}
                                                         </div>
                                                     </div>
