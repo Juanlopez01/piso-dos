@@ -81,7 +81,7 @@ export async function getLibroAdminAction(anio: number, mes: number) {
     // "Administración (pozo)". Así Santi/Nico ven cada pago (ej. "Liq Admin: Paola
     // Castro") por separado. Los INGRESOS del pozo (ventas online, etc.) siguen
     // agrupados en la línea de Administración.
-    const pozoEgresos: { id: string; dia: number; concepto: string; monto: number; esEfvo: boolean; created_at: string }[] = []
+    const pozoEgresos: { id: string; dia: number; concepto: string; monto: number; esEfvo: boolean; created_at: string; origen: string | null }[] = []
     for (const m of (cajaMovs || []) as any[]) {
         const dia = diaART(m.created_at)
         const turno = Array.isArray(m.turno) ? m.turno[0] : m.turno
@@ -90,7 +90,7 @@ export async function getLibroAdminAction(anio: number, mes: number) {
         const monto = Number(m.monto || 0)
 
         if (sedeId === 'pozo' && m.tipo === 'egreso') {
-            pozoEgresos.push({ id: m.id, dia, concepto: m.concepto || 'Pago', monto, esEfvo, created_at: m.created_at })
+            pozoEgresos.push({ id: m.id, dia, concepto: m.concepto || 'Pago', monto, esEfvo, created_at: m.created_at, origen: m.origen_referencia || null })
             continue  // no se suma al agregado del pozo: va como línea propia
         }
 
@@ -187,14 +187,39 @@ export async function getLibroAdminAction(anio: number, mes: number) {
         })
     }
 
-    // Pagos del pozo (profes / staff liquidados por administración): una línea por cada uno.
+    // Pagos del pozo (profes / staff liquidados por administración): una línea por
+    // cada uno, PERO los pagos a un mismo profe (que la liquidación masiva genera
+    // por clase) se juntan en un solo movimiento por profe + día + método, para no
+    // llenar el libro de una línea por clase. Ej: "Liq Admin: Paola Castro · 5 clases".
+    const profeDeConcepto = (c: string): string | null => {
+        const m = /^Liq Admin:\s*(.+?)\s*\(/.exec(c || '')
+        return m ? m[1].trim() : null
+    }
+    type PozoGrupo = { dia: number; concepto: string; profe: string | null; monto: number; esEfvo: boolean; created_at: string; key: string; count: number }
+    const pozoGrupos = new Map<string, PozoGrupo>()
     for (const p of pozoEgresos) {
+        const profe = p.origen === 'pago_profe_admin' ? profeDeConcepto(p.concepto) : null
+        if (profe) {
+            const gk = `${p.dia}|${p.esEfvo ? 'ef' : 'tr'}|${profe.toLowerCase()}`
+            const g = pozoGrupos.get(gk)
+            if (g) {
+                g.monto += p.monto; g.count += 1
+                if (p.created_at < g.created_at) g.created_at = p.created_at
+            } else {
+                pozoGrupos.set(gk, { dia: p.dia, concepto: p.concepto, profe, monto: p.monto, esEfvo: p.esEfvo, created_at: p.created_at, key: `pozoegr-${gk}`, count: 1 })
+            }
+        } else {
+            pozoGrupos.set(`solo-${p.id}`, { dia: p.dia, concepto: p.concepto, profe: null, monto: p.monto, esEfvo: p.esEfvo, created_at: p.created_at, key: `pozoegr-${p.id}`, count: 1 })
+        }
+    }
+    for (const g of pozoGrupos.values()) {
         const b = cero()
-        if (p.esEfvo) b.ef_egr = p.monto; else b.tr_egr = p.monto
-        push(p.dia, {
-            key: `pozoegr-${p.id}`, auto: false, concepto: p.concepto, // sin id → no editable/borrable
+        if (g.esEfvo) b.ef_egr = g.monto; else b.tr_egr = g.monto
+        push(g.dia, {
+            key: g.key, auto: false,  // sin id → no editable/borrable
+            concepto: g.count > 1 ? `Liq Admin: ${g.profe} · ${g.count} clases` : g.concepto,
             autor: 'Administración',
-            hora: new Date(new Date(p.created_at).getTime() - 3 * 3600_000).toISOString().slice(11, 16),
+            hora: new Date(new Date(g.created_at).getTime() - 3 * 3600_000).toISOString().slice(11, 16),
             ...b,
         })
     }
