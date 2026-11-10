@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { Loader2, Calendar, CheckSquare, BarChart3, Clock, MapPin, Package, Star, Users } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import { generarReporteMensualAction } from '@/app/actions/reportes'
+import ClasesEnAlertaPanel from './_components/ClasesEnAlertaPanel'
 
 function AdminContent() {
     const { userRole, isLoading: loadingContext } = useCash()
@@ -91,6 +92,9 @@ function AdminContent() {
                     Herramienta Exclusiva de Administración
                 </p>
             </div>
+
+            {/* PANEL DE ALERTAS: clases con pocos alumnos pagos */}
+            <ClasesEnAlertaPanel />
 
             {/* CAJA DE FILTROS PREMIUM */}
             <div className="bg-[#111] border border-white/5 rounded-3xl p-2 shadow-2xl mb-8 max-w-6xl mx-auto">
