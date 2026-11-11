@@ -25,7 +25,6 @@ import Image from 'next/image'
 import { Toaster, toast } from 'sonner'
 import { useCash } from '@/context/CashContext'
 import MultiDatePicker from '@/components/MultiDatePicker'
-import ClasesEnAlertaPanel from '@/components/ClasesEnAlertaPanel'
 
 // --- TIPOS ESTRICTOS ---
 type EventoAgenda = {
@@ -574,8 +573,6 @@ export default function CalendarioPage() {
     return (
         <div className="h-full flex flex-col pb-24 md:pb-10 px-2 pt-2">
             <Toaster position="top-center" richColors theme="dark" />
-
-            {esStaffOperativo && <ClasesEnAlertaPanel />}
 
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 md:gap-0">
                 <div className="flex items-center gap-3">
