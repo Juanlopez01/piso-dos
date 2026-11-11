@@ -322,6 +322,26 @@ function Postulaciones() {
         if (r.ok) { toast.success('Mensaje enviado.'); setMsgPara(null); setMsgTexto('') } else toast.error(r.error || 'Error')
         setBusy(null)
     }
+    // Normaliza un teléfono AR a formato wa.me (solo dígitos, con prefijo 54 9).
+    const telWa = (tel?: string | null) => {
+        let d = (tel || '').replace(/\D/g, '')
+        if (!d) return ''
+        if (d.startsWith('54')) d = d.slice(2)
+        if (d.startsWith('0')) d = d.slice(1)
+        if (d.startsWith('9')) d = d.slice(1)
+        d = d.replace(/^(\d{2,4})15/, '$1')
+        return '549' + d
+    }
+    // Abre WhatsApp con el postulante, con un mensaje según su estado.
+    const whatsappPostulante = (p: any) => {
+        const tel = telWa(p.telefono)
+        if (!tel) return toast.error('El postulante no tiene teléfono cargado.')
+        const nombre = (p.nombre || '').split(' ')[0] || ''
+        const msg = p.estado === 'aprobada'
+            ? `¡Hola${nombre ? ' ' + nombre : ''}! Buenas noticias: quedaste en La Liga 2027 de Piso 2 🎉 Te cuento cómo seguir 👇`
+            : `¡Hola${nombre ? ' ' + nombre : ''}! Te escribimos de Piso 2 por tu postulación a La Liga 2027.`
+        window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`, '_blank')
+    }
 
     const CONTACTO: Record<string, string> = { llamar: '📞 Que lo llamen', escribir: '✍️ Que le escriban', anotarse: '✅ Anotarse directo' }
 
@@ -352,7 +372,13 @@ function Postulaciones() {
                                             <button onClick={() => aprobar(p.id, 'mensual')} disabled={busy === p.id} className={`${btn} bg-green-600/80 hover:bg-green-600 text-white flex items-center gap-1`}><Check size={13} /> Aprobar (mensual)</button>
                                             <button onClick={() => aprobar(p.id, 'cuatrimestral')} disabled={busy === p.id} className={`${btn} bg-green-700/70 hover:bg-green-700 text-white flex items-center gap-1`}><Check size={13} /> Aprobar (cuatrimestral)</button>
                                             <button onClick={() => rechazar(p.id)} disabled={busy === p.id} className={`${btn} bg-white/5 hover:bg-red-600/30 text-white/70 flex items-center gap-1`}><X size={13} /> No aprobar</button>
-                                            <button onClick={() => setMsgPara(msgPara === p.id ? null : p.id)} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70 flex items-center gap-1`}><MessageSquare size={13} /> Mensaje</button>
+                                            {p.telefono && <button onClick={() => whatsappPostulante(p)} className={`${btn} bg-[#25D366]/90 hover:bg-[#25D366] text-black font-bold flex items-center gap-1`}><MessageSquare size={13} /> WhatsApp</button>}
+                                            <button onClick={() => setMsgPara(msgPara === p.id ? null : p.id)} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70 flex items-center gap-1`}><MessageSquare size={13} /> Mensaje interno</button>
+                                        </div>
+                                    )}
+                                    {p.estado !== 'pendiente' && p.telefono && (
+                                        <div className="mt-3">
+                                            <button onClick={() => whatsappPostulante(p)} className={`${btn} bg-[#25D366]/90 hover:bg-[#25D366] text-black font-bold flex items-center gap-1`}><MessageSquare size={13} /> WhatsApp</button>
                                         </div>
                                     )}
                                     {msgPara === p.id && (
