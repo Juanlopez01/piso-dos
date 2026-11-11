@@ -18,6 +18,7 @@ import {
 import { AsistenciaEditor, ClaseEditor, NotasEditor } from './editores'
 import { Loader2, Check, X, MessageSquare, Link2, Send, Plus } from 'lucide-react'
 import { cuotasHabilitadas, CUOTAS_DESDE_LABEL } from '@/lib/liga27'
+import { telWa } from '@/utils/telWa'
 
 const card = "bg-[#111113] border border-white/10 rounded-xl p-5"
 const btn = "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
@@ -322,16 +323,6 @@ function Postulaciones() {
         if (r.ok) { toast.success('Mensaje enviado.'); setMsgPara(null); setMsgTexto('') } else toast.error(r.error || 'Error')
         setBusy(null)
     }
-    // Normaliza un teléfono AR a formato wa.me (solo dígitos, con prefijo 54 9).
-    const telWa = (tel?: string | null) => {
-        let d = (tel || '').replace(/\D/g, '')
-        if (!d) return ''
-        if (d.startsWith('54')) d = d.slice(2)
-        if (d.startsWith('0')) d = d.slice(1)
-        if (d.startsWith('9')) d = d.slice(1)
-        d = d.replace(/^(\d{2,4})15/, '$1')
-        return '549' + d
-    }
     // Abre WhatsApp con el postulante, con un mensaje según su estado.
     const whatsappPostulante = (p: any) => {
         const tel = telWa(p.telefono)
@@ -422,17 +413,6 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
             toast.success('Link copiado. Pegalo en WhatsApp/mail.', { description: r.url, duration: 8000 })
         } else toast.error(r.error || 'Error')
         setBusy(null)
-    }
-    // Normaliza un teléfono AR a formato wa.me (solo dígitos, con prefijo 54 9).
-    const telWa = (tel?: string | null) => {
-        let d = (tel || '').replace(/\D/g, '')
-        if (!d) return ''
-        if (d.startsWith('54')) d = d.slice(2)
-        if (d.startsWith('0')) d = d.slice(1)
-        if (d.startsWith('9')) d = d.slice(1)
-        // quitar el "15" de celular si quedó al inicio del número local
-        d = d.replace(/^(\d{2,4})15/, '$1')
-        return '549' + d
     }
     // Genera el link de pago y abre WhatsApp con el mensaje ya armado.
     const whatsappPago = async (i: any, concepto: 'matricula' | 'cuota') => {
