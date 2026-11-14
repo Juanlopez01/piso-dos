@@ -633,12 +633,25 @@ export async function toggleVentaOnlineAction(eventoId: string, valor: boolean) 
 // PÚBLICO — venta online de entradas (sin cuenta)
 // ============================================================================
 
-// Evento + entradas disponibles, SOLO si está activo y con venta online habilitada.
+// Una función está "caducada" cuando su DÍA (hora Argentina, UTC-3) ya pasó. Una
+// función de HOY se sigue vendiendo todo el día (aunque su fecha sea 00:00); recién
+// se corta a partir del día siguiente. Sin fecha cargada, no se bloquea.
+function funcionCaducada(fecha?: string | null): boolean {
+    if (!fecha) return false
+    const ev = new Date(new Date(fecha).getTime() - 3 * 3600_000)
+    const hoy = new Date(Date.now() - 3 * 3600_000)
+    const evDia = Date.UTC(ev.getUTCFullYear(), ev.getUTCMonth(), ev.getUTCDate())
+    const hoyDia = Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate())
+    return evDia < hoyDia
+}
+
+// Evento + entradas disponibles, SOLO si está activo, con venta online habilitada
+// y la función no pasó (día en hora Argentina).
 export async function getEventoPublicoAction(eventoId: string, promo?: string) {
     const admin = getAdminClient()
     const { data: evento } = await admin.from('eventos')
         .select('id, nombre, descripcion, fecha, lugar, estado, venta_online, flyer_url').eq('id', eventoId).maybeSingle()
-    if (!evento || !evento.venta_online || evento.estado !== 'activo') return null
+    if (!evento || !evento.venta_online || evento.estado !== 'activo' || funcionCaducada(evento.fecha)) return null
 
     const { data: entradas } = await admin.from('evento_entradas').select('*').eq('evento_id', eventoId).eq('activo', true).order('orden')
     const vendidas = await vendidasPorEntrada(admin, eventoId)
@@ -681,8 +694,9 @@ export async function crearOrdenEventoAction(payload: {
     cia?: string // obra/compañía que refirió la venta (del link ?cia=); null = Piso 2
 }) {
     const admin = getAdminClient()
-    const { data: evento } = await admin.from('eventos').select('id, estado, venta_online, aforo').eq('id', payload.evento_id).maybeSingle()
+    const { data: evento } = await admin.from('eventos').select('id, estado, venta_online, aforo, fecha').eq('id', payload.evento_id).maybeSingle()
     if (!evento || !evento.venta_online || evento.estado !== 'activo') return { ok: false as const, error: 'El evento no está disponible para compra online.' }
+    if (funcionCaducada(evento.fecha)) return { ok: false as const, error: 'Esta función ya pasó: no se pueden comprar entradas.' }
     if (!payload.comprador_nombre?.trim()) return { ok: false as const, error: 'Completá tu nombre.' }
     if (!payload.comprador_email?.includes('@')) return { ok: false as const, error: 'Completá un email válido.' }
 
