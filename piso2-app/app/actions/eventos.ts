@@ -421,7 +421,10 @@ export async function registrarVentaAction(data: {
     medio_pago?: string
     items: { entrada_id: string; cantidad: number }[]
 }) {
-    const perm = await requireStaff()
+    // Registrar una venta en mostrador es operar la puerta: lo puede hacer el
+    // staff de escritura o quien controla las entradas (flag acceso_curaduria),
+    // igual que el check-in. No crea movimiento de caja (va a evento_ventas).
+    const perm = await requireCheckin()
     if (!perm.ok) return { ok: false as const, error: perm.error }
     const admin = getAdminClient()
 
