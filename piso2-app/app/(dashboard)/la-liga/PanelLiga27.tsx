@@ -7,7 +7,9 @@ import {
     enviarMensajePostulacionLiga27Action, getInscripcionesLiga27Action, enviarBienvenidaLiga27Action,
     generarLinkPagoLiga27Action, registrarPagoLiga27Action, getLanzamientosAdminAction,
     guardarLanzamientoAction, getPreciosLiga27Action, guardarPreciosLiga27Action,
+    inscribirAlumnoExistenteLiga27Action,
 } from '@/app/actions/liga2027'
+import { buscarPerfilesAction } from '@/app/actions/consultas'
 import {
     getDisciplinasLiga27Action, getDocentesLiga27Action, guardarDisciplinaLiga27Action,
     getExamenesDisciplinaLiga27Action, guardarExamenLiga27Action,
@@ -396,8 +398,40 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
     const hoy = new Date()
     const hayCuotas = cuotasHabilitadas() // cuotas recién desde enero 2027
 
+    // Alta directa de un alumno que ya tiene cuenta (sin postulación).
+    const [addOpen, setAddOpen] = useState(false)
+    const [q, setQ] = useState('')
+    const [resultados, setResultados] = useState<any[]>([])
+    const [buscando, setBuscando] = useState(false)
+    const [planNuevo, setPlanNuevo] = useState<'mensual' | 'cuatrimestral'>('mensual')
+
     const cargar = async () => { setCargando(true); setItems(await getInscripcionesLiga27Action()); setCargando(false) }
     useEffect(() => { cargar() }, [])
+
+    // Buscar alumnos existentes (debounce simple).
+    useEffect(() => {
+        if (!addOpen) return
+        const t = (q || '').trim()
+        if (t.length < 2) { setResultados([]); return }
+        setBuscando(true)
+        const h = setTimeout(async () => {
+            const r = await buscarPerfilesAction(t)
+            setResultados(r.ok ? r.perfiles : [])
+            setBuscando(false)
+        }, 300)
+        return () => clearTimeout(h)
+    }, [q, addOpen])
+
+    const inscribirExistente = async (profileId: string) => {
+        setBusy('add-' + profileId)
+        const r = await inscribirAlumnoExistenteLiga27Action(profileId, planNuevo)
+        if (r.ok) {
+            toast.success(r.yaEstaba ? 'Ese alumno ya estaba inscripto (quedó aprobado).' : 'Alumno inscripto en La Liga 2027.')
+            setAddOpen(false); setQ(''); setResultados([])
+            cargar()
+        } else toast.error(r.error || 'Error')
+        setBusy(null)
+    }
 
     const bienvenida = async (id: string) => {
         setBusy(id); const r = await enviarBienvenidaLiga27Action(id)
@@ -444,9 +478,48 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
     const EST: Record<string, string> = { postulado: 'bg-amber-500/20 text-amber-300', aprobado: 'bg-green-500/20 text-green-300', bloqueado: 'bg-red-500/20 text-red-300', baja: 'bg-white/10 text-white/40' }
 
     if (cargando) return <Loader2 className="animate-spin text-white/40" />
-    if (!items.length) return <p className="text-white/40 text-sm">Todavía no hay inscripciones. Aprobá postulaciones para crearlas.</p>
     return (
         <div className="space-y-3">
+            {/* Alta directa de alumno existente */}
+            <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-white/40">{items.length} inscripto{items.length === 1 ? '' : 's'}</p>
+                <button onClick={() => { setAddOpen(o => !o); setQ(''); setResultados([]) }} className={`${btn} ${addOpen ? 'bg-white/10 text-white/70' : 'bg-[#D4E655] text-black'} flex items-center gap-1`}>
+                    {addOpen ? <><X size={13} /> Cerrar</> : <><Plus size={13} /> Inscribir alumno existente</>}
+                </button>
+            </div>
+
+            {addOpen && (
+                <div className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-3">
+                    <p className="text-[11px] text-white/50">Para un alumno que <b className="text-white/80">ya tiene cuenta</b> en Piso 2. Lo inscribe directo (sin postulación) y le aparece su panel de La Liga.</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] text-white/50">Plan:</span>
+                        {(['mensual', 'cuatrimestral'] as const).map(p => (
+                            <button key={p} onClick={() => setPlanNuevo(p)} className={`${btn} capitalize ${planNuevo === p ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{p}</button>
+                        ))}
+                    </div>
+                    <input autoFocus value={q} onChange={e => setQ(e.target.value)} className={input} placeholder="Buscar por nombre, email o teléfono…" />
+                    {buscando ? <p className="text-[11px] text-white/40 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Buscando…</p>
+                        : q.trim().length >= 2 && resultados.length === 0 ? <p className="text-[11px] text-white/40">Sin resultados.</p>
+                            : (
+                                <div className="space-y-1.5">
+                                    {resultados.map(p => (
+                                        <div key={p.id} className="flex items-center justify-between gap-2 bg-black/20 rounded-lg px-3 py-2">
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium truncate">{p.nombre_completo || 'Sin nombre'}</p>
+                                                <p className="text-[11px] text-white/40 truncate">{p.email}{p.telefono ? ` · ${p.telefono}` : ''}</p>
+                                            </div>
+                                            <button onClick={() => inscribirExistente(p.id)} disabled={busy === 'add-' + p.id} className={`${btn} bg-green-600/80 hover:bg-green-600 text-white flex items-center gap-1 shrink-0`}>
+                                                {busy === 'add-' + p.id ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Inscribir
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                </div>
+            )}
+
+            {!items.length && <p className="text-white/40 text-sm">Todavía no hay inscripciones. Aprobá postulaciones o inscribí un alumno existente con el botón de arriba.</p>}
+
             {items.map(i => (
                 <div key={i.id} className={card}>
                     <div className="flex items-start gap-4 flex-wrap">

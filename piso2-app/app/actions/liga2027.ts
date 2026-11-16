@@ -364,6 +364,35 @@ export async function aprobarPostulacionLiga27Action(postulacionId: string, plan
     return { ok: true, inscripcionId, cuentaCreada: cuenta.creado }
 }
 
+// Inscribe directo a un alumno que YA tiene cuenta en La Liga 2027, sin pasar por
+// la postulación. Crea la inscripción en el lanzamiento activo; con eso al alumno
+// le aparece su panel de La Liga. Si ya estaba inscripto, no duplica (lo deja aprobado).
+export async function inscribirAlumnoExistenteLiga27Action(profileId: string, plan?: 'mensual' | 'cuatrimestral'): Promise<{ ok: boolean; error?: string; inscripcionId?: string; yaEstaba?: boolean }> {
+    const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
+    const admin = getAdminClient()
+    if (!profileId) return { ok: false, error: 'Elegí un alumno.' }
+    const { data: perfil } = await admin.from('profiles').select('id').eq('id', profileId).maybeSingle()
+    if (!perfil) return { ok: false, error: 'No se encontró el alumno.' }
+
+    const { data: lanz } = await admin.from('liga27_lanzamientos')
+        .select('id').eq('activo', true).order('orden', { ascending: true }).limit(1).maybeSingle()
+    if (!lanz?.id) return { ok: false, error: 'No hay un lanzamiento activo de La Liga 2027.' }
+
+    const { data: existente } = await admin.from('liga27_inscripciones')
+        .select('id').eq('profile_id', profileId).eq('lanzamiento_id', lanz.id).maybeSingle()
+    if (existente?.id) {
+        await admin.from('liga27_inscripciones').update({ estado: 'aprobado', plan: plan || null }).eq('id', existente.id)
+        revalidatePath('/la-liga')
+        return { ok: true, inscripcionId: existente.id, yaEstaba: true }
+    }
+    const { data: ins, error } = await admin.from('liga27_inscripciones').insert({
+        profile_id: profileId, lanzamiento_id: lanz.id, estado: 'aprobado', plan: plan || null,
+    }).select('id').single()
+    if (error) return { ok: false, error: error.message }
+    revalidatePath('/la-liga')
+    return { ok: true, inscripcionId: ins.id }
+}
+
 export async function rechazarPostulacionLiga27Action(postulacionId: string): Promise<{ ok: boolean; error?: string }> {
     const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
     const admin = getAdminClient()
