@@ -259,6 +259,30 @@ export async function getNotasInscripcionLiga27Action(inscripcionId: string) {
     return (data || []).map((n: any) => ({ ...n, nota: n.nota === null ? null : Number(n.nota) }))
 }
 
+// Resumen de asistencia de UN inscripto por materia (para el popup de pagos del
+// staff): presentes / ausentes / justificadas + condición de regularidad.
+export async function getAsistenciaInscripcionLiga27Action(inscripcionId: string): Promise<{ ok: boolean; error?: string; asistencias?: any[] }> {
+    const g = await gate(); if (!g.ok) return { ok: false, error: g.error }
+    const admin = getAdminClient()
+    const { data: disciplinas } = await admin.from('liga27_disciplinas').select('id, nombre').eq('activa', true).order('orden', { ascending: true })
+    const { data: asis } = await admin.from('liga27_asistencia').select('disciplina_id, presente, justificada').eq('inscripcion_id', inscripcionId)
+    const { data: libres } = await admin.from('liga27_libres').select('disciplina_id, tipo, resuelto').eq('inscripcion_id', inscripcionId)
+    const asistencias = (disciplinas || []).map((d: any) => {
+        const rows = (asis || []).filter((a: any) => a.disciplina_id === d.id)
+        const presentes = rows.filter((a: any) => a.presente).length
+        const ausentes = rows.filter((a: any) => !a.presente && !a.justificada).length
+        const justificadas = rows.filter((a: any) => !a.presente && a.justificada).length
+        const libDisc = (libres || []).filter((l: any) => l.disciplina_id === d.id)
+        const libreBloque = libDisc.some((l: any) => l.tipo === 'bloque' && !l.resuelto)
+        const libreMes = libDisc.some((l: any) => l.tipo === 'mes' && !l.resuelto)
+        return {
+            disciplina: d.nombre, presentes, ausentes, justificadas, total: rows.length,
+            condicion: libreBloque ? 'libre_bloque' : (libreMes ? 'libre_mes' : 'regular'),
+        }
+    })
+    return { ok: true, asistencias }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // ASISTENCIAS + RÉGIMEN DE REGULARIDAD
 // ════════════════════════════════════════════════════════════════════════════

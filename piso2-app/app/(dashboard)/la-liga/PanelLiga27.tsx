@@ -17,7 +17,7 @@ import {
     getExamenesDisciplinaLiga27Action, guardarExamenLiga27Action,
     getProgramaDisciplinaLiga27Action, guardarProgramaLiga27Action,
     getLibresLiga27Action, resolverLibreLiga27Action,
-    getBeneficiosLiga27Action, guardarBeneficiosLiga27Action,
+    getBeneficiosLiga27Action, guardarBeneficiosLiga27Action, getAsistenciaInscripcionLiga27Action,
 } from '@/app/actions/liga2027-academico'
 import { AsistenciaEditor, ClaseEditor, NotasEditor } from './editores'
 import { Loader2, Check, X, MessageSquare, Link2, Send, Plus } from 'lucide-react'
@@ -681,14 +681,16 @@ function SeguimientoThread({ inscripcionId }: { inscripcionId: string }) {
 // ── Popup de pagos del alumno (padrón: matrícula + cuotas mar→dic) ─────────────
 function PagosAlumnoModal({ inscripto, onClose, onChange }: { inscripto: any; onClose: () => void; onChange: () => void }) {
     const [data, setData] = useState<any | null>(null)
+    const [asis, setAsis] = useState<any[]>([])
     const [cargando, setCargando] = useState(true)
     const [busy, setBusy] = useState<string | null>(null)
     const [metodo, setMetodo] = useState('efectivo')
 
     const cargar = async () => {
         setCargando(true)
-        const r = await getPagosAlumnoLiga27Action(inscripto.id)
-        setData(r.ok ? r.data : null)
+        const [rp, ra] = await Promise.all([getPagosAlumnoLiga27Action(inscripto.id), getAsistenciaInscripcionLiga27Action(inscripto.id)])
+        setData(rp.ok ? rp.data : null)
+        setAsis(ra.ok ? (ra.asistencias || []) : [])
         setCargando(false)
     }
     useEffect(() => { cargar() }, [inscripto.id])
@@ -763,6 +765,30 @@ function PagosAlumnoModal({ inscripto, onClose, onChange }: { inscripto: any; on
                                 ))}
                             </div>
                             <p className="text-[10px] text-white/30 mt-2">Se puede registrar por adelantado (ej. ya pagaron en recepción). El pago online del alumno recién arranca en {CUOTAS_DESDE_LABEL}.</p>
+                        </div>
+
+                        {/* Asistencia por materia */}
+                        <div>
+                            <p className="text-[11px] uppercase tracking-wider text-white/40 font-bold mb-2">Asistencia</p>
+                            {asis.length === 0 || asis.every((a: any) => a.total === 0)
+                                ? <p className="text-[11px] text-white/30">Sin asistencia registrada todavía.</p>
+                                : (
+                                    <div className="space-y-1.5">
+                                        {asis.filter((a: any) => a.total > 0).map((a: any, i: number) => (
+                                            <div key={i} className="flex items-center justify-between gap-2 bg-white/5 rounded-lg px-3 py-2">
+                                                <span className="text-sm font-medium truncate">{a.disciplina}</span>
+                                                <span className="flex items-center gap-2 text-[11px] shrink-0">
+                                                    <span className="text-green-300">{a.presentes} pres.</span>
+                                                    <span className="text-red-300">{a.ausentes} falta{a.ausentes === 1 ? '' : 's'}</span>
+                                                    {a.justificadas > 0 && <span className="text-white/40">{a.justificadas} just.</span>}
+                                                    {a.condicion !== 'regular'
+                                                        ? <span className="font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-300">{a.condicion === 'libre_bloque' ? 'Libre bloque' : 'Libre mes'}</span>
+                                                        : <span className="font-bold px-2 py-0.5 rounded bg-green-500/20 text-green-300">Regular</span>}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                         </div>
                     </div>
                 )}
