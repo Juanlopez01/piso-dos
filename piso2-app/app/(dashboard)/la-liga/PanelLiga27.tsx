@@ -8,6 +8,8 @@ import {
     generarLinkPagoLiga27Action, registrarPagoLiga27Action, getLanzamientosAdminAction,
     guardarLanzamientoAction, getPreciosLiga27Action, guardarPreciosLiga27Action,
     inscribirAlumnoExistenteLiga27Action, setNivelLiga27Action, getPagosAlumnoLiga27Action,
+    darDeBajaLiga27Action, getSeguimientoLiga27Action, agregarSeguimientoLiga27Action, eliminarSeguimientoLiga27Action,
+    altaNuevaLiga27Action,
 } from '@/app/actions/liga2027'
 import { buscarPerfilesAction } from '@/app/actions/consultas'
 import {
@@ -400,6 +402,28 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
 
     const [filtroNivel, setFiltroNivel] = useState<'' | '1' | '2' | 'sin'>('')
     const [pagosDe, setPagosDe] = useState<any | null>(null) // inscripto abierto en el popup de pagos
+    const [seguimientoDe, setSeguimientoDe] = useState<string | null>(null) // inscripto con el hilo de notas abierto
+    const [altaOpen, setAltaOpen] = useState(false)
+    const [altaForm, setAltaForm] = useState({ nombre: '', apellido: '', email: '', telefono: '', plan: 'mensual' as 'mensual' | 'cuatrimestral' })
+
+    const darBaja = async (i: any, baja: boolean) => {
+        if (baja && !window.confirm(`¿Dar de baja a ${i.perfil?.nombre || 'este inscripto'}? Sale de las listas activas (se puede reactivar).`)) return
+        setBusy(i.id)
+        const r = await darDeBajaLiga27Action(i.id, baja)
+        if (r.ok) { toast.success(baja ? 'Dado de baja.' : 'Reactivado.'); cargar() } else toast.error(r.error || 'Error')
+        setBusy(null)
+    }
+    const altaNueva = async () => {
+        if (!altaForm.nombre.trim()) return toast.error('Poné el nombre.')
+        if (!altaForm.email.includes('@')) return toast.error('Poné un email válido.')
+        setBusy('alta')
+        const r = await altaNuevaLiga27Action(altaForm)
+        if (r.ok) {
+            toast.success(r.cuentaCreada ? 'Persona creada e inscripta.' : 'Inscripta (ya tenía cuenta).')
+            setAltaOpen(false); setAltaForm({ nombre: '', apellido: '', email: '', telefono: '', plan: 'mensual' }); cargar()
+        } else toast.error(r.error || 'Error')
+        setBusy(null)
+    }
     const setNivel = async (id: string, nivel: 1 | 2 | null) => {
         setItems(prev => prev.map(x => x.id === id ? { ...x, nivel } : x)) // optimista
         const r = await setNivelLiga27Action(id, nivel)
@@ -495,10 +519,36 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
                         <button key={v} onClick={() => setFiltroNivel(v)} className={`${btn} ${filtroNivel === v ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{l}</button>
                     ))}
                 </div>
-                <button onClick={() => { setAddOpen(o => !o); setQ(''); setResultados([]) }} className={`${btn} ${addOpen ? 'bg-white/10 text-white/70' : 'bg-[#D4E655] text-black'} flex items-center gap-1`}>
-                    {addOpen ? <><X size={13} /> Cerrar</> : <><Plus size={13} /> Inscribir alumno existente</>}
-                </button>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                    <button onClick={() => { setAltaOpen(o => !o); setAddOpen(false) }} className={`${btn} ${altaOpen ? 'bg-white/10 text-white/70' : 'bg-[#D4E655] text-black'} flex items-center gap-1`}>
+                        {altaOpen ? <><X size={13} /> Cerrar</> : <><Plus size={13} /> Persona nueva</>}
+                    </button>
+                    <button onClick={() => { setAddOpen(o => !o); setQ(''); setResultados([]); setAltaOpen(false) }} className={`${btn} ${addOpen ? 'bg-white/10 text-white/70' : 'bg-white/5 text-white/70 hover:bg-white/10'} flex items-center gap-1`}>
+                        {addOpen ? <><X size={13} /> Cerrar</> : <><Plus size={13} /> Alumno existente</>}
+                    </button>
+                </div>
             </div>
+
+            {altaOpen && (
+                <div className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-3">
+                    <p className="text-[11px] text-white/50">Para alguien <b className="text-white/80">sin cuenta</b>. Le crea la cuenta por su email y la inscribe directo. Si el email ya tenía cuenta, la usa.</p>
+                    <div className="grid grid-cols-2 gap-2">
+                        <input value={altaForm.nombre} onChange={e => setAltaForm({ ...altaForm, nombre: e.target.value })} className={input} placeholder="Nombre" />
+                        <input value={altaForm.apellido} onChange={e => setAltaForm({ ...altaForm, apellido: e.target.value })} className={input} placeholder="Apellido" />
+                    </div>
+                    <input value={altaForm.email} onChange={e => setAltaForm({ ...altaForm, email: e.target.value })} className={input} placeholder="Email" type="email" />
+                    <input value={altaForm.telefono} onChange={e => setAltaForm({ ...altaForm, telefono: e.target.value })} className={input} placeholder="Teléfono (opcional)" />
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] text-white/50">Plan:</span>
+                        {(['mensual', 'cuatrimestral'] as const).map(p => (
+                            <button key={p} onClick={() => setAltaForm({ ...altaForm, plan: p })} className={`${btn} capitalize ${altaForm.plan === p ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{p}</button>
+                        ))}
+                        <button onClick={altaNueva} disabled={busy === 'alta'} className={`${btn} bg-green-600/80 hover:bg-green-600 text-white flex items-center gap-1 ml-auto`}>
+                            {busy === 'alta' ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Crear e inscribir
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {addOpen && (
                 <div className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-3">
@@ -533,7 +583,7 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
             {!items.length && <p className="text-white/40 text-sm">Todavía no hay inscripciones. Aprobá postulaciones o inscribí un alumno existente con el botón de arriba.</p>}
 
             {items.filter(i => filtroNivel === '' || (filtroNivel === 'sin' ? !i.nivel : String(i.nivel) === filtroNivel)).map(i => (
-                <div key={i.id} className={card}>
+                <div key={i.id} className={`${card} ${i.estado === 'baja' ? 'opacity-50' : ''}`}>
                     <div className="flex items-start gap-4 flex-wrap">
                         {i.perfil?.foto_url ? <img src={i.perfil.foto_url} alt="" className="w-12 h-12 rounded-lg object-cover" /> : <div className="w-12 h-12 rounded-lg bg-white/5 flex items-center justify-center text-white/30">{(i.perfil?.nombre || '?')[0]}</div>}
                         <div className="flex-1 min-w-0">
@@ -565,13 +615,65 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
                                         <button onClick={() => pagoManual(i.id, 'cuota')} disabled={busy === i.id} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70`}>+ Pago cuota</button>
                                     </> : <span className="text-[10px] text-white/30 self-center">Cuotas desde {CUOTAS_DESDE_LABEL}</span>}
                                 </>}
+                                <button onClick={() => setSeguimientoDe(seguimientoDe === i.id ? null : i.id)} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70 flex items-center gap-1`}><MessageSquare size={13} /> Seguimiento</button>
+                                {i.estado === 'baja'
+                                    ? <button onClick={() => darBaja(i, false)} disabled={busy === i.id} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70`}>Reactivar</button>
+                                    : <button onClick={() => darBaja(i, true)} disabled={busy === i.id} className={`${btn} bg-white/5 hover:bg-red-600/30 text-white/50 hover:text-red-200`}>Dar de baja</button>}
                             </div>
+                            {seguimientoDe === i.id && <SeguimientoThread inscripcionId={i.id} />}
                         </div>
                     </div>
                 </div>
             ))}
 
             {pagosDe && <PagosAlumnoModal inscripto={pagosDe} onClose={() => setPagosDe(null)} onChange={cargar} />}
+        </div>
+    )
+}
+
+// ── Hilo de notas internas de seguimiento (entre el equipo, no lo ve el alumno) ─
+function SeguimientoThread({ inscripcionId }: { inscripcionId: string }) {
+    const [notas, setNotas] = useState<any[]>([])
+    const [cargando, setCargando] = useState(true)
+    const [texto, setTexto] = useState('')
+    const [busy, setBusy] = useState(false)
+
+    const cargar = async () => { setCargando(true); const r = await getSeguimientoLiga27Action(inscripcionId); setNotas(r.ok ? (r.notas || []) : []); setCargando(false) }
+    useEffect(() => { cargar() }, [inscripcionId])
+
+    const agregar = async () => {
+        if (!texto.trim()) return
+        setBusy(true)
+        const r = await agregarSeguimientoLiga27Action(inscripcionId, texto)
+        if (r.ok) { setTexto(''); cargar() } else toast.error(r.error || 'Error')
+        setBusy(false)
+    }
+    const borrar = async (id: string) => {
+        const r = await eliminarSeguimientoLiga27Action(id)
+        if (r.ok) cargar(); else toast.error(r.error || 'Error')
+    }
+    const fecha = (s: string) => new Date(s).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+    return (
+        <div className="mt-3 bg-black/20 border border-white/10 rounded-xl p-3 space-y-2">
+            <p className="text-[10px] uppercase tracking-wider text-white/40 font-bold">Seguimiento interno · solo lo ve el equipo</p>
+            <div className="flex gap-2">
+                <input value={texto} onChange={e => setTexto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') agregar() }} className={input} placeholder="Nueva nota (ej. le escribí, no respondió)…" />
+                <button onClick={agregar} disabled={busy || !texto.trim()} className={`${btn} bg-[#D4E655] text-black font-bold shrink-0`}>{busy ? <Loader2 size={13} className="animate-spin" /> : 'Agregar'}</button>
+            </div>
+            {cargando ? <Loader2 size={14} className="animate-spin text-white/40" /> : notas.length === 0 ? <p className="text-[11px] text-white/30">Sin notas todavía.</p> : (
+                <div className="space-y-1.5">
+                    {notas.map(n => (
+                        <div key={n.id} className="flex items-start gap-2 bg-white/5 rounded-lg px-3 py-2">
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm text-white/80 break-words">{n.texto}</p>
+                                <p className="text-[10px] text-white/30 mt-0.5">{n.autor} · {fecha(n.created_at)}</p>
+                            </div>
+                            <button onClick={() => borrar(n.id)} className="text-white/20 hover:text-red-400 p-0.5 shrink-0"><X size={13} /></button>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     )
 }

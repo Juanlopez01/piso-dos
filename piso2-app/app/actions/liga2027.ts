@@ -455,6 +455,83 @@ export async function setNivelLiga27Action(inscripcionId: string, nivel: 1 | 2 |
     return { ok: true }
 }
 
+// Da de baja (o reactiva) una inscripción aprobada. 'baja' la saca de las listas
+// activas (asistencia, notas, etc.) sin borrar el historial; se puede reactivar.
+export async function darDeBajaLiga27Action(inscripcionId: string, baja: boolean): Promise<{ ok: boolean; error?: string }> {
+    const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('liga27_inscripciones').update({ estado: baja ? 'baja' : 'aprobado' }).eq('id', inscripcionId)
+    if (error) return { ok: false, error: error.message }
+    revalidatePath('/la-liga')
+    return { ok: true }
+}
+
+// Notas internas de seguimiento entre el equipo, en el perfil del inscripto
+// (ej. "le escribí, no respondió, volver a intentar"). No las ve el alumno.
+export async function getSeguimientoLiga27Action(inscripcionId: string): Promise<{ ok: boolean; notas?: any[]; error?: string }> {
+    const g = await gateStaff(STAFF_LECTURA); if (!g.ok) return { ok: false, error: g.error }
+    const admin = getAdminClient()
+    const { data } = await admin.from('liga27_seguimiento')
+        .select('id, texto, autor_id, created_at').eq('inscripcion_id', inscripcionId).order('created_at', { ascending: false })
+    const autorIds = [...new Set((data || []).map((n: any) => n.autor_id).filter(Boolean))]
+    const names: Record<string, string> = {}
+    if (autorIds.length) {
+        const { data: ps } = await admin.from('profiles').select('id, nombre_completo').in('id', autorIds)
+        for (const p of (ps || [])) names[p.id] = p.nombre_completo || 'Staff'
+    }
+    return { ok: true, notas: (data || []).map((n: any) => ({ ...n, autor: n.autor_id ? (names[n.autor_id] || 'Staff') : 'Staff' })) }
+}
+
+export async function agregarSeguimientoLiga27Action(inscripcionId: string, texto: string): Promise<{ ok: boolean; error?: string }> {
+    const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
+    if (!texto?.trim()) return { ok: false, error: 'Escribí una nota.' }
+    const admin = getAdminClient()
+    const { error } = await admin.from('liga27_seguimiento').insert({ inscripcion_id: inscripcionId, texto: texto.trim(), autor_id: g.userId })
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
+}
+
+export async function eliminarSeguimientoLiga27Action(id: string): Promise<{ ok: boolean; error?: string }> {
+    const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('liga27_seguimiento').delete().eq('id', id)
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
+}
+
+// Alta directa de una persona NUEVA (sin cuenta): crea la cuenta por su email y la
+// inscribe en el lanzamiento activo, en un paso. Si el email ya tenía cuenta, la usa.
+export async function altaNuevaLiga27Action(payload: {
+    nombre: string; apellido?: string; email: string; telefono?: string; plan?: 'mensual' | 'cuatrimestral'
+}): Promise<{ ok: boolean; error?: string; inscripcionId?: string; cuentaCreada?: boolean }> {
+    const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
+    if (!payload.nombre?.trim()) return { ok: false, error: 'Poné el nombre.' }
+    if (!payload.email?.includes('@')) return { ok: false, error: 'Poné un email válido.' }
+    const admin = getAdminClient()
+    const cuenta = await buscarOCrearAlumno(admin, {
+        email: payload.email, nombre: payload.nombre, apellido: payload.apellido, telefono: payload.telefono,
+    })
+    if (!cuenta.ok || !cuenta.profileId) return { ok: false, error: cuenta.error || 'No se pudo crear la cuenta.' }
+
+    const { data: lanz } = await admin.from('liga27_lanzamientos')
+        .select('id').eq('activo', true).order('orden', { ascending: true }).limit(1).maybeSingle()
+    if (!lanz?.id) return { ok: false, error: 'No hay un lanzamiento activo de La Liga 2027.' }
+
+    const { data: existente } = await admin.from('liga27_inscripciones')
+        .select('id').eq('profile_id', cuenta.profileId).eq('lanzamiento_id', lanz.id).maybeSingle()
+    if (existente?.id) {
+        await admin.from('liga27_inscripciones').update({ estado: 'aprobado', plan: payload.plan || null }).eq('id', existente.id)
+        revalidatePath('/la-liga')
+        return { ok: true, inscripcionId: existente.id, cuentaCreada: cuenta.creado }
+    }
+    const { data: ins, error } = await admin.from('liga27_inscripciones').insert({
+        profile_id: cuenta.profileId, lanzamiento_id: lanz.id, estado: 'aprobado', plan: payload.plan || null,
+    }).select('id').single()
+    if (error) return { ok: false, error: error.message }
+    revalidatePath('/la-liga')
+    return { ok: true, inscripcionId: ins.id, cuentaCreada: cuenta.creado }
+}
+
 export async function enviarBienvenidaLiga27Action(inscripcionId: string): Promise<{ ok: boolean; error?: string }> {
     const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
     const admin = getAdminClient()
