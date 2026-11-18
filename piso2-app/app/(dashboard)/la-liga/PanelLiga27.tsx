@@ -7,7 +7,7 @@ import {
     enviarMensajePostulacionLiga27Action, getInscripcionesLiga27Action, enviarBienvenidaLiga27Action,
     generarLinkPagoLiga27Action, registrarPagoLiga27Action, getLanzamientosAdminAction,
     guardarLanzamientoAction, getPreciosLiga27Action, guardarPreciosLiga27Action,
-    inscribirAlumnoExistenteLiga27Action,
+    inscribirAlumnoExistenteLiga27Action, setNivelLiga27Action,
 } from '@/app/actions/liga2027'
 import { buscarPerfilesAction } from '@/app/actions/consultas'
 import {
@@ -398,6 +398,13 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
     const hoy = new Date()
     const hayCuotas = cuotasHabilitadas() // cuotas recién desde enero 2027
 
+    const [filtroNivel, setFiltroNivel] = useState<'' | '1' | '2' | 'sin'>('')
+    const setNivel = async (id: string, nivel: 1 | 2 | null) => {
+        setItems(prev => prev.map(x => x.id === id ? { ...x, nivel } : x)) // optimista
+        const r = await setNivelLiga27Action(id, nivel)
+        if (!r.ok) { toast.error(r.error || 'Error'); cargar() }
+    }
+
     // Alta directa de un alumno que ya tiene cuenta (sin postulación).
     const [addOpen, setAddOpen] = useState(false)
     const [q, setQ] = useState('')
@@ -481,8 +488,12 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
     return (
         <div className="space-y-3">
             {/* Alta directa de alumno existente */}
-            <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-white/40">{items.length} inscripto{items.length === 1 ? '' : 's'}</p>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                    {([['', 'Todos'], ['1', 'Liga 1'], ['2', 'Liga 2'], ['sin', 'Sin nivel']] as const).map(([v, l]) => (
+                        <button key={v} onClick={() => setFiltroNivel(v)} className={`${btn} ${filtroNivel === v ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{l}</button>
+                    ))}
+                </div>
                 <button onClick={() => { setAddOpen(o => !o); setQ(''); setResultados([]) }} className={`${btn} ${addOpen ? 'bg-white/10 text-white/70' : 'bg-[#D4E655] text-black'} flex items-center gap-1`}>
                     {addOpen ? <><X size={13} /> Cerrar</> : <><Plus size={13} /> Inscribir alumno existente</>}
                 </button>
@@ -520,7 +531,7 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
 
             {!items.length && <p className="text-white/40 text-sm">Todavía no hay inscripciones. Aprobá postulaciones o inscribí un alumno existente con el botón de arriba.</p>}
 
-            {items.map(i => (
+            {items.filter(i => filtroNivel === '' || (filtroNivel === 'sin' ? !i.nivel : String(i.nivel) === filtroNivel)).map(i => (
                 <div key={i.id} className={card}>
                     <div className="flex items-start gap-4 flex-wrap">
                         {i.perfil?.foto_url ? <img src={i.perfil.foto_url} alt="" className="w-12 h-12 rounded-lg object-cover" /> : <div className="w-12 h-12 rounded-lg bg-white/5 flex items-center justify-center text-white/30">{(i.perfil?.nombre || '?')[0]}</div>}
@@ -530,6 +541,13 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
                                 <span className={`text-[11px] px-2 py-0.5 rounded capitalize ${EST[i.estado] || 'bg-white/10'}`}>{i.estado}</span>
                                 {i.plan && <span className="text-[11px] px-2 py-0.5 rounded bg-white/5 text-white/50">{i.plan}</span>}
                                 <span className={`text-[11px] px-2 py-0.5 rounded ${i.matricula_pagada ? 'bg-green-500/20 text-green-300' : 'bg-amber-500/20 text-amber-300'}`}>Matrícula {i.matricula_pagada ? 'OK' : 'pend.'}</span>
+                                {/* Nivel Liga 1/2 */}
+                                <div className="flex items-center gap-1">
+                                    {([[1, 'L1'], [2, 'L2']] as const).map(([n, l]) => (
+                                        <button key={n} onClick={() => setNivel(i.id, i.nivel === n ? null : n)}
+                                            className={`text-[11px] px-2 py-0.5 rounded font-bold ${i.nivel === n ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}>{l}</button>
+                                    ))}
+                                </div>
                             </div>
                             <p className="text-xs text-white/50 mt-1">{i.perfil?.email}{i.perfil?.telefono ? ` · ${i.perfil.telefono}` : ''}</p>
                             {i.bloqueado_motivo && <p className="text-xs text-red-300 mt-1">⚠ {i.bloqueado_motivo}</p>}

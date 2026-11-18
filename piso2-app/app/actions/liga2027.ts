@@ -444,6 +444,17 @@ export async function getInscripcionesLiga27Action() {
     return inss.map((i: any) => ({ ...i, perfil: i.profile_id ? (pById[i.profile_id] || null) : null }))
 }
 
+// Marca a qué nivel de La Liga pertenece el inscripto (1 o 2), o lo deja sin asignar.
+export async function setNivelLiga27Action(inscripcionId: string, nivel: 1 | 2 | null): Promise<{ ok: boolean; error?: string }> {
+    const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
+    if (nivel !== null && nivel !== 1 && nivel !== 2) return { ok: false, error: 'Nivel inválido.' }
+    const admin = getAdminClient()
+    const { error } = await admin.from('liga27_inscripciones').update({ nivel }).eq('id', inscripcionId)
+    if (error) return { ok: false, error: error.message }
+    revalidatePath('/la-liga')
+    return { ok: true }
+}
+
 export async function enviarBienvenidaLiga27Action(inscripcionId: string): Promise<{ ok: boolean; error?: string }> {
     const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
     const admin = getAdminClient()
