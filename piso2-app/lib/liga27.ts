@@ -13,3 +13,19 @@ export function cuotasHabilitadas(d: Date = new Date()): boolean {
 }
 
 export const CUOTAS_DESDE_LABEL = 'marzo 2027'
+
+// Las cuotas van de marzo a diciembre 2027 (10 cuotas mensuales).
+export const CUOTAS_HASTA_MES = 12
+
+// Lista de meses de cuota (de CUOTAS_DESDE.mes a CUOTAS_HASTA_MES).
+export function mesesCuota(): number[] {
+    const out: number[] = []
+    for (let m = CUOTAS_DESDE.mes; m <= CUOTAS_HASTA_MES; m++) out.push(m)
+    return out
+}
+
+// ¿mes/año es una cuota válida del programa? (no bloquea por fecha: se puede
+// pagar por adelantado; solo valida que el mes esté dentro del rango de cuotas).
+export function esCuotaValida(mes: number, anio: number): boolean {
+    return anio === CUOTAS_DESDE.anio && mes >= CUOTAS_DESDE.mes && mes <= CUOTAS_HASTA_MES
+}

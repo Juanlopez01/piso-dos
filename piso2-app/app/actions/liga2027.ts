@@ -17,7 +17,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
 import crypto from 'crypto'
 import { aplicarEfectoPagoLiga27 } from '@/app/actions/_liga27-pago'
-import { cuotasHabilitadas, CUOTAS_DESDE_LABEL } from '@/lib/liga27'
+import { cuotasHabilitadas, CUOTAS_DESDE_LABEL, CUOTAS_DESDE, esCuotaValida, mesesCuota } from '@/lib/liga27'
 
 const getAdminClient = () => createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -521,8 +521,16 @@ export async function registrarPagoLiga27Action(payload: {
     mes?: number; anio?: number; monto: number; metodo: string
 }): Promise<{ ok: boolean; error?: string }> {
     const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
-    if (payload.concepto === 'cuota' && !cuotasHabilitadas()) return { ok: false, error: `Las cuotas se cobran a partir de ${CUOTAS_DESDE_LABEL}.` }
     const admin = getAdminClient()
+    // Cuota: recepción la puede cargar por adelantado (no se bloquea por fecha),
+    // pero el mes tiene que ser una cuota real del programa y no estar ya paga.
+    if (payload.concepto === 'cuota') {
+        const mes = Number(payload.mes), anio = Number(payload.anio)
+        if (!esCuotaValida(mes, anio)) return { ok: false, error: `Las cuotas van de ${CUOTAS_DESDE_LABEL} a diciembre.` }
+        const { data: ya } = await admin.from('liga27_pagos').select('id')
+            .eq('inscripcion_id', payload.inscripcionId).eq('concepto', 'cuota').eq('mes', mes).eq('anio', anio).eq('estado', 'pagado').maybeSingle()
+        if (ya) return { ok: false, error: `La cuota ${mes}/${anio} ya figura paga.` }
+    }
     const { error } = await admin.from('liga27_pagos').insert({
         inscripcion_id: payload.inscripcionId,
         concepto: payload.concepto,
@@ -537,6 +545,36 @@ export async function registrarPagoLiga27Action(payload: {
     await aplicarEfectoPagoLiga27(admin, payload.inscripcionId, payload.concepto)
     revalidatePath('/la-liga')
     return { ok: true }
+}
+
+// Padrón de pagos del alumno: matrícula + las 10 cuotas (marzo a diciembre) con
+// su estado. Para el popup de pagos dentro de Inscriptos.
+export async function getPagosAlumnoLiga27Action(inscripcionId: string): Promise<{ ok: boolean; error?: string; data?: any }> {
+    const g = await gateStaff(STAFF_LECTURA); if (!g.ok) return { ok: false, error: g.error }
+    const admin = getAdminClient()
+    const { data: ins } = await admin.from('liga27_inscripciones')
+        .select('id, plan, matricula_pagada, nivel, estado').eq('id', inscripcionId).maybeSingle()
+    if (!ins) return { ok: false, error: 'Inscripción no encontrada' }
+
+    const { data: pagos } = await admin.from('liga27_pagos')
+        .select('concepto, mes, anio, monto, metodo, pagado_at')
+        .eq('inscripcion_id', inscripcionId).eq('estado', 'pagado')
+    const precios = await getPreciosLiga27Action()
+    const precioCuota = ins.plan === 'cuatrimestral' ? precios.liga27_cuota_cuatrimestral : precios.liga27_cuota_mensual
+
+    const cuotas = mesesCuota().map((mes) => {
+        const p = (pagos || []).find((x: any) => x.concepto === 'cuota' && x.mes === mes && x.anio === CUOTAS_DESDE.anio)
+        return { mes, anio: CUOTAS_DESDE.anio, pagada: !!p, monto: p?.monto ?? null, metodo: p?.metodo ?? null, pagado_at: p?.pagado_at ?? null }
+    })
+    const matriculaPago = (pagos || []).find((x: any) => x.concepto === 'matricula')
+
+    return {
+        ok: true, data: {
+            matricula_pagada: !!ins.matricula_pagada, plan: ins.plan, nivel: ins.nivel, estado: ins.estado,
+            matriculaMonto: precios.liga27_matricula, matriculaPago: matriculaPago || null,
+            precioCuota, cuotas,
+        }
+    }
 }
 
 // Lectura pública del pago por id + token (para la página /liga2027/pagar/[id]).

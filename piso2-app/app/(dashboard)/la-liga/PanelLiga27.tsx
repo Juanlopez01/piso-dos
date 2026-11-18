@@ -7,7 +7,7 @@ import {
     enviarMensajePostulacionLiga27Action, getInscripcionesLiga27Action, enviarBienvenidaLiga27Action,
     generarLinkPagoLiga27Action, registrarPagoLiga27Action, getLanzamientosAdminAction,
     guardarLanzamientoAction, getPreciosLiga27Action, guardarPreciosLiga27Action,
-    inscribirAlumnoExistenteLiga27Action, setNivelLiga27Action,
+    inscribirAlumnoExistenteLiga27Action, setNivelLiga27Action, getPagosAlumnoLiga27Action,
 } from '@/app/actions/liga2027'
 import { buscarPerfilesAction } from '@/app/actions/consultas'
 import {
@@ -399,6 +399,7 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
     const hayCuotas = cuotasHabilitadas() // cuotas recién desde enero 2027
 
     const [filtroNivel, setFiltroNivel] = useState<'' | '1' | '2' | 'sin'>('')
+    const [pagosDe, setPagosDe] = useState<any | null>(null) // inscripto abierto en el popup de pagos
     const setNivel = async (id: string, nivel: 1 | 2 | null) => {
         setItems(prev => prev.map(x => x.id === id ? { ...x, nivel } : x)) // optimista
         const r = await setNivelLiga27Action(id, nivel)
@@ -553,6 +554,7 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
                             {i.bloqueado_motivo && <p className="text-xs text-red-300 mt-1">⚠ {i.bloqueado_motivo}</p>}
                             <div className="flex items-center gap-2 mt-3 flex-wrap">
                                 {!i.bienvenida_enviada && <button onClick={() => bienvenida(i.id)} disabled={busy === i.id} className={`${btn} bg-white/5 hover:bg-white/10 text-white/70`}>Enviar bienvenida</button>}
+                                {puedePagos && <button onClick={() => setPagosDe(i)} className={`${btn} bg-[#D4E655] text-black font-bold flex items-center gap-1`}>📋 Padrón de pagos</button>}
                                 {puedePagos && <>
                                     <button onClick={() => whatsappPago(i, 'matricula')} disabled={busy === i.id} className={`${btn} bg-[#25D366]/90 hover:bg-[#25D366] text-black font-bold flex items-center gap-1`}><MessageSquare size={13} /> WhatsApp matrícula</button>
                                     <button onClick={() => linkPago(i.id, 'matricula')} disabled={busy === i.id} className={`${btn} bg-[#009ee3]/80 hover:bg-[#009ee3] text-white flex items-center gap-1`}><Link2 size={13} /> Copiar link matrícula</button>
@@ -568,6 +570,101 @@ function Inscripciones({ puedePagos }: { puedePagos: boolean }) {
                     </div>
                 </div>
             ))}
+
+            {pagosDe && <PagosAlumnoModal inscripto={pagosDe} onClose={() => setPagosDe(null)} onChange={cargar} />}
+        </div>
+    )
+}
+
+// ── Popup de pagos del alumno (padrón: matrícula + cuotas mar→dic) ─────────────
+function PagosAlumnoModal({ inscripto, onClose, onChange }: { inscripto: any; onClose: () => void; onChange: () => void }) {
+    const [data, setData] = useState<any | null>(null)
+    const [cargando, setCargando] = useState(true)
+    const [busy, setBusy] = useState<string | null>(null)
+    const [metodo, setMetodo] = useState('efectivo')
+
+    const cargar = async () => {
+        setCargando(true)
+        const r = await getPagosAlumnoLiga27Action(inscripto.id)
+        setData(r.ok ? r.data : null)
+        setCargando(false)
+    }
+    useEffect(() => { cargar() }, [inscripto.id])
+
+    const nombre = `${inscripto.perfil?.nombre || ''} ${inscripto.perfil?.apellido || ''}`.trim()
+    const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
+
+    const pagarMatricula = async () => {
+        const def = data?.matriculaMonto || 0
+        const montoStr = window.prompt('Monto de la matrícula (efvo/transf):', String(def || ''))
+        if (!montoStr) return
+        const monto = Number(montoStr.replace(/[^\d]/g, '')); if (!monto) return toast.error('Monto inválido.')
+        setBusy('matricula')
+        const r = await registrarPagoLiga27Action({ inscripcionId: inscripto.id, concepto: 'matricula', monto, metodo })
+        if (r.ok) { toast.success('Matrícula registrada.'); await cargar(); onChange() } else toast.error(r.error || 'Error')
+        setBusy(null)
+    }
+    const pagarCuota = async (mes: number, anio: number) => {
+        const def = data?.precioCuota || 0
+        const montoStr = window.prompt(`Monto de la cuota ${MESES[mes]} (efvo/transf):`, String(def || ''))
+        if (!montoStr) return
+        const monto = Number(montoStr.replace(/[^\d]/g, '')); if (!monto) return toast.error('Monto inválido.')
+        setBusy(`cuota-${mes}`)
+        const r = await registrarPagoLiga27Action({ inscripcionId: inscripto.id, concepto: 'cuota', mes, anio, monto, metodo })
+        if (r.ok) { toast.success(`Cuota ${MESES[mes]} registrada.`); await cargar(); onChange() } else toast.error(r.error || 'Error')
+        setBusy(null)
+    }
+
+    return (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-start md:items-center justify-center p-3 md:p-6 overflow-y-auto" onClick={onClose}>
+            <div className="bg-[#0e0e11] border border-white/10 rounded-2xl w-full max-w-lg my-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-white/10">
+                    <div className="min-w-0">
+                        <h3 className="font-black truncate">{nombre || 'Alumno'}</h3>
+                        <p className="text-[11px] text-white/40">Padrón de pagos · {data?.plan || 'sin plan'}{data?.nivel ? ` · Liga ${data.nivel}` : ''}</p>
+                    </div>
+                    <button onClick={onClose} className="text-white/40 hover:text-white p-1"><X size={18} /></button>
+                </div>
+
+                {cargando ? <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-white/40" /></div> : !data ? <p className="p-6 text-white/40 text-sm">No se pudo cargar.</p> : (
+                    <div className="p-4 space-y-4">
+                        {/* Método que se usa para registrar */}
+                        <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-white/40">Registrar con:</span>
+                            <select value={metodo} onChange={e => setMetodo(e.target.value)} className={`${input} w-auto capitalize`}>
+                                {['efectivo', 'transferencia', 'tarjeta'].map(m => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                        </div>
+
+                        {/* Matrícula */}
+                        <div className="flex items-center justify-between gap-2 bg-white/5 rounded-xl px-3 py-2.5">
+                            <div>
+                                <p className="text-sm font-semibold">Matrícula</p>
+                                {data.matricula_pagada && data.matriculaPago && <p className="text-[11px] text-white/40">{pesos(data.matriculaPago.monto)} · {data.matriculaPago.metodo}</p>}
+                            </div>
+                            {data.matricula_pagada
+                                ? <span className="text-[11px] font-bold px-2.5 py-1 rounded bg-green-500/20 text-green-300">Pagada</span>
+                                : <button onClick={pagarMatricula} disabled={busy === 'matricula'} className={`${btn} bg-[#D4E655] text-black font-bold`}>{busy === 'matricula' ? <Loader2 size={13} className="animate-spin" /> : '+ Registrar'}</button>}
+                        </div>
+
+                        {/* Cuotas mar→dic */}
+                        <div>
+                            <p className="text-[11px] uppercase tracking-wider text-white/40 font-bold mb-2">Cuotas 2027 (marzo a diciembre)</p>
+                            <div className="space-y-1.5">
+                                {data.cuotas.map((c: any) => (
+                                    <div key={c.mes} className="flex items-center justify-between gap-2 bg-white/5 rounded-lg px-3 py-2">
+                                        <span className="text-sm font-medium w-24 capitalize">{MESES[c.mes]}</span>
+                                        {c.pagada
+                                            ? <span className="flex items-center gap-2 text-[11px] text-white/50"><span>{pesos(c.monto)} · {c.metodo}</span><span className="font-bold px-2 py-0.5 rounded bg-green-500/20 text-green-300">Pagada</span></span>
+                                            : <button onClick={() => pagarCuota(c.mes, c.anio)} disabled={busy === `cuota-${c.mes}`} className={`${btn} bg-white/10 hover:bg-[#D4E655] hover:text-black text-white/70 font-bold`}>{busy === `cuota-${c.mes}` ? <Loader2 size={13} className="animate-spin" /> : '+ Registrar'}</button>}
+                                    </div>
+                                ))}
+                            </div>
+                            <p className="text-[10px] text-white/30 mt-2">Se puede registrar por adelantado (ej. ya pagaron en recepción). El pago online del alumno recién arranca en {CUOTAS_DESDE_LABEL}.</p>
+                        </div>
+                    </div>
+                )}
+            </div>
         </div>
     )
 }
