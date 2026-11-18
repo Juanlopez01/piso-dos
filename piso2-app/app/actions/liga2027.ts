@@ -553,7 +553,7 @@ export async function getPagosAlumnoLiga27Action(inscripcionId: string): Promise
     const g = await gateStaff(STAFF_LECTURA); if (!g.ok) return { ok: false, error: g.error }
     const admin = getAdminClient()
     const { data: ins } = await admin.from('liga27_inscripciones')
-        .select('id, plan, matricula_pagada, nivel, estado').eq('id', inscripcionId).maybeSingle()
+        .select('id, plan, matricula_pagada, estado').eq('id', inscripcionId).maybeSingle()
     if (!ins) return { ok: false, error: 'Inscripción no encontrada' }
 
     const { data: pagos } = await admin.from('liga27_pagos')
@@ -570,7 +570,7 @@ export async function getPagosAlumnoLiga27Action(inscripcionId: string): Promise
 
     return {
         ok: true, data: {
-            matricula_pagada: !!ins.matricula_pagada, plan: ins.plan, nivel: ins.nivel, estado: ins.estado,
+            matricula_pagada: !!ins.matricula_pagada, plan: ins.plan, nivel: (ins as any).nivel ?? null, estado: ins.estado,
             matriculaMonto: precios.liga27_matricula, matriculaPago: matriculaPago || null,
             precioCuota, cuotas,
         }
