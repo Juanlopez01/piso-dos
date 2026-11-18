@@ -54,9 +54,6 @@ async function gateDocenteODisciplina(disciplinaId: string): Promise<{ ok: boole
     return { ok: false, error: 'No sos docente de esta disciplina.' }
 }
 
-const LETRA_VAL: Record<string, number> = { A: 3, B: 2, C: 1 }
-const VAL_LETRA = (n: number) => (n >= 2.5 ? 'A' : n >= 1.5 ? 'B' : 'C')
-
 // ════════════════════════════════════════════════════════════════════════════
 // DISCIPLINAS + EXÁMENES (staff)
 // ════════════════════════════════════════════════════════════════════════════
@@ -171,7 +168,7 @@ async function perfilesLiga27ByProfileId(admin: ReturnType<typeof getAdminClient
 // ════════════════════════════════════════════════════════════════════════════
 
 export async function guardarNotaExamenLiga27Action(payload: {
-    inscripcionId: string; examenId: string; puntaje: 'A' | 'B' | 'C' | null; observaciones?: string
+    inscripcionId: string; examenId: string; nota: number | null; observaciones?: string
 }): Promise<{ ok: boolean; error?: string }> {
     // El docente solo puede cargar notas de SU disciplina.
     const admin = getAdminClient()
@@ -179,10 +176,18 @@ export async function guardarNotaExamenLiga27Action(payload: {
     if (!ex) return { ok: false, error: 'Examen no encontrado' }
     const g = await gateDocenteODisciplina(ex.disciplina_id); if (!g.ok) return { ok: false, error: g.error }
 
+    // Nota numérica 0 a 10 (2 decimales). null = sin calificar.
+    let nota: number | null = null
+    if (payload.nota !== null && payload.nota !== undefined && String(payload.nota) !== '') {
+        const n = Math.round(Math.max(0, Math.min(10, Number(payload.nota))) * 100) / 100
+        nota = isNaN(n) ? null : n
+    }
+
     const { error } = await admin.from('liga27_alumno_examen').upsert({
         inscripcion_id: payload.inscripcionId,
         examen_id: payload.examenId,
-        puntaje: payload.puntaje,
+        nota,
+        puntaje: null, // legado A/B/C: ya no se usa
         observaciones: payload.observaciones?.trim() || null,
         cargado_por: g.userId,
         actualizado_at: new Date().toISOString(),
@@ -197,30 +202,34 @@ export async function guardarNotaExamenLiga27Action(payload: {
     return { ok: true }
 }
 
-// Promedio general (A=3,B=2,C=1) de TODOS los puntajes cargados → letra.
+// Promedio numérico (0-10) de TODAS las notas cargadas → categoría:
+// A ≥ 8 · B ≥ 6 (6 a 7,99) · C < 6. Guarda el promedio y la letra.
 async function recomputarLetra(admin: ReturnType<typeof getAdminClient>, inscripcionId: string) {
-    const { data: notas } = await admin.from('liga27_alumno_examen').select('puntaje').eq('inscripcion_id', inscripcionId)
-    const vals = (notas || []).map((n: any) => LETRA_VAL[n.puntaje]).filter((v: number | undefined) => typeof v === 'number') as number[]
+    const { data: notas } = await admin.from('liga27_alumno_examen').select('nota').eq('inscripcion_id', inscripcionId)
+    const vals = (notas || [])
+        .filter((n: any) => n.nota !== null && n.nota !== undefined)
+        .map((n: any) => Number(n.nota))
+        .filter((v: number) => !isNaN(v))
     if (!vals.length) {
-        await admin.from('liga27_inscripciones').update({ promedio_letra: null, letra_actual: null }).eq('id', inscripcionId)
+        await admin.from('liga27_inscripciones').update({ promedio_num: null, promedio_letra: null, letra_actual: null }).eq('id', inscripcionId)
         return
     }
-    const prom = vals.reduce((a, b) => a + b, 0) / vals.length
-    const letra = VAL_LETRA(prom)
-    await admin.from('liga27_inscripciones').update({ promedio_letra: letra, letra_actual: letra }).eq('id', inscripcionId)
+    const prom = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100
+    const letra = prom >= 8 ? 'A' : prom >= 6 ? 'B' : 'C'
+    await admin.from('liga27_inscripciones').update({ promedio_num: prom, promedio_letra: letra, letra_actual: letra }).eq('id', inscripcionId)
 }
 
 // Todas las notas de una disciplina (para la grilla del docente): por examen y
 // por inscripción. Devuelve un mapa `${inscripcionId}:${examenId}` → {puntaje, obs}.
-export async function getNotasDisciplinaLiga27Action(disciplinaId: string): Promise<Record<string, { puntaje: string | null; observaciones: string | null }>> {
+export async function getNotasDisciplinaLiga27Action(disciplinaId: string): Promise<Record<string, { nota: number | null; observaciones: string | null }>> {
     const g = await gateDocenteODisciplina(disciplinaId); if (!g.ok) return {}
     const admin = getAdminClient()
     const { data: exs } = await admin.from('liga27_examenes').select('id').eq('disciplina_id', disciplinaId)
     const ids = (exs || []).map((e: any) => e.id)
     if (!ids.length) return {}
-    const { data } = await admin.from('liga27_alumno_examen').select('inscripcion_id, examen_id, puntaje, observaciones').in('examen_id', ids)
-    const out: Record<string, { puntaje: string | null; observaciones: string | null }> = {}
-    for (const n of (data || [])) out[`${n.inscripcion_id}:${n.examen_id}`] = { puntaje: n.puntaje, observaciones: n.observaciones }
+    const { data } = await admin.from('liga27_alumno_examen').select('inscripcion_id, examen_id, nota, observaciones').in('examen_id', ids)
+    const out: Record<string, { nota: number | null; observaciones: string | null }> = {}
+    for (const n of (data || [])) out[`${n.inscripcion_id}:${n.examen_id}`] = { nota: n.nota === null ? null : Number(n.nota), observaciones: n.observaciones }
     return out
 }
 
@@ -246,8 +255,8 @@ export async function getClaseContenidoFechaLiga27Action(disciplinaId: string, c
 export async function getNotasInscripcionLiga27Action(inscripcionId: string) {
     const g = await gate(['admin', 'recepcion', 'coordinador', 'profesor']); if (!g.ok) return []
     const admin = getAdminClient()
-    const { data } = await admin.from('liga27_alumno_examen').select('examen_id, puntaje, observaciones').eq('inscripcion_id', inscripcionId)
-    return data || []
+    const { data } = await admin.from('liga27_alumno_examen').select('examen_id, nota, observaciones').eq('inscripcion_id', inscripcionId)
+    return (data || []).map((n: any) => ({ ...n, nota: n.nota === null ? null : Number(n.nota) }))
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -533,7 +542,7 @@ export async function getMiAcademicoLiga27Action(): Promise<any | null> {
     const uid = session?.user?.id
     if (!uid) return null
     const admin = getAdminClient()
-    const { data: ins } = await admin.from('liga27_inscripciones').select('id, letra_actual, promedio_letra').eq('profile_id', uid).order('creado_at', { ascending: false }).limit(1).maybeSingle()
+    const { data: ins } = await admin.from('liga27_inscripciones').select('id, letra_actual, promedio_letra, promedio_num').eq('profile_id', uid).order('creado_at', { ascending: false }).limit(1).maybeSingle()
     if (!ins) return { inscripcion: null, evaluaciones: [], asistencias: [], programa: [], beneficios: await beneficiosParaAlumno(admin) }
 
     const { data: disciplinas } = await admin.from('liga27_disciplinas').select('id, nombre, bloque, orden').eq('activa', true).order('orden', { ascending: true })
@@ -541,15 +550,20 @@ export async function getMiAcademicoLiga27Action(): Promise<any | null> {
 
     // Evaluaciones por disciplina.
     const { data: examenes } = discIds.length ? await admin.from('liga27_examenes').select('id, disciplina_id, numero').in('disciplina_id', discIds) : { data: [] as any[] }
-    const { data: notas } = await admin.from('liga27_alumno_examen').select('examen_id, puntaje, observaciones').eq('inscripcion_id', ins.id)
+    const { data: notas } = await admin.from('liga27_alumno_examen').select('examen_id, nota, observaciones').eq('inscripcion_id', ins.id)
     const notaByExamen: Record<string, any> = {}; for (const n of (notas || [])) notaByExamen[n.examen_id] = n
 
+    // Desglose por materia: notas de cada examen + comentario del docente, y el
+    // promedio de la materia.
     const evaluaciones = (disciplinas || []).map((d: any) => {
         const exs = (examenes || []).filter((e: any) => e.disciplina_id === d.id).sort((a: any, b: any) => a.numero - b.numero)
-        return {
-            disciplina: d.nombre, bloque: d.bloque,
-            examenes: exs.map((e: any) => ({ numero: e.numero, puntaje: notaByExamen[e.id]?.puntaje || null, observaciones: notaByExamen[e.id]?.observaciones || null })),
-        }
+        const examenesOut = exs.map((e: any) => {
+            const raw = notaByExamen[e.id]?.nota
+            return { numero: e.numero, nota: raw === null || raw === undefined ? null : Number(raw), observaciones: notaByExamen[e.id]?.observaciones || null }
+        })
+        const vals = examenesOut.map((x: any) => x.nota).filter((v: any) => typeof v === 'number')
+        const promedioMateria = vals.length ? Math.round((vals.reduce((a: number, b: number) => a + b, 0) / vals.length) * 100) / 100 : null
+        return { disciplina: d.nombre, bloque: d.bloque, promedioMateria, examenes: examenesOut }
     })
 
     // Asistencias por disciplina + condición de regularidad.

@@ -44,31 +44,49 @@ const BENEFICIOS_FALLBACK: Record<string, string[]> = {
     C: ['Acompañamiento para mejorar tu promedio', 'Acceso a los contenidos del programa'],
 }
 
+const notaCls = (n: number) => n >= 8 ? 'bg-green-500/20 text-green-300' : n >= 6 ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/20 text-red-300'
+
 function TabEvaluaciones({ academico }: { academico: any }) {
     const evs = academico?.evaluaciones || []
+    const promGeneral = typeof academico?.inscripcion?.promedio_num === 'number' ? academico.inscripcion.promedio_num : null
+    const letra = academico?.inscripcion?.letra_actual || academico?.inscripcion?.promedio_letra || null
     if (!evs.length) return <Proximamente texto="Todavía no hay disciplinas cargadas." />
     return (
-        <div className="divide-y divide-white/5">
-            {evs.map((d: any, i: number) => (
-                <div key={i} className="p-4">
-                    <div className="flex items-center justify-between">
-                        <span className="font-semibold text-sm">{d.disciplina}</span>
-                        <span className="text-[11px] text-white/30">Bloque {d.bloque}</span>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                        {d.examenes.map((e: any, j: number) => (
-                            <div key={j} className="flex items-start gap-3 text-sm">
-                                <span className="text-white/40 w-20 shrink-0">Examen {e.numero}</span>
-                                {e.puntaje
-                                    ? <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${NOTA_CLS[e.puntaje]}`}>{e.puntaje}</span>
-                                    : <span className="text-[11px] text-white/25">sin nota</span>}
-                                {e.observaciones && <span className="text-white/60 text-xs flex-1">{e.observaciones}</span>}
-                            </div>
-                        ))}
-                        {d.examenes.length === 0 && <p className="text-xs text-white/25">Sin exámenes aún.</p>}
-                    </div>
+        <div>
+            {promGeneral !== null && (
+                <div className="p-4 border-b border-white/5 flex items-center justify-between">
+                    <span className="text-sm text-white/50">Promedio general</span>
+                    <span className="flex items-center gap-2">
+                        <span className={`text-sm font-black px-2.5 py-1 rounded ${notaCls(promGeneral)}`}>{promGeneral.toFixed(2)}</span>
+                        {letra && <span className="text-xs text-white/40">Categoría <b className="text-white">{letra}</b></span>}
+                    </span>
                 </div>
-            ))}
+            )}
+            <div className="divide-y divide-white/5">
+                {evs.map((d: any, i: number) => (
+                    <div key={i} className="p-4">
+                        <div className="flex items-center justify-between">
+                            <span className="font-semibold text-sm">{d.disciplina}</span>
+                            <span className="flex items-center gap-2">
+                                {typeof d.promedioMateria === 'number' && <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${notaCls(d.promedioMateria)}`}>{d.promedioMateria.toFixed(2)}</span>}
+                                <span className="text-[11px] text-white/30">Bloque {d.bloque}</span>
+                            </span>
+                        </div>
+                        <div className="mt-3 space-y-2">
+                            {d.examenes.map((e: any, j: number) => (
+                                <div key={j} className="flex items-start gap-3 text-sm">
+                                    <span className="text-white/40 w-20 shrink-0">Examen {e.numero}</span>
+                                    {typeof e.nota === 'number'
+                                        ? <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${notaCls(e.nota)}`}>{e.nota.toFixed(2)}</span>
+                                        : <span className="text-[11px] text-white/25">sin nota</span>}
+                                    {e.observaciones && <span className="text-white/60 text-xs flex-1">{e.observaciones}</span>}
+                                </div>
+                            ))}
+                            {d.examenes.length === 0 && <p className="text-xs text-white/25">Sin exámenes aún.</p>}
+                        </div>
+                    </div>
+                ))}
+            </div>
         </div>
     )
 }

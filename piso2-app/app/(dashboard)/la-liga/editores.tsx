@@ -109,7 +109,7 @@ export function ClaseEditor({ disciplinaId }: { disciplinaId: string }) {
 export function NotasEditor({ disciplinaId }: { disciplinaId: string }) {
     const [examenes, setExamenes] = useState<any[]>([])
     const [alumnos, setAlumnos] = useState<any[]>([])
-    const [notas, setNotas] = useState<Record<string, { puntaje: string | null; observaciones: string | null }>>({})
+    const [notas, setNotas] = useState<Record<string, { nota: number | null; observaciones: string | null }>>({})
     const [cargando, setCargando] = useState(true)
     const [busy, setBusy] = useState<string | null>(null)
 
@@ -120,19 +120,22 @@ export function NotasEditor({ disciplinaId }: { disciplinaId: string }) {
     }
     useEffect(() => { cargar() }, [disciplinaId])
 
-    const setNota = async (inscripcionId: string, examenId: string, puntaje: 'A' | 'B' | 'C') => {
+    // Guarda la nota numérica (0-10). Vacío = sin calificar.
+    const setNota = async (inscripcionId: string, examenId: string, valor: string) => {
         const key = `${inscripcionId}:${examenId}`
+        const nota = valor.trim() === '' ? null : Math.max(0, Math.min(10, Number(valor.replace(',', '.'))))
+        if (nota !== null && isNaN(nota)) return toast.error('La nota tiene que ser un número de 0 a 10.')
         setBusy(key)
         const obs = notas[key]?.observaciones || ''
-        const r = await guardarNotaExamenLiga27Action({ inscripcionId, examenId, puntaje, observaciones: obs })
-        if (r.ok) setNotas(n => ({ ...n, [key]: { puntaje, observaciones: obs } })); else toast.error(r.error || 'Error')
+        const r = await guardarNotaExamenLiga27Action({ inscripcionId, examenId, nota, observaciones: obs })
+        if (r.ok) setNotas(n => ({ ...n, [key]: { nota, observaciones: obs } })); else toast.error(r.error || 'Error')
         setBusy(null)
     }
     const setObs = async (inscripcionId: string, examenId: string, observaciones: string) => {
         const key = `${inscripcionId}:${examenId}`
-        const puntaje = (notas[key]?.puntaje as any) || null
-        const r = await guardarNotaExamenLiga27Action({ inscripcionId, examenId, puntaje, observaciones })
-        if (r.ok) setNotas(n => ({ ...n, [key]: { puntaje, observaciones } })); else toast.error(r.error || 'Error')
+        const nota = notas[key]?.nota ?? null
+        const r = await guardarNotaExamenLiga27Action({ inscripcionId, examenId, nota, observaciones })
+        if (r.ok) setNotas(n => ({ ...n, [key]: { nota, observaciones } })); else toast.error(r.error || 'Error')
     }
 
     if (cargando) return <Loader2 className="animate-spin text-white/40" />
@@ -141,6 +144,7 @@ export function NotasEditor({ disciplinaId }: { disciplinaId: string }) {
 
     return (
         <div className="space-y-3">
+            <p className="text-[11px] text-white/40">Nota de <b className="text-white/70">0 a 10</b> por examen. El promedio general define la categoría: <b className="text-green-300">A ≥ 8</b> · <b className="text-amber-300">B 6–7,9</b> · <b className="text-red-300">C &lt; 6</b>.</p>
             {alumnos.map(a => (
                 <div key={a.inscripcion_id} className={card}>
                     <h3 className="font-semibold text-sm mb-3">{a.perfil?.nombre} {a.perfil?.apellido || ''}</h3>
@@ -152,12 +156,12 @@ export function NotasEditor({ disciplinaId }: { disciplinaId: string }) {
                                 <div key={e.id} className="bg-white/5 rounded-lg p-3">
                                     <div className="flex items-center gap-2 mb-2">
                                         <span className="text-xs text-white/50 w-20">Examen {e.numero}</span>
-                                        {(['A', 'B', 'C'] as const).map(p => (
-                                            <button key={p} onClick={() => setNota(a.inscripcion_id, e.id, p)} disabled={busy === key}
-                                                className={`${btn} ${nota?.puntaje === p ? (p === 'A' ? 'bg-green-600' : p === 'B' ? 'bg-amber-600' : 'bg-red-600') + ' text-white' : 'bg-white/10 text-white/50'}`}>{p}</button>
-                                        ))}
+                                        <input type="number" min={0} max={10} step="0.1" defaultValue={nota?.nota ?? ''} disabled={busy === key}
+                                            onBlur={ev => { if (String(ev.target.value) !== String(nota?.nota ?? '')) setNota(a.inscripcion_id, e.id, ev.target.value) }}
+                                            className={`${input} w-24 text-center font-bold`} placeholder="–" />
+                                        <span className="text-[11px] text-white/30">/ 10</span>
                                     </div>
-                                    <input defaultValue={nota?.observaciones || ''} onBlur={ev => setObs(a.inscripcion_id, e.id, ev.target.value)} className={input} placeholder="Devolución / observaciones (se guarda al salir del campo)" />
+                                    <input defaultValue={nota?.observaciones || ''} onBlur={ev => setObs(a.inscripcion_id, e.id, ev.target.value)} className={input} placeholder="Devolución / comentario (se guarda al salir del campo)" />
                                 </div>
                             )
                         })}
