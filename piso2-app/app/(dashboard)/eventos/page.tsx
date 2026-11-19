@@ -12,7 +12,7 @@ import {
     getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction, setRepartoPctObraAction, setFlyerObraAction, editarObraPropuestaAction,
 } from '@/app/actions/convocatoria'
 import {
-    getEventosAction, getEventoAction, getEventoDetalleAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
+    getEventosAction, getEventoAction, getEventoDetalleAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, toggleOcultoCarteleraAction, getReporteEventoAction, getLinkCompaniaAction,
     eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction, reembolsarVentaAction, cancelarEventoAction,
     getEquipoAction, guardarMiembroEquipoAction, eliminarMiembroEquipoAction,
     getBorderauxAction, setRepartoPctAction, toggleIncluirEquipoAction, guardarGastoAction, eliminarGastoAction,
@@ -27,7 +27,7 @@ import { getSalasAlquilerAction } from '@/app/actions/alquileres-online'
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
 type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number; oculta?: boolean; codigo_promo?: string | null; obra_id?: string | null }
 type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; canal?: string | null; reembolsada?: boolean; reembolso_ref?: string | null; reembolso_at?: string | null; created_at: string; token?: string | null; items: { nombre: string; cantidad: number; precio_unit: number }[] }
-type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean; cancelado?: boolean; ciclo_id?: string | null; ciclo?: { nombre: string; slug: string } | null }
+type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean; cancelado?: boolean; ciclo_id?: string | null; ciclo?: { nombre: string; slug: string } | null; oculto_cartelera?: boolean }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 // Copia robusta: intenta el portapapeles moderno y, si falla (típico en celu
@@ -340,6 +340,12 @@ const agregarEntrada = async () => {
         const nuevo = !evento?.venta_online
         const r = await toggleVentaOnlineAction(eventoId, nuevo)
         if (r.ok) setEvento(ev => ev ? { ...ev, venta_online: nuevo } : ev)
+        else toast.error(r.error || 'Error')
+    }
+    const toggleOcultoCartelera = async () => {
+        const nuevo = !evento?.oculto_cartelera
+        const r = await toggleOcultoCarteleraAction(eventoId, nuevo)
+        if (r.ok) setEvento(ev => ev ? { ...ev, oculto_cartelera: nuevo } : ev)
         else toast.error(r.error || 'Error')
     }
     const copiarLinkCompra = () => {
@@ -809,6 +815,16 @@ const agregarEntrada = async () => {
                     </>
                 )}
                 {!evento.venta_online && <span className="ml-auto text-[10px] text-gray-500">Activala y compartí el link para vender entradas online.</span>}
+            </div>
+
+            {/* ocultar de cartelera */}
+            <div className="flex flex-wrap items-center gap-2 mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                <EyeOff size={15} className={evento.oculto_cartelera ? 'text-orange-400' : 'text-gray-500'} />
+                <span className="text-xs font-semibold text-gray-300">Ocultar de cartelera</span>
+                {soloLectura
+                    ? <span className={`ml-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${evento.oculto_cartelera ? 'bg-orange-400/20 text-orange-400' : 'bg-white/10 text-gray-400'}`}>{evento.oculto_cartelera ? 'Oculto' : 'Visible'}</span>
+                    : <button onClick={toggleOcultoCartelera} className={`ml-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide transition-colors ${evento.oculto_cartelera ? 'bg-orange-400 text-black' : 'bg-white/10 text-gray-400'}`}>{evento.oculto_cartelera ? 'Oculto' : 'Visible'}</button>}
+                {evento.oculto_cartelera && <span className="ml-auto text-[10px] text-gray-400">No aparece en la cartelera pública, pero la venta online sigue activa.</span>}
             </div>
 
             {/* ciclo de varias fechas */}
