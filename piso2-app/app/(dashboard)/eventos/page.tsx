@@ -9,7 +9,7 @@ import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 import {
-    getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction, setRepartoPctObraAction, setFlyerObraAction, editarObraPropuestaAction,
+    getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction, setRepartoPctObraAction, setFlyerObraAction, editarObraPropuestaAction, crearObraDesdeEventoAction,
 } from '@/app/actions/convocatoria'
 import {
     getEventosAction, getEventoAction, getEventoDetalleAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, toggleOcultoCarteleraAction, getReporteEventoAction, getLinkCompaniaAction,
@@ -573,6 +573,15 @@ const agregarEntrada = async () => {
         if (r.ok) { toast.success('Obra actualizada'); setEditandoObra(null); cargarObras() } else toast.error((r as any).error || 'Error')
     }
 
+    const [mostrarFormObra, setMostrarFormObra] = useState(false)
+    const [nuevaObra, setNuevaObra] = useState({ titulo: '', compania: '', director: '', duracion_min: '', descripcion: '' })
+    const crearObraNueva = async () => {
+        if (!nuevaObra.titulo.trim()) return toast.error('Falta el título')
+        const r = await crearObraDesdeEventoAction(eventoId, { titulo: nuevaObra.titulo, compania: nuevaObra.compania, director: nuevaObra.director, duracion_min: nuevaObra.duracion_min ? Number(nuevaObra.duracion_min) : null, descripcion: nuevaObra.descripcion })
+        if (r.ok) { toast.success('Obra creada y vinculada'); setNuevaObra({ titulo: '', compania: '', director: '', duracion_min: '', descripcion: '' }); setMostrarFormObra(false); cargarObras() }
+        else toast.error((r as any).error || 'Error')
+    }
+
     // --- link de puerta (gente externa) ---
     const copiarLinkPuerta = async () => {
         const r = await getLinkPuertaAction(eventoId)
@@ -919,11 +928,35 @@ const agregarEntrada = async () => {
                         ))}
                     </div>
                 ) : <p className="text-[11px] text-gray-500 mb-2">Sin obras vinculadas.{!soloLectura ? ' Podés armar un programa con varias obras aprobadas.' : ''}</p>}
-                {!soloLectura && obrasDisp.length > 0 && (
-                    <select onChange={e => { if (e.target.value) { agregarObra(e.target.value); e.target.value = '' } }} defaultValue="" className="inp w-full">
-                        <option value="">+ Agregar obra aprobada…</option>
-                        {obrasDisp.map(o => <option key={o.id} value={o.id}>{o.titulo}{o.compania ? ` — ${o.compania}` : ''}</option>)}
-                    </select>
+                {!soloLectura && (
+                    <div className="space-y-2">
+                        {obrasDisp.length > 0 && (
+                            <select onChange={e => { if (e.target.value) { agregarObra(e.target.value); e.target.value = '' } }} defaultValue="" className="inp w-full">
+                                <option value="">+ Agregar obra aprobada…</option>
+                                {obrasDisp.map(o => <option key={o.id} value={o.id}>{o.titulo}{o.compania ? ` — ${o.compania}` : ''}</option>)}
+                            </select>
+                        )}
+                        {!mostrarFormObra
+                            ? <button onClick={() => setMostrarFormObra(true)} className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg flex items-center gap-1.5"><Plus size={12} /> Agregar obra nueva</button>
+                            : (
+                                <div className="bg-[#111] border border-white/10 rounded-lg p-3 space-y-2">
+                                    <p className="text-[11px] font-semibold text-gray-300">Nueva obra</p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <input value={nuevaObra.titulo} onChange={e => setNuevaObra({ ...nuevaObra, titulo: e.target.value })} placeholder="Título *" className="inp" />
+                                        <input value={nuevaObra.compania} onChange={e => setNuevaObra({ ...nuevaObra, compania: e.target.value })} placeholder="Compañía" className="inp" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <input value={nuevaObra.director} onChange={e => setNuevaObra({ ...nuevaObra, director: e.target.value })} placeholder="Director/a" className="inp" />
+                                        <input value={nuevaObra.duracion_min} onChange={e => setNuevaObra({ ...nuevaObra, duracion_min: e.target.value })} placeholder="Duración (min)" type="number" className="inp" />
+                                    </div>
+                                    <textarea value={nuevaObra.descripcion} onChange={e => setNuevaObra({ ...nuevaObra, descripcion: e.target.value })} placeholder="Descripción" rows={2} className="inp w-full resize-none" />
+                                    <div className="flex gap-2 justify-end">
+                                        <button onClick={() => setMostrarFormObra(false)} className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 hover:text-white px-3 py-1.5 rounded-lg bg-white/5">Cancelar</button>
+                                        <button onClick={crearObraNueva} className="text-[10px] font-semibold uppercase tracking-wide text-black bg-[#D4E655] hover:bg-white px-3 py-1.5 rounded-lg">Crear y vincular</button>
+                                    </div>
+                                </div>
+                            )}
+                    </div>
                 )}
             </div>
 
