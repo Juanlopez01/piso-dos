@@ -1620,7 +1620,7 @@ export async function registrarVentaPuertaAction(payload: { eventoId: string; to
 export async function getCarteleraEscenaAction() {
     const admin = getAdminClient()
     const { data: eventos } = await admin.from('eventos')
-        .select('id, nombre, fecha, lugar, flyer_url, venta_online, ciclo_id, oculto_cartelera')
+        .select('*')
         .eq('estado', 'activo').eq('cancelado', false)
         .order('fecha', { ascending: true, nullsFirst: false })
 
