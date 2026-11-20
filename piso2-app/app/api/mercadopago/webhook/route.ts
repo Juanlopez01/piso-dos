@@ -3,15 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 import { autoInscribirEspecial } from '@/app/actions/_auto-inscribir-especial';
 import { sincronizarCreditosDePacks } from '@/app/actions/_creditos';
 
-function getSupabase() {
-    return createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-}
+const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function POST(request: Request) {
-    const supabase = getSupabase();
     try {
         console.log("🔔 [WEBHOOK] Recibiendo notificación de Mercado Pago...");
 

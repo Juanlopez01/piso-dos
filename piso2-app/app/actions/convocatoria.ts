@@ -325,24 +325,6 @@ export async function desvincularObraAction(propuestaId: string, eventoId: strin
     return { ok: true as const }
 }
 
-export async function crearObraDesdeEventoAction(eventoId: string, data: { titulo: string; compania?: string; director?: string; duracion_min?: number | null; descripcion?: string }) {
-    const perm = await requireStaff()
-    if (!perm.ok) return { ok: false as const, error: perm.error }
-    if (!data.titulo?.trim()) return { ok: false as const, error: 'Falta el título' }
-    const admin = getAdminClient()
-    const { data: obra, error } = await admin.from('obra_propuestas').insert({
-        titulo: data.titulo.trim(),
-        compania: data.compania?.trim() || null,
-        director: data.director?.trim() || null,
-        duracion_min: data.duracion_min ?? null,
-        descripcion: data.descripcion?.trim() || null,
-        estado: 'aceptada',
-    }).select('id').single()
-    if (error || !obra) return { ok: false as const, error: error?.message || 'Error al crear' }
-    await admin.from('evento_obras').upsert({ evento_id: eventoId, obra_id: obra.id }, { onConflict: 'evento_id,obra_id' })
-    return { ok: true as const, obraId: obra.id }
-}
-
 // "Eliminar" ya NO borra: manda a la papelera (borrado blando). El contacto y
 // todos los datos quedan en la base y se pueden restaurar.
 export async function archivarPropuestaAction(id: string) {
