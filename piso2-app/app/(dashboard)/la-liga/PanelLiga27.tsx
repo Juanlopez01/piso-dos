@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { toast, Toaster } from 'sonner'
 import {
     listPostulacionesLiga27Action, aprobarPostulacionLiga27Action, rechazarPostulacionLiga27Action,
+    marcarContactadoLiga27Action,
     enviarMensajePostulacionLiga27Action, getInscripcionesLiga27Action, enviarBienvenidaLiga27Action,
     generarLinkPagoLiga27Action, registrarPagoLiga27Action, getLanzamientosAdminAction,
     guardarLanzamientoAction, getPreciosLiga27Action, guardarPreciosLiga27Action,
@@ -304,9 +305,17 @@ function Postulaciones() {
     const [msgPara, setMsgPara] = useState<string | null>(null)
     const [msgTexto, setMsgTexto] = useState('')
     const [busy, setBusy] = useState<string | null>(null)
+    const [soloSinContactar, setSoloSinContactar] = useState(false)
 
     const cargar = async () => { setCargando(true); setItems(await listPostulacionesLiga27Action(filtro || undefined)); setCargando(false) }
     useEffect(() => { cargar() }, [filtro])
+
+    // Marca/desmarca si ya se le escribió (optimista).
+    const marcarContactado = async (p: any, val: boolean) => {
+        setItems(prev => prev.map(x => x.id === p.id ? { ...x, contactado: val } : x))
+        const r = await marcarContactadoLiga27Action(p.id, val)
+        if (!r.ok) { toast.error(r.error || 'Error'); cargar() }
+    }
 
     const aprobar = async (id: string, plan?: 'mensual' | 'cuatrimestral') => {
         setBusy(id)
@@ -324,10 +333,13 @@ function Postulaciones() {
         if (!msgTexto.trim()) return toast.error('Escribí un mensaje.')
         setBusy(id)
         const r = await enviarMensajePostulacionLiga27Action(id, msgTexto)
-        if (r.ok) { toast.success('Mensaje enviado.'); setMsgPara(null); setMsgTexto('') } else toast.error(r.error || 'Error')
+        if (r.ok) {
+            toast.success('Mensaje enviado.'); setMsgPara(null); setMsgTexto('')
+            const p = items.find(x => x.id === id); if (p && !p.contactado) marcarContactado(p, true)
+        } else toast.error(r.error || 'Error')
         setBusy(null)
     }
-    // Abre WhatsApp con el postulante, con un mensaje según su estado.
+    // Abre WhatsApp con el postulante, con un mensaje según su estado. Queda marcado como contactado.
     const whatsappPostulante = (p: any) => {
         const tel = telWa(p.telefono)
         if (!tel) return toast.error('El postulante no tiene teléfono cargado.')
@@ -336,20 +348,22 @@ function Postulaciones() {
             ? `¡Hola${nombre ? ' ' + nombre : ''}! Buenas noticias: quedaste en La Liga 2027 de Piso 2 🎉 Te cuento cómo seguir 👇`
             : `¡Hola${nombre ? ' ' + nombre : ''}! Te escribimos de Piso 2 por tu postulación a La Liga 2027.`
         window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`, '_blank')
+        if (!p.contactado) marcarContactado(p, true)
     }
 
     const CONTACTO: Record<string, string> = { llamar: '📞 Que lo llamen', escribir: '✍️ Que le escriban', anotarse: '✅ Anotarse directo' }
 
     return (
         <div>
-            <div className="flex gap-2 mb-4">
+            <div className="flex gap-2 mb-4 flex-wrap items-center">
                 {[['pendiente', 'Pendientes'], ['aprobada', 'Aprobadas'], ['no', 'No aprobadas'], ['', 'Todas']].map(([v, l]) => (
                     <button key={v} onClick={() => setFiltro(v)} className={`${btn} ${filtro === v ? 'bg-[#D4E655] text-black' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{l}</button>
                 ))}
+                <button onClick={() => setSoloSinContactar(s => !s)} className={`${btn} ml-auto flex items-center gap-1 ${soloSinContactar ? 'bg-amber-500/80 text-black' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>Sin contactar</button>
             </div>
-            {cargando ? <Loader2 className="animate-spin text-white/40" /> : items.length === 0 ? <p className="text-white/40 text-sm">No hay postulaciones.</p> : (
+            {cargando ? <Loader2 className="animate-spin text-white/40" /> : items.filter(p => !soloSinContactar || !p.contactado).length === 0 ? <p className="text-white/40 text-sm">{soloSinContactar ? 'A todos se les escribió. 🎉' : 'No hay postulaciones.'}</p> : (
                 <div className="space-y-3">
-                    {items.map(p => (
+                    {items.filter(p => !soloSinContactar || !p.contactado).map(p => (
                         <div key={p.id} className={card}>
                             <div className="flex items-start gap-4">
                                 {p.foto_url ? <img src={p.foto_url} alt="" className="w-14 h-14 rounded-lg object-cover" /> : <div className="w-14 h-14 rounded-lg bg-white/5 flex items-center justify-center text-white/30 text-xl">{(p.nombre || '?')[0]}</div>}
@@ -358,6 +372,11 @@ function Postulaciones() {
                                         <h3 className="font-semibold">{p.nombre}</h3>
                                         <span className="text-[11px] px-2 py-0.5 rounded bg-white/10 text-white/70">{CONTACTO[p.tipo_contacto] || p.tipo_contacto}</span>
                                         {p.estado !== 'pendiente' && <span className="text-[11px] px-2 py-0.5 rounded bg-white/5 text-white/40 capitalize">{p.estado}</span>}
+                                        <button onClick={() => marcarContactado(p, !p.contactado)}
+                                            title={p.contactado ? 'Ya se le escribió · tocá para desmarcar' : 'Marcar que ya se le escribió'}
+                                            className={`text-[11px] px-2 py-0.5 rounded font-bold flex items-center gap-1 transition-colors ${p.contactado ? 'bg-green-500/20 text-green-300' : 'bg-white/5 text-white/40 hover:bg-white/10'}`}>
+                                            {p.contactado ? <><Check size={12} /> Contactado</> : '○ Sin contactar'}
+                                        </button>
                                     </div>
                                     <p className="text-xs text-white/50 mt-1">{p.email}{p.telefono ? ` · ${p.telefono}` : ''}{p.instagram ? ` · ${p.instagram}` : ''}{p.ciudad ? ` · ${p.ciudad}` : ''}</p>
                                     {p.nota && <p className="text-sm text-white/70 mt-2 bg-white/5 rounded-lg p-2">{p.nota}</p>}

@@ -393,6 +393,18 @@ export async function inscribirAlumnoExistenteLiga27Action(profileId: string, pl
     return { ok: true, inscripcionId: ins.id }
 }
 
+// Marca si a un postulante ya se le escribió/contactó (tick para no perder la cuenta
+// de a quién le falta escribir antes de aprobarlo).
+export async function marcarContactadoLiga27Action(postulacionId: string, contactado: boolean): Promise<{ ok: boolean; error?: string }> {
+    const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('liga27_postulaciones')
+        .update({ contactado, contactado_at: contactado ? new Date().toISOString() : null }).eq('id', postulacionId)
+    if (error) return { ok: false, error: error.message }
+    revalidatePath('/la-liga')
+    return { ok: true }
+}
+
 export async function rechazarPostulacionLiga27Action(postulacionId: string): Promise<{ ok: boolean; error?: string }> {
     const g = await gateStaff(); if (!g.ok) return { ok: false, error: g.error }
     const admin = getAdminClient()
