@@ -9,10 +9,10 @@ import { createClient } from '@/utils/supabase/client'
 import { optimizeImage } from '@/utils/optimizeImage'
 import { montoServicio, conServicio, SERVICIO_PCT } from '@/utils/servicio'
 import {
-    getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction, setRepartoPctObraAction, setFlyerObraAction, editarObraPropuestaAction,
+    getObrasDeEventoAction, getObrasAceptadasDisponiblesAction, vincularObraAEventoAction, desvincularObraAction, setRepartoPctObraAction, setFlyerObraAction, editarObraPropuestaAction, crearObraDesdeEventoAction,
 } from '@/app/actions/convocatoria'
 import {
-    getEventosAction, getEventoAction, getEventoDetalleAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, getReporteEventoAction, getLinkCompaniaAction,
+    getEventosAction, getEventoAction, getEventoDetalleAction, crearEventoAction, editarEventoAction, cambiarEstadoEventoAction, toggleVentaOnlineAction, toggleOcultoCarteleraAction, getReporteEventoAction, getLinkCompaniaAction,
     eliminarEventoAction, guardarEntradaAction, eliminarEntradaAction, registrarVentaAction, anularVentaAction, reembolsarVentaAction, cancelarEventoAction,
     getEquipoAction, guardarMiembroEquipoAction, eliminarMiembroEquipoAction,
     getBorderauxAction, setRepartoPctAction, toggleIncluirEquipoAction, guardarGastoAction, eliminarGastoAction,
@@ -27,7 +27,7 @@ import { getSalasAlquilerAction } from '@/app/actions/alquileres-online'
 type EventoRow = { id: string; nombre: string; fecha: string | null; lugar: string | null; estado: string; recaudado: number; vendidas: number }
 type Entrada = { id: string; nombre: string; precio: number; cupo: number; vendidas: number; disponible: number; orden: number; oculta?: boolean; codigo_promo?: string | null; obra_id?: string | null }
 type Venta = { id: string; comprador_nombre: string | null; comprador_contacto: string | null; medio_pago: string; total: number; estado: string; canal?: string | null; reembolsada?: boolean; reembolso_ref?: string | null; reembolso_at?: string | null; created_at: string; token?: string | null; items: { nombre: string; cantidad: number; precio_unit: number }[] }
-type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean; cancelado?: boolean; ciclo_id?: string | null; ciclo?: { nombre: string; slug: string } | null }
+type Evento = { id: string; nombre: string; descripcion: string | null; fecha: string | null; lugar: string | null; estado: string; venta_online?: boolean; cancelado?: boolean; ciclo_id?: string | null; ciclo?: { nombre: string; slug: string } | null; oculto_cartelera?: boolean }
 
 const pesos = (n: number) => '$' + Number(n || 0).toLocaleString('es-AR')
 // Copia robusta: intenta el portapapeles moderno y, si falla (típico en celu
@@ -567,6 +567,22 @@ const agregarEntrada = async () => {
         if (r.ok) { toast.success('Obra actualizada'); setEditandoObra(null); cargarObras() } else toast.error((r as any).error || 'Error')
     }
 
+    const toggleOcultoCartelera = async () => {
+        const nuevo = !evento?.oculto_cartelera
+        const r = await toggleOcultoCarteleraAction(eventoId, nuevo)
+        if (r.ok) setEvento(ev => ev ? { ...ev, oculto_cartelera: nuevo } : ev)
+        else toast.error(r.error || 'Error')
+    }
+
+    const [mostrarFormObra, setMostrarFormObra] = useState(false)
+    const [nuevaObra, setNuevaObra] = useState({ titulo: '', compania: '', director: '', duracion_min: '', descripcion: '' })
+    const crearObraNueva = async () => {
+        if (!nuevaObra.titulo.trim()) return toast.error('Falta el título')
+        const r = await crearObraDesdeEventoAction(eventoId, { titulo: nuevaObra.titulo, compania: nuevaObra.compania, director: nuevaObra.director, duracion_min: nuevaObra.duracion_min ? Number(nuevaObra.duracion_min) : null, descripcion: nuevaObra.descripcion })
+        if (r.ok) { toast.success('Obra creada y vinculada'); setNuevaObra({ titulo: '', compania: '', director: '', duracion_min: '', descripcion: '' }); setMostrarFormObra(false); cargarObras() }
+        else toast.error((r as any).error || 'Error')
+    }
+
     // --- link de puerta (gente externa) ---
     const copiarLinkPuerta = async () => {
         const r = await getLinkPuertaAction(eventoId)
@@ -811,6 +827,16 @@ const agregarEntrada = async () => {
                 {!evento.venta_online && <span className="ml-auto text-[10px] text-gray-500">Activala y compartí el link para vender entradas online.</span>}
             </div>
 
+            {/* ocultar de cartelera */}
+            <div className="flex flex-wrap items-center gap-2 mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
+                <EyeOff size={15} className={evento.oculto_cartelera ? 'text-orange-400' : 'text-gray-500'} />
+                <span className="text-xs font-semibold text-gray-300">Ocultar de cartelera</span>
+                {soloLectura
+                    ? <span className={`ml-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${evento.oculto_cartelera ? 'bg-orange-400/20 text-orange-400' : 'bg-white/10 text-gray-400'}`}>{evento.oculto_cartelera ? 'Oculto' : 'Visible'}</span>
+                    : <button onClick={toggleOcultoCartelera} className={`ml-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide transition-colors ${evento.oculto_cartelera ? 'bg-orange-400 text-black' : 'bg-white/10 text-gray-400'}`}>{evento.oculto_cartelera ? 'Oculto' : 'Visible'}</button>}
+                <span className="ml-auto text-[10px] text-gray-500">{evento.oculto_cartelera ? 'No aparece en la cartelera pública, pero la venta online sigue activa.' : 'Aparece en la cartelera pública.'}</span>
+            </div>
+
             {/* ciclo de varias fechas */}
             <div className="mb-5 bg-[#0e0e10] border border-white/10 rounded-xl p-3">
                 <div className="flex items-center gap-2 mb-2">
@@ -903,11 +929,31 @@ const agregarEntrada = async () => {
                         ))}
                     </div>
                 ) : <p className="text-[11px] text-gray-500 mb-2">Sin obras vinculadas.{!soloLectura ? ' Podés armar un programa con varias obras aprobadas.' : ''}</p>}
-                {!soloLectura && obrasDisp.length > 0 && (
-                    <select onChange={e => { if (e.target.value) { agregarObra(e.target.value); e.target.value = '' } }} defaultValue="" className="inp w-full">
-                        <option value="">+ Agregar obra aprobada…</option>
-                        {obrasDisp.map(o => <option key={o.id} value={o.id}>{o.titulo}{o.compania ? ` — ${o.compania}` : ''}</option>)}
-                    </select>
+                {!soloLectura && (
+                    <div className="space-y-2">
+                        {obrasDisp.length > 0 && (
+                            <select onChange={e => { if (e.target.value) { agregarObra(e.target.value); e.target.value = '' } }} defaultValue="" className="inp w-full">
+                                <option value="">+ Agregar obra aprobada…</option>
+                                {obrasDisp.map(o => <option key={o.id} value={o.id}>{o.titulo}{o.compania ? ` — ${o.compania}` : ''}</option>)}
+                            </select>
+                        )}
+                        {!mostrarFormObra
+                            ? <button onClick={() => setMostrarFormObra(true)} className="text-[11px] text-[#D4E655] hover:underline flex items-center gap-1"><Plus size={12} /> Agregar obra nueva</button>
+                            : (
+                                <div className="bg-[#111] border border-white/10 rounded-lg p-3 space-y-2">
+                                    <p className="text-[11px] font-semibold text-gray-300 mb-1">Nueva obra</p>
+                                    <input value={nuevaObra.titulo} onChange={e => setNuevaObra(p => ({ ...p, titulo: e.target.value }))} placeholder="Título *" className="inp w-full text-xs" />
+                                    <input value={nuevaObra.compania} onChange={e => setNuevaObra(p => ({ ...p, compania: e.target.value }))} placeholder="Compañía" className="inp w-full text-xs" />
+                                    <input value={nuevaObra.director} onChange={e => setNuevaObra(p => ({ ...p, director: e.target.value }))} placeholder="Director/a" className="inp w-full text-xs" />
+                                    <input value={nuevaObra.duracion_min} onChange={e => setNuevaObra(p => ({ ...p, duracion_min: e.target.value }))} placeholder="Duración (min)" type="number" className="inp w-full text-xs" />
+                                    <textarea value={nuevaObra.descripcion} onChange={e => setNuevaObra(p => ({ ...p, descripcion: e.target.value }))} placeholder="Descripción" className="inp w-full text-xs" rows={2} />
+                                    <div className="flex gap-2">
+                                        <button onClick={crearObraNueva} className="px-3 py-1 rounded-lg text-[11px] font-bold bg-[#D4E655] text-black">Crear y vincular</button>
+                                        <button onClick={() => setMostrarFormObra(false)} className="px-3 py-1 rounded-lg text-[11px] font-bold bg-white/10 text-gray-400">Cancelar</button>
+                                    </div>
+                                </div>
+                            )}
+                    </div>
                 )}
             </div>
 

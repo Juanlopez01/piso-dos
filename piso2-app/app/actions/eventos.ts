@@ -632,6 +632,15 @@ export async function toggleVentaOnlineAction(eventoId: string, valor: boolean) 
     return { ok: true as const }
 }
 
+export async function toggleOcultoCarteleraAction(eventoId: string, valor: boolean) {
+    const perm = await requireStaff()
+    if (!perm.ok) return { ok: false as const, error: perm.error }
+    const admin = getAdminClient()
+    const { error } = await admin.from('eventos').update({ oculto_cartelera: valor }).eq('id', eventoId)
+    if (error) return { ok: false as const, error: error.message }
+    return { ok: true as const }
+}
+
 // ============================================================================
 // PÚBLICO — venta online de entradas (sin cuenta)
 // ============================================================================
@@ -1611,7 +1620,7 @@ export async function registrarVentaPuertaAction(payload: { eventoId: string; to
 export async function getCarteleraEscenaAction() {
     const admin = getAdminClient()
     const { data: eventos } = await admin.from('eventos')
-        .select('id, nombre, fecha, lugar, flyer_url, venta_online, ciclo_id')
+        .select('*')
         .eq('estado', 'activo').eq('cancelado', false)
         .order('fecha', { ascending: true, nullsFirst: false })
 
@@ -1625,6 +1634,7 @@ export async function getCarteleraEscenaAction() {
     const cards: any[] = []
     const ciclosVistos = new Set<string>()
     for (const e of (eventos || []) as any[]) {
+        if (e.oculto_cartelera) continue
         if (e.ciclo_id && ciclos[e.ciclo_id]?.activo) {
             if (ciclosVistos.has(e.ciclo_id)) continue // el ciclo se muestra una sola vez
             ciclosVistos.add(e.ciclo_id)
